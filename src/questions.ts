@@ -1,4 +1,4 @@
-import { Question } from './types.ts';
+import { Question } from './types';
 
 export const QUESTIONS: Question[] = [
   // --- DÜNYA KUPASI TARİHİ ---

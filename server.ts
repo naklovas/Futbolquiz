@@ -3,7 +3,7 @@ import { createServer } from "http";
 import { Server } from "socket.io";
 import { createServer as createViteServer } from "vite";
 import { QUESTIONS } from "./src/questions.ts";
-import { Question } from "./src/types.ts";
+import { type Question } from "./src/types.ts";
 
 const PORT = 3000;
 const QUESTIONS_PER_LEVEL = 5;
