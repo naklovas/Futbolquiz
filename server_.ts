@@ -2,8 +2,8 @@ import express from "express";
 import { createServer } from "http";
 import { Server } from "socket.io";
 import { createServer as createViteServer } from "vite";
-import { QUESTIONS } from "./src/questions.ts";
-import { Question } from "./src/types.ts";
+import { QUESTIONS } from "./src/questions";
+import { Question } from "./src/types";
 
 const PORT = 3000;
 const QUESTIONS_PER_LEVEL = 5;
@@ -52,21 +52,13 @@ async function startServer() {
       socket.join(roomId);
       
       if (!rooms[roomId]) {
-        // Pick 50 random questions from the pool
-        const pool = [...QUESTIONS];
-        const selectedQuestions = [];
-        for (let i = 0; i < 50 && pool.length > 0; i++) {
-          const randomIndex = Math.floor(Math.random() * pool.length);
-          selectedQuestions.push(pool.splice(randomIndex, 1)[0]);
-        }
-
         rooms[roomId] = {
           id: roomId,
           players: [],
           currentLevel: 1,
           currentQuestionIndex: 0,
           status: 'PLAYING',
-          questions: selectedQuestions,
+          questions: shuffleArray(QUESTIONS),
           playerChoices: {},
         };
       }
