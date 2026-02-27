@@ -19,6 +19,7 @@ export default function App() {
   const [gameState, setGameState] = useState<GameState | null>(null);
   const [localChoice, setLocalChoice] = useState<string | null>(null);
   const [isJoined, setIsJoined] = useState(false);
+  const [timeLeft, setTimeLeft] = useState(10);
 
   useEffect(() => {
     const newSocket = io();
@@ -26,10 +27,17 @@ export default function App() {
 
     newSocket.on("room_update", (updatedRoom: GameState) => {
       setGameState(updatedRoom);
+      if (updatedRoom.timeLeft !== undefined) {
+        setTimeLeft(updatedRoom.timeLeft);
+      }
       // Reset local choice when moving to a new question
       if (updatedRoom.status === 'PLAYING' && Object.keys(updatedRoom.playerChoices).length === 0) {
         setLocalChoice(null);
       }
+    });
+
+    newSocket.on("timer_update", ({ timeLeft }: { timeLeft: number }) => {
+      setTimeLeft(timeLeft);
     });
 
     return () => {
@@ -41,6 +49,12 @@ export default function App() {
     if (roomId.trim() && playerName.trim() && socket) {
       socket.emit("join_room", { roomId: roomId.trim().toUpperCase(), playerName: playerName.trim() });
       setIsJoined(true);
+    }
+  };
+
+  const startGame = () => {
+    if (socket && gameState) {
+      socket.emit("start_game", { roomId: gameState.id });
     }
   };
 
@@ -64,9 +78,12 @@ export default function App() {
   };
 
   const currentQuestion = useMemo(() => {
-    if (!gameState) return null;
-    return gameState.questions[(gameState.currentLevel - 1) * QUESTIONS_PER_LEVEL + gameState.currentQuestionIndex];
+    if (!gameState || !gameState.questions.length) return null;
+    const index = (gameState.currentLevel - 1) * QUESTIONS_PER_LEVEL + gameState.currentQuestionIndex;
+    return gameState.questions[index];
   }, [gameState]);
+
+  const isAdmin = gameState?.adminId === socket?.id;
 
   const getWinner = () => {
     if (!gameState) return null;
@@ -150,6 +167,54 @@ export default function App() {
       <div className="max-w-4xl mx-auto px-4 py-8 md:py-12">
         
         <AnimatePresence mode="wait">
+          {gameState.status === 'WAITING' && (
+            <motion.div
+              key="waiting"
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 1.05 }}
+              className="space-y-8"
+            >
+              <div className="bg-slate-800/40 p-8 rounded-[2.5rem] border border-slate-700/50 backdrop-blur-xl shadow-2xl text-center">
+                <div className="bg-emerald-500/20 w-20 h-20 rounded-3xl flex items-center justify-center mx-auto mb-6">
+                  <Users className="w-10 h-10 text-emerald-500" />
+                </div>
+                <h2 className="text-3xl font-black italic uppercase tracking-tighter mb-2">Oyun Lobisi</h2>
+                <p className="text-slate-400 mb-8">Oyuncuların katılmasını bekleyin. Sadece admin oyunu başlatabilir.</p>
+
+                <div className="space-y-3 mb-8">
+                  {gameState.players.map((p) => (
+                    <div key={p.id} className="flex items-center justify-between p-4 bg-slate-900/50 border border-slate-700 rounded-2xl">
+                      <div className="flex items-center gap-3">
+                        <div className="w-2 h-2 rounded-full bg-emerald-500" />
+                        <span className="font-bold">{p.name}</span>
+                        {p.id === gameState.adminId && (
+                          <span className="text-[10px] bg-emerald-500/20 text-emerald-500 px-2 py-0.5 rounded-full font-black uppercase tracking-widest border border-emerald-500/30">Admin</span>
+                        )}
+                      </div>
+                      {p.id === socket?.id && <span className="text-xs text-slate-500 font-bold">(Siz)</span>}
+                    </div>
+                  ))}
+                </div>
+
+                {isAdmin ? (
+                  <button
+                    onClick={startGame}
+                    disabled={gameState.players.length < 1}
+                    className="w-full py-4 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-black text-xl rounded-2xl transition-all flex items-center justify-center gap-3 shadow-lg group"
+                  >
+                    <Play className="w-6 h-6 group-hover:scale-110 transition-transform" />
+                    OYUNU BAŞLAT
+                  </button>
+                ) : (
+                  <div className="p-4 bg-slate-900/50 border border-slate-800 rounded-2xl text-slate-500 font-bold animate-pulse">
+                    Adminin oyunu başlatması bekleniyor...
+                  </div>
+                )}
+              </div>
+            </motion.div>
+          )}
+
           {gameState.status === 'PLAYING' && (
             <motion.div
               key="playing"
@@ -173,6 +238,9 @@ export default function App() {
                     >
                       <div className={`w-2 h-2 rounded-full ${hasAnswered ? 'bg-emerald-500 animate-pulse' : 'bg-slate-700'}`} />
                       <span className="font-black text-xs uppercase">{p.name}</span>
+                      {p.id === gameState.adminId && (
+                        <Shield className="w-3 h-3 text-emerald-500" />
+                      )}
                       <span className="text-[10px] bg-slate-800 px-1.5 py-0.5 rounded text-slate-400">{p.score}</span>
                     </div>
                   );
@@ -193,6 +261,16 @@ export default function App() {
                 <div className="text-center">
                   <p className="text-[10px] uppercase tracking-widest text-slate-400 font-bold">Seviye {gameState.currentLevel}</p>
                   <p className="text-lg font-black">Soru {gameState.currentQuestionIndex + 1}/5</p>
+                </div>
+
+                <div className="flex items-center gap-3">
+                  <div className={`p-2 rounded-lg ${timeLeft <= 3 ? 'bg-red-500/20 animate-pulse' : 'bg-orange-500/20'}`}>
+                    <Timer className={`w-5 h-5 ${timeLeft <= 3 ? 'text-red-500' : 'text-orange-500'}`} />
+                  </div>
+                  <div>
+                    <p className="text-[10px] uppercase tracking-widest text-slate-400 font-bold">Süre</p>
+                    <p className={`text-xl font-black ${timeLeft <= 3 ? 'text-red-500' : 'text-orange-400'}`}>{timeLeft}s</p>
+                  </div>
                 </div>
 
                 <div className="flex items-center gap-3">
@@ -273,7 +351,7 @@ export default function App() {
                           {isCorrect ? (
                             <div className="flex items-center gap-2 text-emerald-500">
                               <CheckCircle2 className="w-6 h-6" />
-                              <span className="font-black text-sm">+50</span>
+                              <span className="font-black text-sm">+{gameState.currentLevel * 2}</span>
                             </div>
                           ) : (
                             <XCircle className="w-6 h-6 text-red-500" />
@@ -293,13 +371,19 @@ export default function App() {
                 </div>
               </div>
 
-              <button
-                onClick={nextStep}
-                className="w-full py-4 bg-blue-600 hover:bg-blue-500 text-white font-black text-xl rounded-2xl transition-all flex items-center justify-center gap-2 shadow-lg"
-              >
-                DEVAM ET
-                <ChevronRight className="w-6 h-6" />
-              </button>
+              {isAdmin ? (
+                <button
+                  onClick={nextStep}
+                  className="w-full py-4 bg-blue-600 hover:bg-blue-500 text-white font-black text-xl rounded-2xl transition-all flex items-center justify-center gap-2 shadow-lg"
+                >
+                  DEVAM ET
+                  <ChevronRight className="w-6 h-6" />
+                </button>
+              ) : (
+                <div className="text-center p-4 bg-slate-800/50 rounded-2xl text-slate-400 font-bold italic">
+                  Adminin devam etmesi bekleniyor...
+                </div>
+              )}
             </motion.div>
           )}
 
@@ -324,19 +408,26 @@ export default function App() {
                     <div className="flex items-center gap-3">
                       <span className="text-slate-500 font-bold">#{i+1}</span>
                       <span className="font-bold">{p.name}</span>
+                      {p.id === gameState.adminId && <Shield className="w-3 h-3 text-emerald-500" />}
                     </div>
                     <span className="font-black text-emerald-400">{p.score}</span>
                   </div>
                 ))}
               </div>
 
-              <button
-                onClick={nextLevel}
-                className="px-12 py-4 bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xl rounded-full transition-all shadow-lg"
-              >
-                SONRAKİ SEVİYE
-                <ChevronRight className="inline-block ml-2" />
-              </button>
+              {isAdmin ? (
+                <button
+                  onClick={nextLevel}
+                  className="px-12 py-4 bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xl rounded-full transition-all shadow-lg"
+                >
+                  SONRAKİ SEVİYE
+                  <ChevronRight className="inline-block ml-2" />
+                </button>
+              ) : (
+                <div className="text-center p-4 bg-slate-800/50 rounded-2xl text-slate-400 font-bold italic">
+                  Adminin sonraki seviyeye geçmesi bekleniyor...
+                </div>
+              )}
             </motion.div>
           )}
 

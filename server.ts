@@ -2,8 +2,8 @@ import express from "express";
 import { createServer } from "http";
 import { Server } from "socket.io";
 import { createServer as createViteServer } from "vite";
-import { QUESTIONS } from "./src/questions";
-import type { Question } from "./src/types";
+import { QUESTIONS } from "./src/questions.ts";
+import type { Question } from "./src/types.ts";
 
 const PORT = 3000;
 const QUESTIONS_PER_LEVEL = 5;
@@ -13,9 +13,12 @@ interface RoomState {
   players: { id: string; name: string; score: number; answers: any[] }[];
   currentLevel: number;
   currentQuestionIndex: number;
-  status: 'PLAYING' | 'REVEAL' | 'LEVEL_COMPLETE' | 'GAME_OVER';
+  status: 'WAITING' | 'PLAYING' | 'REVEAL' | 'LEVEL_COMPLETE' | 'GAME_OVER';
   questions: Question[];
   playerChoices: Record<string, string>; // socketId -> choice
+  adminId: string;
+  timeLeft: number;
+  timerInterval?: NodeJS.Timeout;
 }
 
 const rooms: Record<string, RoomState> = {};
@@ -45,6 +48,53 @@ async function startServer() {
     app.use(express.static("dist"));
   }
 
+  const startTimer = (roomId: string) => {
+    const room = rooms[roomId];
+    if (!room) return;
+
+    if (room.timerInterval) clearInterval(room.timerInterval);
+    room.timeLeft = 10;
+
+    room.timerInterval = setInterval(() => {
+      const r = rooms[roomId];
+      if (!r) {
+        clearInterval(room.timerInterval);
+        return;
+      }
+
+      r.timeLeft--;
+      if (r.timeLeft <= 0) {
+        clearInterval(r.timerInterval);
+        revealAnswers(roomId);
+      } else {
+        io.to(roomId).emit("timer_update", { timeLeft: r.timeLeft });
+      }
+    }, 1000);
+  };
+
+  const revealAnswers = (roomId: string) => {
+    const room = rooms[roomId];
+    if (!room) return;
+
+    if (room.timerInterval) clearInterval(room.timerInterval);
+    room.status = 'REVEAL';
+    
+    // Update scores
+    const currentQuestion = room.questions[(room.currentLevel - 1) * QUESTIONS_PER_LEVEL + room.currentQuestionIndex];
+    
+    room.players.forEach(player => {
+      const playerChoice = room.playerChoices[player.id];
+      const isCorrect = playerChoice === currentQuestion.correctAnswer;
+      if (isCorrect) {
+        // Level 1: 2, Level 2: 4, Level 3: 6...
+        player.score += room.currentLevel * 2;
+      }
+      player.answers.push({ questionId: currentQuestion.id, isCorrect });
+    });
+
+    io.to(roomId).emit("room_update", room);
+  };
+
   io.on("connection", (socket) => {
     console.log("User connected:", socket.id);
 
@@ -65,9 +115,11 @@ async function startServer() {
           players: [],
           currentLevel: 1,
           currentQuestionIndex: 0,
-          status: 'PLAYING',
+          status: 'WAITING',
           questions: selectedQuestions,
           playerChoices: {},
+          adminId: socket.id,
+          timeLeft: 10,
         };
       }
 
@@ -84,12 +136,27 @@ async function startServer() {
         });
       }
 
+      // If admin left and this is the first player, assign as admin
+      if (!room.players.find(p => p.id === room.adminId)) {
+        room.adminId = room.players[0].id;
+      }
+
+      io.to(roomId).emit("room_update", room);
+    });
+
+    socket.on("start_game", ({ roomId }) => {
+      const room = rooms[roomId];
+      if (!room || room.adminId !== socket.id) return;
+
+      room.status = 'PLAYING';
+      room.playerChoices = {};
+      startTimer(roomId);
       io.to(roomId).emit("room_update", room);
     });
 
     socket.on("submit_choice", ({ roomId, choice }) => {
       const room = rooms[roomId];
-      if (!room) return;
+      if (!room || room.status !== 'PLAYING') return;
 
       room.playerChoices[socket.id] = choice;
 
@@ -97,21 +164,7 @@ async function startServer() {
       const allAnswered = room.players.every(p => room.playerChoices[p.id] !== undefined);
 
       if (allAnswered) {
-        room.status = 'REVEAL';
-        
-        // Update scores
-        const currentQuestion = room.questions[(room.currentLevel - 1) * QUESTIONS_PER_LEVEL + room.currentQuestionIndex];
-        
-        room.players.forEach(player => {
-          const playerChoice = room.playerChoices[player.id];
-          const isCorrect = playerChoice === currentQuestion.correctAnswer;
-          if (isCorrect) {
-            player.score += 50; // Simple scoring for now
-          }
-          player.answers.push({ questionId: currentQuestion.id, isCorrect });
-        });
-
-        io.to(roomId).emit("room_update", room);
+        revealAnswers(roomId);
       } else {
         // Just notify others that someone answered
         io.to(roomId).emit("player_answered", { socketId: socket.id });
@@ -120,12 +173,13 @@ async function startServer() {
 
     socket.on("next_step", ({ roomId }) => {
       const room = rooms[roomId];
-      if (!room) return;
+      if (!room || room.adminId !== socket.id) return;
 
       if (room.currentQuestionIndex < QUESTIONS_PER_LEVEL - 1) {
         room.currentQuestionIndex++;
         room.status = 'PLAYING';
         room.playerChoices = {};
+        startTimer(roomId);
       } else if (room.currentLevel < 10) {
         room.status = 'LEVEL_COMPLETE';
       } else {
@@ -137,25 +191,38 @@ async function startServer() {
 
     socket.on("next_level", ({ roomId }) => {
       const room = rooms[roomId];
-      if (!room) return;
+      if (!room || room.adminId !== socket.id) return;
 
       room.currentLevel++;
       room.currentQuestionIndex = 0;
       room.status = 'PLAYING';
       room.playerChoices = {};
+      startTimer(roomId);
 
       io.to(roomId).emit("room_update", room);
     });
 
     socket.on("disconnect", () => {
       console.log("User disconnected:", socket.id);
-      // Optional: Remove player from room or mark as inactive
       for (const roomId in rooms) {
         const room = rooms[roomId];
         const playerIndex = room.players.findIndex(p => p.id === socket.id);
         if (playerIndex !== -1) {
-          // We keep the player in the list but could notify others
-          io.to(roomId).emit("player_disconnected", { socketId: socket.id });
+          room.players.splice(playerIndex, 1);
+          
+          // Reassign admin if necessary
+          if (room.adminId === socket.id && room.players.length > 0) {
+            room.adminId = room.players[0].id;
+          }
+
+          // If room empty, cleanup
+          if (room.players.length === 0) {
+            if (room.timerInterval) clearInterval(room.timerInterval);
+            delete rooms[roomId];
+          } else {
+            io.to(roomId).emit("room_update", room);
+            io.to(roomId).emit("player_disconnected", { socketId: socket.id });
+          }
         }
       }
     });

@@ -18,7 +18,9 @@ export interface GameState {
   players: Player[];
   currentLevel: number;
   currentQuestionIndex: number;
-  status: 'PLAYING' | 'REVEAL' | 'LEVEL_COMPLETE' | 'GAME_OVER';
+  status: 'WAITING' | 'PLAYING' | 'REVEAL' | 'LEVEL_COMPLETE' | 'GAME_OVER';
   questions: Question[];
   playerChoices: Record<string, string>;
+  adminId: string;
+  timeLeft?: number;
 }
