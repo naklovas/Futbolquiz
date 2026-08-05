@@ -1,9 +1,5 @@
 namespace ITInventory.Web.Models.DevicePool;
 
-/// <summary>
-/// Ziraat_YD tablosundaki port/servis bazlı satırların IP'ye göre gruplanmış,
-/// tek bir cihazı temsil eden özet görünümü.
-/// </summary>
 public class DiscoveredDeviceDto
 {
     public int ZiraatYdId { get; set; }
@@ -17,4 +13,7 @@ public class DiscoveredDeviceDto
     public string? CategoryName { get; set; }
     public DateTime? LastSeenAt { get; set; }
     public bool AlreadyInInventory { get; set; }
+
+    /// <summary>Only populated when showing devices across all countries (admin, no country filter selected).</summary>
+    public string? Country { get; set; }
 }
