@@ -1,0 +1,218 @@
+using ITInventory.Data;
+using ITInventory.Data.Entities;
+using ITInventory.Web.Models.Servers;
+using ITInventory.Web.Services;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.Rendering;
+using Microsoft.EntityFrameworkCore;
+
+namespace ITInventory.Web.Controllers;
+
+public class ServersController : Controller
+{
+    private readonly ITInventoryDbContext _db;
+    private readonly ICurrentUserService _currentUser;
+
+    public ServersController(ITInventoryDbContext db, ICurrentUserService currentUser)
+    {
+        _db = db;
+        _currentUser = currentUser;
+    }
+
+    public async Task<IActionResult> Index(int? countryId)
+    {
+        var query = _db.Servers.Include(s => s.Country).AsQueryable();
+
+        if (!_currentUser.IsAdmin)
+            query = query.Where(s => s.CountryId == _currentUser.CountryId);
+        else if (countryId.HasValue)
+            query = query.Where(s => s.CountryId == countryId.Value);
+
+        var items = await query.OrderBy(s => s.Country!.Name).ThenBy(s => s.HostName).ToListAsync();
+
+        ViewBag.Countries = await _db.Countries.OrderBy(c => c.Name).ToListAsync();
+        ViewBag.SelectedCountryId = countryId;
+        ViewBag.CanEdit = _currentUser.CanEdit;
+        ViewBag.IsAdmin = _currentUser.IsAdmin;
+
+        return View(items);
+    }
+
+    public async Task<IActionResult> Create(bool fromPool = false, int? sourceId = null, int? countryId = null)
+    {
+        if (!_currentUser.CanEdit) return Forbid();
+
+        var vm = new ServerFormViewModel
+        {
+            CountryId = _currentUser.IsAdmin ? countryId ?? 0 : _currentUser.CountryId ?? 0
+        };
+
+        if (fromPool && sourceId.HasValue)
+        {
+            var source = await _db.ZiraatYds.FindAsync(sourceId.Value);
+            if (source is not null)
+            {
+                vm.SourceZiraatYdId = source.Id;
+                vm.HostName = source.DnsName ?? source.NetbiosName ?? source.IpAddress;
+                vm.IpAddress = source.IpAddress;
+                vm.OperatingSystem = source.OperatingSystem;
+
+                var profile = await _db.DeviceProfileCatalogs
+                    .FirstOrDefaultAsync(p => p.ProfileName == source.DeviceProfile);
+                if (profile is not null)
+                    vm.DeviceProfileId = profile.Id;
+            }
+        }
+
+        await PopulateDropdowns();
+        return View(vm);
+    }
+
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> Create(ServerFormViewModel vm)
+    {
+        if (!_currentUser.CanEdit) return Forbid();
+
+        if (!_currentUser.IsAdmin)
+            vm.CountryId = _currentUser.CountryId ?? 0;
+
+        if (!ModelState.IsValid)
+        {
+            await PopulateDropdowns();
+            return View(vm);
+        }
+
+        var entity = new Server
+        {
+            CountryId = vm.CountryId,
+            DeviceProfileId = vm.DeviceProfileId,
+            SourceZiraatYdId = vm.SourceZiraatYdId,
+            HostName = vm.HostName,
+            ApplianceType = vm.ApplianceType,
+            IpAddress = vm.IpAddress,
+            OperatingSystem = vm.OperatingSystem,
+            Brand = vm.Brand,
+            Model = vm.Model,
+            SerialNo = vm.SerialNo,
+            VendorSupplier = vm.VendorSupplier,
+            Port = vm.Port,
+            Branch = vm.Branch,
+            Location = vm.Location,
+            StartOfSupportDate = vm.StartOfSupportDate,
+            EndOfSupportDate = vm.EndOfSupportDate,
+            EndOfLifeDate = vm.EndOfLifeDate,
+            Notes = vm.Notes,
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = _currentUser.Username
+        };
+
+        _db.Servers.Add(entity);
+        await _db.SaveChangesAsync();
+        return RedirectToAction(nameof(Index));
+    }
+
+    public async Task<IActionResult> Edit(int id)
+    {
+        if (!_currentUser.CanEdit) return Forbid();
+
+        var entity = await _db.Servers.FindAsync(id);
+        if (entity is null) return NotFound();
+        if (!_currentUser.IsAdmin && entity.CountryId != _currentUser.CountryId) return Forbid();
+
+        var vm = new ServerFormViewModel
+        {
+            Id = entity.Id,
+            CountryId = entity.CountryId,
+            DeviceProfileId = entity.DeviceProfileId,
+            SourceZiraatYdId = entity.SourceZiraatYdId,
+            HostName = entity.HostName,
+            ApplianceType = entity.ApplianceType,
+            IpAddress = entity.IpAddress,
+            OperatingSystem = entity.OperatingSystem,
+            Brand = entity.Brand,
+            Model = entity.Model,
+            SerialNo = entity.SerialNo,
+            VendorSupplier = entity.VendorSupplier,
+            Port = entity.Port,
+            Branch = entity.Branch,
+            Location = entity.Location,
+            StartOfSupportDate = entity.StartOfSupportDate,
+            EndOfSupportDate = entity.EndOfSupportDate,
+            EndOfLifeDate = entity.EndOfLifeDate,
+            Notes = entity.Notes
+        };
+
+        await PopulateDropdowns();
+        return View(vm);
+    }
+
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> Edit(int id, ServerFormViewModel vm)
+    {
+        if (!_currentUser.CanEdit) return Forbid();
+        if (id != vm.Id) return BadRequest();
+
+        var entity = await _db.Servers.FindAsync(id);
+        if (entity is null) return NotFound();
+        if (!_currentUser.IsAdmin && entity.CountryId != _currentUser.CountryId) return Forbid();
+
+        if (!_currentUser.IsAdmin)
+            vm.CountryId = _currentUser.CountryId ?? 0;
+
+        if (!ModelState.IsValid)
+        {
+            await PopulateDropdowns();
+            return View(vm);
+        }
+
+        entity.CountryId = vm.CountryId;
+        entity.HostName = vm.HostName;
+        entity.ApplianceType = vm.ApplianceType;
+        entity.IpAddress = vm.IpAddress;
+        entity.OperatingSystem = vm.OperatingSystem;
+        entity.Brand = vm.Brand;
+        entity.Model = vm.Model;
+        entity.SerialNo = vm.SerialNo;
+        entity.VendorSupplier = vm.VendorSupplier;
+        entity.Port = vm.Port;
+        entity.Branch = vm.Branch;
+        entity.Location = vm.Location;
+        entity.StartOfSupportDate = vm.StartOfSupportDate;
+        entity.EndOfSupportDate = vm.EndOfSupportDate;
+        entity.EndOfLifeDate = vm.EndOfLifeDate;
+        entity.Notes = vm.Notes;
+        entity.UpdatedAt = DateTime.UtcNow;
+        entity.UpdatedBy = _currentUser.Username;
+
+        await _db.SaveChangesAsync();
+        return RedirectToAction(nameof(Index));
+    }
+
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> Delete(int id)
+    {
+        if (!_currentUser.CanEdit) return Forbid();
+
+        var entity = await _db.Servers.FindAsync(id);
+        if (entity is null) return NotFound();
+        if (!_currentUser.IsAdmin && entity.CountryId != _currentUser.CountryId) return Forbid();
+
+        _db.Servers.Remove(entity);
+        await _db.SaveChangesAsync();
+        return RedirectToAction(nameof(Index));
+    }
+
+    private async Task PopulateDropdowns()
+    {
+        ViewBag.IsAdmin = _currentUser.IsAdmin;
+
+        var countries = _currentUser.IsAdmin
+            ? await _db.Countries.Where(c => c.IsActive).OrderBy(c => c.Name).ToListAsync()
+            : await _db.Countries.Where(c => c.Id == _currentUser.CountryId).ToListAsync();
+
+        ViewBag.CountryOptions = new SelectList(countries, "Id", "Name");
+    }
+}

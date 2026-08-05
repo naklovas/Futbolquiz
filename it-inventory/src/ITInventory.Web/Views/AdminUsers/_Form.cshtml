@@ -1,0 +1,60 @@
+@model ITInventory.Web.Models.Admin.UserFormViewModel
+@{
+    var countryOptions = (Microsoft.AspNetCore.Mvc.Rendering.SelectList)ViewBag.CountryOptions;
+    var roles = (List<ITInventory.Data.Entities.YdRole>)ViewBag.Roles;
+}
+
+<div asp-validation-summary="ModelOnly" class="text-danger mb-3"></div>
+<input type="hidden" asp-for="Id" />
+
+<div class="row">
+    <div class="col-md-4 mb-3">
+        <label asp-for="Username" class="form-label"></label>
+        <input asp-for="Username" class="form-control" />
+        <span asp-validation-for="Username" class="text-danger"></span>
+        <div class="form-text">AD'deki kullanıcı adı (fintek.local\ kısmı olmadan).</div>
+    </div>
+    <div class="col-md-4 mb-3">
+        <label asp-for="FullName" class="form-label"></label>
+        <input asp-for="FullName" class="form-control" />
+        <span asp-validation-for="FullName" class="text-danger"></span>
+    </div>
+    <div class="col-md-4 mb-3">
+        <label asp-for="Email" class="form-label"></label>
+        <input asp-for="Email" class="form-control" />
+        <span asp-validation-for="Email" class="text-danger"></span>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-md-4 mb-3">
+        <label asp-for="CountryId" class="form-label"></label>
+        <select asp-for="CountryId" asp-items="countryOptions" class="form-select">
+            <option value="">-- Seçilmedi (ör. admin) --</option>
+        </select>
+    </div>
+    <div class="col-md-4 mb-3 d-flex align-items-end">
+        <div class="form-check">
+            <input asp-for="IsActive" class="form-check-input" />
+            <label asp-for="IsActive" class="form-check-label"></label>
+        </div>
+    </div>
+</div>
+
+<div class="mb-3">
+    <label class="form-label">Roller</label>
+    <div>
+        @foreach (var role in roles)
+        {
+            <div class="form-check form-check-inline">
+                <input type="checkbox" class="form-check-input" name="SelectedRoleIds" value="@role.Id"
+                       id="role_@role.Id"
+                       checked="@Model.SelectedRoleIds.Contains(role.Id)" />
+                <label class="form-check-label" for="role_@role.Id">@role.RoleName</label>
+            </div>
+        }
+    </div>
+</div>
+
+<button type="submit" class="btn btn-primary">Kaydet</button>
+<a asp-action="Index" class="btn btn-outline-secondary">Vazgeç</a>

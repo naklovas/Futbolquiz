@@ -1,0 +1,29 @@
+@model ITInventory.Web.Models.Admin.CountryFormViewModel
+
+<div asp-validation-summary="ModelOnly" class="text-danger mb-3"></div>
+<input type="hidden" asp-for="Id" />
+
+<div class="row">
+    <div class="col-md-6 mb-3">
+        <label asp-for="Name" class="form-label"></label>
+        <input asp-for="Name" class="form-control" />
+        <span asp-validation-for="Name" class="text-danger"></span>
+        <div class="form-text">
+            Nessus taramalarındaki (Ziraat_YD.RepositoryName) ülke adıyla birebir aynı olmalı,
+            aksi halde cihaz havuzu bu ülke için çalışmaz.
+        </div>
+    </div>
+    <div class="col-md-3 mb-3">
+        <label asp-for="Code" class="form-label"></label>
+        <input asp-for="Code" class="form-control" />
+    </div>
+    <div class="col-md-3 mb-3 d-flex align-items-end">
+        <div class="form-check">
+            <input asp-for="IsActive" class="form-check-input" />
+            <label asp-for="IsActive" class="form-check-label"></label>
+        </div>
+    </div>
+</div>
+
+<button type="submit" class="btn btn-primary">Kaydet</button>
+<a asp-action="Index" class="btn btn-outline-secondary">Vazgeç</a>

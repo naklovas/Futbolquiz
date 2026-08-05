@@ -1,0 +1,121 @@
+@model ITInventory.Web.Models.PhysicalDevices.PhysicalDeviceFormViewModel
+@{
+    var countryOptions = (Microsoft.AspNetCore.Mvc.Rendering.SelectList)ViewBag.CountryOptions;
+    var categoryOptions = (Microsoft.AspNetCore.Mvc.Rendering.SelectList)ViewBag.CategoryOptions;
+    bool isAdmin = ViewBag.IsAdmin ?? false;
+}
+
+<div asp-validation-summary="ModelOnly" class="text-danger mb-3"></div>
+<input type="hidden" asp-for="Id" />
+<input type="hidden" asp-for="DeviceProfileId" />
+<input type="hidden" asp-for="SourceZiraatYdId" />
+
+<div class="row">
+    <div class="col-md-4 mb-3">
+        <label asp-for="CountryId" class="form-label"></label>
+        @if (isAdmin)
+        {
+            <select asp-for="CountryId" asp-items="countryOptions" class="form-select">
+                <option value="">-- Seçin --</option>
+            </select>
+        }
+        else
+        {
+            <select asp-for="CountryId" asp-items="countryOptions" class="form-select" disabled></select>
+            <input type="hidden" asp-for="CountryId" />
+        }
+        <span asp-validation-for="CountryId" class="text-danger"></span>
+    </div>
+    <div class="col-md-4 mb-3">
+        <label asp-for="CategoryId" class="form-label"></label>
+        <select asp-for="CategoryId" asp-items="categoryOptions" class="form-select">
+            <option value="">-- Seçin --</option>
+        </select>
+        <span asp-validation-for="CategoryId" class="text-danger"></span>
+    </div>
+    <div class="col-md-4 mb-3">
+        <label asp-for="ApplianceType" class="form-label"></label>
+        <select asp-for="ApplianceType" class="form-select">
+            <option value="Physical">Fiziksel</option>
+            <option value="Virtual">Sanal</option>
+        </select>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-md-6 mb-3">
+        <label asp-for="DeviceName" class="form-label"></label>
+        <input asp-for="DeviceName" class="form-control" />
+        <span asp-validation-for="DeviceName" class="text-danger"></span>
+    </div>
+    <div class="col-md-3 mb-3">
+        <label asp-for="Brand" class="form-label"></label>
+        <input asp-for="Brand" class="form-control" />
+    </div>
+    <div class="col-md-3 mb-3">
+        <label asp-for="Model" class="form-label"></label>
+        <input asp-for="Model" class="form-control" />
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-md-3 mb-3">
+        <label asp-for="IpAddress" class="form-label"></label>
+        <input asp-for="IpAddress" class="form-control" />
+    </div>
+    <div class="col-md-3 mb-3">
+        <label asp-for="MgmtIp" class="form-label"></label>
+        <input asp-for="MgmtIp" class="form-control" />
+    </div>
+    <div class="col-md-3 mb-3">
+        <label asp-for="SerialNo" class="form-label"></label>
+        <input asp-for="SerialNo" class="form-control" />
+    </div>
+    <div class="col-md-3 mb-3">
+        <label asp-for="SoftwareVersion" class="form-label"></label>
+        <input asp-for="SoftwareVersion" class="form-control" />
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-md-4 mb-3">
+        <label asp-for="Branch" class="form-label"></label>
+        <input asp-for="Branch" class="form-control" />
+    </div>
+    <div class="col-md-4 mb-3">
+        <label asp-for="Location" class="form-label"></label>
+        <input asp-for="Location" class="form-control" />
+        <span asp-validation-for="Location" class="text-danger"></span>
+    </div>
+    <div class="col-md-4 mb-3">
+        <label asp-for="VendorSupplier" class="form-label"></label>
+        <input asp-for="VendorSupplier" class="form-control" />
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-md-3 mb-3">
+        <label asp-for="LicenceInfo" class="form-label"></label>
+        <input asp-for="LicenceInfo" class="form-control" />
+    </div>
+    <div class="col-md-3 mb-3">
+        <label asp-for="StartOfSupportDate" class="form-label"></label>
+        <input asp-for="StartOfSupportDate" class="form-control" />
+    </div>
+    <div class="col-md-3 mb-3">
+        <label asp-for="EndOfSupportDate" class="form-label"></label>
+        <input asp-for="EndOfSupportDate" class="form-control" />
+    </div>
+    <div class="col-md-3 mb-3">
+        <label asp-for="EndOfLifeDate" class="form-label"></label>
+        <input asp-for="EndOfLifeDate" class="form-control" />
+    </div>
+</div>
+
+<div class="mb-3">
+    <label asp-for="Notes" class="form-label"></label>
+    <textarea asp-for="Notes" class="form-control" rows="3"></textarea>
+</div>
+
+<button type="submit" class="btn btn-primary">Kaydet</button>
+<a asp-action="Index" class="btn btn-outline-secondary">Vazgeç</a>

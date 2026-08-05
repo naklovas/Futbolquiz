@@ -1,0 +1,99 @@
+@model List<ITInventory.Data.Entities.PhysicalDevice>
+@{
+    ViewData["Title"] = "Fiziksel Cihazlar";
+    var countries = (List<ITInventory.Data.Entities.Country>)ViewBag.Countries;
+    var categories = (List<ITInventory.Data.Entities.DeviceCategory>)ViewBag.Categories;
+    int? selectedCountryId = ViewBag.SelectedCountryId;
+    int? selectedCategoryId = ViewBag.SelectedCategoryId;
+    bool canEdit = ViewBag.CanEdit;
+    bool isAdmin = ViewBag.IsAdmin;
+}
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h2>Fiziksel Cihazlar</h2>
+    @if (canEdit)
+    {
+        <a asp-action="Create" class="btn btn-primary">+ Yeni Cihaz Ekle</a>
+    }
+</div>
+
+<form method="get" class="row g-2 mb-3">
+    @if (isAdmin)
+    {
+        <div class="col-auto">
+            <select name="countryId" class="form-select" onchange="this.form.submit()">
+                <option value="">Tüm Ülkeler</option>
+                @foreach (var c in countries)
+                {
+                    <option value="@c.Id" selected="@(c.Id == selectedCountryId)">@c.Name</option>
+                }
+            </select>
+        </div>
+    }
+    <div class="col-auto">
+        <select name="categoryId" class="form-select" onchange="this.form.submit()">
+            <option value="">Tüm Kategoriler</option>
+            @foreach (var cat in categories)
+            {
+                <option value="@cat.Id" selected="@(cat.Id == selectedCategoryId)">@cat.Name</option>
+            }
+        </select>
+    </div>
+</form>
+
+@if (!Model.Any())
+{
+    <div class="alert alert-secondary">Kayıt bulunamadı.</div>
+}
+else
+{
+    <table class="table table-striped table-sm">
+        <thead>
+            <tr>
+                @if (isAdmin)
+                {
+                    <th>Ülke</th>
+                }
+                <th>Kategori</th>
+                <th>Cihaz Adı</th>
+                <th>Marka/Model</th>
+                <th>Fiziksel/Sanal</th>
+                <th>IP</th>
+                <th>Lokasyon</th>
+                <th>Destek Bitiş</th>
+                @if (canEdit)
+                {
+                    <th></th>
+                }
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var item in Model)
+            {
+                <tr>
+                    @if (isAdmin)
+                    {
+                        <td>@item.Country?.Name</td>
+                    }
+                    <td>@item.Category?.Name</td>
+                    <td>@item.DeviceName</td>
+                    <td>@item.Brand @item.Model</td>
+                    <td>@item.ApplianceType</td>
+                    <td>@item.IpAddress</td>
+                    <td>@item.Location</td>
+                    <td>@(item.EndOfSupportDate?.ToString("dd.MM.yyyy") ?? "-")</td>
+                    @if (canEdit)
+                    {
+                        <td>
+                            <a asp-action="Edit" asp-route-id="@item.Id" class="btn btn-sm btn-outline-secondary">Düzenle</a>
+                            <form asp-action="Delete" asp-route-id="@item.Id" method="post" class="d-inline"
+                                  onsubmit="return confirm('Bu kaydı silmek istediğinize emin misiniz?');">
+                                <button type="submit" class="btn btn-sm btn-outline-danger">Sil</button>
+                            </form>
+                        </td>
+                    }
+                </tr>
+            }
+        </tbody>
+    </table>
+}

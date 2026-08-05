@@ -1,0 +1,10 @@
+@model ITInventory.Web.Models.PhysicalDevices.PhysicalDeviceFormViewModel
+@{
+    ViewData["Title"] = "Yeni Fiziksel Cihaz";
+}
+
+<h2>Yeni Fiziksel Cihaz</h2>
+
+<form asp-action="Create" method="post">
+    @await Html.PartialAsync("_Form", Model)
+</form>

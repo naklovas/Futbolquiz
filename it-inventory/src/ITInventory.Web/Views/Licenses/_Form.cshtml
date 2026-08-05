@@ -1,0 +1,66 @@
+@model ITInventory.Web.Models.Licenses.LicenseFormViewModel
+@{
+    var countryOptions = (Microsoft.AspNetCore.Mvc.Rendering.SelectList)ViewBag.CountryOptions;
+    bool isAdmin = ViewBag.IsAdmin ?? false;
+}
+
+<div asp-validation-summary="ModelOnly" class="text-danger mb-3"></div>
+<input type="hidden" asp-for="Id" />
+
+<div class="row">
+    <div class="col-md-6 mb-3">
+        <label asp-for="CountryId" class="form-label"></label>
+        @if (isAdmin)
+        {
+            <select asp-for="CountryId" asp-items="countryOptions" class="form-select">
+                <option value="">-- Seçin --</option>
+            </select>
+        }
+        else
+        {
+            <select asp-for="CountryId" asp-items="countryOptions" class="form-select" disabled></select>
+            <input type="hidden" asp-for="CountryId" />
+        }
+        <span asp-validation-for="CountryId" class="text-danger"></span>
+    </div>
+    <div class="col-md-6 mb-3">
+        <label asp-for="LicenseName" class="form-label"></label>
+        <input asp-for="LicenseName" class="form-control" />
+        <span asp-validation-for="LicenseName" class="text-danger"></span>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-md-4 mb-3">
+        <label asp-for="VendorSupplier" class="form-label"></label>
+        <input asp-for="VendorSupplier" class="form-control" />
+    </div>
+    <div class="col-md-4 mb-3">
+        <label asp-for="Branch" class="form-label"></label>
+        <input asp-for="Branch" class="form-control" />
+    </div>
+    <div class="col-md-4 mb-3">
+        <label asp-for="Location" class="form-label"></label>
+        <input asp-for="Location" class="form-control" />
+        <span asp-validation-for="Location" class="text-danger"></span>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-md-6 mb-3">
+        <label asp-for="SupportStartDate" class="form-label"></label>
+        <input asp-for="SupportStartDate" class="form-control" />
+    </div>
+    <div class="col-md-6 mb-3">
+        <label asp-for="SupportEndDate" class="form-label"></label>
+        <input asp-for="SupportEndDate" class="form-control" />
+    </div>
+</div>
+
+<div class="mb-3">
+    <label asp-for="Notes" class="form-label"></label>
+    <textarea asp-for="Notes" class="form-control" rows="3"></textarea>
+</div>
+
+<button type="submit" class="btn btn-primary">Kaydet</button>
+<a asp-action="Index" class="btn btn-outline-secondary">Vazgeç</a>

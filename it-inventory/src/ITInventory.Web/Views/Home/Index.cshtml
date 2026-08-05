@@ -1,0 +1,71 @@
+@model ITInventory.Web.Models.Home.DashboardViewModel
+@{
+    ViewData["Title"] = "Ana Sayfa";
+}
+
+<h2 class="mb-4">Genel Bakış</h2>
+
+<div class="row mb-4">
+    <div class="col-md-3">
+        <div class="card text-center">
+            <div class="card-body">
+                <h5 class="card-title">@Model.PhysicalDeviceCount</h5>
+                <p class="card-text text-muted">Fiziksel Cihaz</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-center">
+            <div class="card-body">
+                <h5 class="card-title">@Model.ServerCount</h5>
+                <p class="card-text text-muted">Sunucu</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-center">
+            <div class="card-body">
+                <h5 class="card-title">@Model.LicenseCount</h5>
+                <p class="card-text text-muted">Lisans</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-center">
+            <div class="card-body">
+                <h5 class="card-title">@Model.CircuitCount</h5>
+                <p class="card-text text-muted">Hat</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<h4>Yaklaşan Sona Erme Tarihleri (90 gün içinde)</h4>
+@if (!Model.ExpiringItems.Any())
+{
+    <div class="alert alert-success">Yaklaşan bir sona erme tarihi bulunmuyor.</div>
+}
+else
+{
+    <table class="table table-striped table-sm">
+        <thead>
+            <tr>
+                <th>Tip</th>
+                <th>Ad</th>
+                <th>Ülke</th>
+                <th>Bitiş Tarihi</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var item in Model.ExpiringItems)
+            {
+                <tr class="@(item.ExpiresAt < DateTime.UtcNow ? "table-danger" : "")">
+                    <td>@item.Type</td>
+                    <td>@item.Name</td>
+                    <td>@item.Country</td>
+                    <td>@item.ExpiresAt.ToString("dd.MM.yyyy")</td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}

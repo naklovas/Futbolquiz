@@ -1,0 +1,10 @@
+@model ITInventory.Web.Models.Circuits.CircuitFormViewModel
+@{
+    ViewData["Title"] = "Hattı Düzenle";
+}
+
+<h2>Hattı Düzenle</h2>
+
+<form asp-action="Edit" asp-route-id="@Model.Id" method="post">
+    @await Html.PartialAsync("_Form", Model)
+</form>
