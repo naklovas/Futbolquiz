@@ -16,19 +16,24 @@ incelenip çalıştırılan SQL script tercih edildiği için ayrıca burada tut
    değişikliği gerekirse migration'ı güncelleyip scripti yeniden üretin.
    İdempotenttir, birden fazla çalıştırılabilir.
 
-2. **002_seed_roles.sql** — Mevcut `dbo.YDRoles` tablosuna uygulamanın
-   kullandığı 3 rolü (`admin`, `country_manager`, `country_view_only`) ekler.
-   İdempotenttir.
+2. **002_seed_roles.sql** — `dbo.YDRoles` tablosu **zaten varsa** (ör. production'da
+   önceden kurulmuş bir ortamda) uygulamanın kullandığı 3 rolü ekler. İdempotenttir.
+   Sıfırdan/boş bir SQL Server'da bu script yerine doğrudan **003**'ü çalıştırın.
+
+3. **003_yd_users_roles.sql** — `dbo.YDRoles`, `dbo.YDUsers`, `dbo.YDUserRoles`
+   tabloları **henüz yoksa** oluşturur, 3 rolü seed eder ve `visikhan`
+   kullanıcısını admin rolüyle tanımlar. Idempotenttir; tablolar zaten varsa
+   sadece rol/kullanıcı seed kısmını çalıştırır (2. script ile çakışmaz,
+   birlikte de çalıştırılabilir).
 
 ## Bu scriptlerin DOKUNMADIĞI mevcut tablolar
 
-Aşağıdaki tablolar zaten production'da mevcut ve harici servisler/önceki
-kurulum tarafından yönetiliyor; bu scriptler bunları oluşturmaz veya değiştirmez,
-uygulama sadece bunları okur/EF Core ile eşler:
+Aşağıdaki tablo bu proje tarafından oluşturulmaz; production'da başka bir
+harici servis tarafından besleniyorsa uygulama sadece onu okur/EF Core ile eşler.
+Kendi test ortamınızda yoksa, sadece Cihaz Havuzu modülü çalışmaz, geri kalan
+modülleri etkilemez:
 
 - `dbo.Ziraat_YD` — Nessus/Tenable senkronizasyon servisi tarafından beslenir
-- `dbo.YDUsers`, `dbo.YDRoles`, `dbo.YDUserRoles` — kullanıcı/rol tabloları
-  (yalnızca `002_seed_roles.sql` ile YDRoles'a 3 satır eklenir)
 
 ## Yeniden üretme
 
