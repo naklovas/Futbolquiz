@@ -11,3 +11,4 @@ obj/
 # çalışma zamanında gereken dosyalar burada olduğu için tekrar dahil ediyoruz.
 !src/ITInventory.Web/wwwroot/lib/**/dist/
 !src/ITInventory.Web/wwwroot/lib/**/dist/**
+it-inventory/src/ITInventory.Web/wwwroot/lib/
