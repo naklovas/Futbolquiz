@@ -45,14 +45,14 @@ public class LdapAuthenticationService : ILdapAuthenticationService
         }
         catch (LdapException ex)
         {
-            _logger.LogWarning("LDAP bind başarısız oldu. Kullanıcı: {Username}, Hata: {Message}", username, ex.Message);
-            errorMessage = "Kullanıcı adı veya şifre hatalı.";
+            _logger.LogWarning("LDAP bind failed. User: {Username}, Error: {Message}", username, ex.Message);
+            errorMessage = "Invalid username or password.";
             return false;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "LDAP sunucusuna ({Server}) bağlanılamadı.", server);
-            errorMessage = "Kimlik doğrulama sunucusuna şu anda ulaşılamıyor. Lütfen daha sonra tekrar deneyin.";
+            _logger.LogError(ex, "Could not connect to the LDAP server ({Server}).", server);
+            errorMessage = "Unable to reach the authentication server right now. Please try again later.";
             return false;
         }
     }

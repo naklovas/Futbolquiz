@@ -7,33 +7,33 @@ public class ServerFormViewModel
 {
     public int Id { get; set; }
 
-    [Required(ErrorMessage = "Ülke zorunludur.")]
-    [Display(Name = "Ülke")]
+    [Required(ErrorMessage = "Country is required.")]
+    [Display(Name = "Country")]
     public int CountryId { get; set; }
 
-    [Display(Name = "Cihaz Profili (havuzdan)")]
+    [Display(Name = "Device Profile (from pool)")]
     public int? DeviceProfileId { get; set; }
 
     public int? SourceZiraatYdId { get; set; }
 
-    [Required(ErrorMessage = "Host adı zorunludur.")]
+    [Required(ErrorMessage = "Host name is required.")]
     [StringLength(255)]
-    [Display(Name = "Host Adı")]
+    [Display(Name = "Host Name")]
     public string HostName { get; set; } = string.Empty;
 
-    [Display(Name = "Fiziksel/Sanal")]
+    [Display(Name = "Physical/Virtual")]
     public ApplianceType ApplianceType { get; set; }
 
     [StringLength(50)]
-    [Display(Name = "IP Adresi")]
+    [Display(Name = "IP Address")]
     public string? IpAddress { get; set; }
 
     [StringLength(255)]
-    [Display(Name = "İşletim Sistemi")]
+    [Display(Name = "Operating System")]
     public string? OperatingSystem { get; set; }
 
     [StringLength(100)]
-    [Display(Name = "Marka")]
+    [Display(Name = "Brand")]
     public string? Brand { get; set; }
 
     [StringLength(150)]
@@ -41,11 +41,11 @@ public class ServerFormViewModel
     public string? Model { get; set; }
 
     [StringLength(150)]
-    [Display(Name = "Seri No")]
+    [Display(Name = "Serial Number")]
     public string? SerialNo { get; set; }
 
     [StringLength(150)]
-    [Display(Name = "Üretici/Yüklenici")]
+    [Display(Name = "Vendor/Supplier")]
     public string? VendorSupplier { get; set; }
 
     [Range(1, 65535)]
@@ -53,26 +53,26 @@ public class ServerFormViewModel
     public int? Port { get; set; }
 
     [StringLength(150)]
-    [Display(Name = "Şube")]
+    [Display(Name = "Branch")]
     public string? Branch { get; set; }
 
-    [Required(ErrorMessage = "Lokasyon zorunludur.")]
+    [Required(ErrorMessage = "Location is required.")]
     [StringLength(255)]
-    [Display(Name = "Lokasyon")]
+    [Display(Name = "Location")]
     public string Location { get; set; } = string.Empty;
 
     [DataType(DataType.Date)]
-    [Display(Name = "Destek Başlangıç Tarihi")]
+    [Display(Name = "Support Start Date")]
     public DateTime? StartOfSupportDate { get; set; }
 
     [DataType(DataType.Date)]
-    [Display(Name = "Destek Bitiş Tarihi")]
+    [Display(Name = "Support End Date")]
     public DateTime? EndOfSupportDate { get; set; }
 
     [DataType(DataType.Date)]
-    [Display(Name = "End of Life Tarihi")]
+    [Display(Name = "End of Life Date")]
     public DateTime? EndOfLifeDate { get; set; }
 
-    [Display(Name = "Notlar")]
+    [Display(Name = "Notes")]
     public string? Notes { get; set; }
 }

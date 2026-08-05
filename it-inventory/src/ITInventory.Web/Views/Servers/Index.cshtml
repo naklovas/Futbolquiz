@@ -1,6 +1,6 @@
 @model List<ITInventory.Data.Entities.Server>
 @{
-    ViewData["Title"] = "Sunucular";
+    ViewData["Title"] = "Servers";
     var countries = (List<ITInventory.Data.Entities.Country>)ViewBag.Countries;
     int? selectedCountryId = ViewBag.SelectedCountryId;
     bool canEdit = ViewBag.CanEdit;
@@ -8,10 +8,10 @@
 }
 
 <div class="d-flex justify-content-between align-items-center mb-3">
-    <h2>Sunucular</h2>
+    <h2>Servers</h2>
     @if (canEdit)
     {
-        <a asp-action="Create" class="btn btn-primary">+ Yeni Sunucu Ekle</a>
+        <a asp-action="Create" class="btn btn-primary">+ Add New Server</a>
     }
 </div>
 
@@ -20,7 +20,7 @@
     <form method="get" class="row g-2 mb-3">
         <div class="col-auto">
             <select name="countryId" class="form-select" onchange="this.form.submit()">
-                <option value="">Tüm Ülkeler</option>
+                <option value="">All Countries</option>
                 @foreach (var c in countries)
                 {
                     <option value="@c.Id" selected="@(c.Id == selectedCountryId)">@c.Name</option>
@@ -32,7 +32,7 @@
 
 @if (!Model.Any())
 {
-    <div class="alert alert-secondary">Kayıt bulunamadı.</div>
+    <div class="alert alert-secondary">No records found.</div>
 }
 else
 {
@@ -41,15 +41,15 @@ else
             <tr>
                 @if (isAdmin)
                 {
-                    <th>Ülke</th>
+                    <th>Country</th>
                 }
-                <th>Host Adı</th>
-                <th>Fiziksel/Sanal</th>
+                <th>Host Name</th>
+                <th>Physical/Virtual</th>
                 <th>IP</th>
-                <th>İşletim Sistemi</th>
+                <th>Operating System</th>
                 <th>Port</th>
-                <th>Lokasyon</th>
-                <th>Destek Bitiş</th>
+                <th>Location</th>
+                <th>Support End</th>
                 @if (canEdit)
                 {
                     <th></th>
@@ -74,10 +74,10 @@ else
                     @if (canEdit)
                     {
                         <td>
-                            <a asp-action="Edit" asp-route-id="@item.Id" class="btn btn-sm btn-outline-secondary">Düzenle</a>
+                            <a asp-action="Edit" asp-route-id="@item.Id" class="btn btn-sm btn-outline-secondary">Edit</a>
                             <form asp-action="Delete" asp-route-id="@item.Id" method="post" class="d-inline"
-                                  onsubmit="return confirm('Bu kaydı silmek istediğinize emin misiniz?');">
-                                <button type="submit" class="btn btn-sm btn-outline-danger">Sil</button>
+                                  onsubmit="return confirm('Are you sure you want to delete this record?');">
+                                <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
                             </form>
                         </td>
                     }

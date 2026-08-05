@@ -12,7 +12,7 @@
         <label asp-for="Username" class="form-label"></label>
         <input asp-for="Username" class="form-control" />
         <span asp-validation-for="Username" class="text-danger"></span>
-        <div class="form-text">AD'deki kullanıcı adı (fintek.local\ kısmı olmadan).</div>
+        <div class="form-text">AD username (without the fintek.local\ prefix).</div>
     </div>
     <div class="col-md-4 mb-3">
         <label asp-for="FullName" class="form-label"></label>
@@ -30,7 +30,7 @@
     <div class="col-md-4 mb-3">
         <label asp-for="CountryId" class="form-label"></label>
         <select asp-for="CountryId" asp-items="countryOptions" class="form-select">
-            <option value="">-- Seçilmedi (ör. admin) --</option>
+            <option value="">-- Not selected (e.g. admin) --</option>
         </select>
     </div>
     <div class="col-md-4 mb-3 d-flex align-items-end">
@@ -42,7 +42,7 @@
 </div>
 
 <div class="mb-3">
-    <label class="form-label">Roller</label>
+    <label class="form-label">Roles</label>
     <div>
         @foreach (var role in roles)
         {
@@ -56,5 +56,5 @@
     </div>
 </div>
 
-<button type="submit" class="btn btn-primary">Kaydet</button>
-<a asp-action="Index" class="btn btn-outline-secondary">Vazgeç</a>
+<button type="submit" class="btn btn-primary">Save</button>
+<a asp-action="Index" class="btn btn-outline-secondary">Cancel</a>

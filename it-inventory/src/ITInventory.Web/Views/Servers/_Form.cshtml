@@ -15,7 +15,7 @@
         @if (isAdmin)
         {
             <select asp-for="CountryId" asp-items="countryOptions" class="form-select">
-                <option value="">-- Seçin --</option>
+                <option value="">-- Select --</option>
             </select>
         }
         else
@@ -28,8 +28,8 @@
     <div class="col-md-4 mb-3">
         <label asp-for="ApplianceType" class="form-label"></label>
         <select asp-for="ApplianceType" class="form-select">
-            <option value="Physical">Fiziksel</option>
-            <option value="Virtual">Sanal</option>
+            <option value="Physical">Physical</option>
+            <option value="Virtual">Virtual</option>
         </select>
     </div>
     <div class="col-md-4 mb-3">
@@ -106,5 +106,5 @@
     <textarea asp-for="Notes" class="form-control" rows="3"></textarea>
 </div>
 
-<button type="submit" class="btn btn-primary">Kaydet</button>
-<a asp-action="Index" class="btn btn-outline-secondary">Vazgeç</a>
+<button type="submit" class="btn btn-primary">Save</button>
+<a asp-action="Index" class="btn btn-outline-secondary">Cancel</a>

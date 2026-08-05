@@ -6,40 +6,40 @@ public class CircuitFormViewModel
 {
     public int Id { get; set; }
 
-    [Required(ErrorMessage = "Ülke zorunludur.")]
-    [Display(Name = "Ülke")]
+    [Required(ErrorMessage = "Country is required.")]
+    [Display(Name = "Country")]
     public int CountryId { get; set; }
 
-    [Required(ErrorMessage = "Hat tipi zorunludur.")]
+    [Required(ErrorMessage = "Circuit type is required.")]
     [StringLength(100)]
-    [Display(Name = "Hat Tipi")]
+    [Display(Name = "Circuit Type")]
     public string CircuitType { get; set; } = string.Empty;
 
     [StringLength(50)]
-    [Display(Name = "Kapasite")]
+    [Display(Name = "Capacity")]
     public string? CircuitCapacity { get; set; }
 
     [StringLength(150)]
-    [Display(Name = "Sağlayıcı")]
+    [Display(Name = "Provider")]
     public string? Provider { get; set; }
 
     [StringLength(150)]
-    [Display(Name = "Şube")]
+    [Display(Name = "Branch")]
     public string? Branch { get; set; }
 
-    [Required(ErrorMessage = "Lokasyon zorunludur.")]
+    [Required(ErrorMessage = "Location is required.")]
     [StringLength(255)]
-    [Display(Name = "Lokasyon")]
+    [Display(Name = "Location")]
     public string Location { get; set; } = string.Empty;
 
     [DataType(DataType.Date)]
-    [Display(Name = "Başlangıç Tarihi")]
+    [Display(Name = "Start Date")]
     public DateTime? StartDate { get; set; }
 
     [DataType(DataType.Date)]
-    [Display(Name = "Bitiş Tarihi")]
+    [Display(Name = "End Date")]
     public DateTime? EndDate { get; set; }
 
-    [Display(Name = "Notlar")]
+    [Display(Name = "Notes")]
     public string? Notes { get; set; }
 }

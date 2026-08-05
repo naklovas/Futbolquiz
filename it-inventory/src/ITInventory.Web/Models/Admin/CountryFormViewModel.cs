@@ -6,15 +6,15 @@ public class CountryFormViewModel
 {
     public int Id { get; set; }
 
-    [Required(ErrorMessage = "Ülke adı zorunludur.")]
+    [Required(ErrorMessage = "Country name is required.")]
     [StringLength(150)]
-    [Display(Name = "Ülke Adı")]
+    [Display(Name = "Country Name")]
     public string Name { get; set; } = string.Empty;
 
     [StringLength(20)]
-    [Display(Name = "Kod")]
+    [Display(Name = "Code")]
     public string? Code { get; set; }
 
-    [Display(Name = "Aktif")]
+    [Display(Name = "Active")]
     public bool IsActive { get; set; } = true;
 }

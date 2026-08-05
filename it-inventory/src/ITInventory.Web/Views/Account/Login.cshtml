@@ -1,12 +1,14 @@
 @model ITInventory.Web.Models.Account.LoginViewModel
+@inject Microsoft.Extensions.Options.IOptionsSnapshot<ITInventory.Web.Configuration.TestLoginSettings> TestLoginOptions
 @{
-    ViewData["Title"] = "Giriş Yap";
+    ViewData["Title"] = "Log In";
     Layout = "_LoginLayout";
+    var testLoginEnabled = TestLoginOptions.Value.Enabled;
 }
 
 <div class="login-box">
-    <h3 class="mb-3 text-center">IT Envanter Sistemi</h3>
-    <p class="text-muted text-center mb-4">fintek.local hesabınızla giriş yapın</p>
+    <h3 class="mb-3 text-center">IT Inventory System</h3>
+    <p class="text-muted text-center mb-4">Sign in with your fintek.local account</p>
 
     <form asp-controller="Account" asp-action="Login" method="post">
         <input type="hidden" asp-for="ReturnUrl" />
@@ -24,7 +26,12 @@
             <span asp-validation-for="Password" class="text-danger"></span>
         </div>
 
-        <button type="submit" class="btn btn-primary w-100">Giriş Yap</button>
+        <button type="submit" name="LoginMode" value="ldap" class="btn btn-primary w-100 mb-2">Log In with AD (LDAP)</button>
+        @if (testLoginEnabled)
+        {
+            <button type="submit" name="LoginMode" value="test" class="btn btn-outline-secondary w-100">Log In as Test User</button>
+            <p class="text-muted text-center small mt-2 mb-0">Test users skip AD and sign in with the shared test password.</p>
+        }
     </form>
 </div>
 

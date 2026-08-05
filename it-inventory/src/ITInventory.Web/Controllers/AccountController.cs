@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using ITInventory.Data;
+using ITInventory.Web.Configuration;
 using ITInventory.Web.Models.Account;
 using ITInventory.Web.Services;
 using Microsoft.AspNetCore.Authentication;
@@ -7,6 +8,7 @@ using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 
 namespace ITInventory.Web.Controllers;
 
@@ -16,12 +18,18 @@ public class AccountController : Controller
     private readonly ILdapAuthenticationService _ldapAuth;
     private readonly ITInventoryDbContext _db;
     private readonly ILogger<AccountController> _logger;
+    private readonly TestLoginSettings _testLoginSettings;
 
-    public AccountController(ILdapAuthenticationService ldapAuth, ITInventoryDbContext db, ILogger<AccountController> logger)
+    public AccountController(
+        ILdapAuthenticationService ldapAuth,
+        ITInventoryDbContext db,
+        ILogger<AccountController> logger,
+        IOptions<TestLoginSettings> testLoginSettings)
     {
         _ldapAuth = ldapAuth;
         _db = db;
         _logger = logger;
+        _testLoginSettings = testLoginSettings.Value;
     }
 
     [HttpGet]
@@ -37,9 +45,25 @@ public class AccountController : Controller
         if (!ModelState.IsValid)
             return View(model);
 
-        if (!_ldapAuth.ValidateCredentials(model.Username, model.Password, out var ldapError))
+        var useTestLogin = model.LoginMode == "test";
+
+        if (useTestLogin)
         {
-            ModelState.AddModelError(string.Empty, ldapError ?? "Kullanıcı adı veya şifre hatalı.");
+            if (!_testLoginSettings.Enabled)
+            {
+                ModelState.AddModelError(string.Empty, "Test login is disabled.");
+                return View(model);
+            }
+
+            if (string.IsNullOrEmpty(_testLoginSettings.Password) || model.Password != _testLoginSettings.Password)
+            {
+                ModelState.AddModelError(string.Empty, "Invalid test password.");
+                return View(model);
+            }
+        }
+        else if (!_ldapAuth.ValidateCredentials(model.Username, model.Password, out var ldapError))
+        {
+            ModelState.AddModelError(string.Empty, ldapError ?? "Invalid username or password.");
             return View(model);
         }
 
@@ -53,10 +77,10 @@ public class AccountController : Controller
         if (user is null || !user.IsActive)
         {
             _logger.LogWarning(
-                "AD kimlik doğrulaması başarılı ama kullanıcı IT Envanter sisteminde tanımlı/aktif değil: {Username}",
-                bareUsername);
+                "Authentication succeeded but the user is not registered/active in the IT Inventory system: {Username} (mode: {Mode})",
+                bareUsername, useTestLogin ? "test" : "ldap");
             ModelState.AddModelError(string.Empty,
-                "Bu kullanıcı IT Envanter sistemine tanımlı değil. Lütfen sistem yöneticinize başvurun.");
+                "This user is not registered in the IT Inventory system. Please contact your system administrator.");
             return View(model);
         }
 
@@ -69,7 +93,7 @@ public class AccountController : Controller
         if (roles.Count == 0)
         {
             ModelState.AddModelError(string.Empty,
-                "Kullanıcıya atanmış bir rol bulunamadı. Lütfen sistem yöneticinize başvurun.");
+                "No role is assigned to this user. Please contact your system administrator.");
             return View(model);
         }
 

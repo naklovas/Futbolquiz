@@ -6,27 +6,27 @@ public class UserFormViewModel
 {
     public int Id { get; set; }
 
-    [Required(ErrorMessage = "Kullanıcı adı zorunludur.")]
+    [Required(ErrorMessage = "Username is required.")]
     [StringLength(100)]
-    [Display(Name = "Kullanıcı Adı (AD sAMAccountName)")]
+    [Display(Name = "Username (AD sAMAccountName)")]
     public string Username { get; set; } = string.Empty;
 
-    [Required(ErrorMessage = "Ad Soyad zorunludur.")]
+    [Required(ErrorMessage = "Full name is required.")]
     [StringLength(100)]
-    [Display(Name = "Ad Soyad")]
+    [Display(Name = "Full Name")]
     public string FullName { get; set; } = string.Empty;
 
     [StringLength(100)]
-    [EmailAddress(ErrorMessage = "Geçerli bir e-posta adresi girin.")]
-    [Display(Name = "E-posta")]
+    [EmailAddress(ErrorMessage = "Enter a valid email address.")]
+    [Display(Name = "Email")]
     public string? Email { get; set; }
 
-    [Display(Name = "Ülke/Şube")]
+    [Display(Name = "Country/Branch")]
     public int? CountryId { get; set; }
 
-    [Display(Name = "Aktif")]
+    [Display(Name = "Active")]
     public bool IsActive { get; set; } = true;
 
-    [Display(Name = "Roller")]
+    [Display(Name = "Roles")]
     public List<int> SelectedRoleIds { get; set; } = new();
 }

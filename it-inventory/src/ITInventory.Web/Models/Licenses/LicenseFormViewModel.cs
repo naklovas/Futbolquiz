@@ -6,36 +6,36 @@ public class LicenseFormViewModel
 {
     public int Id { get; set; }
 
-    [Required(ErrorMessage = "Ülke zorunludur.")]
-    [Display(Name = "Ülke")]
+    [Required(ErrorMessage = "Country is required.")]
+    [Display(Name = "Country")]
     public int CountryId { get; set; }
 
-    [Required(ErrorMessage = "Lisans adı zorunludur.")]
+    [Required(ErrorMessage = "License name is required.")]
     [StringLength(255)]
-    [Display(Name = "Lisans Adı")]
+    [Display(Name = "License Name")]
     public string LicenseName { get; set; } = string.Empty;
 
     [StringLength(150)]
-    [Display(Name = "Üretici/Yüklenici")]
+    [Display(Name = "Vendor/Supplier")]
     public string? VendorSupplier { get; set; }
 
     [StringLength(150)]
-    [Display(Name = "Şube")]
+    [Display(Name = "Branch")]
     public string? Branch { get; set; }
 
-    [Required(ErrorMessage = "Lokasyon zorunludur.")]
+    [Required(ErrorMessage = "Location is required.")]
     [StringLength(255)]
-    [Display(Name = "Lokasyon")]
+    [Display(Name = "Location")]
     public string Location { get; set; } = string.Empty;
 
     [DataType(DataType.Date)]
-    [Display(Name = "Destek Başlangıç Tarihi")]
+    [Display(Name = "Support Start Date")]
     public DateTime? SupportStartDate { get; set; }
 
     [DataType(DataType.Date)]
-    [Display(Name = "Destek Bitiş Tarihi")]
+    [Display(Name = "Support End Date")]
     public DateTime? SupportEndDate { get; set; }
 
-    [Display(Name = "Notlar")]
+    [Display(Name = "Notes")]
     public string? Notes { get; set; }
 }

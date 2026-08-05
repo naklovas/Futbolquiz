@@ -31,7 +31,7 @@ public class AdminCountriesController : Controller
     public async Task<IActionResult> Create(CountryFormViewModel vm)
     {
         if (await _db.Countries.AnyAsync(c => c.Name == vm.Name))
-            ModelState.AddModelError(nameof(vm.Name), "Bu isimde bir ülke zaten kayıtlı.");
+            ModelState.AddModelError(nameof(vm.Name), "A country with this name already exists.");
 
         if (!ModelState.IsValid)
             return View(vm);
@@ -69,7 +69,7 @@ public class AdminCountriesController : Controller
         if (id != vm.Id) return BadRequest();
 
         if (await _db.Countries.AnyAsync(c => c.Name == vm.Name && c.Id != id))
-            ModelState.AddModelError(nameof(vm.Name), "Bu isimde bir ülke zaten kayıtlı.");
+            ModelState.AddModelError(nameof(vm.Name), "A country with this name already exists.");
 
         if (!ModelState.IsValid)
             return View(vm);
@@ -101,7 +101,7 @@ public class AdminCountriesController : Controller
         }
         catch (DbUpdateException)
         {
-            TempData["Error"] = "Bu ülkeye bağlı envanter kayıtları olduğu için silinemedi. Önce ilgili kayıtları silin veya taşıyın.";
+            TempData["Error"] = "Could not delete because inventory records are linked to this country. Delete or move the related records first.";
         }
 
         return RedirectToAction(nameof(Index));

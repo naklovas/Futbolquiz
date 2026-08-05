@@ -1,6 +1,6 @@
 @model List<ITInventory.Web.Models.DevicePool.DiscoveredDeviceDto>
 @{
-    ViewData["Title"] = "Cihaz Havuzu";
+    ViewData["Title"] = "Device Pool";
     var countries = (List<ITInventory.Data.Entities.Country>)ViewBag.Countries;
     var categories = (List<ITInventory.Data.Entities.DeviceCategory>)ViewBag.Categories;
     int? selectedCountryId = ViewBag.SelectedCountryId;
@@ -9,13 +9,13 @@
     bool noCountryAssigned = ViewBag.NoCountryAssigned ?? false;
 }
 
-<h2>Cihaz Havuzu</h2>
-<p class="text-muted">Nessus taramalarında keşfedilen cihazlar. Envantere eklemek için ilgili satırdan seçim yapın.</p>
+<h2>Device Pool</h2>
+<p class="text-muted">Devices discovered in Nessus scans. Select from the relevant row to add it to the inventory.</p>
 
 @if (noCountryAssigned)
 {
     <div class="alert alert-warning">
-        Hesabınıza atanmış bir ülke bulunamadı. Lütfen sistem yöneticinize başvurun.
+        No country is assigned to your account. Please contact your system administrator.
     </div>
 }
 else
@@ -25,7 +25,7 @@ else
         {
             <div class="col-auto">
                 <select name="countryId" class="form-select" onchange="this.form.submit()">
-                    <option value="">-- Ülke Seçin --</option>
+                    <option value="">-- Select Country --</option>
                     @foreach (var c in countries)
                     {
                         <option value="@c.Id" selected="@(c.Id == selectedCountryId)">@c.Name</option>
@@ -35,7 +35,7 @@ else
         }
         <div class="col-auto">
             <select name="categoryId" class="form-select" onchange="this.form.submit()">
-                <option value="">Tüm Kategoriler</option>
+                <option value="">All Categories</option>
                 @foreach (var cat in categories)
                 {
                     <option value="@cat.Id" selected="@(cat.Id == selectedCategoryId)">@cat.Name</option>
@@ -46,24 +46,24 @@ else
 
     @if (selectedCountryId is null)
     {
-        <div class="alert alert-info">Cihazları görüntülemek için bir ülke seçin.</div>
+        <div class="alert alert-info">Select a country to view devices.</div>
     }
     else if (!Model.Any())
     {
-        <div class="alert alert-secondary">Bu ülke/kategori için keşfedilmiş cihaz bulunamadı.</div>
+        <div class="alert alert-secondary">No discovered devices found for this country/category.</div>
     }
     else
     {
         <table class="table table-striped table-sm">
             <thead>
                 <tr>
-                    <th>IP Adresi</th>
+                    <th>IP Address</th>
                     <th>DNS / Netbios</th>
                     <th>MAC</th>
-                    <th>İşletim Sistemi</th>
-                    <th>Cihaz Profili</th>
-                    <th>Kategori</th>
-                    <th>Son Görülme</th>
+                    <th>Operating System</th>
+                    <th>Device Profile</th>
+                    <th>Category</th>
+                    <th>Last Seen</th>
                     <th></th>
                 </tr>
             </thead>
@@ -81,7 +81,7 @@ else
                         <td>
                             @if (d.AlreadyInInventory)
                             {
-                                <span class="badge bg-secondary">Envanterde</span>
+                                <span class="badge bg-secondary">In Inventory</span>
                             }
                             else
                             {
@@ -92,14 +92,14 @@ else
                                        asp-route-sourceId="@d.ZiraatYdId"
                                        asp-route-countryId="@selectedCountryId"
                                        asp-route-categoryId="@d.CategoryId">
-                                        Fiziksel Cihaz Olarak Ekle
+                                        Add as Physical Device
                                     </a>
                                     <a class="btn btn-outline-primary"
                                        asp-controller="Servers" asp-action="Create"
                                        asp-route-fromPool="true"
                                        asp-route-sourceId="@d.ZiraatYdId"
                                        asp-route-countryId="@selectedCountryId">
-                                        Sunucu Olarak Ekle
+                                        Add as Server
                                     </a>
                                 </div>
                             }

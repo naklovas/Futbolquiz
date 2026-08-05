@@ -13,7 +13,7 @@
         @if (isAdmin)
         {
             <select asp-for="CountryId" asp-items="countryOptions" class="form-select">
-                <option value="">-- Seçin --</option>
+                <option value="">-- Select --</option>
             </select>
         }
         else
@@ -66,5 +66,5 @@
     <textarea asp-for="Notes" class="form-control" rows="3"></textarea>
 </div>
 
-<button type="submit" class="btn btn-primary">Kaydet</button>
-<a asp-action="Index" class="btn btn-outline-secondary">Vazgeç</a>
+<button type="submit" class="btn btn-primary">Save</button>
+<a asp-action="Index" class="btn btn-outline-secondary">Cancel</a>

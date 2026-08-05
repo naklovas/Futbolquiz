@@ -1,20 +1,20 @@
 @model List<ITInventory.Data.Entities.DeviceProfileCatalog>
 @{
-    ViewData["Title"] = "Cihaz Profilleri";
+    ViewData["Title"] = "Device Profiles";
     var categories = (List<ITInventory.Data.Entities.DeviceCategory>)ViewBag.Categories;
 }
 
-<h2>Cihaz Profilleri (Nessus DeviceProfile Eşlemesi)</h2>
+<h2>Device Profiles (Nessus DeviceProfile Mapping)</h2>
 <p class="text-muted">
-    Nessus taramalarında görülen her DeviceProfile değerinin hangi envanter kategorisine
-    ait olduğunu buradan belirleyebilirsiniz. Cihaz havuzu bu eşlemeyi kullanır.
+    Assign each DeviceProfile value seen in Nessus scans to an inventory category here.
+    The device pool uses this mapping.
 </p>
 
 <table class="table table-striped table-sm">
     <thead>
         <tr>
-            <th>Cihaz Profili (Nessus)</th>
-            <th>Kategori</th>
+            <th>Device Profile (Nessus)</th>
+            <th>Category</th>
             <th></th>
         </tr>
     </thead>
@@ -26,13 +26,13 @@
                 <td>
                     <form asp-action="UpdateCategory" asp-route-id="@p.Id" method="post" class="d-flex gap-2">
                         <select name="categoryId" class="form-select form-select-sm">
-                            <option value="">-- Kategori Yok --</option>
+                            <option value="">-- No Category --</option>
                             @foreach (var cat in categories)
                             {
                                 <option value="@cat.Id" selected="@(cat.Id == p.CategoryId)">@cat.Name</option>
                             }
                         </select>
-                        <button type="submit" class="btn btn-sm btn-outline-primary">Kaydet</button>
+                        <button type="submit" class="btn btn-sm btn-outline-primary">Save</button>
                     </form>
                 </td>
             </tr>

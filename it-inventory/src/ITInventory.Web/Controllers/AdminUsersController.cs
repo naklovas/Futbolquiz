@@ -41,7 +41,7 @@ public class AdminUsersController : Controller
     public async Task<IActionResult> Create(UserFormViewModel vm)
     {
         if (await _db.YdUsers.AnyAsync(u => u.Username == vm.Username))
-            ModelState.AddModelError(nameof(vm.Username), "Bu kullanıcı adı zaten kayıtlı.");
+            ModelState.AddModelError(nameof(vm.Username), "This username already exists.");
 
         if (!ModelState.IsValid)
         {
@@ -102,7 +102,7 @@ public class AdminUsersController : Controller
         if (id != vm.Id) return BadRequest();
 
         if (await _db.YdUsers.AnyAsync(u => u.Username == vm.Username && u.Id != id))
-            ModelState.AddModelError(nameof(vm.Username), "Bu kullanıcı adı zaten kayıtlı.");
+            ModelState.AddModelError(nameof(vm.Username), "This username already exists.");
 
         if (!ModelState.IsValid)
         {

@@ -4,14 +4,17 @@ namespace ITInventory.Web.Models.Account;
 
 public class LoginViewModel
 {
-    [Required(ErrorMessage = "Kullanıcı adı zorunludur.")]
-    [Display(Name = "Kullanıcı Adı")]
+    [Required(ErrorMessage = "Username is required.")]
+    [Display(Name = "Username")]
     public string Username { get; set; } = string.Empty;
 
-    [Required(ErrorMessage = "Şifre zorunludur.")]
+    [Required(ErrorMessage = "Password is required.")]
     [DataType(DataType.Password)]
-    [Display(Name = "Şifre")]
+    [Display(Name = "Password")]
     public string Password { get; set; } = string.Empty;
+
+    /// <summary>"ldap" (default) or "test" - set by which submit button was clicked.</summary>
+    public string LoginMode { get; set; } = "ldap";
 
     public string? ReturnUrl { get; set; }
 }

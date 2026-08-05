@@ -1,16 +1,16 @@
 @model ITInventory.Web.Models.Home.DashboardViewModel
 @{
-    ViewData["Title"] = "Ana Sayfa";
+    ViewData["Title"] = "Home";
 }
 
-<h2 class="mb-4">Genel Bakış</h2>
+<h2 class="mb-4">Overview</h2>
 
 <div class="row mb-4">
     <div class="col-md-3">
         <div class="card text-center">
             <div class="card-body">
                 <h5 class="card-title">@Model.PhysicalDeviceCount</h5>
-                <p class="card-text text-muted">Fiziksel Cihaz</p>
+                <p class="card-text text-muted">Physical Devices</p>
             </div>
         </div>
     </div>
@@ -18,7 +18,7 @@
         <div class="card text-center">
             <div class="card-body">
                 <h5 class="card-title">@Model.ServerCount</h5>
-                <p class="card-text text-muted">Sunucu</p>
+                <p class="card-text text-muted">Servers</p>
             </div>
         </div>
     </div>
@@ -26,7 +26,7 @@
         <div class="card text-center">
             <div class="card-body">
                 <h5 class="card-title">@Model.LicenseCount</h5>
-                <p class="card-text text-muted">Lisans</p>
+                <p class="card-text text-muted">Licenses</p>
             </div>
         </div>
     </div>
@@ -34,26 +34,26 @@
         <div class="card text-center">
             <div class="card-body">
                 <h5 class="card-title">@Model.CircuitCount</h5>
-                <p class="card-text text-muted">Hat</p>
+                <p class="card-text text-muted">Circuits</p>
             </div>
         </div>
     </div>
 </div>
 
-<h4>Yaklaşan Sona Erme Tarihleri (90 gün içinde)</h4>
+<h4>Upcoming Expirations (within 90 days)</h4>
 @if (!Model.ExpiringItems.Any())
 {
-    <div class="alert alert-success">Yaklaşan bir sona erme tarihi bulunmuyor.</div>
+    <div class="alert alert-success">No upcoming expirations.</div>
 }
 else
 {
     <table class="table table-striped table-sm">
         <thead>
             <tr>
-                <th>Tip</th>
-                <th>Ad</th>
-                <th>Ülke</th>
-                <th>Bitiş Tarihi</th>
+                <th>Type</th>
+                <th>Name</th>
+                <th>Country</th>
+                <th>Expiration Date</th>
             </tr>
         </thead>
         <tbody>

@@ -1,9 +1,9 @@
 @model ITInventory.Web.Models.Licenses.LicenseFormViewModel
 @{
-    ViewData["Title"] = "Yeni Lisans";
+    ViewData["Title"] = "New License";
 }
 
-<h2>Yeni Lisans</h2>
+<h2>New License</h2>
 
 <form asp-action="Create" method="post">
     @await Html.PartialAsync("_Form", Model)

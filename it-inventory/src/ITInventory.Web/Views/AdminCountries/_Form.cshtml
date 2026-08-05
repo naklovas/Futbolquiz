@@ -9,8 +9,8 @@
         <input asp-for="Name" class="form-control" />
         <span asp-validation-for="Name" class="text-danger"></span>
         <div class="form-text">
-            Nessus taramalarındaki (Ziraat_YD.RepositoryName) ülke adıyla birebir aynı olmalı,
-            aksi halde cihaz havuzu bu ülke için çalışmaz.
+            Must exactly match the country name in the Nessus scan data (Ziraat_YD.RepositoryName),
+            otherwise the device pool will not work for this country.
         </div>
     </div>
     <div class="col-md-3 mb-3">
@@ -25,5 +25,5 @@
     </div>
 </div>
 
-<button type="submit" class="btn btn-primary">Kaydet</button>
-<a asp-action="Index" class="btn btn-outline-secondary">Vazgeç</a>
+<button type="submit" class="btn btn-primary">Save</button>
+<a asp-action="Index" class="btn btn-outline-secondary">Cancel</a>

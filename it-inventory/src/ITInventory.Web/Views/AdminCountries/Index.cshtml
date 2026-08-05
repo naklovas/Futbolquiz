@@ -1,11 +1,11 @@
 @model List<ITInventory.Data.Entities.Country>
 @{
-    ViewData["Title"] = "Ülkeler";
+    ViewData["Title"] = "Countries";
 }
 
 <div class="d-flex justify-content-between align-items-center mb-3">
-    <h2>Ülkeler</h2>
-    <a asp-action="Create" class="btn btn-primary">+ Yeni Ülke</a>
+    <h2>Countries</h2>
+    <a asp-action="Create" class="btn btn-primary">+ New Country</a>
 </div>
 
 @if (TempData["Error"] is string error)
@@ -16,9 +16,9 @@
 <table class="table table-striped table-sm">
     <thead>
         <tr>
-            <th>Ad</th>
-            <th>Kod</th>
-            <th>Aktif</th>
+            <th>Name</th>
+            <th>Code</th>
+            <th>Active</th>
             <th></th>
         </tr>
     </thead>
@@ -28,12 +28,12 @@
             <tr>
                 <td>@c.Name</td>
                 <td>@c.Code</td>
-                <td>@(c.IsActive ? "Evet" : "Hayır")</td>
+                <td>@(c.IsActive ? "Yes" : "No")</td>
                 <td>
-                    <a asp-action="Edit" asp-route-id="@c.Id" class="btn btn-sm btn-outline-secondary">Düzenle</a>
+                    <a asp-action="Edit" asp-route-id="@c.Id" class="btn btn-sm btn-outline-secondary">Edit</a>
                     <form asp-action="Delete" asp-route-id="@c.Id" method="post" class="d-inline"
-                          onsubmit="return confirm('Bu ülkeyi silmek istediğinize emin misiniz?');">
-                        <button type="submit" class="btn btn-sm btn-outline-danger">Sil</button>
+                          onsubmit="return confirm('Are you sure you want to delete this country?');">
+                        <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
                     </form>
                 </td>
             </tr>

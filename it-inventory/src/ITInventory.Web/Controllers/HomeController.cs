@@ -43,7 +43,7 @@ public class HomeController : Controller
                 .ToListAsync())
             .Select(d => new ExpiringItem
             {
-                Type = "Fiziksel Cihaz",
+                Type = "Physical Device",
                 Name = d.DeviceName,
                 Country = d.Country?.Name,
                 ExpiresAt = d.EndOfSupportDate!.Value
@@ -54,7 +54,7 @@ public class HomeController : Controller
                 .ToListAsync())
             .Select(s => new ExpiringItem
             {
-                Type = "Sunucu",
+                Type = "Server",
                 Name = s.HostName,
                 Country = s.Country?.Name,
                 ExpiresAt = s.EndOfSupportDate!.Value
@@ -65,7 +65,7 @@ public class HomeController : Controller
                 .ToListAsync())
             .Select(l => new ExpiringItem
             {
-                Type = "Lisans",
+                Type = "License",
                 Name = l.LicenseName,
                 Country = l.Country?.Name,
                 ExpiresAt = l.SupportEndDate!.Value
@@ -76,7 +76,7 @@ public class HomeController : Controller
                 .ToListAsync())
             .Select(c => new ExpiringItem
             {
-                Type = "Hat",
+                Type = "Circuit",
                 Name = c.CircuitType,
                 Country = c.Country?.Name,
                 ExpiresAt = c.EndDate!.Value

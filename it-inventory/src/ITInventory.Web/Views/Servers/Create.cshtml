@@ -1,9 +1,9 @@
 @model ITInventory.Web.Models.Servers.ServerFormViewModel
 @{
-    ViewData["Title"] = "Yeni Sunucu";
+    ViewData["Title"] = "New Server";
 }
 
-<h2>Yeni Sunucu</h2>
+<h2>New Server</h2>
 
 <form asp-action="Create" method="post">
     @await Html.PartialAsync("_Form", Model)

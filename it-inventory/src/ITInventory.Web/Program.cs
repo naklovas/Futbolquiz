@@ -16,6 +16,8 @@ builder.Services.AddDbContext<ITInventoryDbContext>(options =>
 builder.Services.Configure<LdapSettings>(builder.Configuration.GetSection(LdapSettings.SectionName));
 builder.Services.AddSingleton<ILdapAuthenticationService, LdapAuthenticationService>();
 
+builder.Services.Configure<TestLoginSettings>(builder.Configuration.GetSection(TestLoginSettings.SectionName));
+
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ICurrentUserService, CurrentUserService>();
 builder.Services.AddScoped<IDevicePoolService, DevicePoolService>();

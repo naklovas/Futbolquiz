@@ -1,9 +1,9 @@
 @model ITInventory.Web.Models.Admin.CountryFormViewModel
 @{
-    ViewData["Title"] = "Yeni Ülke";
+    ViewData["Title"] = "New Country";
 }
 
-<h2>Yeni Ülke</h2>
+<h2>New Country</h2>
 
 <form asp-action="Create" method="post">
     @await Html.PartialAsync("_Form", Model)
