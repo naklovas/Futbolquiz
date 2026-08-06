@@ -1,12 +1,13 @@
 @model List<ITInventory.Web.Models.DevicePool.DiscoveredDeviceDto>
 @{
     ViewData["Title"] = "Device Pool";
-    var countries = (List<ITInventory.Data.Entities.Country>)ViewBag.Countries;
+    var countries = (List<string>)ViewBag.Countries;
     var categories = (List<ITInventory.Data.Entities.DeviceCategory>)ViewBag.Categories;
-    int? selectedCountryId = ViewBag.SelectedCountryId;
+    string? selectedCountry = ViewBag.SelectedCountry;
     int? selectedCategoryId = ViewBag.SelectedCategoryId;
     bool isAdmin = ViewBag.IsAdmin;
     bool noCountryAssigned = ViewBag.NoCountryAssigned ?? false;
+    int? matchedCountryId = ViewBag.MatchedCountryId;
 }
 
 <h2>Device Pool</h2>
@@ -24,11 +25,11 @@ else
         @if (isAdmin)
         {
             <div class="col-auto">
-                <select name="countryId" class="form-select" onchange="this.form.submit()">
+                <select name="country" class="form-select" onchange="this.form.submit()">
                     <option value="">-- Select Country --</option>
                     @foreach (var c in countries)
                     {
-                        <option value="@c.Id" selected="@(c.Id == selectedCountryId)">@c.Name</option>
+                        <option value="@c" selected="@(c == selectedCountry)">@c</option>
                     }
                 </select>
             </div>
@@ -44,7 +45,7 @@ else
         </div>
     </form>
 
-    @if (selectedCountryId is null)
+    @if (selectedCountry is null)
     {
         <div class="alert alert-info">Select a country to view devices.</div>
     }
@@ -90,7 +91,7 @@ else
                                        asp-controller="PhysicalDevices" asp-action="Create"
                                        asp-route-fromPool="true"
                                        asp-route-sourceId="@d.ZiraatYdId"
-                                       asp-route-countryId="@selectedCountryId"
+                                       asp-route-countryId="@matchedCountryId"
                                        asp-route-categoryId="@d.CategoryId">
                                         Add as Physical Device
                                     </a>
@@ -98,7 +99,7 @@ else
                                        asp-controller="Servers" asp-action="Create"
                                        asp-route-fromPool="true"
                                        asp-route-sourceId="@d.ZiraatYdId"
-                                       asp-route-countryId="@selectedCountryId">
+                                       asp-route-countryId="@matchedCountryId">
                                         Add as Server
                                     </a>
                                 </div>

@@ -13,25 +13,21 @@ public class DevicePoolService : IDevicePoolService
         _db = db;
     }
 
-    public async Task<List<DiscoveredDeviceDto>> GetDevicesForCountryAsync(int countryId, int? categoryId = null)
+    public async Task<List<DiscoveredDeviceDto>> GetDevicesForRepositoryAsync(string repositoryName, int? categoryId = null)
     {
-        var country = await _db.Countries.FindAsync(countryId);
-        if (country is null)
-            return new List<DiscoveredDeviceDto>();
-
         var rawRows = await _db.ZiraatYds
-            .Where(z => z.RepositoryName == country.Name)
+            .Where(z => z.RepositoryName == repositoryName)
             .ToListAsync();
 
         var profiles = await _db.DeviceProfileCatalogs.Include(p => p.Category).ToListAsync();
         var profileLookup = profiles.ToDictionary(p => p.ProfileName, p => p, StringComparer.OrdinalIgnoreCase);
 
         var usedIps = (await _db.PhysicalDevices
-                .Where(d => d.CountryId == countryId && d.IpAddress != null)
+                .Where(d => d.IpAddress != null)
                 .Select(d => d.IpAddress!)
                 .ToListAsync())
             .Concat(await _db.Servers
-                .Where(s => s.CountryId == countryId && s.IpAddress != null)
+                .Where(s => s.IpAddress != null)
                 .Select(s => s.IpAddress!)
                 .ToListAsync())
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
