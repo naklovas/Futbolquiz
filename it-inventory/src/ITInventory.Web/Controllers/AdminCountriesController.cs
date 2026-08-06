@@ -39,6 +39,7 @@ public class AdminCountriesController : Controller
         _db.Countries.Add(new Country
         {
             Name = vm.Name,
+            DisplayName = vm.DisplayName,
             Code = vm.Code,
             IsActive = vm.IsActive,
             CreatedAt = DateTime.UtcNow
@@ -57,6 +58,7 @@ public class AdminCountriesController : Controller
         {
             Id = country.Id,
             Name = country.Name,
+            DisplayName = country.DisplayName,
             Code = country.Code,
             IsActive = country.IsActive
         });
@@ -78,6 +80,7 @@ public class AdminCountriesController : Controller
         if (country is null) return NotFound();
 
         country.Name = vm.Name;
+        country.DisplayName = vm.DisplayName;
         country.Code = vm.Code;
         country.IsActive = vm.IsActive;
         country.UpdatedAt = DateTime.UtcNow;

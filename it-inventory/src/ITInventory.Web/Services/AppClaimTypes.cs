@@ -9,4 +9,7 @@ public static class AppClaimTypes
 
     /// <summary>dbo.Countries.Id - RepositoryName için bir Country kaydı tanımlıysa set edilir.</summary>
     public const string CountryId = "country_id";
+
+    /// <summary>dbo.Countries.DisplayName - varsa Country yerine ekranda bu gösterilir.</summary>
+    public const string CountryDisplayName = "country_display_name";
 }

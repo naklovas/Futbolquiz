@@ -45,7 +45,7 @@ public class HomeController : Controller
             {
                 Type = "Physical Device",
                 Name = d.DeviceName,
-                Country = d.Country?.Name,
+                Country = d.Country != null ? (d.Country.DisplayName ?? d.Country.Name) : null,
                 ExpiresAt = d.EndOfSupportDate!.Value
             }));
 
@@ -56,7 +56,7 @@ public class HomeController : Controller
             {
                 Type = "Server",
                 Name = s.HostName,
-                Country = s.Country?.Name,
+                Country = s.Country != null ? (s.Country.DisplayName ?? s.Country.Name) : null,
                 ExpiresAt = s.EndOfSupportDate!.Value
             }));
 
@@ -67,7 +67,7 @@ public class HomeController : Controller
             {
                 Type = "License",
                 Name = l.LicenseName,
-                Country = l.Country?.Name,
+                Country = l.Country != null ? (l.Country.DisplayName ?? l.Country.Name) : null,
                 ExpiresAt = l.SupportEndDate!.Value
             }));
 
@@ -78,7 +78,7 @@ public class HomeController : Controller
             {
                 Type = "Circuit",
                 Name = c.CircuitType,
-                Country = c.Country?.Name,
+                Country = c.Country != null ? (c.Country.DisplayName ?? c.Country.Name) : null,
                 ExpiresAt = c.EndDate!.Value
             }));
 

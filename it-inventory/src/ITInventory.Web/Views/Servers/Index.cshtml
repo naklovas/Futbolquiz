@@ -25,7 +25,7 @@
                 <option value="">All Countries</option>
                 @foreach (var c in countries)
                 {
-                    <option value="@c.Id" selected="@(c.Id == selectedCountryId)">@c.Name</option>
+                    <option value="@c.Id" selected="@(c.Id == selectedCountryId)">@(c.DisplayName ?? c.Name)</option>
                 }
             </select>
         </form>
@@ -73,7 +73,7 @@ else
                     <tr class="hover:bg-slate-50">
                         @if (isAdmin)
                         {
-                            <td class="px-4 py-3 text-slate-700">@item.Country?.Name</td>
+                            <td class="px-4 py-3 text-slate-700">@(item.Country?.DisplayName ?? item.Country?.Name)</td>
                         }
                         <td class="px-4 py-3 text-slate-700 font-medium">@item.HostName</td>
                         <td class="px-4 py-3 text-slate-700">@item.ApplianceType</td>

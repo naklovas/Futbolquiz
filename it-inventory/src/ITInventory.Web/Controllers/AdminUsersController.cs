@@ -27,6 +27,10 @@ public class AdminUsersController : Controller
             .OrderBy(u => u.Username)
             .ToListAsync();
 
+        ViewBag.CountryDisplayNames = await _db.Countries
+            .Where(c => c.DisplayName != null)
+            .ToDictionaryAsync(c => c.Name, c => c.DisplayName!);
+
         return View(users);
     }
 
@@ -145,7 +149,8 @@ public class AdminUsersController : Controller
 
     private async Task PopulateDropdowns()
     {
-        ViewBag.CountryOptions = new SelectList(await _db.Countries.OrderBy(c => c.Name).ToListAsync(), "Id", "Name");
+        var countries = await _db.Countries.OrderBy(c => c.Name).Select(c => new { c.Id, Label = c.DisplayName ?? c.Name }).ToListAsync();
+        ViewBag.CountryOptions = new SelectList(countries, "Id", "Label");
         ViewBag.Roles = await _db.YdRoles.OrderBy(r => r.RoleName).ToListAsync();
     }
 }

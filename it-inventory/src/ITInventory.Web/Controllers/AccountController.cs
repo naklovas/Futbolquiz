@@ -110,7 +110,11 @@ public class AccountController : Controller
 
             var country = await _db.Countries.FirstOrDefaultAsync(c => c.Name == user.RepositoryName);
             if (country is not null)
+            {
                 claims.Add(new Claim(AppClaimTypes.CountryId, country.Id.ToString()));
+                if (!string.IsNullOrWhiteSpace(country.DisplayName))
+                    claims.Add(new Claim(AppClaimTypes.CountryDisplayName, country.DisplayName));
+            }
         }
 
         claims.AddRange(roles.Select(r => new Claim(ClaimTypes.Role, r)));

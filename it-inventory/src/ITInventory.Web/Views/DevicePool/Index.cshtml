@@ -4,6 +4,7 @@
     var countries = (List<string>)ViewBag.Countries;
     var categories = (List<ITInventory.Data.Entities.DeviceCategory>)ViewBag.Categories;
     string? selectedCountry = ViewBag.SelectedCountry;
+    var countryDisplayNames = (Dictionary<string, string>)ViewBag.CountryDisplayNames;
     int? selectedCategoryId = ViewBag.SelectedCategoryId;
     bool isAdmin = ViewBag.IsAdmin;
     bool noCountryAssigned = ViewBag.NoCountryAssigned ?? false;
@@ -29,7 +30,7 @@ else
                     <option value="">-- Select Country --</option>
                     @foreach (var c in countries)
                     {
-                        <option value="@c" selected="@(c == selectedCountry)">@c</option>
+                        <option value="@c" selected="@(c == selectedCountry)">@(countryDisplayNames.TryGetValue(c, out var cdn) ? cdn : c)</option>
                     }
                 </select>
             }

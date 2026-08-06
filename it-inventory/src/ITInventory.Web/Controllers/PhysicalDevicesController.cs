@@ -231,11 +231,12 @@ public class PhysicalDevicesController : Controller
     {
         ViewBag.IsAdmin = _currentUser.IsAdmin;
 
-        var countries = _currentUser.IsAdmin
-            ? await _db.Countries.Where(c => c.IsActive).OrderBy(c => c.Name).ToListAsync()
-            : await _db.Countries.Where(c => c.Id == _currentUser.CountryId).ToListAsync();
+        var countriesQuery = _currentUser.IsAdmin
+            ? _db.Countries.Where(c => c.IsActive).OrderBy(c => c.Name)
+            : _db.Countries.Where(c => c.Id == _currentUser.CountryId);
+        var countries = await countriesQuery.Select(c => new { c.Id, Label = c.DisplayName ?? c.Name }).ToListAsync();
 
-        ViewBag.CountryOptions = new SelectList(countries, "Id", "Name");
+        ViewBag.CountryOptions = new SelectList(countries, "Id", "Label");
         ViewBag.CategoryOptions = new SelectList(await _db.DeviceCategories.OrderBy(c => c.Name).ToListAsync(), "Id", "Name");
     }
 }

@@ -1,6 +1,7 @@
 @model List<ITInventory.Data.Entities.YdUser>
 @{
     ViewData["Title"] = "Users";
+    var countryDisplayNames = (Dictionary<string, string>)ViewBag.CountryDisplayNames;
 }
 
 <div class="flex items-center justify-between mb-6">
@@ -36,7 +37,9 @@
                     <td class="px-4 py-3 text-slate-700 font-medium">@user.Username</td>
                     <td class="px-4 py-3 text-slate-700">@user.FullName</td>
                     <td class="px-4 py-3 text-slate-700">@user.Email</td>
-                    <td class="px-4 py-3 text-slate-700">@user.RepositoryName</td>
+                    <td class="px-4 py-3 text-slate-700">
+                    @(user.RepositoryName != null && countryDisplayNames.TryGetValue(user.RepositoryName, out var cdn) ? cdn : user.RepositoryName)
+                </td>
                     <td class="px-4 py-3">
                         @foreach (var r in user.UserRoles)
                         {

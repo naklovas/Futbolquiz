@@ -27,6 +27,10 @@ public class DevicePoolController : Controller
             .OrderBy(r => r)
             .ToListAsync();
 
+        ViewBag.CountryDisplayNames = await _db.Countries
+            .Where(c => c.DisplayName != null)
+            .ToDictionaryAsync(c => c.Name, c => c.DisplayName!);
+
         ViewBag.Categories = await _db.DeviceCategories
             .Where(c => _db.DeviceProfileCatalogs.Any(p => p.CategoryId == c.Id))
             .OrderBy(c => c.Name)

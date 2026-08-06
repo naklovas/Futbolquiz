@@ -4,14 +4,19 @@
 <input type="hidden" asp-for="Id" />
 
 <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-    <div class="md:col-span-2">
+    <div>
         <label asp-for="Name" class="block text-sm font-medium text-slate-700 mb-1"></label>
         <input asp-for="Name" class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500" />
         <span asp-validation-for="Name" class="text-sm text-red-600"></span>
         <p class="text-xs text-slate-400 mt-1">
-            Must exactly match the country name in the Nessus scan data (Ziraat_YD.RepositoryName),
+            Must exactly match the value in the Nessus scan data (Ziraat_YD.RepositoryName),
             otherwise the device pool will not work for this country.
         </p>
+    </div>
+    <div>
+        <label asp-for="DisplayName" class="block text-sm font-medium text-slate-700 mb-1"></label>
+        <input asp-for="DisplayName" placeholder="e.g. ZiraatBank AG" class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500" />
+        <p class="text-xs text-slate-400 mt-1">Shown everywhere in the app instead of the raw name above. Leave blank to show the raw name.</p>
     </div>
     <div>
         <label asp-for="Code" class="block text-sm font-medium text-slate-700 mb-1"></label>

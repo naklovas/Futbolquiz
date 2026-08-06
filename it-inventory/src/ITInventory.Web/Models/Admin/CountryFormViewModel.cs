@@ -8,8 +8,12 @@ public class CountryFormViewModel
 
     [Required(ErrorMessage = "Country name is required.")]
     [StringLength(150)]
-    [Display(Name = "Country Name")]
+    [Display(Name = "Country Name (must match Nessus RepositoryName)")]
     public string Name { get; set; } = string.Empty;
+
+    [StringLength(200)]
+    [Display(Name = "Display Name (e.g. institution name)")]
+    public string? DisplayName { get; set; }
 
     [StringLength(20)]
     [Display(Name = "Code")]

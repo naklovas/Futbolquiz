@@ -25,7 +25,8 @@
     <table id="countries-table" class="min-w-full divide-y divide-slate-200 text-sm">
         <thead class="bg-slate-50">
             <tr>
-                <th class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Name</th>
+                <th class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Display Name</th>
+                <th class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Repository Name (Nessus)</th>
                 <th class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Code</th>
                 <th class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Active</th>
                 <th class="px-4 py-3"></th>
@@ -35,7 +36,8 @@
             @foreach (var c in Model)
             {
                 <tr class="hover:bg-slate-50">
-                    <td class="px-4 py-3 text-slate-700">@c.Name</td>
+                    <td class="px-4 py-3 text-slate-700 font-medium">@(c.DisplayName ?? c.Name)</td>
+                    <td class="px-4 py-3 text-slate-500 font-mono text-xs">@c.Name</td>
                     <td class="px-4 py-3 text-slate-700">@c.Code</td>
                     <td class="px-4 py-3">
                         @if (c.IsActive)

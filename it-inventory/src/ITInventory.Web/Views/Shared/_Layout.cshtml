@@ -72,7 +72,8 @@
                                 <i class="fa-solid fa-user-circle mr-1"></i>
                                 @User.FindFirst(ITInventory.Web.Services.AppClaimTypes.FullName)?.Value
                                 @{
-                                    var country = User.FindFirst(ITInventory.Web.Services.AppClaimTypes.Country)?.Value;
+                                    var country = User.FindFirst(ITInventory.Web.Services.AppClaimTypes.CountryDisplayName)?.Value
+                                        ?? User.FindFirst(ITInventory.Web.Services.AppClaimTypes.Country)?.Value;
                                 }
                                 @if (!string.IsNullOrEmpty(country))
                                 {
