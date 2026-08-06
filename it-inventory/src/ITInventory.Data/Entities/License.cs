@@ -17,5 +17,8 @@ public class License : AuditableEntity
     public DateTime? SupportStartDate { get; set; }
     public DateTime? SupportEndDate { get; set; }
 
+    /// <summary>Lisansın kendi geçerlilik/son kullanma tarihi (destek bitiş tarihinden farklı olabilir).</summary>
+    public DateTime? ExpirationDate { get; set; }
+
     public string? Notes { get; set; }
 }

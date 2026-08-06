@@ -1,7 +1,10 @@
+using ClosedXML.Excel;
 using ITInventory.Data;
 using ITInventory.Data.Entities;
+using ITInventory.Web.Models.Import;
 using ITInventory.Web.Models.Servers;
 using ITInventory.Web.Services;
+using ITInventory.Web.Services.Import;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Rendering;
 using Microsoft.EntityFrameworkCore;
@@ -203,6 +206,142 @@ public class ServersController : Controller
         _db.Servers.Remove(entity);
         await _db.SaveChangesAsync();
         return RedirectToAction(nameof(Index));
+    }
+
+    public IActionResult Import()
+    {
+        if (!_currentUser.CanEdit) return Forbid();
+        ViewBag.EntityName = "Servers";
+        return View("Import");
+    }
+
+    public IActionResult DownloadTemplate()
+    {
+        if (!_currentUser.CanEdit) return Forbid();
+
+        var bytes = ExcelImportHelpers.CreateTemplateBytes("Servers",
+            "Country", "Host Name", "Physical/Virtual", "IP Address", "Operating System",
+            "Brand", "Model", "Serial Number", "Vendor/Supplier", "Port", "Branch", "Location",
+            "Support Start Date", "Support End Date", "End of Life Date", "Notes");
+
+        return File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "Servers_Template.xlsx");
+    }
+
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> Import(IFormFile file)
+    {
+        if (!_currentUser.CanEdit) return Forbid();
+
+        if (file is null || file.Length == 0)
+        {
+            TempData["ImportError"] = "Please choose a file.";
+            return RedirectToAction(nameof(Import));
+        }
+
+        var countryLookup = await BuildCountryLookupAsync();
+        var result = new ImportResultViewModel { EntityName = "Servers" };
+        var toAdd = new List<Server>();
+
+        using (var stream = new MemoryStream())
+        {
+            await file.CopyToAsync(stream);
+            stream.Position = 0;
+            using var workbook = new XLWorkbook(stream);
+            var ws = workbook.Worksheets.First();
+            var headers = ExcelImportHelpers.ReadHeaders(ws);
+            var lastRow = ws.LastRowUsed()?.RowNumber() ?? 1;
+
+            for (var row = 2; row <= lastRow; row++)
+            {
+                if (ExcelImportHelpers.IsRowEmpty(ws, row, headers)) continue;
+
+                var countryText = ExcelImportHelpers.GetString(ws, row, headers, "Country");
+                var hostName = ExcelImportHelpers.GetString(ws, row, headers, "Host Name");
+                var location = ExcelImportHelpers.GetString(ws, row, headers, "Location");
+                var applianceRaw = ExcelImportHelpers.GetString(ws, row, headers, "Physical/Virtual");
+
+                if (string.IsNullOrEmpty(countryText))
+                {
+                    result.Errors.Add(new ImportRowError { RowNumber = row, Message = "Country is required." });
+                    continue;
+                }
+
+                if (!countryLookup.TryGetValue(countryText, out var country))
+                {
+                    result.Errors.Add(new ImportRowError { RowNumber = row, Message = $"Country '{countryText}' not found." });
+                    continue;
+                }
+
+                if (!_currentUser.IsAdmin && country.Id != _currentUser.CountryId)
+                {
+                    result.Errors.Add(new ImportRowError { RowNumber = row, Message = $"You are not allowed to import records for '{countryText}'." });
+                    continue;
+                }
+
+                if (string.IsNullOrEmpty(hostName))
+                {
+                    result.Errors.Add(new ImportRowError { RowNumber = row, Message = "Host Name is required." });
+                    continue;
+                }
+
+                if (string.IsNullOrEmpty(location))
+                {
+                    result.Errors.Add(new ImportRowError { RowNumber = row, Message = "Location is required." });
+                    continue;
+                }
+
+                if (!ExcelImportHelpers.TryParseApplianceType(applianceRaw, out var applianceType, out var applianceError))
+                {
+                    result.Errors.Add(new ImportRowError { RowNumber = row, Message = applianceError! });
+                    continue;
+                }
+
+                toAdd.Add(new Server
+                {
+                    CountryId = country.Id,
+                    HostName = hostName,
+                    ApplianceType = applianceType,
+                    IpAddress = ExcelImportHelpers.GetString(ws, row, headers, "IP Address"),
+                    OperatingSystem = ExcelImportHelpers.GetString(ws, row, headers, "Operating System"),
+                    Brand = ExcelImportHelpers.GetString(ws, row, headers, "Brand"),
+                    Model = ExcelImportHelpers.GetString(ws, row, headers, "Model"),
+                    SerialNo = ExcelImportHelpers.GetString(ws, row, headers, "Serial Number"),
+                    VendorSupplier = ExcelImportHelpers.GetString(ws, row, headers, "Vendor/Supplier"),
+                    Port = ExcelImportHelpers.GetInt(ws, row, headers, "Port"),
+                    Branch = ExcelImportHelpers.GetString(ws, row, headers, "Branch"),
+                    Location = location,
+                    StartOfSupportDate = ExcelImportHelpers.GetDate(ws, row, headers, "Support Start Date"),
+                    EndOfSupportDate = ExcelImportHelpers.GetDate(ws, row, headers, "Support End Date"),
+                    EndOfLifeDate = ExcelImportHelpers.GetDate(ws, row, headers, "End of Life Date"),
+                    Notes = ExcelImportHelpers.GetString(ws, row, headers, "Notes"),
+                    CreatedAt = DateTime.UtcNow,
+                    CreatedBy = _currentUser.Username
+                });
+            }
+        }
+
+        if (toAdd.Count > 0)
+        {
+            _db.Servers.AddRange(toAdd);
+            await _db.SaveChangesAsync();
+        }
+
+        result.SuccessCount = toAdd.Count;
+        return View("ImportResult", result);
+    }
+
+    private async Task<Dictionary<string, Country>> BuildCountryLookupAsync()
+    {
+        var countries = await _db.Countries.ToListAsync();
+        var lookup = new Dictionary<string, Country>(StringComparer.OrdinalIgnoreCase);
+        foreach (var c in countries)
+        {
+            lookup[c.Name] = c;
+            if (!string.IsNullOrEmpty(c.DisplayName))
+                lookup[c.DisplayName] = c;
+        }
+        return lookup;
     }
 
     private async Task PopulateDropdowns()

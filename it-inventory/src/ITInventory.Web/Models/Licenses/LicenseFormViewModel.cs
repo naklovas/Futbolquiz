@@ -36,6 +36,10 @@ public class LicenseFormViewModel
     [Display(Name = "Support End Date")]
     public DateTime? SupportEndDate { get; set; }
 
+    [DataType(DataType.Date)]
+    [Display(Name = "License Expiration Date")]
+    public DateTime? ExpirationDate { get; set; }
+
     [Display(Name = "Notes")]
     public string? Notes { get; set; }
 }

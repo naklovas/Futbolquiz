@@ -11,9 +11,14 @@
     <h2 class="text-xl font-semibold text-slate-900">Licenses</h2>
     @if (canEdit)
     {
-        <a asp-action="Create" class="inline-flex items-center gap-2 bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium px-4 py-2 rounded-md">
-            <i class="fa-solid fa-plus"></i>Add New License
-        </a>
+        <div class="flex gap-2">
+            <a asp-action="Import" class="inline-flex items-center gap-2 border border-slate-300 text-slate-700 hover:bg-slate-50 text-sm font-medium px-4 py-2 rounded-md">
+                <i class="fa-solid fa-file-excel"></i>Import from Excel
+            </a>
+            <a asp-action="Create" class="inline-flex items-center gap-2 bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium px-4 py-2 rounded-md">
+                <i class="fa-solid fa-plus"></i>Add New License
+            </a>
+        </div>
     }
 </div>
 
@@ -60,6 +65,7 @@ else
                     <th class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Location</th>
                     <th class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Support Start</th>
                     <th class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Support End</th>
+                    <th class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">License Expiration</th>
                     @if (canEdit)
                     {
                         <th class="px-4 py-3"></th>
@@ -80,6 +86,7 @@ else
                         <td class="px-4 py-3 text-slate-700">@item.Location</td>
                         <td class="px-4 py-3 text-slate-700">@(item.SupportStartDate?.ToString("dd.MM.yyyy") ?? "-")</td>
                         <td class="px-4 py-3 text-slate-700">@(item.SupportEndDate?.ToString("dd.MM.yyyy") ?? "-")</td>
+                        <td class="px-4 py-3 @(item.ExpirationDate.HasValue && item.ExpirationDate < DateTime.UtcNow ? "text-red-700 font-medium" : "text-slate-700")">@(item.ExpirationDate?.ToString("dd.MM.yyyy") ?? "-")</td>
                         @if (canEdit)
                         {
                             <td class="px-4 py-3 text-right whitespace-nowrap">

@@ -1,7 +1,10 @@
+using ClosedXML.Excel;
 using ITInventory.Data;
 using ITInventory.Data.Entities;
+using ITInventory.Web.Models.Import;
 using ITInventory.Web.Models.Licenses;
 using ITInventory.Web.Services;
+using ITInventory.Web.Services.Import;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Rendering;
 using Microsoft.EntityFrameworkCore;
@@ -75,6 +78,7 @@ public class LicensesController : Controller
             Location = vm.Location,
             SupportStartDate = vm.SupportStartDate,
             SupportEndDate = vm.SupportEndDate,
+            ExpirationDate = vm.ExpirationDate,
             Notes = vm.Notes,
             CreatedAt = DateTime.UtcNow,
             CreatedBy = _currentUser.Username
@@ -103,6 +107,7 @@ public class LicensesController : Controller
             Location = entity.Location,
             SupportStartDate = entity.SupportStartDate,
             SupportEndDate = entity.SupportEndDate,
+            ExpirationDate = entity.ExpirationDate,
             Notes = entity.Notes
         };
 
@@ -137,6 +142,7 @@ public class LicensesController : Controller
         entity.Location = vm.Location;
         entity.SupportStartDate = vm.SupportStartDate;
         entity.SupportEndDate = vm.SupportEndDate;
+        entity.ExpirationDate = vm.ExpirationDate;
         entity.Notes = vm.Notes;
         entity.UpdatedAt = DateTime.UtcNow;
         entity.UpdatedBy = _currentUser.Username;
@@ -158,6 +164,127 @@ public class LicensesController : Controller
         _db.Licenses.Remove(entity);
         await _db.SaveChangesAsync();
         return RedirectToAction(nameof(Index));
+    }
+
+    public IActionResult Import()
+    {
+        if (!_currentUser.CanEdit) return Forbid();
+        ViewBag.EntityName = "Licenses";
+        return View("Import");
+    }
+
+    public IActionResult DownloadTemplate()
+    {
+        if (!_currentUser.CanEdit) return Forbid();
+
+        var bytes = ExcelImportHelpers.CreateTemplateBytes("Licenses",
+            "Country", "License Name", "Vendor/Supplier", "Branch", "Location",
+            "Support Start Date", "Support End Date", "License Expiration Date", "Notes");
+
+        return File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "Licenses_Template.xlsx");
+    }
+
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> Import(IFormFile file)
+    {
+        if (!_currentUser.CanEdit) return Forbid();
+
+        if (file is null || file.Length == 0)
+        {
+            TempData["ImportError"] = "Please choose a file.";
+            return RedirectToAction(nameof(Import));
+        }
+
+        var countryLookup = await BuildCountryLookupAsync();
+        var result = new ImportResultViewModel { EntityName = "Licenses" };
+        var toAdd = new List<License>();
+
+        using (var stream = new MemoryStream())
+        {
+            await file.CopyToAsync(stream);
+            stream.Position = 0;
+            using var workbook = new XLWorkbook(stream);
+            var ws = workbook.Worksheets.First();
+            var headers = ExcelImportHelpers.ReadHeaders(ws);
+            var lastRow = ws.LastRowUsed()?.RowNumber() ?? 1;
+
+            for (var row = 2; row <= lastRow; row++)
+            {
+                if (ExcelImportHelpers.IsRowEmpty(ws, row, headers)) continue;
+
+                var countryText = ExcelImportHelpers.GetString(ws, row, headers, "Country");
+                var licenseName = ExcelImportHelpers.GetString(ws, row, headers, "License Name");
+                var location = ExcelImportHelpers.GetString(ws, row, headers, "Location");
+
+                if (string.IsNullOrEmpty(countryText))
+                {
+                    result.Errors.Add(new ImportRowError { RowNumber = row, Message = "Country is required." });
+                    continue;
+                }
+
+                if (!countryLookup.TryGetValue(countryText, out var country))
+                {
+                    result.Errors.Add(new ImportRowError { RowNumber = row, Message = $"Country '{countryText}' not found." });
+                    continue;
+                }
+
+                if (!_currentUser.IsAdmin && country.Id != _currentUser.CountryId)
+                {
+                    result.Errors.Add(new ImportRowError { RowNumber = row, Message = $"You are not allowed to import records for '{countryText}'." });
+                    continue;
+                }
+
+                if (string.IsNullOrEmpty(licenseName))
+                {
+                    result.Errors.Add(new ImportRowError { RowNumber = row, Message = "License Name is required." });
+                    continue;
+                }
+
+                if (string.IsNullOrEmpty(location))
+                {
+                    result.Errors.Add(new ImportRowError { RowNumber = row, Message = "Location is required." });
+                    continue;
+                }
+
+                toAdd.Add(new License
+                {
+                    CountryId = country.Id,
+                    LicenseName = licenseName,
+                    VendorSupplier = ExcelImportHelpers.GetString(ws, row, headers, "Vendor/Supplier"),
+                    Branch = ExcelImportHelpers.GetString(ws, row, headers, "Branch"),
+                    Location = location,
+                    SupportStartDate = ExcelImportHelpers.GetDate(ws, row, headers, "Support Start Date"),
+                    SupportEndDate = ExcelImportHelpers.GetDate(ws, row, headers, "Support End Date"),
+                    ExpirationDate = ExcelImportHelpers.GetDate(ws, row, headers, "License Expiration Date"),
+                    Notes = ExcelImportHelpers.GetString(ws, row, headers, "Notes"),
+                    CreatedAt = DateTime.UtcNow,
+                    CreatedBy = _currentUser.Username
+                });
+            }
+        }
+
+        if (toAdd.Count > 0)
+        {
+            _db.Licenses.AddRange(toAdd);
+            await _db.SaveChangesAsync();
+        }
+
+        result.SuccessCount = toAdd.Count;
+        return View("ImportResult", result);
+    }
+
+    private async Task<Dictionary<string, Country>> BuildCountryLookupAsync()
+    {
+        var countries = await _db.Countries.ToListAsync();
+        var lookup = new Dictionary<string, Country>(StringComparer.OrdinalIgnoreCase);
+        foreach (var c in countries)
+        {
+            lookup[c.Name] = c;
+            if (!string.IsNullOrEmpty(c.DisplayName))
+                lookup[c.DisplayName] = c;
+        }
+        return lookup;
     }
 
     private async Task PopulateDropdowns()

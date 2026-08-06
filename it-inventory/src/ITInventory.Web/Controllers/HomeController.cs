@@ -60,16 +60,37 @@ public class HomeController : Controller
                 ExpiresAt = s.EndOfSupportDate!.Value
             }));
 
-        expiring.AddRange((await licenses
-                .Where(l => l.SupportEndDate != null && l.SupportEndDate <= threshold)
-                .ToListAsync())
-            .Select(l => new ExpiringItem
+        var expiringLicenses = await licenses
+            .Where(l => (l.SupportEndDate != null && l.SupportEndDate <= threshold)
+                     || (l.ExpirationDate != null && l.ExpirationDate <= threshold))
+            .ToListAsync();
+
+        foreach (var l in expiringLicenses)
+        {
+            var licenseCountry = l.Country != null ? (l.Country.DisplayName ?? l.Country.Name) : null;
+
+            if (l.SupportEndDate != null && l.SupportEndDate <= threshold)
             {
-                Type = "License",
-                Name = l.LicenseName,
-                Country = l.Country != null ? (l.Country.DisplayName ?? l.Country.Name) : null,
-                ExpiresAt = l.SupportEndDate!.Value
-            }));
+                expiring.Add(new ExpiringItem
+                {
+                    Type = "License (Support)",
+                    Name = l.LicenseName,
+                    Country = licenseCountry,
+                    ExpiresAt = l.SupportEndDate.Value
+                });
+            }
+
+            if (l.ExpirationDate != null && l.ExpirationDate <= threshold)
+            {
+                expiring.Add(new ExpiringItem
+                {
+                    Type = "License (Expiration)",
+                    Name = l.LicenseName,
+                    Country = licenseCountry,
+                    ExpiresAt = l.ExpirationDate.Value
+                });
+            }
+        }
 
         expiring.AddRange((await circuits
                 .Where(c => c.EndDate != null && c.EndDate <= threshold)

@@ -1,7 +1,10 @@
+using ClosedXML.Excel;
 using ITInventory.Data;
 using ITInventory.Data.Entities;
 using ITInventory.Web.Models.Circuits;
+using ITInventory.Web.Models.Import;
 using ITInventory.Web.Services;
+using ITInventory.Web.Services.Import;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Rendering;
 using Microsoft.EntityFrameworkCore;
@@ -161,6 +164,127 @@ public class CircuitsController : Controller
         _db.Circuits.Remove(entity);
         await _db.SaveChangesAsync();
         return RedirectToAction(nameof(Index));
+    }
+
+    public IActionResult Import()
+    {
+        if (!_currentUser.CanEdit) return Forbid();
+        ViewBag.EntityName = "Circuits";
+        return View("Import");
+    }
+
+    public IActionResult DownloadTemplate()
+    {
+        if (!_currentUser.CanEdit) return Forbid();
+
+        var bytes = ExcelImportHelpers.CreateTemplateBytes("Circuits",
+            "Country", "Circuit Type", "Capacity", "Provider", "Branch", "Location",
+            "Start Date", "End Date", "Notes");
+
+        return File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "Circuits_Template.xlsx");
+    }
+
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> Import(IFormFile file)
+    {
+        if (!_currentUser.CanEdit) return Forbid();
+
+        if (file is null || file.Length == 0)
+        {
+            TempData["ImportError"] = "Please choose a file.";
+            return RedirectToAction(nameof(Import));
+        }
+
+        var countryLookup = await BuildCountryLookupAsync();
+        var result = new ImportResultViewModel { EntityName = "Circuits" };
+        var toAdd = new List<Circuit>();
+
+        using (var stream = new MemoryStream())
+        {
+            await file.CopyToAsync(stream);
+            stream.Position = 0;
+            using var workbook = new XLWorkbook(stream);
+            var ws = workbook.Worksheets.First();
+            var headers = ExcelImportHelpers.ReadHeaders(ws);
+            var lastRow = ws.LastRowUsed()?.RowNumber() ?? 1;
+
+            for (var row = 2; row <= lastRow; row++)
+            {
+                if (ExcelImportHelpers.IsRowEmpty(ws, row, headers)) continue;
+
+                var countryText = ExcelImportHelpers.GetString(ws, row, headers, "Country");
+                var circuitType = ExcelImportHelpers.GetString(ws, row, headers, "Circuit Type");
+                var location = ExcelImportHelpers.GetString(ws, row, headers, "Location");
+
+                if (string.IsNullOrEmpty(countryText))
+                {
+                    result.Errors.Add(new ImportRowError { RowNumber = row, Message = "Country is required." });
+                    continue;
+                }
+
+                if (!countryLookup.TryGetValue(countryText, out var country))
+                {
+                    result.Errors.Add(new ImportRowError { RowNumber = row, Message = $"Country '{countryText}' not found." });
+                    continue;
+                }
+
+                if (!_currentUser.IsAdmin && country.Id != _currentUser.CountryId)
+                {
+                    result.Errors.Add(new ImportRowError { RowNumber = row, Message = $"You are not allowed to import records for '{countryText}'." });
+                    continue;
+                }
+
+                if (string.IsNullOrEmpty(circuitType))
+                {
+                    result.Errors.Add(new ImportRowError { RowNumber = row, Message = "Circuit Type is required." });
+                    continue;
+                }
+
+                if (string.IsNullOrEmpty(location))
+                {
+                    result.Errors.Add(new ImportRowError { RowNumber = row, Message = "Location is required." });
+                    continue;
+                }
+
+                toAdd.Add(new Circuit
+                {
+                    CountryId = country.Id,
+                    CircuitType = circuitType,
+                    CircuitCapacity = ExcelImportHelpers.GetString(ws, row, headers, "Capacity"),
+                    Provider = ExcelImportHelpers.GetString(ws, row, headers, "Provider"),
+                    Branch = ExcelImportHelpers.GetString(ws, row, headers, "Branch"),
+                    Location = location,
+                    StartDate = ExcelImportHelpers.GetDate(ws, row, headers, "Start Date"),
+                    EndDate = ExcelImportHelpers.GetDate(ws, row, headers, "End Date"),
+                    Notes = ExcelImportHelpers.GetString(ws, row, headers, "Notes"),
+                    CreatedAt = DateTime.UtcNow,
+                    CreatedBy = _currentUser.Username
+                });
+            }
+        }
+
+        if (toAdd.Count > 0)
+        {
+            _db.Circuits.AddRange(toAdd);
+            await _db.SaveChangesAsync();
+        }
+
+        result.SuccessCount = toAdd.Count;
+        return View("ImportResult", result);
+    }
+
+    private async Task<Dictionary<string, Country>> BuildCountryLookupAsync()
+    {
+        var countries = await _db.Countries.ToListAsync();
+        var lookup = new Dictionary<string, Country>(StringComparer.OrdinalIgnoreCase);
+        foreach (var c in countries)
+        {
+            lookup[c.Name] = c;
+            if (!string.IsNullOrEmpty(c.DisplayName))
+                lookup[c.DisplayName] = c;
+        }
+        return lookup;
     }
 
     private async Task PopulateDropdowns()

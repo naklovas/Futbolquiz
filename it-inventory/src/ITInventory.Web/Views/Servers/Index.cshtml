@@ -11,9 +11,14 @@
     <h2 class="text-xl font-semibold text-slate-900">Servers</h2>
     @if (canEdit)
     {
-        <a asp-action="Create" class="inline-flex items-center gap-2 bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium px-4 py-2 rounded-md">
-            <i class="fa-solid fa-plus"></i>Add New Server
-        </a>
+        <div class="flex gap-2">
+            <a asp-action="Import" class="inline-flex items-center gap-2 border border-slate-300 text-slate-700 hover:bg-slate-50 text-sm font-medium px-4 py-2 rounded-md">
+                <i class="fa-solid fa-file-excel"></i>Import from Excel
+            </a>
+            <a asp-action="Create" class="inline-flex items-center gap-2 bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium px-4 py-2 rounded-md">
+                <i class="fa-solid fa-plus"></i>Add New Server
+            </a>
+        </div>
     }
 </div>
 
