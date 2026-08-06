@@ -31,15 +31,7 @@ public class DevicePoolController : Controller
 
         if (effectiveCountryId is null)
         {
-            if (_currentUser.IsAdmin)
-            {
-                ViewBag.NoCountryAssigned = false;
-                ViewBag.ShowingAllCountries = true;
-                var allDevices = await _devicePoolService.GetAllDevicesAsync(categoryId);
-                return View(allDevices);
-            }
-
-            ViewBag.NoCountryAssigned = true;
+            ViewBag.NoCountryAssigned = !_currentUser.IsAdmin;
             return View(new List<Models.DevicePool.DiscoveredDeviceDto>());
         }
 

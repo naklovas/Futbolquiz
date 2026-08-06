@@ -13,7 +13,4 @@ public class DiscoveredDeviceDto
     public string? CategoryName { get; set; }
     public DateTime? LastSeenAt { get; set; }
     public bool AlreadyInInventory { get; set; }
-
-    /// <summary>Only populated when showing devices across all countries (admin, no country filter selected).</summary>
-    public string? Country { get; set; }
 }

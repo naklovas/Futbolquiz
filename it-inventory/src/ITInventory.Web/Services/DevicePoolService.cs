@@ -1,5 +1,4 @@
 using ITInventory.Data;
-using ITInventory.Data.Entities;
 using ITInventory.Web.Models.DevicePool;
 using Microsoft.EntityFrameworkCore;
 
@@ -24,6 +23,9 @@ public class DevicePoolService : IDevicePoolService
             .Where(z => z.RepositoryName == country.Name)
             .ToListAsync();
 
+        var profiles = await _db.DeviceProfileCatalogs.Include(p => p.Category).ToListAsync();
+        var profileLookup = profiles.ToDictionary(p => p.ProfileName, p => p, StringComparer.OrdinalIgnoreCase);
+
         var usedIps = (await _db.PhysicalDevices
                 .Where(d => d.CountryId == countryId && d.IpAddress != null)
                 .Select(d => d.IpAddress!)
@@ -34,33 +36,7 @@ public class DevicePoolService : IDevicePoolService
                 .ToListAsync())
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-        return await BuildDtosAsync(rawRows, usedIps, categoryId, includeCountry: false);
-    }
-
-    public async Task<List<DiscoveredDeviceDto>> GetAllDevicesAsync(int? categoryId = null)
-    {
-        var rawRows = await _db.ZiraatYds.ToListAsync();
-
-        var usedIps = (await _db.PhysicalDevices
-                .Where(d => d.IpAddress != null)
-                .Select(d => d.IpAddress!)
-                .ToListAsync())
-            .Concat(await _db.Servers
-                .Where(s => s.IpAddress != null)
-                .Select(s => s.IpAddress!)
-                .ToListAsync())
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-        return await BuildDtosAsync(rawRows, usedIps, categoryId, includeCountry: true);
-    }
-
-    private async Task<List<DiscoveredDeviceDto>> BuildDtosAsync(
-        List<ZiraatYd> rawRows, HashSet<string> usedIps, int? categoryId, bool includeCountry)
-    {
-        var profiles = await _db.DeviceProfileCatalogs.Include(p => p.Category).ToListAsync();
-        var profileLookup = profiles.ToDictionary(p => p.ProfileName, p => p, StringComparer.OrdinalIgnoreCase);
-
-        return rawRows
+        var devices = rawRows
             .GroupBy(z => z.IpAddress)
             .Select(g => g.OrderByDescending(z => z.LastSeenAt ?? z.TenableLastSeen ?? DateTime.MinValue).First())
             .Select(z =>
@@ -78,12 +54,13 @@ public class DevicePoolService : IDevicePoolService
                     CategoryId = profile?.CategoryId,
                     CategoryName = profile?.Category?.Name,
                     LastSeenAt = z.LastSeenAt ?? z.TenableLastSeen,
-                    AlreadyInInventory = usedIps.Contains(z.IpAddress),
-                    Country = includeCountry ? z.RepositoryName : null
+                    AlreadyInInventory = usedIps.Contains(z.IpAddress)
                 };
             })
             .Where(d => categoryId == null || d.CategoryId == categoryId)
             .OrderBy(d => d.IpAddress)
             .ToList();
+
+        return devices;
     }
 }
