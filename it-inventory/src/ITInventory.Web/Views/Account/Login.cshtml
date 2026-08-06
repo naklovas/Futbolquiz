@@ -4,11 +4,12 @@
     ViewData["Title"] = "Log In";
     Layout = "_LoginLayout";
     var testLoginEnabled = TestLoginOptions.Value.Enabled;
+    var testLoginPassword = TestLoginOptions.Value.Password;
 }
 
 <div class="login-box">
     <h3 class="mb-3 text-center">IT Inventory System</h3>
-    <p class="text-muted text-center mb-4">Sign in with your fintek.local account</p>
+    <p class="text-muted text-center mb-4">Sign in with your fintek.local account, or as a test user</p>
 
     <form asp-controller="Account" asp-action="Login" method="post">
         <input type="hidden" asp-for="ReturnUrl" />
@@ -29,8 +30,20 @@
         <button type="submit" name="LoginMode" value="ldap" class="btn btn-primary w-100 mb-2">Log In with AD (LDAP)</button>
         @if (testLoginEnabled)
         {
+            <div class="d-flex align-items-center my-2 text-muted small">
+                <hr class="flex-grow-1" />
+                <span class="px-2">or</span>
+                <hr class="flex-grow-1" />
+            </div>
             <button type="submit" name="LoginMode" value="test" class="btn btn-outline-secondary w-100">Log In as Test User</button>
-            <p class="text-muted text-center small mt-2 mb-0">Test users skip AD and sign in with the shared test password.</p>
+
+            <div class="alert alert-info small mt-3 mb-0">
+                <strong>Test users</strong> (type the username above, password <code>@testLoginPassword</code>, then click "Log In as Test User" — this skips AD):
+                <ul class="mb-0 ps-3 mt-1">
+                    <li><code>germany_test</code> &mdash; sees only Germany's inventory</li>
+                    <li><code>bulgaria_test</code> &mdash; sees only Bulgaria's inventory</li>
+                </ul>
+            </div>
         }
     </form>
 </div>

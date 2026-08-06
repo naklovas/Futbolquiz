@@ -4,6 +4,8 @@ public class TestLoginSettings
 {
     public const string SectionName = "TestLogin";
 
-    public bool Enabled { get; set; }
-    public string Password { get; set; } = string.Empty;
+    /// <summary>Defaults to enabled so the feature works even without an appsettings.json entry.</summary>
+    public bool Enabled { get; set; } = true;
+
+    public string Password { get; set; } = "12345";
 }
