@@ -12,6 +12,7 @@ public class DeviceProfileCatalogConfiguration : IEntityTypeConfiguration<Device
 
         builder.HasKey(x => x.Id);
         builder.Property(x => x.ProfileName).HasMaxLength(150).IsRequired();
+        builder.Property(x => x.DisplayName).HasMaxLength(200);
         builder.HasIndex(x => x.ProfileName).IsUnique();
 
         builder.HasOne(x => x.Category)
@@ -23,6 +24,7 @@ public class DeviceProfileCatalogConfiguration : IEntityTypeConfiguration<Device
         {
             Id = idx + 1,
             ProfileName = p.ProfileName,
+            DisplayName = p.DisplayName,
             CategoryId = p.CategoryId
         }));
     }

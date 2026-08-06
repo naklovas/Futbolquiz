@@ -26,6 +26,13 @@ incelenip çalıştırılan SQL script tercih edildiği için ayrıca burada tut
    sadece rol/kullanıcı seed kısmını çalıştırır (2. script ile çakışmaz,
    birlikte de çalıştırılabilir).
 
+5. **005_device_profile_displayname_and_category_names.sql** — `DeviceCategories.Name`
+   değerlerini İngilizceye çevirir (Sunucu→Server vb.) ve `DeviceProfileCatalog`'a
+   `DisplayName` (İngilizce, sadece ekranda gösterilen) alanını ekler.
+   `ProfileName` (Ziraat_YD.DeviceProfile ile eşleşen asıl anahtar) **değişmez** —
+   sadece admin ekranındaki görünen isim değişir, Cihaz Havuzu eşleştirmesi bozulmaz.
+   EF Core migration'ından üretildi, elle düzenlemeyin. Idempotenttir.
+
 ## Bu scriptlerin DOKUNMADIĞI mevcut tablolar
 
 Aşağıdaki tablo bu proje tarafından oluşturulmaz; production'da başka bir

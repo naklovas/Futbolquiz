@@ -28,7 +28,13 @@
             @foreach (var p in Model)
             {
                 <tr class="hover:bg-slate-50">
-                    <td class="px-4 py-3 text-slate-700">@p.ProfileName</td>
+                    <td class="px-4 py-3">
+                        <div class="text-slate-700 font-medium">@(p.DisplayName ?? p.ProfileName)</div>
+                        @if (!string.IsNullOrEmpty(p.DisplayName) && p.DisplayName != p.ProfileName)
+                        {
+                            <div class="text-xs text-slate-400 font-mono">@p.ProfileName</div>
+                        }
+                    </td>
                     <td class="px-4 py-3">
                         <form asp-action="UpdateCategory" asp-route-id="@p.Id" method="post" class="flex items-center gap-2">
                             <select name="categoryId" class="rounded-md border border-slate-300 px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
