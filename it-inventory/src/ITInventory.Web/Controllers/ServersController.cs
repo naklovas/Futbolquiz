@@ -22,7 +22,7 @@ public class ServersController : Controller
         _currentUser = currentUser;
     }
 
-    public async Task<IActionResult> Index(int? countryId)
+    public async Task<IActionResult> Index(int? countryId, int page = 1)
     {
         var query = _db.Servers.Include(s => s.Country).AsQueryable();
 
@@ -31,7 +31,7 @@ public class ServersController : Controller
         else if (countryId.HasValue)
             query = query.Where(s => s.CountryId == countryId.Value);
 
-        var items = await query.OrderBy(s => s.Country!.Name).ThenBy(s => s.HostName).ToListAsync();
+        var items = await query.OrderBy(s => s.Country!.Name).ThenBy(s => s.HostName).ToPagedResultAsync(page);
 
         ViewBag.Countries = await _db.Countries.OrderBy(c => c.Name).ToListAsync();
         ViewBag.SelectedCountryId = countryId;

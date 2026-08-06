@@ -68,7 +68,8 @@ else
     }
     else
     {
-        <div class="bg-white rounded-lg shadow-sm border border-slate-200 overflow-x-auto">
+        <div class="bg-white rounded-lg shadow-sm border border-slate-200">
+        <div class="overflow-x-auto">
             <table id="pool-table" class="min-w-full divide-y divide-slate-200 text-sm">
                 <thead class="bg-slate-50">
                     <tr>
@@ -131,6 +132,8 @@ else
                     }
                 </tbody>
             </table>
+        </div>
+        @await Html.PartialAsync("_Pagination", (ITInventory.Web.Models.PaginationInfo)ViewBag.Pagination)
         </div>
     }
 }

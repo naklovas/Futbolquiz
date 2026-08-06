@@ -1,4 +1,4 @@
-@model List<ITInventory.Data.Entities.License>
+@model ITInventory.Web.Models.PagedResult<ITInventory.Data.Entities.License>
 @{
     ViewData["Title"] = "Licenses";
     var countries = (List<ITInventory.Data.Entities.Country>)ViewBag.Countries;
@@ -42,7 +42,7 @@
     </div>
 </div>
 
-@if (!Model.Any())
+@if (!Model.Items.Any())
 {
     <div class="text-center py-12 text-slate-400 bg-white rounded-lg border border-slate-200">
         <i class="fa-solid fa-inbox text-3xl mb-2"></i>
@@ -51,7 +51,8 @@
 }
 else
 {
-    <div class="bg-white rounded-lg shadow-sm border border-slate-200 overflow-x-auto">
+    <div class="bg-white rounded-lg shadow-sm border border-slate-200">
+    <div class="overflow-x-auto">
         <table id="licenses-table" class="min-w-full divide-y divide-slate-200 text-sm">
             <thead class="bg-slate-50">
                 <tr>
@@ -73,7 +74,7 @@ else
                 </tr>
             </thead>
             <tbody class="divide-y divide-slate-100">
-                @foreach (var item in Model)
+                @foreach (var item in Model.Items)
                 {
                     <tr class="hover:bg-slate-50">
                         @if (isAdmin)
@@ -99,5 +100,7 @@ else
                 }
             </tbody>
         </table>
+    </div>
+    @await Html.PartialAsync("_Pagination", ITInventory.Web.Models.PaginationInfo.From(Model))
     </div>
 }

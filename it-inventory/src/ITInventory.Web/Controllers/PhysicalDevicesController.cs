@@ -22,7 +22,7 @@ public class PhysicalDevicesController : Controller
         _currentUser = currentUser;
     }
 
-    public async Task<IActionResult> Index(int? countryId, int? categoryId)
+    public async Task<IActionResult> Index(int? countryId, int? categoryId, int page = 1)
     {
         var query = _db.PhysicalDevices
             .Include(d => d.Country)
@@ -39,7 +39,7 @@ public class PhysicalDevicesController : Controller
 
         var items = await query
             .OrderBy(d => d.Country!.Name).ThenBy(d => d.DeviceName)
-            .ToListAsync();
+            .ToPagedResultAsync(page);
 
         ViewBag.Countries = await _db.Countries.OrderBy(c => c.Name).ToListAsync();
         ViewBag.Categories = await _db.DeviceCategories.OrderBy(c => c.Name).ToListAsync();

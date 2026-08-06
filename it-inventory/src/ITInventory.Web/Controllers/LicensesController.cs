@@ -22,7 +22,7 @@ public class LicensesController : Controller
         _currentUser = currentUser;
     }
 
-    public async Task<IActionResult> Index(int? countryId)
+    public async Task<IActionResult> Index(int? countryId, int page = 1)
     {
         var query = _db.Licenses.Include(l => l.Country).AsQueryable();
 
@@ -31,7 +31,7 @@ public class LicensesController : Controller
         else if (countryId.HasValue)
             query = query.Where(l => l.CountryId == countryId.Value);
 
-        var items = await query.OrderBy(l => l.Country!.Name).ThenBy(l => l.LicenseName).ToListAsync();
+        var items = await query.OrderBy(l => l.Country!.Name).ThenBy(l => l.LicenseName).ToPagedResultAsync(page);
 
         ViewBag.Countries = await _db.Countries.OrderBy(c => c.Name).ToListAsync();
         ViewBag.SelectedCountryId = countryId;

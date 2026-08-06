@@ -22,7 +22,7 @@ public class CircuitsController : Controller
         _currentUser = currentUser;
     }
 
-    public async Task<IActionResult> Index(int? countryId)
+    public async Task<IActionResult> Index(int? countryId, int page = 1)
     {
         var query = _db.Circuits.Include(c => c.Country).AsQueryable();
 
@@ -31,7 +31,7 @@ public class CircuitsController : Controller
         else if (countryId.HasValue)
             query = query.Where(c => c.CountryId == countryId.Value);
 
-        var items = await query.OrderBy(c => c.Country!.Name).ThenBy(c => c.CircuitType).ToListAsync();
+        var items = await query.OrderBy(c => c.Country!.Name).ThenBy(c => c.CircuitType).ToPagedResultAsync(page);
 
         ViewBag.Countries = await _db.Countries.OrderBy(c => c.Name).ToListAsync();
         ViewBag.SelectedCountryId = countryId;

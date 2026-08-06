@@ -1,4 +1,5 @@
 using ITInventory.Data;
+using ITInventory.Web.Models;
 using ITInventory.Web.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -18,7 +19,7 @@ public class DevicePoolController : Controller
         _currentUser = currentUser;
     }
 
-    public async Task<IActionResult> Index(string? country, int? categoryId)
+    public async Task<IActionResult> Index(string? country, int? categoryId, int page = 1)
     {
         ViewBag.Countries = await _db.ZiraatYds
             .Where(z => z.RepositoryName != null)
@@ -57,6 +58,18 @@ public class DevicePoolController : Controller
             .Select(c => (int?)c.Id)
             .FirstOrDefaultAsync();
 
-        return View(devices);
+        const int pageSize = PaginationExtensions.DefaultPageSize;
+        if (page < 1) page = 1;
+        var pageItems = devices.Skip((page - 1) * pageSize).Take(pageSize).ToList();
+
+        ViewBag.Pagination = new PaginationInfo
+        {
+            PageNumber = page,
+            PageSize = pageSize,
+            TotalCount = devices.Count,
+            TotalPages = (int)Math.Ceiling(devices.Count / (double)pageSize)
+        };
+
+        return View(pageItems);
     }
 }
