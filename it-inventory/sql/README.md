@@ -38,14 +38,23 @@ incelenip çalıştırılan SQL script tercih edildiği için ayrıca burada tut
    sadece admin ekranındaki görünen isim değişir, Cihaz Havuzu eşleştirmesi bozulmaz.
    EF Core migration'ından üretildi, elle düzenlemeyin. Idempotenttir.
 
-8. **008_test_inventory_data.sql** — Germany, Bulgaria ve China için Physical
-   Devices, Licenses ve Circuits tablolarına örnek/demo veri ekler (China
-   `Countries` tablosuna da bu scriptle eklenir). Tüm cihaz adları ve lisans
-   adları `TEST-` ile başlar, Notes alanı da "Test data... Safe to delete"
-   yazar — gerçek veriyle karışmaz, `WHERE DeviceName LIKE N'TEST-%'` (ve
-   Licenses için aynısı) ile kolayca silinebilir. Bazı kayıtların destek/lisans
-   bitiş tarihleri yakın gelecekte, dashboard'daki "Upcoming Expirations"
-   uyarısında görünsünler diye. İdempotenttir.
+8. **008_test_inventory_data.sql** — Germany ve Bulgaria için Physical Devices,
+   Licenses ve Circuits tablolarına örnek/demo veri ekler. Tüm cihaz adları ve
+   lisans adları `TEST-` ile başlar, Notes alanı da "Test data... Safe to
+   delete" yazar — gerçek veriyle karışmaz, `WHERE DeviceName LIKE N'TEST-%'`
+   (ve Licenses için aynısı) ile kolayca silinebilir. Bazı kayıtların
+   destek/lisans bitiş tarihleri yakın gelecekte, dashboard'daki "Upcoming
+   Expirations" uyarısında görünsünler diye. İdempotenttir.
+
+9. **009_fix_test_country_names_and_remove_china.sql** — Daha önce
+   004/008'in ilk sürümünü çalıştırmış ortamlar için düzeltme scripti:
+   Germany/Bulgaria ülkelerinin `DisplayName` alanını doğru değere çeker
+   (`ZiraatBank AG International` / `ZiraatBank Bulgaria`) ve yanlışlıkla
+   eklenmiş olan China ülkesini + ona ait tüm test verisini (Physical
+   Devices, Licenses, Circuits) siler. 004 ve 008 zaten güncellendi (yeni
+   kurulumlarda China hiç oluşmaz, Germany/Bulgaria doğru isimle gelir); bu
+   script sadece daha önce eski sürümü çalıştırmış ortamlar içindir.
+   İdempotenttir.
 
 ## Bu scriptlerin DOKUNMADIĞI mevcut tablolar
 

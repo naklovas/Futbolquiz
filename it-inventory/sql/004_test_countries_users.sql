@@ -5,12 +5,15 @@
 -- Idempotent; safe to run multiple times.
 
 IF NOT EXISTS (SELECT 1 FROM dbo.Countries WHERE Name = N'Germany')
-    INSERT INTO dbo.Countries (Name, Code, IsActive, CreatedAt)
-    VALUES (N'Germany', N'DE', 1, SYSUTCDATETIME());
+    INSERT INTO dbo.Countries (Name, DisplayName, Code, IsActive, CreatedAt)
+    VALUES (N'Germany', N'ZiraatBank AG International', N'DE', 1, SYSUTCDATETIME());
 
 IF NOT EXISTS (SELECT 1 FROM dbo.Countries WHERE Name = N'Bulgaria')
-    INSERT INTO dbo.Countries (Name, Code, IsActive, CreatedAt)
-    VALUES (N'Bulgaria', N'BG', 1, SYSUTCDATETIME());
+    INSERT INTO dbo.Countries (Name, DisplayName, Code, IsActive, CreatedAt)
+    VALUES (N'Bulgaria', N'ZiraatBank Bulgaria', N'BG', 1, SYSUTCDATETIME());
+
+UPDATE dbo.Countries SET DisplayName = N'ZiraatBank AG International' WHERE Name = N'Germany' AND (DisplayName IS NULL OR DisplayName <> N'ZiraatBank AG International');
+UPDATE dbo.Countries SET DisplayName = N'ZiraatBank Bulgaria' WHERE Name = N'Bulgaria' AND (DisplayName IS NULL OR DisplayName <> N'ZiraatBank Bulgaria');
 
 IF NOT EXISTS (SELECT 1 FROM dbo.YDUsers WHERE Username = N'germany_test')
     INSERT INTO dbo.YDUsers (Username, FullName, Email, IsActive, CreatedAt, RepositoryName)
