@@ -25,40 +25,38 @@
 <body class="min-h-screen bg-slate-50 text-slate-800 flex flex-col">
     <header class="bg-white border-b border-slate-200 shadow-sm">
         <nav class="max-w-7xl mx-auto px-4">
-            <div class="flex items-center justify-between h-16">
-                <a asp-controller="Home" asp-action="Index" class="flex items-center gap-2">
-                    <img src="~/images/ziraat-bank-logo.png" alt="Ziraat Bank" class="h-8 w-auto" />
-                    <span class="text-slate-300 font-light text-lg">|</span>
-                    <span class="text-slate-700 font-semibold text-sm">IT Inventory</span>
+            <div class="flex items-center justify-between h-16 gap-3">
+                <a asp-controller="Home" asp-action="Index" class="flex-shrink-0 flex items-center">
+                    <img src="~/images/ziraat-bank-logo.png" alt="Ziraat Bank" class="h-7 w-auto" />
                 </a>
 
                 @if (User.Identity?.IsAuthenticated == true)
                 {
-                    <button id="mobile-menu-toggle" class="md:hidden text-slate-500 hover:text-slate-900">
+                    <button id="mobile-menu-toggle" class="md:hidden text-slate-500 hover:text-slate-900 flex-shrink-0">
                         <i class="fa-solid fa-bars text-xl"></i>
                     </button>
 
-                    <div class="hidden md:flex items-center gap-1">
-                        <a asp-controller="PhysicalDevices" asp-action="Index" class="px-3 py-2 rounded-md text-sm font-medium text-slate-600 hover:text-brand-700 hover:bg-brand-50 transition">
+                    <div class="hidden md:flex items-center gap-0.5 min-w-0 overflow-x-auto">
+                        <a asp-controller="PhysicalDevices" asp-action="Index" class="flex-shrink-0 whitespace-nowrap px-2.5 py-2 rounded-md text-sm font-medium text-slate-600 hover:text-brand-700 hover:bg-brand-50 transition">
                             <i class="fa-solid fa-desktop mr-1.5"></i>Physical Devices
                         </a>
-                        <a asp-controller="Servers" asp-action="Index" class="px-3 py-2 rounded-md text-sm font-medium text-slate-600 hover:text-brand-700 hover:bg-brand-50 transition">
+                        <a asp-controller="Servers" asp-action="Index" class="flex-shrink-0 whitespace-nowrap px-2.5 py-2 rounded-md text-sm font-medium text-slate-600 hover:text-brand-700 hover:bg-brand-50 transition">
                             <i class="fa-solid fa-database mr-1.5"></i>Servers
                         </a>
-                        <a asp-controller="Licenses" asp-action="Index" class="px-3 py-2 rounded-md text-sm font-medium text-slate-600 hover:text-brand-700 hover:bg-brand-50 transition">
+                        <a asp-controller="Licenses" asp-action="Index" class="flex-shrink-0 whitespace-nowrap px-2.5 py-2 rounded-md text-sm font-medium text-slate-600 hover:text-brand-700 hover:bg-brand-50 transition">
                             <i class="fa-solid fa-key mr-1.5"></i>Licenses
                         </a>
-                        <a asp-controller="Circuits" asp-action="Index" class="px-3 py-2 rounded-md text-sm font-medium text-slate-600 hover:text-brand-700 hover:bg-brand-50 transition">
+                        <a asp-controller="Circuits" asp-action="Index" class="flex-shrink-0 whitespace-nowrap px-2.5 py-2 rounded-md text-sm font-medium text-slate-600 hover:text-brand-700 hover:bg-brand-50 transition">
                             <i class="fa-solid fa-diagram-project mr-1.5"></i>Circuits
                         </a>
-                        <a asp-controller="DevicePool" asp-action="Index" class="px-3 py-2 rounded-md text-sm font-medium text-slate-600 hover:text-brand-700 hover:bg-brand-50 transition">
+                        <a asp-controller="DevicePool" asp-action="Index" class="flex-shrink-0 whitespace-nowrap px-2.5 py-2 rounded-md text-sm font-medium text-slate-600 hover:text-brand-700 hover:bg-brand-50 transition">
                             <i class="fa-solid fa-magnifying-glass-chart mr-1.5"></i>Device Pool
                         </a>
                         @if (User.IsInRole("admin"))
                         {
-                            <div class="relative group">
-                                <button class="px-3 py-2 rounded-md text-sm font-medium text-slate-600 hover:text-brand-700 hover:bg-brand-50 transition">
-                                    <i class="fa-solid fa-gear mr-1.5"></i>Administration <i class="fa-solid fa-chevron-down text-xs ml-1"></i>
+                            <div class="relative group flex-shrink-0">
+                                <button class="whitespace-nowrap px-2.5 py-2 rounded-md text-sm font-medium text-slate-600 hover:text-brand-700 hover:bg-brand-50 transition">
+                                    <i class="fa-solid fa-gear mr-1.5"></i>Admin <i class="fa-solid fa-chevron-down text-xs ml-1"></i>
                                 </button>
                                 <div class="absolute right-0 hidden group-hover:block bg-white rounded-md shadow-lg border border-slate-200 py-1 w-48 z-20">
                                     <a asp-controller="AdminUsers" asp-action="Index" class="block px-4 py-2 text-sm text-slate-700 hover:bg-slate-100">Users</a>
@@ -67,23 +65,28 @@
                                 </div>
                             </div>
                         }
+                    </div>
 
-                        <div class="ml-4 pl-4 border-l border-slate-200 flex items-center gap-3">
-                            <span class="text-sm text-slate-500">
-                                <i class="fa-solid fa-user-circle mr-1"></i>
-                                @User.FindFirst(ITInventory.Web.Services.AppClaimTypes.FullName)?.Value
-                                @{
-                                    var country = User.FindFirst(ITInventory.Web.Services.AppClaimTypes.CountryDisplayName)?.Value
-                                        ?? User.FindFirst(ITInventory.Web.Services.AppClaimTypes.Country)?.Value;
-                                }
+                    var fullName = User.FindFirst(ITInventory.Web.Services.AppClaimTypes.FullName)?.Value;
+                    var country = User.FindFirst(ITInventory.Web.Services.AppClaimTypes.CountryDisplayName)?.Value
+                        ?? User.FindFirst(ITInventory.Web.Services.AppClaimTypes.Country)?.Value;
+                    <div class="hidden md:block relative group flex-shrink-0 ml-2 pl-3 border-l border-slate-200">
+                        <button class="flex items-center gap-1.5 px-2 py-2 rounded-md text-sm font-medium text-slate-600 hover:text-brand-700 hover:bg-brand-50 transition max-w-[10rem]">
+                            <i class="fa-solid fa-user-circle"></i>
+                            <span class="truncate">@fullName</span>
+                            <i class="fa-solid fa-chevron-down text-xs"></i>
+                        </button>
+                        <div class="absolute right-0 hidden group-hover:block bg-white rounded-md shadow-lg border border-slate-200 py-1 w-56 z-20">
+                            <div class="px-4 py-2 text-xs text-slate-500 border-b border-slate-100">
+                                <div class="font-medium text-slate-700 truncate">@fullName</div>
                                 @if (!string.IsNullOrEmpty(country))
                                 {
-                                    <text> (@country)</text>
+                                    <div class="truncate">@country</div>
                                 }
-                            </span>
+                            </div>
                             <form asp-controller="Account" asp-action="Logout" method="post">
-                                <button type="submit" class="text-sm text-slate-600 hover:text-brand-700 hover:bg-brand-50 px-3 py-1.5 rounded-md transition">
-                                    <i class="fa-solid fa-right-from-bracket mr-1"></i>Log Out
+                                <button type="submit" class="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-100">
+                                    <i class="fa-solid fa-right-from-bracket mr-1.5"></i>Log Out
                                 </button>
                             </form>
                         </div>
