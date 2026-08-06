@@ -3,8 +3,10 @@
     ViewData["Title"] = "Edit Country";
 }
 
-<h2>Edit Country</h2>
+<h2 class="text-xl font-semibold text-slate-900 mb-6">Edit Country</h2>
 
-<form asp-action="Edit" asp-route-id="@Model.Id" method="post">
-    @await Html.PartialAsync("_Form", Model)
-</form>
+<div class="bg-white rounded-lg shadow-sm border border-slate-200 p-6 max-w-2xl">
+    <form asp-action="Edit" asp-route-id="@Model.Id" method="post">
+        @await Html.PartialAsync("_Form", Model)
+    </form>
+</div>

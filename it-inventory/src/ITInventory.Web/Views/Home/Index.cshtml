@@ -3,69 +3,78 @@
     ViewData["Title"] = "Home";
 }
 
-<h2 class="mb-4">Overview</h2>
+<h2 class="text-xl font-semibold text-slate-900 mb-6">Overview</h2>
 
-<div class="row mb-4">
-    <div class="col-md-3">
-        <div class="card text-center">
-            <div class="card-body">
-                <h5 class="card-title">@Model.PhysicalDeviceCount</h5>
-                <p class="card-text text-muted">Physical Devices</p>
+<div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+    <div class="bg-white rounded-lg shadow-sm border border-slate-200 p-5">
+        <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-lg bg-brand-50 text-brand-600 flex items-center justify-center"><i class="fa-solid fa-desktop"></i></div>
+            <div>
+                <div class="text-2xl font-semibold text-slate-900">@Model.PhysicalDeviceCount</div>
+                <div class="text-xs text-slate-500">Physical Devices</div>
             </div>
         </div>
     </div>
-    <div class="col-md-3">
-        <div class="card text-center">
-            <div class="card-body">
-                <h5 class="card-title">@Model.ServerCount</h5>
-                <p class="card-text text-muted">Servers</p>
+    <div class="bg-white rounded-lg shadow-sm border border-slate-200 p-5">
+        <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center"><i class="fa-solid fa-database"></i></div>
+            <div>
+                <div class="text-2xl font-semibold text-slate-900">@Model.ServerCount</div>
+                <div class="text-xs text-slate-500">Servers</div>
             </div>
         </div>
     </div>
-    <div class="col-md-3">
-        <div class="card text-center">
-            <div class="card-body">
-                <h5 class="card-title">@Model.LicenseCount</h5>
-                <p class="card-text text-muted">Licenses</p>
+    <div class="bg-white rounded-lg shadow-sm border border-slate-200 p-5">
+        <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-lg bg-amber-50 text-amber-600 flex items-center justify-center"><i class="fa-solid fa-key"></i></div>
+            <div>
+                <div class="text-2xl font-semibold text-slate-900">@Model.LicenseCount</div>
+                <div class="text-xs text-slate-500">Licenses</div>
             </div>
         </div>
     </div>
-    <div class="col-md-3">
-        <div class="card text-center">
-            <div class="card-body">
-                <h5 class="card-title">@Model.CircuitCount</h5>
-                <p class="card-text text-muted">Circuits</p>
+    <div class="bg-white rounded-lg shadow-sm border border-slate-200 p-5">
+        <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-lg bg-purple-50 text-purple-600 flex items-center justify-center"><i class="fa-solid fa-diagram-project"></i></div>
+            <div>
+                <div class="text-2xl font-semibold text-slate-900">@Model.CircuitCount</div>
+                <div class="text-xs text-slate-500">Circuits</div>
             </div>
         </div>
     </div>
 </div>
 
-<h4>Upcoming Expirations (within 90 days)</h4>
+<h3 class="text-base font-semibold text-slate-900 mb-3">Upcoming Expirations (within 90 days)</h3>
 @if (!Model.ExpiringItems.Any())
 {
-    <div class="alert alert-success">No upcoming expirations.</div>
+    <div class="bg-brand-50 border border-brand-200 text-brand-700 rounded-md px-4 py-3 text-sm">
+        <i class="fa-solid fa-circle-check mr-1.5"></i>No upcoming expirations.
+    </div>
 }
 else
 {
-    <table class="table table-striped table-sm">
-        <thead>
-            <tr>
-                <th>Type</th>
-                <th>Name</th>
-                <th>Country</th>
-                <th>Expiration Date</th>
-            </tr>
-        </thead>
-        <tbody>
-            @foreach (var item in Model.ExpiringItems)
-            {
-                <tr class="@(item.ExpiresAt < DateTime.UtcNow ? "table-danger" : "")">
-                    <td>@item.Type</td>
-                    <td>@item.Name</td>
-                    <td>@item.Country</td>
-                    <td>@item.ExpiresAt.ToString("dd.MM.yyyy")</td>
+    <div class="bg-white rounded-lg shadow-sm border border-slate-200 overflow-x-auto">
+        <table class="min-w-full divide-y divide-slate-200 text-sm">
+            <thead class="bg-slate-50">
+                <tr>
+                    <th class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Type</th>
+                    <th class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Name</th>
+                    <th class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Country</th>
+                    <th class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Expiration Date</th>
                 </tr>
-            }
-        </tbody>
-    </table>
+            </thead>
+            <tbody class="divide-y divide-slate-100">
+                @foreach (var item in Model.ExpiringItems)
+                {
+                    var isPast = item.ExpiresAt < DateTime.UtcNow;
+                    <tr class="@(isPast ? "bg-red-50" : "hover:bg-slate-50")">
+                        <td class="px-4 py-3 text-slate-700">@item.Type</td>
+                        <td class="px-4 py-3 text-slate-700">@item.Name</td>
+                        <td class="px-4 py-3 text-slate-700">@item.Country</td>
+                        <td class="px-4 py-3 @(isPast ? "text-red-700 font-medium" : "text-slate-700")">@item.ExpiresAt.ToString("dd.MM.yyyy")</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
 }

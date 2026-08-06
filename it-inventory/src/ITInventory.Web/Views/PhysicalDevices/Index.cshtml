@@ -9,91 +9,99 @@
     bool isAdmin = ViewBag.IsAdmin;
 }
 
-<div class="d-flex justify-content-between align-items-center mb-3">
-    <h2>Physical Devices</h2>
+<div class="flex items-center justify-between mb-6">
+    <h2 class="text-xl font-semibold text-slate-900">Physical Devices</h2>
     @if (canEdit)
     {
-        <a asp-action="Create" class="btn btn-primary">+ Add New Device</a>
+        <a asp-action="Create" class="inline-flex items-center gap-2 bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium px-4 py-2 rounded-md">
+            <i class="fa-solid fa-plus"></i>Add New Device
+        </a>
     }
 </div>
 
-<form method="get" class="row g-2 mb-3">
-    @if (isAdmin)
-    {
-        <div class="col-auto">
-            <select name="countryId" class="form-select" onchange="this.form.submit()">
+<div class="flex flex-wrap items-center gap-3 mb-4">
+    <form method="get" class="flex flex-wrap items-center gap-3">
+        @if (isAdmin)
+        {
+            <select name="countryId" onchange="this.form.submit()" class="rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
                 <option value="">All Countries</option>
                 @foreach (var c in countries)
                 {
                     <option value="@c.Id" selected="@(c.Id == selectedCountryId)">@c.Name</option>
                 }
             </select>
-        </div>
-    }
-    <div class="col-auto">
-        <select name="categoryId" class="form-select" onchange="this.form.submit()">
+        }
+        <select name="categoryId" onchange="this.form.submit()" class="rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
             <option value="">All Categories</option>
             @foreach (var cat in categories)
             {
                 <option value="@cat.Id" selected="@(cat.Id == selectedCategoryId)">@cat.Name</option>
             }
         </select>
+    </form>
+    <div class="relative max-w-xs ml-auto">
+        <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm"></i>
+        <input type="text" oninput="filterRows(this, 'devices-table')" placeholder="Search devices..."
+               class="w-full pl-9 pr-3 py-2 text-sm rounded-md border border-slate-300 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500" />
     </div>
-</form>
+</div>
 
 @if (!Model.Any())
 {
-    <div class="alert alert-secondary">No records found.</div>
+    <div class="text-center py-12 text-slate-400 bg-white rounded-lg border border-slate-200">
+        <i class="fa-solid fa-inbox text-3xl mb-2"></i>
+        <p class="text-sm">No records found.</p>
+    </div>
 }
 else
 {
-    <table class="table table-striped table-sm">
-        <thead>
-            <tr>
-                @if (isAdmin)
-                {
-                    <th>Country</th>
-                }
-                <th>Category</th>
-                <th>Device Name</th>
-                <th>Brand/Model</th>
-                <th>Physical/Virtual</th>
-                <th>IP</th>
-                <th>Location</th>
-                <th>Support End</th>
-                @if (canEdit)
-                {
-                    <th></th>
-                }
-            </tr>
-        </thead>
-        <tbody>
-            @foreach (var item in Model)
-            {
+    <div class="bg-white rounded-lg shadow-sm border border-slate-200 overflow-x-auto">
+        <table id="devices-table" class="min-w-full divide-y divide-slate-200 text-sm">
+            <thead class="bg-slate-50">
                 <tr>
                     @if (isAdmin)
                     {
-                        <td>@item.Country?.Name</td>
+                        <th class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Country</th>
                     }
-                    <td>@item.Category?.Name</td>
-                    <td>@item.DeviceName</td>
-                    <td>@item.Brand @item.Model</td>
-                    <td>@item.ApplianceType</td>
-                    <td>@item.IpAddress</td>
-                    <td>@item.Location</td>
-                    <td>@(item.EndOfSupportDate?.ToString("dd.MM.yyyy") ?? "-")</td>
+                    <th class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Category</th>
+                    <th class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Device Name</th>
+                    <th class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Brand/Model</th>
+                    <th class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Physical/Virtual</th>
+                    <th class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">IP</th>
+                    <th class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Location</th>
+                    <th class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Support End</th>
                     @if (canEdit)
                     {
-                        <td>
-                            <a asp-action="Edit" asp-route-id="@item.Id" class="btn btn-sm btn-outline-secondary">Edit</a>
-                            <form asp-action="Delete" asp-route-id="@item.Id" method="post" class="d-inline"
-                                  onsubmit="return confirm('Are you sure you want to delete this record?');">
-                                <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
-                            </form>
-                        </td>
+                        <th class="px-4 py-3"></th>
                     }
                 </tr>
-            }
-        </tbody>
-    </table>
+            </thead>
+            <tbody class="divide-y divide-slate-100">
+                @foreach (var item in Model)
+                {
+                    <tr class="hover:bg-slate-50">
+                        @if (isAdmin)
+                        {
+                            <td class="px-4 py-3 text-slate-700">@item.Country?.Name</td>
+                        }
+                        <td class="px-4 py-3 text-slate-700">@item.Category?.Name</td>
+                        <td class="px-4 py-3 text-slate-700 font-medium">@item.DeviceName</td>
+                        <td class="px-4 py-3 text-slate-700">@item.Brand @item.Model</td>
+                        <td class="px-4 py-3 text-slate-700">@item.ApplianceType</td>
+                        <td class="px-4 py-3 text-slate-700 font-mono text-xs">@item.IpAddress</td>
+                        <td class="px-4 py-3 text-slate-700">@item.Location</td>
+                        <td class="px-4 py-3 text-slate-700">@(item.EndOfSupportDate?.ToString("dd.MM.yyyy") ?? "-")</td>
+                        @if (canEdit)
+                        {
+                            <td class="px-4 py-3 text-right whitespace-nowrap">
+                                <a asp-action="Edit" asp-route-id="@item.Id" class="text-brand-600 hover:text-brand-800 mr-3" title="Edit"><i class="fa-solid fa-pen"></i></a>
+                                <button type="button" onclick="openConfirmModal('delete-form-@item.Id', 'Are you sure you want to delete this record?')" class="text-red-600 hover:text-red-800" title="Delete"><i class="fa-solid fa-trash"></i></button>
+                                <form id="delete-form-@item.Id" asp-action="Delete" asp-route-id="@item.Id" method="post" class="hidden"></form>
+                            </td>
+                        }
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
 }

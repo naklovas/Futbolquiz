@@ -4,87 +4,141 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>@ViewData["Title"] - IT Inventory</title>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" />
-    <link rel="stylesheet" href="~/css/site.css" asp-append-version="true" />
-    <link rel="stylesheet" href="~/ITInventory.Web.styles.css" asp-append-version="true" />
-</head>
-<body>
-    <header>
-        <nav class="navbar navbar-expand-lg navbar-light bg-white border-bottom box-shadow mb-3">
-            <div class="container-fluid">
-                <a class="navbar-brand" asp-controller="Home" asp-action="Index">IT Inventory</a>
-                <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target=".navbar-collapse"
-                        aria-controls="navbarSupportedContent" aria-expanded="false" aria-label="Toggle navigation">
-                    <span class="navbar-toggler-icon"></span>
-                </button>
-                <div class="navbar-collapse collapse d-lg-inline-flex justify-content-between">
-                    @if (User.Identity?.IsAuthenticated == true)
-                    {
-                        <ul class="navbar-nav flex-grow-1">
-                            <li class="nav-item">
-                                <a class="nav-link" asp-controller="PhysicalDevices" asp-action="Index">Physical Devices</a>
-                            </li>
-                            <li class="nav-item">
-                                <a class="nav-link" asp-controller="Servers" asp-action="Index">Servers</a>
-                            </li>
-                            <li class="nav-item">
-                                <a class="nav-link" asp-controller="Licenses" asp-action="Index">Licenses</a>
-                            </li>
-                            <li class="nav-item">
-                                <a class="nav-link" asp-controller="Circuits" asp-action="Index">Circuits</a>
-                            </li>
-                            <li class="nav-item">
-                                <a class="nav-link" asp-controller="DevicePool" asp-action="Index">Device Pool</a>
-                            </li>
-                            @if (User.IsInRole("admin"))
-                            {
-                                <li class="nav-item dropdown">
-                                    <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">Administration</a>
-                                    <ul class="dropdown-menu">
-                                        <li><a class="dropdown-item" asp-controller="AdminUsers" asp-action="Index">Users</a></li>
-                                        <li><a class="dropdown-item" asp-controller="AdminCountries" asp-action="Index">Countries</a></li>
-                                        <li><a class="dropdown-item" asp-controller="AdminDeviceProfiles" asp-action="Index">Device Profiles</a></li>
-                                    </ul>
-                                </li>
-                            }
-                        </ul>
-                        <ul class="navbar-nav">
-                            <li class="nav-item d-flex align-items-center me-2">
-                                <span class="text-muted small">
-                                    @User.FindFirst(ITInventory.Web.Services.AppClaimTypes.FullName)?.Value
-                                    @{
-                                        var country = User.FindFirst(ITInventory.Web.Services.AppClaimTypes.Country)?.Value;
-                                    }
-                                    @if (!string.IsNullOrEmpty(country))
-                                    {
-                                        <text> (@country)</text>
-                                    }
-                                </span>
-                            </li>
-                            <li class="nav-item">
-                                <form asp-controller="Account" asp-action="Logout" method="post">
-                                    <button type="submit" class="btn btn-outline-secondary btn-sm">Log Out</button>
-                                </form>
-                            </li>
-                        </ul>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        brand: {
+                            50: '#ecfdf5', 100: '#d1fae5', 500: '#10b981',
+                            600: '#059669', 700: '#047857'
+                        }
                     }
-                </div>
+                }
+            }
+        }
+    </script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" />
+    <link rel="stylesheet" href="~/css/site.css" asp-append-version="true" />
+</head>
+<body class="min-h-screen bg-slate-50 text-slate-800 flex flex-col">
+    <header class="bg-slate-900 shadow-md">
+        <nav class="max-w-7xl mx-auto px-4">
+            <div class="flex items-center justify-between h-16">
+                <a asp-controller="Home" asp-action="Index" class="flex items-center gap-2 text-white font-semibold text-lg">
+                    <i class="fa-solid fa-server text-brand-500"></i>
+                    IT Inventory
+                </a>
+
+                @if (User.Identity?.IsAuthenticated == true)
+                {
+                    <button id="mobile-menu-toggle" class="md:hidden text-slate-300 hover:text-white">
+                        <i class="fa-solid fa-bars text-xl"></i>
+                    </button>
+
+                    <div class="hidden md:flex items-center gap-1">
+                        <a asp-controller="PhysicalDevices" asp-action="Index" class="px-3 py-2 rounded-md text-sm font-medium text-slate-300 hover:text-white hover:bg-slate-800 transition">
+                            <i class="fa-solid fa-desktop mr-1.5"></i>Physical Devices
+                        </a>
+                        <a asp-controller="Servers" asp-action="Index" class="px-3 py-2 rounded-md text-sm font-medium text-slate-300 hover:text-white hover:bg-slate-800 transition">
+                            <i class="fa-solid fa-database mr-1.5"></i>Servers
+                        </a>
+                        <a asp-controller="Licenses" asp-action="Index" class="px-3 py-2 rounded-md text-sm font-medium text-slate-300 hover:text-white hover:bg-slate-800 transition">
+                            <i class="fa-solid fa-key mr-1.5"></i>Licenses
+                        </a>
+                        <a asp-controller="Circuits" asp-action="Index" class="px-3 py-2 rounded-md text-sm font-medium text-slate-300 hover:text-white hover:bg-slate-800 transition">
+                            <i class="fa-solid fa-diagram-project mr-1.5"></i>Circuits
+                        </a>
+                        <a asp-controller="DevicePool" asp-action="Index" class="px-3 py-2 rounded-md text-sm font-medium text-slate-300 hover:text-white hover:bg-slate-800 transition">
+                            <i class="fa-solid fa-magnifying-glass-chart mr-1.5"></i>Device Pool
+                        </a>
+                        @if (User.IsInRole("admin"))
+                        {
+                            <div class="relative group">
+                                <button class="px-3 py-2 rounded-md text-sm font-medium text-slate-300 hover:text-white hover:bg-slate-800 transition">
+                                    <i class="fa-solid fa-gear mr-1.5"></i>Administration <i class="fa-solid fa-chevron-down text-xs ml-1"></i>
+                                </button>
+                                <div class="absolute right-0 hidden group-hover:block bg-white rounded-md shadow-lg border border-slate-200 py-1 w-48 z-20">
+                                    <a asp-controller="AdminUsers" asp-action="Index" class="block px-4 py-2 text-sm text-slate-700 hover:bg-slate-100">Users</a>
+                                    <a asp-controller="AdminCountries" asp-action="Index" class="block px-4 py-2 text-sm text-slate-700 hover:bg-slate-100">Countries</a>
+                                    <a asp-controller="AdminDeviceProfiles" asp-action="Index" class="block px-4 py-2 text-sm text-slate-700 hover:bg-slate-100">Device Profiles</a>
+                                </div>
+                            </div>
+                        }
+
+                        <div class="ml-4 pl-4 border-l border-slate-700 flex items-center gap-3">
+                            <span class="text-sm text-slate-400">
+                                <i class="fa-solid fa-user-circle mr-1"></i>
+                                @User.FindFirst(ITInventory.Web.Services.AppClaimTypes.FullName)?.Value
+                                @{
+                                    var country = User.FindFirst(ITInventory.Web.Services.AppClaimTypes.Country)?.Value;
+                                }
+                                @if (!string.IsNullOrEmpty(country))
+                                {
+                                    <text> (@country)</text>
+                                }
+                            </span>
+                            <form asp-controller="Account" asp-action="Logout" method="post">
+                                <button type="submit" class="text-sm text-slate-300 hover:text-white hover:bg-slate-800 px-3 py-1.5 rounded-md transition">
+                                    <i class="fa-solid fa-right-from-bracket mr-1"></i>Log Out
+                                </button>
+                            </form>
+                        </div>
+                    </div>
+                }
             </div>
+
+            @if (User.Identity?.IsAuthenticated == true)
+            {
+                <div id="mobile-menu" class="hidden md:hidden pb-3 space-y-1">
+                    <a asp-controller="PhysicalDevices" asp-action="Index" class="block px-3 py-2 rounded-md text-sm font-medium text-slate-300 hover:text-white hover:bg-slate-800">Physical Devices</a>
+                    <a asp-controller="Servers" asp-action="Index" class="block px-3 py-2 rounded-md text-sm font-medium text-slate-300 hover:text-white hover:bg-slate-800">Servers</a>
+                    <a asp-controller="Licenses" asp-action="Index" class="block px-3 py-2 rounded-md text-sm font-medium text-slate-300 hover:text-white hover:bg-slate-800">Licenses</a>
+                    <a asp-controller="Circuits" asp-action="Index" class="block px-3 py-2 rounded-md text-sm font-medium text-slate-300 hover:text-white hover:bg-slate-800">Circuits</a>
+                    <a asp-controller="DevicePool" asp-action="Index" class="block px-3 py-2 rounded-md text-sm font-medium text-slate-300 hover:text-white hover:bg-slate-800">Device Pool</a>
+                    @if (User.IsInRole("admin"))
+                    {
+                        <a asp-controller="AdminUsers" asp-action="Index" class="block px-3 py-2 rounded-md text-sm font-medium text-slate-300 hover:text-white hover:bg-slate-800">Users</a>
+                        <a asp-controller="AdminCountries" asp-action="Index" class="block px-3 py-2 rounded-md text-sm font-medium text-slate-300 hover:text-white hover:bg-slate-800">Countries</a>
+                        <a asp-controller="AdminDeviceProfiles" asp-action="Index" class="block px-3 py-2 rounded-md text-sm font-medium text-slate-300 hover:text-white hover:bg-slate-800">Device Profiles</a>
+                    }
+                    <form asp-controller="Account" asp-action="Logout" method="post">
+                        <button type="submit" class="w-full text-left px-3 py-2 rounded-md text-sm font-medium text-slate-300 hover:text-white hover:bg-slate-800">Log Out</button>
+                    </form>
+                </div>
+            }
         </nav>
     </header>
-    <div class="container-fluid">
-        <main role="main" class="pb-3">
-            @RenderBody()
-        </main>
-    </div>
 
-    <footer class="border-top footer text-muted">
-        <div class="container">
+    <main class="flex-1 max-w-7xl w-full mx-auto px-4 py-6">
+        @RenderBody()
+    </main>
+
+    <footer class="border-t border-slate-200 py-4">
+        <div class="max-w-7xl mx-auto px-4 text-center text-sm text-slate-400">
             &copy; @DateTime.Now.Year - IT Inventory System
         </div>
     </footer>
-    <script src="https://cdn.jsdelivr.net/npm/jquery@3.7.1/dist/jquery.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+
+    <div id="confirm-modal" class="hidden fixed inset-0 bg-slate-900/50 flex items-center justify-center z-50 p-4">
+        <div class="bg-white rounded-lg shadow-xl max-w-sm w-full p-6">
+            <div class="flex items-start gap-3">
+                <div class="flex-shrink-0 w-10 h-10 rounded-full bg-red-100 flex items-center justify-center">
+                    <i class="fa-solid fa-triangle-exclamation text-red-600"></i>
+                </div>
+                <div class="flex-1">
+                    <h3 class="font-semibold text-slate-900">Confirm</h3>
+                    <p id="confirm-modal-message" class="text-sm text-slate-500 mt-1">Are you sure?</p>
+                </div>
+            </div>
+            <div class="mt-5 flex justify-end gap-2">
+                <button type="button" onclick="closeConfirmModal()" class="px-4 py-2 text-sm font-medium rounded-md border border-slate-300 text-slate-700 hover:bg-slate-50">Cancel</button>
+                <button id="confirm-modal-confirm" type="button" class="px-4 py-2 text-sm font-medium rounded-md bg-red-600 text-white hover:bg-red-700">Delete</button>
+            </div>
+        </div>
+    </div>
+
     <script src="~/js/site.js" asp-append-version="true"></script>
     @await RenderSectionAsync("Scripts", required: false)
 </body>

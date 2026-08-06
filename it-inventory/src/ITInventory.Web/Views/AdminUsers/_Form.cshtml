@@ -4,57 +4,56 @@
     var roles = (List<ITInventory.Data.Entities.YdRole>)ViewBag.Roles;
 }
 
-<div asp-validation-summary="ModelOnly" class="text-danger mb-3"></div>
+<div asp-validation-summary="ModelOnly" class="text-sm text-red-600 mb-3"></div>
 <input type="hidden" asp-for="Id" />
 
-<div class="row">
-    <div class="col-md-4 mb-3">
-        <label asp-for="Username" class="form-label"></label>
-        <input asp-for="Username" class="form-control" />
-        <span asp-validation-for="Username" class="text-danger"></span>
-        <div class="form-text">AD username (without the fintek.local\ prefix).</div>
+<div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+    <div>
+        <label asp-for="Username" class="block text-sm font-medium text-slate-700 mb-1"></label>
+        <input asp-for="Username" class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500" />
+        <span asp-validation-for="Username" class="text-sm text-red-600"></span>
+        <p class="text-xs text-slate-400 mt-1">AD username (without the fintek.local\ prefix).</p>
     </div>
-    <div class="col-md-4 mb-3">
-        <label asp-for="FullName" class="form-label"></label>
-        <input asp-for="FullName" class="form-control" />
-        <span asp-validation-for="FullName" class="text-danger"></span>
+    <div>
+        <label asp-for="FullName" class="block text-sm font-medium text-slate-700 mb-1"></label>
+        <input asp-for="FullName" class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500" />
+        <span asp-validation-for="FullName" class="text-sm text-red-600"></span>
     </div>
-    <div class="col-md-4 mb-3">
-        <label asp-for="Email" class="form-label"></label>
-        <input asp-for="Email" class="form-control" />
-        <span asp-validation-for="Email" class="text-danger"></span>
+    <div>
+        <label asp-for="Email" class="block text-sm font-medium text-slate-700 mb-1"></label>
+        <input asp-for="Email" class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500" />
+        <span asp-validation-for="Email" class="text-sm text-red-600"></span>
     </div>
 </div>
 
-<div class="row">
-    <div class="col-md-4 mb-3">
-        <label asp-for="CountryId" class="form-label"></label>
-        <select asp-for="CountryId" asp-items="countryOptions" class="form-select">
+<div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4 items-end">
+    <div>
+        <label asp-for="CountryId" class="block text-sm font-medium text-slate-700 mb-1"></label>
+        <select asp-for="CountryId" asp-items="countryOptions" class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
             <option value="">-- Not selected (e.g. admin) --</option>
         </select>
     </div>
-    <div class="col-md-4 mb-3 d-flex align-items-end">
-        <div class="form-check">
-            <input asp-for="IsActive" class="form-check-input" />
-            <label asp-for="IsActive" class="form-check-label"></label>
-        </div>
+    <div class="flex items-center gap-2 pb-2">
+        <input asp-for="IsActive" class="rounded border-slate-300 text-brand-600 focus:ring-brand-500" />
+        <label asp-for="IsActive" class="text-sm font-medium text-slate-700"></label>
     </div>
 </div>
 
-<div class="mb-3">
-    <label class="form-label">Roles</label>
-    <div>
+<div class="mb-6">
+    <label class="block text-sm font-medium text-slate-700 mb-2">Roles</label>
+    <div class="flex flex-wrap gap-3">
         @foreach (var role in roles)
         {
-            <div class="form-check form-check-inline">
-                <input type="checkbox" class="form-check-input" name="SelectedRoleIds" value="@role.Id"
-                       id="role_@role.Id"
+            <label class="inline-flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-md px-3 py-1.5 text-sm cursor-pointer hover:bg-slate-100">
+                <input type="checkbox" class="rounded border-slate-300 text-brand-600 focus:ring-brand-500" name="SelectedRoleIds" value="@role.Id"
                        checked="@Model.SelectedRoleIds.Contains(role.Id)" />
-                <label class="form-check-label" for="role_@role.Id">@role.RoleName</label>
-            </div>
+                @role.RoleName
+            </label>
         }
     </div>
 </div>
 
-<button type="submit" class="btn btn-primary">Save</button>
-<a asp-action="Index" class="btn btn-outline-secondary">Cancel</a>
+<div class="flex gap-2">
+    <button type="submit" class="bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium px-5 py-2.5 rounded-md">Save</button>
+    <a asp-action="Index" class="border border-slate-300 text-slate-700 hover:bg-slate-50 text-sm font-medium px-5 py-2.5 rounded-md">Cancel</a>
+</div>

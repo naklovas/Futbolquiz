@@ -3,8 +3,10 @@
     ViewData["Title"] = "New License";
 }
 
-<h2>New License</h2>
+<h2 class="text-xl font-semibold text-slate-900 mb-6">New License</h2>
 
-<form asp-action="Create" method="post">
-    @await Html.PartialAsync("_Form", Model)
-</form>
+<div class="bg-white rounded-lg shadow-sm border border-slate-200 p-6 max-w-4xl">
+    <form asp-action="Create" method="post">
+        @await Html.PartialAsync("_Form", Model)
+    </form>
+</div>
