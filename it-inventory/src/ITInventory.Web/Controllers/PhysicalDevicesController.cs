@@ -230,10 +230,11 @@ public class PhysicalDevicesController : Controller
         return RedirectToAction(nameof(Index));
     }
 
-    public IActionResult Import()
+    public async Task<IActionResult> Import()
     {
         if (!_currentUser.CanEdit) return Forbid();
         ViewBag.EntityName = "Physical Devices";
+        await PopulateImportCountryInfo();
         return View("Import");
     }
 
@@ -242,7 +243,7 @@ public class PhysicalDevicesController : Controller
         if (!_currentUser.CanEdit) return Forbid();
 
         var bytes = ExcelImportHelpers.CreateTemplateBytes("Physical Devices",
-            "Country", "Category", "Device Name", "Brand", "Model", "Physical/Virtual",
+            "Category", "Device Name", "Brand", "Model", "Physical/Virtual",
             "Software Version", "Serial Number", "IP Address", "Management IP", "Branch",
             "Location", "Vendor/Supplier", "License Info", "Support Start Date", "Support End Date",
             "End of Life Date", "Notes");
@@ -252,7 +253,7 @@ public class PhysicalDevicesController : Controller
 
     [HttpPost]
     [ValidateAntiForgeryToken]
-    public async Task<IActionResult> Import(IFormFile file)
+    public async Task<IActionResult> Import(IFormFile file, int? countryId)
     {
         if (!_currentUser.CanEdit) return Forbid();
 
@@ -262,7 +263,20 @@ public class PhysicalDevicesController : Controller
             return RedirectToAction(nameof(Import));
         }
 
-        var countryLookup = await BuildCountryLookupAsync();
+        var effectiveCountryId = _currentUser.IsAdmin ? countryId : _currentUser.CountryId;
+        if (!effectiveCountryId.HasValue)
+        {
+            TempData["ImportError"] = "Please select a country.";
+            return RedirectToAction(nameof(Import));
+        }
+
+        var country = await _db.Countries.FindAsync(effectiveCountryId.Value);
+        if (country is null)
+        {
+            TempData["ImportError"] = "Selected country not found.";
+            return RedirectToAction(nameof(Import));
+        }
+
         var categories = await _db.DeviceCategories.ToListAsync();
         var categoryLookup = categories.ToDictionary(c => c.Name, c => c, StringComparer.OrdinalIgnoreCase);
 
@@ -282,29 +296,10 @@ public class PhysicalDevicesController : Controller
             {
                 if (ExcelImportHelpers.IsRowEmpty(ws, row, headers)) continue;
 
-                var countryText = ExcelImportHelpers.GetString(ws, row, headers, "Country");
                 var categoryText = ExcelImportHelpers.GetString(ws, row, headers, "Category");
                 var deviceName = ExcelImportHelpers.GetString(ws, row, headers, "Device Name");
                 var location = ExcelImportHelpers.GetString(ws, row, headers, "Location");
                 var applianceRaw = ExcelImportHelpers.GetString(ws, row, headers, "Physical/Virtual");
-
-                if (string.IsNullOrEmpty(countryText))
-                {
-                    result.Errors.Add(new ImportRowError { RowNumber = row, Message = "Country is required." });
-                    continue;
-                }
-
-                if (!countryLookup.TryGetValue(countryText, out var country))
-                {
-                    result.Errors.Add(new ImportRowError { RowNumber = row, Message = $"Country '{countryText}' not found." });
-                    continue;
-                }
-
-                if (!_currentUser.IsAdmin && country.Id != _currentUser.CountryId)
-                {
-                    result.Errors.Add(new ImportRowError { RowNumber = row, Message = $"You are not allowed to import records for '{countryText}'." });
-                    continue;
-                }
 
                 if (string.IsNullOrEmpty(categoryText))
                 {
@@ -372,17 +367,21 @@ public class PhysicalDevicesController : Controller
         return View("ImportResult", result);
     }
 
-    private async Task<Dictionary<string, Country>> BuildCountryLookupAsync()
+    private async Task PopulateImportCountryInfo()
     {
-        var countries = await _db.Countries.ToListAsync();
-        var lookup = new Dictionary<string, Country>(StringComparer.OrdinalIgnoreCase);
-        foreach (var c in countries)
+        ViewBag.IsAdmin = _currentUser.IsAdmin;
+
+        if (_currentUser.IsAdmin)
         {
-            lookup[c.Name] = c;
-            if (!string.IsNullOrEmpty(c.DisplayName))
-                lookup[c.DisplayName] = c;
+            var countries = await _db.Countries.Where(c => c.IsActive).OrderBy(c => c.Name)
+                .Select(c => new { c.Id, Label = c.DisplayName ?? c.Name }).ToListAsync();
+            ViewBag.CountryOptions = new SelectList(countries, "Id", "Label");
         }
-        return lookup;
+        else
+        {
+            var country = await _db.Countries.FirstOrDefaultAsync(c => c.Id == _currentUser.CountryId);
+            ViewBag.OwnCountryLabel = country?.DisplayName ?? country?.Name ?? _currentUser.Country;
+        }
     }
 
     private async Task PopulateDropdowns()

@@ -166,10 +166,11 @@ public class CircuitsController : Controller
         return RedirectToAction(nameof(Index));
     }
 
-    public IActionResult Import()
+    public async Task<IActionResult> Import()
     {
         if (!_currentUser.CanEdit) return Forbid();
         ViewBag.EntityName = "Circuits";
+        await PopulateImportCountryInfo();
         return View("Import");
     }
 
@@ -178,7 +179,7 @@ public class CircuitsController : Controller
         if (!_currentUser.CanEdit) return Forbid();
 
         var bytes = ExcelImportHelpers.CreateTemplateBytes("Circuits",
-            "Country", "Circuit Type", "Capacity", "Provider", "Branch", "Location",
+            "Circuit Type", "Capacity", "Provider", "Branch", "Location",
             "Start Date", "End Date", "Notes");
 
         return File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "Circuits_Template.xlsx");
@@ -186,7 +187,7 @@ public class CircuitsController : Controller
 
     [HttpPost]
     [ValidateAntiForgeryToken]
-    public async Task<IActionResult> Import(IFormFile file)
+    public async Task<IActionResult> Import(IFormFile file, int? countryId)
     {
         if (!_currentUser.CanEdit) return Forbid();
 
@@ -196,7 +197,20 @@ public class CircuitsController : Controller
             return RedirectToAction(nameof(Import));
         }
 
-        var countryLookup = await BuildCountryLookupAsync();
+        var effectiveCountryId = _currentUser.IsAdmin ? countryId : _currentUser.CountryId;
+        if (!effectiveCountryId.HasValue)
+        {
+            TempData["ImportError"] = "Please select a country.";
+            return RedirectToAction(nameof(Import));
+        }
+
+        var country = await _db.Countries.FindAsync(effectiveCountryId.Value);
+        if (country is null)
+        {
+            TempData["ImportError"] = "Selected country not found.";
+            return RedirectToAction(nameof(Import));
+        }
+
         var result = new ImportResultViewModel { EntityName = "Circuits" };
         var toAdd = new List<Circuit>();
 
@@ -213,27 +227,8 @@ public class CircuitsController : Controller
             {
                 if (ExcelImportHelpers.IsRowEmpty(ws, row, headers)) continue;
 
-                var countryText = ExcelImportHelpers.GetString(ws, row, headers, "Country");
                 var circuitType = ExcelImportHelpers.GetString(ws, row, headers, "Circuit Type");
                 var location = ExcelImportHelpers.GetString(ws, row, headers, "Location");
-
-                if (string.IsNullOrEmpty(countryText))
-                {
-                    result.Errors.Add(new ImportRowError { RowNumber = row, Message = "Country is required." });
-                    continue;
-                }
-
-                if (!countryLookup.TryGetValue(countryText, out var country))
-                {
-                    result.Errors.Add(new ImportRowError { RowNumber = row, Message = $"Country '{countryText}' not found." });
-                    continue;
-                }
-
-                if (!_currentUser.IsAdmin && country.Id != _currentUser.CountryId)
-                {
-                    result.Errors.Add(new ImportRowError { RowNumber = row, Message = $"You are not allowed to import records for '{countryText}'." });
-                    continue;
-                }
 
                 if (string.IsNullOrEmpty(circuitType))
                 {
@@ -274,17 +269,21 @@ public class CircuitsController : Controller
         return View("ImportResult", result);
     }
 
-    private async Task<Dictionary<string, Country>> BuildCountryLookupAsync()
+    private async Task PopulateImportCountryInfo()
     {
-        var countries = await _db.Countries.ToListAsync();
-        var lookup = new Dictionary<string, Country>(StringComparer.OrdinalIgnoreCase);
-        foreach (var c in countries)
+        ViewBag.IsAdmin = _currentUser.IsAdmin;
+
+        if (_currentUser.IsAdmin)
         {
-            lookup[c.Name] = c;
-            if (!string.IsNullOrEmpty(c.DisplayName))
-                lookup[c.DisplayName] = c;
+            var countries = await _db.Countries.Where(c => c.IsActive).OrderBy(c => c.Name)
+                .Select(c => new { c.Id, Label = c.DisplayName ?? c.Name }).ToListAsync();
+            ViewBag.CountryOptions = new SelectList(countries, "Id", "Label");
         }
-        return lookup;
+        else
+        {
+            var country = await _db.Countries.FirstOrDefaultAsync(c => c.Id == _currentUser.CountryId);
+            ViewBag.OwnCountryLabel = country?.DisplayName ?? country?.Name ?? _currentUser.Country;
+        }
     }
 
     private async Task PopulateDropdowns()
