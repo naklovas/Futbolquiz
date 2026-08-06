@@ -38,6 +38,15 @@ incelenip çalıştırılan SQL script tercih edildiği için ayrıca burada tut
    sadece admin ekranındaki görünen isim değişir, Cihaz Havuzu eşleştirmesi bozulmaz.
    EF Core migration'ından üretildi, elle düzenlemeyin. Idempotenttir.
 
+8. **008_test_inventory_data.sql** — Germany, Bulgaria ve China için Physical
+   Devices, Licenses ve Circuits tablolarına örnek/demo veri ekler (China
+   `Countries` tablosuna da bu scriptle eklenir). Tüm cihaz adları ve lisans
+   adları `TEST-` ile başlar, Notes alanı da "Test data... Safe to delete"
+   yazar — gerçek veriyle karışmaz, `WHERE DeviceName LIKE N'TEST-%'` (ve
+   Licenses için aynısı) ile kolayca silinebilir. Bazı kayıtların destek/lisans
+   bitiş tarihleri yakın gelecekte, dashboard'daki "Upcoming Expirations"
+   uyarısında görünsünler diye. İdempotenttir.
+
 ## Bu scriptlerin DOKUNMADIĞI mevcut tablolar
 
 Aşağıdaki tablo bu proje tarafından oluşturulmaz; production'da başka bir
