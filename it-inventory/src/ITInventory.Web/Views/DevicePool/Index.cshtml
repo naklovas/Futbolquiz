@@ -7,6 +7,7 @@
     var countryDisplayNames = (Dictionary<string, string>)ViewBag.CountryDisplayNames;
     int? selectedCategoryId = ViewBag.SelectedCategoryId;
     bool isAdmin = ViewBag.IsAdmin;
+    bool canEdit = ViewBag.CanEdit;
     bool noCountryAssigned = ViewBag.NoCountryAssigned ?? false;
     int? matchedCountryId = ViewBag.MatchedCountryId;
 }
@@ -78,7 +79,10 @@ else
                         <th class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Device Profile</th>
                         <th class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Category</th>
                         <th class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Last Seen</th>
-                        <th class="px-4 py-3"></th>
+                        @if (canEdit)
+                        {
+                            <th class="px-4 py-3"></th>
+                        }
                     </tr>
                 </thead>
                 <tbody class="divide-y divide-slate-100">
@@ -92,34 +96,37 @@ else
                             <td class="px-4 py-3 text-slate-700">@d.DeviceProfile</td>
                             <td class="px-4 py-3 text-slate-700">@d.CategoryName</td>
                             <td class="px-4 py-3 text-slate-700">@(d.LastSeenAt?.ToString("dd.MM.yyyy") ?? "-")</td>
-                            <td class="px-4 py-3 text-right whitespace-nowrap">
-                                @if (d.AlreadyInInventory)
-                                {
-                                    <span class="inline-flex items-center gap-1 text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full text-xs font-medium">
-                                        <i class="fa-solid fa-check"></i>In Inventory
-                                    </span>
-                                }
-                                else
-                                {
-                                    <div class="flex justify-end gap-2">
-                                        <a class="text-xs font-medium text-brand-700 bg-brand-50 hover:bg-brand-100 px-2.5 py-1.5 rounded-md whitespace-nowrap"
-                                           asp-controller="PhysicalDevices" asp-action="Create"
-                                           asp-route-fromPool="true"
-                                           asp-route-sourceId="@d.ZiraatYdId"
-                                           asp-route-countryId="@matchedCountryId"
-                                           asp-route-categoryId="@d.CategoryId">
-                                            <i class="fa-solid fa-desktop mr-1"></i>Add as Device
-                                        </a>
-                                        <a class="text-xs font-medium text-blue-700 bg-blue-50 hover:bg-blue-100 px-2.5 py-1.5 rounded-md whitespace-nowrap"
-                                           asp-controller="Servers" asp-action="Create"
-                                           asp-route-fromPool="true"
-                                           asp-route-sourceId="@d.ZiraatYdId"
-                                           asp-route-countryId="@matchedCountryId">
-                                            <i class="fa-solid fa-database mr-1"></i>Add as Server
-                                        </a>
-                                    </div>
-                                }
-                            </td>
+                            @if (canEdit)
+                            {
+                                <td class="px-4 py-3 text-right whitespace-nowrap">
+                                    @if (d.AlreadyInInventory)
+                                    {
+                                        <span class="inline-flex items-center gap-1 text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full text-xs font-medium">
+                                            <i class="fa-solid fa-check"></i>In Inventory
+                                        </span>
+                                    }
+                                    else
+                                    {
+                                        <div class="flex justify-end gap-2">
+                                            <a class="text-xs font-medium text-brand-700 bg-brand-50 hover:bg-brand-100 px-2.5 py-1.5 rounded-md whitespace-nowrap"
+                                               asp-controller="PhysicalDevices" asp-action="Create"
+                                               asp-route-fromPool="true"
+                                               asp-route-sourceId="@d.ZiraatYdId"
+                                               asp-route-countryId="@matchedCountryId"
+                                               asp-route-categoryId="@d.CategoryId">
+                                                <i class="fa-solid fa-desktop mr-1"></i>Add as Device
+                                            </a>
+                                            <a class="text-xs font-medium text-blue-700 bg-blue-50 hover:bg-blue-100 px-2.5 py-1.5 rounded-md whitespace-nowrap"
+                                               asp-controller="Servers" asp-action="Create"
+                                               asp-route-fromPool="true"
+                                               asp-route-sourceId="@d.ZiraatYdId"
+                                               asp-route-countryId="@matchedCountryId">
+                                                <i class="fa-solid fa-database mr-1"></i>Add as Server
+                                            </a>
+                                        </div>
+                                    }
+                                </td>
+                            }
                         </tr>
                     }
                 </tbody>

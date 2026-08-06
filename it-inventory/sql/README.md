@@ -26,6 +26,11 @@ incelenip çalıştırılan SQL script tercih edildiği için ayrıca burada tut
    sadece rol/kullanıcı seed kısmını çalıştırır (2. script ile çakışmaz,
    birlikte de çalıştırılabilir).
 
+4. **004_test_countries_users.sql** — Test Login modu için `germany_test`/`bulgaria_test`
+   (country_manager, ekleme/düzenleme yapabilir) ve `germany_view_test`
+   (country_view_only, sadece görüntüler; ekleme/düzenleme/silme/Excel import yapamaz)
+   test kullanıcılarını seed eder. İdempotenttir.
+
 5. **005_device_profile_displayname_and_category_names.sql** — `DeviceCategories.Name`
    değerlerini İngilizceye çevirir (Sunucu→Server vb.) ve `DeviceProfileCatalog`'a
    `DisplayName` (İngilizce, sadece ekranda gösterilen) alanını ekler.

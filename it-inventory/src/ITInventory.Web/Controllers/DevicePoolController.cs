@@ -41,6 +41,7 @@ public class DevicePoolController : Controller
         ViewBag.SelectedCountry = effectiveCountry;
         ViewBag.SelectedCategoryId = categoryId;
         ViewBag.IsAdmin = _currentUser.IsAdmin;
+        ViewBag.CanEdit = _currentUser.CanEdit;
 
         if (string.IsNullOrEmpty(effectiveCountry))
         {
