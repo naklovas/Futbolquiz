@@ -32,8 +32,11 @@ function filterRows(inputEl, tableId) {
 // "Columns" show/hide dropdown, wired to a button/panel with matching IDs
 // (col-chooser-btn-<tableId> / col-chooser-panel-<tableId>). Column headers
 // need data-col="<key>" on both the <th> and its matching <td>s; cells
-// without data-col (e.g. the actions column) are always shown. Choice is
-// remembered per table via localStorage.
+// without data-col (e.g. the actions column) are always shown. A header can
+// add data-default-hidden="true" for extra/detail columns that should start
+// hidden the very first time a user opens this table (before they've saved
+// any preference of their own). Choice is remembered per table via
+// localStorage.
 function initColumnChooser(table) {
     var storageKey = table.getAttribute('data-colchooser');
     var btn = document.getElementById('col-chooser-btn-' + table.id);
@@ -41,8 +44,15 @@ function initColumnChooser(table) {
     var headerCells = table.querySelectorAll('thead th[data-col]');
     if (!storageKey || !btn || !panel || headerCells.length === 0) return;
 
+    var saved = localStorage.getItem(storageKey);
     var hidden = [];
-    try { hidden = JSON.parse(localStorage.getItem(storageKey) || '[]'); } catch (e) { hidden = []; }
+    if (saved === null) {
+        headerCells.forEach(function (th) {
+            if (th.getAttribute('data-default-hidden') === 'true') hidden.push(th.getAttribute('data-col'));
+        });
+    } else {
+        try { hidden = JSON.parse(saved); } catch (e) { hidden = []; }
+    }
 
     function applyVisibility() {
         headerCells.forEach(function (th) {

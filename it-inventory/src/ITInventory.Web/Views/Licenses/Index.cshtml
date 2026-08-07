@@ -79,6 +79,7 @@ else
                     <th data-col="supportStart" class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Support Start</th>
                     <th data-col="supportEnd" class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Support End</th>
                     <th data-col="expiration" class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">License Expiration</th>
+                    <th data-col="notes" data-default-hidden="true" class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Notes</th>
                     @if (canEdit)
                     {
                         <th class="px-4 py-3"></th>
@@ -100,6 +101,7 @@ else
                         <td data-col="supportStart" class="px-4 py-3 text-slate-700">@(item.SupportStartDate?.ToString("dd.MM.yyyy") ?? "-")</td>
                         <td data-col="supportEnd" class="px-4 py-3 text-slate-700">@(item.SupportEndDate?.ToString("dd.MM.yyyy") ?? "-")</td>
                         <td data-col="expiration" class="px-4 py-3 @(item.ExpirationDate.HasValue && item.ExpirationDate < DateTime.UtcNow ? "text-red-700 font-medium" : "text-slate-700")">@(item.ExpirationDate?.ToString("dd.MM.yyyy") ?? "-")</td>
+                        <td data-col="notes" class="px-4 py-3 text-slate-700 max-w-xs truncate" title="@item.Notes">@item.Notes</td>
                         @if (canEdit)
                         {
                             <td class="px-4 py-3 text-right whitespace-nowrap">
