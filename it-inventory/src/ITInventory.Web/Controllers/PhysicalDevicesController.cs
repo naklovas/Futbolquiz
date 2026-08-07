@@ -463,9 +463,10 @@ public class PhysicalDevicesController : Controller
         ViewBag.AllLocations = await _db.Locations.Where(l => l.IsActive)
             .Select(l => new { l.CountryId, l.Branch }).ToListAsync();
 
-        ViewBag.VendorOptions = await _db.PhysicalDevices
+        var vendors = await _db.PhysicalDevices
             .Where(d => d.VendorSupplier != null && d.VendorSupplier != "")
             .Select(d => d.VendorSupplier!).Distinct().OrderBy(v => v).ToListAsync();
+        ViewBag.VendorOptions = new SelectList(vendors);
 
         var brands = await _db.PhysicalDevices
             .Where(d => d.Brand != null && d.Brand != "")

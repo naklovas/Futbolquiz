@@ -363,8 +363,9 @@ public class LicensesController : Controller
         ViewBag.AllLocations = await _db.Locations.Where(l => l.IsActive)
             .Select(l => new { l.CountryId, l.Branch }).ToListAsync();
 
-        ViewBag.VendorOptions = await _db.Licenses
+        var vendors = await _db.Licenses
             .Where(l => l.VendorSupplier != null && l.VendorSupplier != "")
             .Select(l => l.VendorSupplier!).Distinct().OrderBy(v => v).ToListAsync();
+        ViewBag.VendorOptions = new SelectList(vendors);
     }
 }
