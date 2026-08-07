@@ -29,7 +29,9 @@ incelenip çalıştırılan SQL script tercih edildiği için ayrıca burada tut
 4. **004_test_countries_users.sql** — Test Login modu için `germany_test`/`bulgaria_test`
    (country_manager, ekleme/düzenleme yapabilir) ve `germany_view_test`
    (country_view_only, sadece görüntüler; ekleme/düzenleme/silme/Excel import yapamaz)
-   test kullanıcılarını seed eder. İdempotenttir.
+   test kullanıcılarını seed eder. Bu kullanıcılar **gerçek** `Almanya`/`Bulgaristan`
+   ülkelerine bağlanır (Ziraat_YD.RepositoryName ile eşleşen, Cihaz Havuzu'nun da
+   kullandığı satırlar) — ayrı bir test ülkesi oluşturulmaz (bkz. 010). İdempotenttir.
 
 5. **005_device_profile_displayname_and_category_names.sql** — `DeviceCategories.Name`
    değerlerini İngilizceye çevirir (Sunucu→Server vb.) ve `DeviceProfileCatalog`'a
@@ -38,23 +40,31 @@ incelenip çalıştırılan SQL script tercih edildiği için ayrıca burada tut
    sadece admin ekranındaki görünen isim değişir, Cihaz Havuzu eşleştirmesi bozulmaz.
    EF Core migration'ından üretildi, elle düzenlemeyin. Idempotenttir.
 
-8. **008_test_inventory_data.sql** — Germany ve Bulgaria için Physical Devices,
-   Licenses ve Circuits tablolarına örnek/demo veri ekler. Tüm cihaz adları ve
-   lisans adları `TEST-` ile başlar, Notes alanı da "Test data... Safe to
-   delete" yazar — gerçek veriyle karışmaz, `WHERE DeviceName LIKE N'TEST-%'`
-   (ve Licenses için aynısı) ile kolayca silinebilir. Bazı kayıtların
-   destek/lisans bitiş tarihleri yakın gelecekte, dashboard'daki "Upcoming
-   Expirations" uyarısında görünsünler diye. İdempotenttir.
+8. **008_test_inventory_data.sql** — Almanya ve Bulgaristan (gerçek ülke
+   satırları) için Physical Devices, Licenses ve Circuits tablolarına
+   örnek/demo veri ekler. Tüm cihaz adları ve lisans adları `TEST-` ile
+   başlar, Notes alanı da "Test data... Safe to delete" yazar — gerçek
+   veriyle karışmaz, `WHERE DeviceName LIKE N'TEST-%'` (ve Licenses için
+   aynısı) ile kolayca silinebilir. Bazı kayıtların destek/lisans bitiş
+   tarihleri yakın gelecekte, dashboard'daki "Upcoming Expirations"
+   uyarısında görünsünler diye. İdempotenttir.
 
 9. **009_fix_test_country_names_and_remove_china.sql** — Daha önce
    004/008'in ilk sürümünü çalıştırmış ortamlar için düzeltme scripti:
-   Germany/Bulgaria ülkelerinin `DisplayName` alanını doğru değere çeker
-   (`ZiraatBank AG International` / `ZiraatBank Bulgaria`) ve yanlışlıkla
-   eklenmiş olan China ülkesini + ona ait tüm test verisini (Physical
-   Devices, Licenses, Circuits) siler. 004 ve 008 zaten güncellendi (yeni
-   kurulumlarda China hiç oluşmaz, Germany/Bulgaria doğru isimle gelir); bu
-   script sadece daha önce eski sürümü çalıştırmış ortamlar içindir.
-   İdempotenttir.
+   yanlışlıkla eklenmiş olan China ülkesini + ona ait tüm test verisini
+   (Physical Devices, Licenses, Circuits) siler. İdempotenttir.
+
+10. **010_consolidate_test_countries_into_real.sql** — Daha da önceki bir
+    004 sürümü, Almanya/Bulgaristan'ın yanına ayrıca "Germany"/"Bulgaria"
+    adında ayrı test ülkeleri oluşturmuştu; bu da her ülke dropdown'ında
+    aynı görünen isimlerin (ör. "ZiraatBank AG International") iki kez
+    çıkmasına yol açtı. Bu script o ayrı test ülkelerine bağlı tüm verileri
+    (Physical Devices/Servers/Licenses/Circuits) gerçek Almanya/Bulgaristan
+    satırlarına taşır, test kullanıcılarının `RepositoryName` alanını buna
+    göre düzeltir ve artık kullanılmayan "Germany"/"Bulgaria" satırlarını
+    siler. 004 ve 008 zaten güncellendi (yeni kurulumlarda bu sorun hiç
+    oluşmaz); bu script sadece daha önce eski sürümleri çalıştırmış
+    ortamlar içindir. İdempotenttir.
 
 ## Bu scriptlerin DOKUNMADIĞI mevcut tablolar
 
