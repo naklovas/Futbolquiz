@@ -89,14 +89,14 @@
     </div>
     <div>
         <label asp-for="VendorSupplier" class="block text-sm font-medium text-slate-700 mb-1"></label>
-        <input asp-for="VendorSupplier" class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500" />
+        <input asp-for="VendorSupplier" id="VendorSupplier" autocomplete="off" class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500" />
     </div>
 </div>
 
 <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
     <div>
         <label asp-for="LicenceInfo" class="block text-sm font-medium text-slate-700 mb-1"></label>
-        <input asp-for="LicenceInfo" class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500" />
+        <input asp-for="LicenceInfo" id="LicenceInfo" autocomplete="off" class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500" />
     </div>
     <div>
         <label asp-for="StartOfSupportDate" class="block text-sm font-medium text-slate-700 mb-1"></label>
@@ -124,4 +124,6 @@
 
 <script>
     initBranchAutocomplete('Branch', @Html.Raw(Json.Serialize(ViewBag.AllLocations)));
+    initTextAutocomplete('VendorSupplier', @Html.Raw(Json.Serialize(ViewBag.VendorOptions)));
+    initTextAutocomplete('LicenceInfo', @Html.Raw(Json.Serialize(ViewBag.LicenceInfoOptions)));
 </script>

@@ -462,5 +462,12 @@ public class PhysicalDevicesController : Controller
         ViewBag.CategoryOptions = new SelectList(await _db.DeviceCategories.OrderBy(c => c.Name).ToListAsync(), "Id", "Name");
         ViewBag.AllLocations = await _db.Locations.Where(l => l.IsActive)
             .Select(l => new { l.CountryId, l.Branch }).ToListAsync();
+
+        ViewBag.VendorOptions = await _db.PhysicalDevices
+            .Where(d => d.VendorSupplier != null && d.VendorSupplier != "")
+            .Select(d => d.VendorSupplier!).Distinct().OrderBy(v => v).ToListAsync();
+        ViewBag.LicenceInfoOptions = await _db.PhysicalDevices
+            .Where(d => d.LicenceInfo != null && d.LicenceInfo != "")
+            .Select(d => d.LicenceInfo!).Distinct().OrderBy(v => v).ToListAsync();
     }
 }

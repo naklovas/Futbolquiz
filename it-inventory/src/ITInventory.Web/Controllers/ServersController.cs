@@ -426,5 +426,9 @@ public class ServersController : Controller
 
         ViewBag.AllLocations = await _db.Locations.Where(l => l.IsActive)
             .Select(l => new { l.CountryId, l.Branch }).ToListAsync();
+
+        ViewBag.VendorOptions = await _db.Servers
+            .Where(s => s.VendorSupplier != null && s.VendorSupplier != "")
+            .Select(s => s.VendorSupplier!).Distinct().OrderBy(v => v).ToListAsync();
     }
 }

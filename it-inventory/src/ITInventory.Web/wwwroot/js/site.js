@@ -68,6 +68,34 @@ function initBranchAutocomplete(inputId, locations) {
     refresh();
 }
 
+// Populates a <datalist> of suggestions for a free-text input from a flat
+// list of distinct values already used elsewhere in the same table (ex:
+// Vendor/Supplier, License Info) -- no separate lookup table involved, and
+// the field stays plain free text, just with suggestions as you type.
+function initTextAutocomplete(inputId, values) {
+    var input = document.getElementById(inputId);
+    if (!input) return;
+
+    var listId = inputId + '-suggest-datalist';
+    var datalist = document.getElementById(listId);
+    if (!datalist) {
+        datalist = document.createElement('datalist');
+        datalist.id = listId;
+        input.insertAdjacentElement('afterend', datalist);
+        input.setAttribute('list', listId);
+    }
+
+    datalist.innerHTML = '';
+    var seen = {};
+    (values || []).forEach(function (v) {
+        if (!v || seen[v]) return;
+        seen[v] = true;
+        var opt = document.createElement('option');
+        opt.value = v;
+        datalist.appendChild(opt);
+    });
+}
+
 function filterRows(inputEl, tableId) {
     var filter = inputEl.value.toLowerCase();
     var rows = document.querySelectorAll('#' + tableId + ' tbody tr');
