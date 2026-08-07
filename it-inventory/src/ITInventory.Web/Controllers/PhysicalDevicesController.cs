@@ -466,8 +466,15 @@ public class PhysicalDevicesController : Controller
         ViewBag.VendorOptions = await _db.PhysicalDevices
             .Where(d => d.VendorSupplier != null && d.VendorSupplier != "")
             .Select(d => d.VendorSupplier!).Distinct().OrderBy(v => v).ToListAsync();
-        ViewBag.LicenceInfoOptions = await _db.PhysicalDevices
+
+        var brands = await _db.PhysicalDevices
+            .Where(d => d.Brand != null && d.Brand != "")
+            .Select(d => d.Brand!).Distinct().OrderBy(v => v).ToListAsync();
+        ViewBag.BrandOptions = new SelectList(brands);
+
+        var licenceInfos = await _db.PhysicalDevices
             .Where(d => d.LicenceInfo != null && d.LicenceInfo != "")
             .Select(d => d.LicenceInfo!).Distinct().OrderBy(v => v).ToListAsync();
+        ViewBag.LicenceInfoOptions = new SelectList(licenceInfos);
     }
 }

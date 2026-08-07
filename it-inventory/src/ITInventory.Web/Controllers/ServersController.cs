@@ -430,5 +430,10 @@ public class ServersController : Controller
         ViewBag.VendorOptions = await _db.Servers
             .Where(s => s.VendorSupplier != null && s.VendorSupplier != "")
             .Select(s => s.VendorSupplier!).Distinct().OrderBy(v => v).ToListAsync();
+
+        var brands = await _db.Servers
+            .Where(s => s.Brand != null && s.Brand != "")
+            .Select(s => s.Brand!).Distinct().OrderBy(v => v).ToListAsync();
+        ViewBag.BrandOptions = new SelectList(brands);
     }
 }

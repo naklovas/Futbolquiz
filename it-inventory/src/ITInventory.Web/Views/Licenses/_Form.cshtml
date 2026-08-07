@@ -38,7 +38,9 @@
     </div>
     <div>
         <label asp-for="Branch" class="block text-sm font-medium text-slate-700 mb-1"></label>
-        <input asp-for="Branch" id="Branch" autocomplete="off" class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500" />
+        <select asp-for="Branch" id="Branch" class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
+            <option value="">-- Select --</option>
+        </select>
     </div>
     <div>
         <label asp-for="Location" class="block text-sm font-medium text-slate-700 mb-1"></label>
@@ -83,6 +85,6 @@
 </div>
 
 <script>
-    initBranchAutocomplete('Branch', @Html.Raw(Json.Serialize(ViewBag.AllLocations)));
+    initBranchCombobox('Branch', @Html.Raw(Json.Serialize(ViewBag.AllLocations)), @Html.Raw(Json.Serialize(Model.Branch)));
     initTextAutocomplete('VendorSupplier', @Html.Raw(Json.Serialize(ViewBag.VendorOptions)));
 </script>

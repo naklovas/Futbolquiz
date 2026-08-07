@@ -29,38 +29,51 @@ function hideLoadingOverlay() {
     if (overlay) overlay.classList.add('hidden');
 }
 
-// Populates a <datalist> of branch-name suggestions for a Branch <input>,
-// filtered to the currently selected Country. `locations` is an array of
-// { CountryId, Branch } for every active Location. Re-filters whenever the
-// #CountryId select/hidden-input changes, so it stays in sync with admin
-// users switching countries (and works unchanged for non-admins, whose
-// country never changes).
-function initBranchAutocomplete(inputId, locations) {
-    var input = document.getElementById(inputId);
-    if (!input) return;
-
-    var listId = inputId + '-locations-datalist';
-    var datalist = document.getElementById(listId);
-    if (!datalist) {
-        datalist = document.createElement('datalist');
-        datalist.id = listId;
-        input.insertAdjacentElement('afterend', datalist);
-        input.setAttribute('list', listId);
-    }
+// Turns a Branch <select> into a combobox of branch names scoped to the
+// currently selected Country. `locations` is an array of { CountryId, Branch }
+// for every active Location. Re-filters whenever the #CountryId select/hidden
+// input changes (and works unchanged for non-admins, whose country never
+// changes). `currentValue` is the value the field was bound to on page load
+// (Model.Branch) -- if it isn't in the filtered Locations list (legacy
+// free-text data, or a value for a different country), it's kept as an extra
+// selected option instead of being silently dropped.
+function initBranchCombobox(selectId, locations, currentValue) {
+    var select = document.getElementById(selectId);
+    if (!select) return;
+    var usedInitialValue = false;
 
     function refresh() {
         var countryField = document.getElementById('CountryId');
         var countryId = countryField ? parseInt(countryField.value, 10) : NaN;
-        datalist.innerHTML = '';
+        var value = usedInitialValue ? select.value : (currentValue || '');
+        usedInitialValue = true;
+
+        select.innerHTML = '';
+        var placeholder = document.createElement('option');
+        placeholder.value = '';
+        placeholder.textContent = '-- Select --';
+        select.appendChild(placeholder);
+
         var seen = {};
+        var matched = false;
         (locations || []).forEach(function (loc) {
             if (!isNaN(countryId) && loc.CountryId !== countryId) return;
             if (seen[loc.Branch]) return;
             seen[loc.Branch] = true;
             var opt = document.createElement('option');
             opt.value = loc.Branch;
-            datalist.appendChild(opt);
+            opt.textContent = loc.Branch;
+            if (loc.Branch === value) { opt.selected = true; matched = true; }
+            select.appendChild(opt);
         });
+
+        if (value && !matched) {
+            var extra = document.createElement('option');
+            extra.value = value;
+            extra.textContent = value;
+            extra.selected = true;
+            select.insertBefore(extra, select.children[1] || null);
+        }
     }
 
     var countryField = document.getElementById('CountryId');
