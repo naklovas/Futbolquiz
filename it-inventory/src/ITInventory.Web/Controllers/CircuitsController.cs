@@ -1,6 +1,7 @@
 using ClosedXML.Excel;
 using ITInventory.Data;
 using ITInventory.Data.Entities;
+using ITInventory.Web.Models;
 using ITInventory.Web.Models.Circuits;
 using ITInventory.Web.Models.Import;
 using ITInventory.Web.Services;
@@ -22,21 +23,36 @@ public class CircuitsController : Controller
         _currentUser = currentUser;
     }
 
-    public async Task<IActionResult> Index(int? countryId, int page = 1)
+    public async Task<IActionResult> Index(string? countryId, int page = 1)
     {
-        var query = _db.Circuits.Include(c => c.Country).AsQueryable();
+        var isAdmin = _currentUser.IsAdmin;
+        var viewAll = isAdmin && countryId == "all";
+        int? selectedCountryId = !viewAll && int.TryParse(countryId, out var parsedCountryId) ? parsedCountryId : null;
+        var requiresSelection = isAdmin && !viewAll && !selectedCountryId.HasValue;
 
-        if (!_currentUser.IsAdmin)
-            query = query.Where(c => c.CountryId == _currentUser.CountryId);
-        else if (countryId.HasValue)
-            query = query.Where(c => c.CountryId == countryId.Value);
+        PagedResult<Circuit> items;
+        if (requiresSelection)
+        {
+            items = new PagedResult<Circuit> { Items = Array.Empty<Circuit>(), PageNumber = 1, PageSize = PaginationExtensions.DefaultPageSize, TotalCount = 0 };
+        }
+        else
+        {
+            var query = _db.Circuits.Include(c => c.Country).AsQueryable();
 
-        var items = await query.OrderBy(c => c.Country!.Name).ThenBy(c => c.CircuitType).ToPagedResultAsync(page);
+            if (!isAdmin)
+                query = query.Where(c => c.CountryId == _currentUser.CountryId);
+            else if (selectedCountryId.HasValue)
+                query = query.Where(c => c.CountryId == selectedCountryId.Value);
+
+            items = await query.OrderBy(c => c.Country!.Name).ThenBy(c => c.CircuitType).ToPagedResultAsync(page);
+        }
 
         ViewBag.Countries = await _db.Countries.OrderBy(c => c.Name).ToListAsync();
-        ViewBag.SelectedCountryId = countryId;
+        ViewBag.SelectedCountryId = selectedCountryId;
+        ViewBag.ViewAll = viewAll;
+        ViewBag.RequiresSelection = requiresSelection;
         ViewBag.CanEdit = _currentUser.CanEdit;
-        ViewBag.IsAdmin = _currentUser.IsAdmin;
+        ViewBag.IsAdmin = isAdmin;
 
         return View(items);
     }

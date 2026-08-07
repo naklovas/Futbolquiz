@@ -5,6 +5,8 @@
     int? selectedCountryId = ViewBag.SelectedCountryId;
     bool canEdit = ViewBag.CanEdit;
     bool isAdmin = ViewBag.IsAdmin;
+    bool viewAll = ViewBag.ViewAll;
+    bool requiresSelection = ViewBag.RequiresSelection;
 }
 
 <div class="flex items-center justify-between mb-6">
@@ -27,7 +29,8 @@
     {
         <form method="get">
             <select name="countryId" onchange="this.form.submit()" class="rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
-                <option value="">All Countries</option>
+                <option value="" selected="@(requiresSelection)">-- Select Country --</option>
+                <option value="all" selected="@viewAll">All Countries</option>
                 @foreach (var c in countries)
                 {
                     <option value="@c.Id" selected="@(c.Id == selectedCountryId)">@(c.DisplayName ?? c.Name)</option>
@@ -42,7 +45,13 @@
     </div>
 </div>
 
-@if (!Model.Items.Any())
+@if (requiresSelection)
+{
+    <div class="bg-blue-50 border border-blue-200 text-blue-700 rounded-md px-4 py-3 text-sm">
+        <i class="fa-solid fa-circle-info mr-1.5"></i>Select a country above (or choose "All Countries") to view records.
+    </div>
+}
+else if (!Model.Items.Any())
 {
     <div class="text-center py-12 text-slate-400 bg-white rounded-lg border border-slate-200">
         <i class="fa-solid fa-inbox text-3xl mb-2"></i>

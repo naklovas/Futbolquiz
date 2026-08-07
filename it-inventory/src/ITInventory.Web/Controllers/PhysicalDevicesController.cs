@@ -1,6 +1,7 @@
 using ClosedXML.Excel;
 using ITInventory.Data;
 using ITInventory.Data.Entities;
+using ITInventory.Web.Models;
 using ITInventory.Web.Models.Import;
 using ITInventory.Web.Models.PhysicalDevices;
 using ITInventory.Web.Services;
@@ -22,31 +23,46 @@ public class PhysicalDevicesController : Controller
         _currentUser = currentUser;
     }
 
-    public async Task<IActionResult> Index(int? countryId, int? categoryId, int page = 1)
+    public async Task<IActionResult> Index(string? countryId, int? categoryId, int page = 1)
     {
-        var query = _db.PhysicalDevices
-            .Include(d => d.Country)
-            .Include(d => d.Category)
-            .AsQueryable();
+        var isAdmin = _currentUser.IsAdmin;
+        var viewAll = isAdmin && countryId == "all";
+        int? selectedCountryId = !viewAll && int.TryParse(countryId, out var parsedCountryId) ? parsedCountryId : null;
+        var requiresSelection = isAdmin && !viewAll && !selectedCountryId.HasValue;
 
-        if (!_currentUser.IsAdmin)
-            query = query.Where(d => d.CountryId == _currentUser.CountryId);
-        else if (countryId.HasValue)
-            query = query.Where(d => d.CountryId == countryId.Value);
+        PagedResult<PhysicalDevice> items;
+        if (requiresSelection)
+        {
+            items = new PagedResult<PhysicalDevice> { Items = Array.Empty<PhysicalDevice>(), PageNumber = 1, PageSize = PaginationExtensions.DefaultPageSize, TotalCount = 0 };
+        }
+        else
+        {
+            var query = _db.PhysicalDevices
+                .Include(d => d.Country)
+                .Include(d => d.Category)
+                .AsQueryable();
 
-        if (categoryId.HasValue)
-            query = query.Where(d => d.CategoryId == categoryId.Value);
+            if (!isAdmin)
+                query = query.Where(d => d.CountryId == _currentUser.CountryId);
+            else if (selectedCountryId.HasValue)
+                query = query.Where(d => d.CountryId == selectedCountryId.Value);
 
-        var items = await query
-            .OrderBy(d => d.Country!.Name).ThenBy(d => d.DeviceName)
-            .ToPagedResultAsync(page);
+            if (categoryId.HasValue)
+                query = query.Where(d => d.CategoryId == categoryId.Value);
+
+            items = await query
+                .OrderBy(d => d.Country!.Name).ThenBy(d => d.DeviceName)
+                .ToPagedResultAsync(page);
+        }
 
         ViewBag.Countries = await _db.Countries.OrderBy(c => c.Name).ToListAsync();
         ViewBag.Categories = await _db.DeviceCategories.OrderBy(c => c.Name).ToListAsync();
-        ViewBag.SelectedCountryId = countryId;
+        ViewBag.SelectedCountryId = selectedCountryId;
+        ViewBag.ViewAll = viewAll;
+        ViewBag.RequiresSelection = requiresSelection;
         ViewBag.SelectedCategoryId = categoryId;
         ViewBag.CanEdit = _currentUser.CanEdit;
-        ViewBag.IsAdmin = _currentUser.IsAdmin;
+        ViewBag.IsAdmin = isAdmin;
 
         return View(items);
     }
