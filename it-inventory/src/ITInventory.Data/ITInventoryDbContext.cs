@@ -21,6 +21,7 @@ public class ITInventoryDbContext : DbContext
     public DbSet<License> Licenses => Set<License>();
     public DbSet<Circuit> Circuits => Set<Circuit>();
     public DbSet<Company> Companies => Set<Company>();
+    public DbSet<OriginCountry> OriginCountries => Set<OriginCountry>();
     public DbSet<CompanyContact> CompanyContacts => Set<CompanyContact>();
     public DbSet<Application> Applications => Set<Application>();
 

@@ -15,9 +15,8 @@ public class CompanyFormViewModel
     [Display(Name = "Company Name")]
     public string Name { get; set; } = string.Empty;
 
-    [StringLength(150)]
     [Display(Name = "Country of Origin")]
-    public string? CountryOfOrigin { get; set; }
+    public int? OriginCountryId { get; set; }
 
     [Display(Name = "Active")]
     public bool IsActive { get; set; } = true;

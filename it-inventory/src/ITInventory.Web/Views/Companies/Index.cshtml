@@ -100,7 +100,7 @@ else
                             <td data-col="country" class="px-4 py-3 text-slate-700">@(item.Country?.DisplayName ?? item.Country?.Name)</td>
                         }
                         <td data-col="name" class="px-4 py-3 text-slate-700 font-medium">@item.Name</td>
-                        <td data-col="origin" class="px-4 py-3 text-slate-700">@item.CountryOfOrigin</td>
+                        <td data-col="origin" class="px-4 py-3 text-slate-700">@item.OriginCountry?.Name</td>
                         <td data-col="contacts" class="px-4 py-3 text-slate-500">
                             @if (item.Contacts.Any())
                             {

@@ -83,6 +83,15 @@ incelenip çalıştırılan SQL script tercih edildiği için ayrıca burada tut
     `__EFMigrationsHistory` kaydına göre zaten uygulanmış kısımları otomatik atlar).
     EF Core migration'ından üretildi, elle düzenlemeyin. İdempotenttir.
 
+13. **013_origin_countries.sql** — `OriginCountries` tablosunu oluşturur ve ~195
+    dünya ülkesiyle seed eder (admin ekranından "Origin Countries" altında
+    yönetilir). `Companies.CountryOfOrigin` (serbest metin) kolonunu kaldırıp
+    yerine `Companies.OriginCountryId` (OriginCountries'e FK, combo/dropdown)
+    kolonunu ekler; varsa mevcut serbest metin değerlerini isim eşleştirmesiyle
+    otomatik taşır. Bu script **011 ve 012'yi de içerir** (daha önce çalıştırıp
+    çalıştırmadığınızdan bağımsız olarak güvenle çalıştırılabilir).
+    EF Core migration'ından üretildi, elle düzenlemeyin. İdempotenttir.
+
 ## Bu scriptlerin DOKUNMADIĞI mevcut tablolar
 
 Aşağıdaki tablo bu proje tarafından oluşturulmaz; production'da başka bir

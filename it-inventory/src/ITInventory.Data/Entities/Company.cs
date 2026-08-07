@@ -15,8 +15,9 @@ public class Company : AuditableEntity
 
     public string Name { get; set; } = string.Empty;
 
-    /// <summary>Menşei ülkesi (serbest metin; firmanın kendi menşei, kurumun operasyon ülkesi değil).</summary>
-    public string? CountryOfOrigin { get; set; }
+    /// <summary>Menşei ülkesi (OriginCountries referans listesinden; firmanın kendi menşei, kurumun operasyon ülkesi değil).</summary>
+    public int? OriginCountryId { get; set; }
+    public OriginCountry? OriginCountry { get; set; }
 
     public bool IsActive { get; set; } = true;
 

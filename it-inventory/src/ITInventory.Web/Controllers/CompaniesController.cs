@@ -1,6 +1,5 @@
 using ITInventory.Data;
 using ITInventory.Data.Entities;
-using ITInventory.Web.Common;
 using ITInventory.Web.Models;
 using ITInventory.Web.Models.Companies;
 using ITInventory.Web.Services;
@@ -36,7 +35,7 @@ public class CompaniesController : Controller
         }
         else
         {
-            var query = _db.Companies.Include(c => c.Country).Include(c => c.Contacts).AsQueryable();
+            var query = _db.Companies.Include(c => c.Country).Include(c => c.OriginCountry).Include(c => c.Contacts).AsQueryable();
 
             if (!isAdmin)
                 query = query.Where(c => c.CountryId == _currentUser.CountryId);
@@ -64,7 +63,7 @@ public class CompaniesController : Controller
         int? selectedCountryId = !viewAll && int.TryParse(countryId, out var parsedCountryId) ? parsedCountryId : null;
         if (!viewAll && !selectedCountryId.HasValue) return BadRequest("Please select a country (or All Countries) first.");
 
-        var query = _db.Companies.Include(c => c.Country).Include(c => c.Contacts).AsQueryable();
+        var query = _db.Companies.Include(c => c.Country).Include(c => c.OriginCountry).Include(c => c.Contacts).AsQueryable();
         if (selectedCountryId.HasValue)
             query = query.Where(c => c.CountryId == selectedCountryId.Value);
 
@@ -75,7 +74,7 @@ public class CompaniesController : Controller
         {
             c.Country?.DisplayName ?? c.Country?.Name,
             c.Name,
-            c.CountryOfOrigin,
+            c.OriginCountry?.Name,
             string.Join(", ", c.Contacts.Select(x => x.PersonName ?? x.Title ?? x.Email ?? "(contact)")),
             c.IsActive ? "Yes" : "No"
         });
@@ -120,7 +119,7 @@ public class CompaniesController : Controller
         {
             CountryId = vm.CountryId,
             Name = vm.Name,
-            CountryOfOrigin = vm.CountryOfOrigin,
+            OriginCountryId = vm.OriginCountryId,
             IsActive = vm.IsActive,
             CreatedAt = DateTime.UtcNow,
             CreatedBy = _currentUser.Username
@@ -155,7 +154,7 @@ public class CompaniesController : Controller
             Id = company.Id,
             CountryId = company.CountryId,
             Name = company.Name,
-            CountryOfOrigin = company.CountryOfOrigin,
+            OriginCountryId = company.OriginCountryId,
             IsActive = company.IsActive,
             Contacts = company.Contacts.Select(c => new CompanyContactFormViewModel
             {
@@ -199,7 +198,7 @@ public class CompaniesController : Controller
 
         entity.CountryId = vm.CountryId;
         entity.Name = vm.Name;
-        entity.CountryOfOrigin = vm.CountryOfOrigin;
+        entity.OriginCountryId = vm.OriginCountryId;
         entity.IsActive = vm.IsActive;
         entity.UpdatedAt = DateTime.UtcNow;
         entity.UpdatedBy = _currentUser.Username;
@@ -277,6 +276,8 @@ public class CompaniesController : Controller
         var countries = await countriesQuery.Select(c => new { c.Id, Label = c.DisplayName ?? c.Name }).ToListAsync();
 
         ViewBag.CountryOptions = new SelectList(countries, "Id", "Label");
-        ViewBag.CountryOfOriginOptions = new SelectList(WorldCountryNames.All);
+
+        var originCountries = await _db.OriginCountries.Where(o => o.IsActive).OrderBy(o => o.Name).ToListAsync();
+        ViewBag.CountryOfOriginOptions = new SelectList(originCountries, "Id", "Name");
     }
 }
