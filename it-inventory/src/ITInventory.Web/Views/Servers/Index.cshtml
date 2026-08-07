@@ -35,7 +35,7 @@
     @if (isAdmin)
     {
         <form method="get">
-            <select name="countryId" onchange="this.form.submit()" class="rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
+            <select name="countryId" onchange="showLoadingOverlay(); this.form.submit();" class="rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
                 <option value="" selected="@(requiresSelection)">-- Select Country --</option>
                 <option value="all" selected="@viewAll">All Countries</option>
                 @foreach (var c in countries)

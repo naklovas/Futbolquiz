@@ -19,6 +19,16 @@ function closeConfirmModal() {
     if (modal) modal.classList.add('hidden');
 }
 
+function showLoadingOverlay() {
+    var overlay = document.getElementById('loading-overlay');
+    if (overlay) overlay.classList.remove('hidden');
+}
+
+function hideLoadingOverlay() {
+    var overlay = document.getElementById('loading-overlay');
+    if (overlay) overlay.classList.add('hidden');
+}
+
 function filterRows(inputEl, tableId) {
     var filter = inputEl.value.toLowerCase();
     var rows = document.querySelectorAll('#' + tableId + ' tbody tr');
@@ -119,4 +129,10 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     document.querySelectorAll('table[data-colchooser]').forEach(initColumnChooser);
+});
+
+// If the browser restores this page from back/forward cache (bfcache) with the
+// loading overlay still showing from just before navigating away, hide it.
+window.addEventListener('pageshow', function (e) {
+    if (e.persisted) hideLoadingOverlay();
 });

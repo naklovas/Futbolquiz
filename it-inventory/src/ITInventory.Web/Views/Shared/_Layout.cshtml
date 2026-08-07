@@ -144,6 +144,13 @@
         </div>
     </div>
 
+    <div id="loading-overlay" class="hidden fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center z-50">
+        <div class="bg-white rounded-lg shadow-xl px-8 py-6 flex flex-col items-center gap-3">
+            <i class="fa-solid fa-circle-notch fa-spin text-3xl text-brand-600"></i>
+            <p class="text-sm font-medium text-slate-700">Loading data...</p>
+        </div>
+    </div>
+
     <script src="~/js/site.js" asp-append-version="true"></script>
     @await RenderSectionAsync("Scripts", required: false)
 </body>

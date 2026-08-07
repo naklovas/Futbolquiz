@@ -27,7 +27,7 @@ else
         <form method="get" class="flex flex-wrap items-center gap-3">
             @if (isAdmin)
             {
-                <select name="country" onchange="this.form.submit()" class="rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
+                <select name="country" onchange="showLoadingOverlay(); this.form.submit();" class="rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
                     <option value="">-- Select Country --</option>
                     @foreach (var c in countries)
                     {
@@ -35,7 +35,7 @@ else
                     }
                 </select>
             }
-            <select name="categoryId" onchange="this.form.submit()" class="rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
+            <select name="categoryId" onchange="showLoadingOverlay(); this.form.submit();" class="rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
                 <option value="">All Categories</option>
                 @foreach (var cat in categories)
                 {

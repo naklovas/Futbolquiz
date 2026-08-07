@@ -23,7 +23,7 @@
             <div class="flex items-center gap-1">
                 @if (Model.HasPrevious)
                 {
-                    <a href="@PageUrl(Model.PageNumber - 1)" class="px-3 py-1.5 rounded-md border border-slate-300 hover:bg-slate-50 text-slate-700">
+                    <a href="@PageUrl(Model.PageNumber - 1)" onclick="showLoadingOverlay()" class="px-3 py-1.5 rounded-md border border-slate-300 hover:bg-slate-50 text-slate-700">
                         <i class="fa-solid fa-chevron-left"></i>
                     </a>
                 }
@@ -34,7 +34,7 @@
                 <span class="px-3 py-1.5 text-slate-700">Page @Model.PageNumber / @Model.TotalPages</span>
                 @if (Model.HasNext)
                 {
-                    <a href="@PageUrl(Model.PageNumber + 1)" class="px-3 py-1.5 rounded-md border border-slate-300 hover:bg-slate-50 text-slate-700">
+                    <a href="@PageUrl(Model.PageNumber + 1)" onclick="showLoadingOverlay()" class="px-3 py-1.5 rounded-md border border-slate-300 hover:bg-slate-50 text-slate-700">
                         <i class="fa-solid fa-chevron-right"></i>
                     </a>
                 }
