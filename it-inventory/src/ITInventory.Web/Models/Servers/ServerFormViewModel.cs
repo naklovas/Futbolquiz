@@ -16,6 +16,9 @@ public class ServerFormViewModel
 
     public int? SourceZiraatYdId { get; set; }
 
+    [Display(Name = "Application")]
+    public int? ApplicationId { get; set; }
+
     [Required(ErrorMessage = "Host name is required.")]
     [StringLength(255)]
     [Display(Name = "Host Name")]

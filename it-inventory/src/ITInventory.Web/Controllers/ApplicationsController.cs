@@ -1,9 +1,10 @@
 using ClosedXML.Excel;
 using ITInventory.Data;
+using ITInventory.Data.Common;
 using ITInventory.Data.Entities;
 using ITInventory.Web.Models;
+using ITInventory.Web.Models.Applications;
 using ITInventory.Web.Models.Import;
-using ITInventory.Web.Models.Licenses;
 using ITInventory.Web.Services;
 using ITInventory.Web.Services.Import;
 using Microsoft.AspNetCore.Mvc;
@@ -12,12 +13,12 @@ using Microsoft.EntityFrameworkCore;
 
 namespace ITInventory.Web.Controllers;
 
-public class LicensesController : Controller
+public class ApplicationsController : Controller
 {
     private readonly ITInventoryDbContext _db;
     private readonly ICurrentUserService _currentUser;
 
-    public LicensesController(ITInventoryDbContext db, ICurrentUserService currentUser)
+    public ApplicationsController(ITInventoryDbContext db, ICurrentUserService currentUser)
     {
         _db = db;
         _currentUser = currentUser;
@@ -30,21 +31,25 @@ public class LicensesController : Controller
         int? selectedCountryId = !viewAll && int.TryParse(countryId, out var parsedCountryId) ? parsedCountryId : null;
         var requiresSelection = isAdmin && !viewAll && !selectedCountryId.HasValue;
 
-        PagedResult<License> items;
+        PagedResult<Application> items;
         if (requiresSelection)
         {
-            items = new PagedResult<License> { Items = Array.Empty<License>(), PageNumber = 1, PageSize = PaginationExtensions.DefaultPageSize, TotalCount = 0 };
+            items = new PagedResult<Application> { Items = Array.Empty<Application>(), PageNumber = 1, PageSize = PaginationExtensions.DefaultPageSize, TotalCount = 0 };
         }
         else
         {
-            var query = _db.Licenses.Include(l => l.Country).Include(l => l.Company).AsQueryable();
+            var query = _db.Applications
+                .Include(a => a.Country)
+                .Include(a => a.Company)
+                .Include(a => a.License)
+                .AsQueryable();
 
             if (!isAdmin)
-                query = query.Where(l => l.CountryId == _currentUser.CountryId);
+                query = query.Where(a => a.CountryId == _currentUser.CountryId);
             else if (selectedCountryId.HasValue)
-                query = query.Where(l => l.CountryId == selectedCountryId.Value);
+                query = query.Where(a => a.CountryId == selectedCountryId.Value);
 
-            items = await query.OrderBy(l => l.Country!.Name).ThenBy(l => l.LicenseName).ToPagedResultAsync(page);
+            items = await query.OrderBy(a => a.Country!.Name).ThenBy(a => a.Name).ToPagedResultAsync(page);
         }
 
         ViewBag.Countries = await _db.Countries.OrderBy(c => c.Name).ToListAsync();
@@ -65,40 +70,39 @@ public class LicensesController : Controller
         int? selectedCountryId = !viewAll && int.TryParse(countryId, out var parsedCountryId) ? parsedCountryId : null;
         if (!viewAll && !selectedCountryId.HasValue) return BadRequest("Please select a country (or All Countries) first.");
 
-        var query = _db.Licenses.Include(l => l.Country).Include(l => l.Company).AsQueryable();
+        var query = _db.Applications.Include(a => a.Country).Include(a => a.Company).Include(a => a.License).AsQueryable();
         if (selectedCountryId.HasValue)
-            query = query.Where(l => l.CountryId == selectedCountryId.Value);
+            query = query.Where(a => a.CountryId == selectedCountryId.Value);
 
-        var items = await query.OrderBy(l => l.Country!.Name).ThenBy(l => l.LicenseName).ToListAsync();
+        var items = await query.OrderBy(a => a.Country!.Name).ThenBy(a => a.Name).ToListAsync();
 
         var headers = new[]
         {
-            "Country", "License Name", "Company", "Vendor/Supplier", "Branch", "Location",
-            "Support Start Date", "Support End Date", "License Expiration Date", "Notes"
+            "Country", "Application Name", "Company", "License", "Application Type",
+            "Externally Exposed?", "URL", "Cloud Application?", "Notes"
         };
-        var rows = items.Select(l => new object?[]
+        var rows = items.Select(a => new object?[]
         {
-            l.Country?.DisplayName ?? l.Country?.Name,
-            l.LicenseName,
-            l.Company?.Name,
-            l.VendorSupplier,
-            l.Branch,
-            l.Location,
-            l.SupportStartDate,
-            l.SupportEndDate,
-            l.ExpirationDate,
-            l.Notes
+            a.Country?.DisplayName ?? a.Country?.Name,
+            a.Name,
+            a.Company?.Name,
+            a.License?.LicenseName,
+            a.ApplicationType.ToString(),
+            a.IsExternallyExposed ? "Yes" : "No",
+            a.Url,
+            a.IsCloudApplication ? "Yes" : "No",
+            a.Notes
         });
 
-        var bytes = ExcelImportHelpers.CreateExportBytes("Licenses", headers, rows);
-        return File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", $"Licenses_Export_{DateTime.UtcNow:yyyyMMdd_HHmmss}.xlsx");
+        var bytes = ExcelImportHelpers.CreateExportBytes("Applications", headers, rows);
+        return File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", $"Applications_Export_{DateTime.UtcNow:yyyyMMdd_HHmmss}.xlsx");
     }
 
     public async Task<IActionResult> Create()
     {
         if (!_currentUser.CanEdit) return Forbid();
 
-        var vm = new LicenseFormViewModel
+        var vm = new ApplicationFormViewModel
         {
             CountryId = _currentUser.IsAdmin ? 0 : _currentUser.CountryId ?? 0
         };
@@ -109,7 +113,7 @@ public class LicensesController : Controller
 
     [HttpPost]
     [ValidateAntiForgeryToken]
-    public async Task<IActionResult> Create(LicenseFormViewModel vm)
+    public async Task<IActionResult> Create(ApplicationFormViewModel vm)
     {
         if (!_currentUser.CanEdit) return Forbid();
 
@@ -122,23 +126,22 @@ public class LicensesController : Controller
             return View(vm);
         }
 
-        var entity = new License
+        var entity = new Application
         {
             CountryId = vm.CountryId,
-            LicenseName = vm.LicenseName,
-            VendorSupplier = vm.VendorSupplier,
+            Name = vm.Name,
             CompanyId = vm.CompanyId,
-            Branch = vm.Branch,
-            Location = vm.Location,
-            SupportStartDate = vm.SupportStartDate,
-            SupportEndDate = vm.SupportEndDate,
-            ExpirationDate = vm.ExpirationDate,
+            LicenseId = vm.LicenseId,
+            ApplicationType = vm.ApplicationType,
+            IsExternallyExposed = vm.IsExternallyExposed,
+            Url = vm.Url,
+            IsCloudApplication = vm.IsCloudApplication,
             Notes = vm.Notes,
             CreatedAt = DateTime.UtcNow,
             CreatedBy = _currentUser.Username
         };
 
-        _db.Licenses.Add(entity);
+        _db.Applications.Add(entity);
         await _db.SaveChangesAsync();
         return RedirectToAction(nameof(Index));
     }
@@ -147,22 +150,21 @@ public class LicensesController : Controller
     {
         if (!_currentUser.CanEdit) return Forbid();
 
-        var entity = await _db.Licenses.FindAsync(id);
+        var entity = await _db.Applications.FindAsync(id);
         if (entity is null) return NotFound();
         if (!_currentUser.IsAdmin && entity.CountryId != _currentUser.CountryId) return Forbid();
 
-        var vm = new LicenseFormViewModel
+        var vm = new ApplicationFormViewModel
         {
             Id = entity.Id,
             CountryId = entity.CountryId,
-            LicenseName = entity.LicenseName,
-            VendorSupplier = entity.VendorSupplier,
+            Name = entity.Name,
             CompanyId = entity.CompanyId,
-            Branch = entity.Branch,
-            Location = entity.Location,
-            SupportStartDate = entity.SupportStartDate,
-            SupportEndDate = entity.SupportEndDate,
-            ExpirationDate = entity.ExpirationDate,
+            LicenseId = entity.LicenseId,
+            ApplicationType = entity.ApplicationType,
+            IsExternallyExposed = entity.IsExternallyExposed,
+            Url = entity.Url,
+            IsCloudApplication = entity.IsCloudApplication,
             Notes = entity.Notes
         };
 
@@ -172,12 +174,12 @@ public class LicensesController : Controller
 
     [HttpPost]
     [ValidateAntiForgeryToken]
-    public async Task<IActionResult> Edit(int id, LicenseFormViewModel vm)
+    public async Task<IActionResult> Edit(int id, ApplicationFormViewModel vm)
     {
         if (!_currentUser.CanEdit) return Forbid();
         if (id != vm.Id) return BadRequest();
 
-        var entity = await _db.Licenses.FindAsync(id);
+        var entity = await _db.Applications.FindAsync(id);
         if (entity is null) return NotFound();
         if (!_currentUser.IsAdmin && entity.CountryId != _currentUser.CountryId) return Forbid();
 
@@ -191,14 +193,13 @@ public class LicensesController : Controller
         }
 
         entity.CountryId = vm.CountryId;
-        entity.LicenseName = vm.LicenseName;
-        entity.VendorSupplier = vm.VendorSupplier;
+        entity.Name = vm.Name;
         entity.CompanyId = vm.CompanyId;
-        entity.Branch = vm.Branch;
-        entity.Location = vm.Location;
-        entity.SupportStartDate = vm.SupportStartDate;
-        entity.SupportEndDate = vm.SupportEndDate;
-        entity.ExpirationDate = vm.ExpirationDate;
+        entity.LicenseId = vm.LicenseId;
+        entity.ApplicationType = vm.ApplicationType;
+        entity.IsExternallyExposed = vm.IsExternallyExposed;
+        entity.Url = vm.Url;
+        entity.IsCloudApplication = vm.IsCloudApplication;
         entity.Notes = vm.Notes;
         entity.UpdatedAt = DateTime.UtcNow;
         entity.UpdatedBy = _currentUser.Username;
@@ -213,19 +214,28 @@ public class LicensesController : Controller
     {
         if (!_currentUser.CanEdit) return Forbid();
 
-        var entity = await _db.Licenses.FindAsync(id);
+        var entity = await _db.Applications.FindAsync(id);
         if (entity is null) return NotFound();
         if (!_currentUser.IsAdmin && entity.CountryId != _currentUser.CountryId) return Forbid();
 
-        _db.Licenses.Remove(entity);
-        await _db.SaveChangesAsync();
+        _db.Applications.Remove(entity);
+
+        try
+        {
+            await _db.SaveChangesAsync();
+        }
+        catch (DbUpdateException)
+        {
+            TempData["ImportError"] = "Could not delete because servers are linked to this application. Unlink them first.";
+        }
+
         return RedirectToAction(nameof(Index));
     }
 
     public async Task<IActionResult> Import()
     {
         if (!_currentUser.CanEdit) return Forbid();
-        ViewBag.EntityName = "Licenses";
+        ViewBag.EntityName = "Applications";
         await PopulateImportCountryInfo();
         return View("Import");
     }
@@ -234,11 +244,11 @@ public class LicensesController : Controller
     {
         if (!_currentUser.CanEdit) return Forbid();
 
-        var bytes = ExcelImportHelpers.CreateTemplateBytes("Licenses",
-            "License Name", "Vendor/Supplier", "Branch", "Location",
-            "Support Start Date", "Support End Date", "License Expiration Date", "Notes");
+        var bytes = ExcelImportHelpers.CreateTemplateBytes("Applications",
+            "Application Name", "Company", "License", "Application Type",
+            "Externally Exposed?", "URL", "Cloud Application?");
 
-        return File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "Licenses_Template.xlsx");
+        return File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "Applications_Template.xlsx");
     }
 
     [HttpPost]
@@ -267,8 +277,14 @@ public class LicensesController : Controller
             return RedirectToAction(nameof(Import));
         }
 
-        var result = new ImportResultViewModel { EntityName = "Licenses" };
-        var toAdd = new List<License>();
+        var companies = await _db.Companies.ToListAsync();
+        var companyLookup = companies.ToDictionary(c => c.Name, c => c, StringComparer.OrdinalIgnoreCase);
+
+        var licenses = await _db.Licenses.Where(l => l.CountryId == country.Id).ToListAsync();
+        var licenseLookup = licenses.ToDictionary(l => l.LicenseName, l => l, StringComparer.OrdinalIgnoreCase);
+
+        var result = new ImportResultViewModel { EntityName = "Applications" };
+        var toAdd = new List<Application>();
 
         using (var stream = new MemoryStream())
         {
@@ -283,32 +299,46 @@ public class LicensesController : Controller
             {
                 if (ExcelImportHelpers.IsRowEmpty(ws, row, headers)) continue;
 
-                var licenseName = ExcelImportHelpers.GetString(ws, row, headers, "License Name");
-                var location = ExcelImportHelpers.GetString(ws, row, headers, "Location");
-
-                if (string.IsNullOrEmpty(licenseName))
+                var name = ExcelImportHelpers.GetString(ws, row, headers, "Application Name");
+                if (string.IsNullOrEmpty(name))
                 {
-                    result.Errors.Add(new ImportRowError { RowNumber = row, Message = "License Name is required." });
+                    result.Errors.Add(new ImportRowError { RowNumber = row, Message = "Application Name is required." });
                     continue;
                 }
 
-                if (string.IsNullOrEmpty(location))
+                var companyName = ExcelImportHelpers.GetString(ws, row, headers, "Company");
+                Company? company = null;
+                if (!string.IsNullOrEmpty(companyName) && !companyLookup.TryGetValue(companyName, out company))
                 {
-                    result.Errors.Add(new ImportRowError { RowNumber = row, Message = "Location is required." });
+                    result.Errors.Add(new ImportRowError { RowNumber = row, Message = $"Company '{companyName}' not found." });
                     continue;
                 }
 
-                toAdd.Add(new License
+                var licenseName = ExcelImportHelpers.GetString(ws, row, headers, "License");
+                License? license = null;
+                if (!string.IsNullOrEmpty(licenseName) && !licenseLookup.TryGetValue(licenseName, out license))
+                {
+                    result.Errors.Add(new ImportRowError { RowNumber = row, Message = $"License '{licenseName}' not found for this country." });
+                    continue;
+                }
+
+                var typeRaw = ExcelImportHelpers.GetString(ws, row, headers, "Application Type");
+                if (!TryParseApplicationType(typeRaw, out var appType, out var typeError))
+                {
+                    result.Errors.Add(new ImportRowError { RowNumber = row, Message = typeError! });
+                    continue;
+                }
+
+                toAdd.Add(new Application
                 {
                     CountryId = country.Id,
-                    LicenseName = licenseName,
-                    VendorSupplier = ExcelImportHelpers.GetString(ws, row, headers, "Vendor/Supplier"),
-                    Branch = ExcelImportHelpers.GetString(ws, row, headers, "Branch"),
-                    Location = location,
-                    SupportStartDate = ExcelImportHelpers.GetDate(ws, row, headers, "Support Start Date"),
-                    SupportEndDate = ExcelImportHelpers.GetDate(ws, row, headers, "Support End Date"),
-                    ExpirationDate = ExcelImportHelpers.GetDate(ws, row, headers, "License Expiration Date"),
-                    Notes = ExcelImportHelpers.GetString(ws, row, headers, "Notes"),
+                    Name = name,
+                    CompanyId = company?.Id,
+                    LicenseId = license?.Id,
+                    ApplicationType = appType,
+                    IsExternallyExposed = ParseYesNo(ExcelImportHelpers.GetString(ws, row, headers, "Externally Exposed?")),
+                    Url = ExcelImportHelpers.GetString(ws, row, headers, "URL"),
+                    IsCloudApplication = ParseYesNo(ExcelImportHelpers.GetString(ws, row, headers, "Cloud Application?")),
                     CreatedAt = DateTime.UtcNow,
                     CreatedBy = _currentUser.Username
                 });
@@ -317,13 +347,40 @@ public class LicensesController : Controller
 
         if (toAdd.Count > 0)
         {
-            _db.Licenses.AddRange(toAdd);
+            _db.Applications.AddRange(toAdd);
             await _db.SaveChangesAsync();
         }
 
         result.SuccessCount = toAdd.Count;
         return View("ImportResult", result);
     }
+
+    private static bool TryParseApplicationType(string? raw, out ApplicationType value, out string? error)
+    {
+        error = null;
+        if (string.IsNullOrWhiteSpace(raw) || raw.Trim().Equals("Web", StringComparison.OrdinalIgnoreCase))
+        {
+            value = ApplicationType.Web;
+            return true;
+        }
+        if (raw.Trim().Equals("Mobile", StringComparison.OrdinalIgnoreCase))
+        {
+            value = ApplicationType.Mobile;
+            return true;
+        }
+        if (raw.Trim().Equals("Desktop", StringComparison.OrdinalIgnoreCase))
+        {
+            value = ApplicationType.Desktop;
+            return true;
+        }
+
+        value = ApplicationType.Web;
+        error = $"Unrecognized Application Type '{raw}' (expected 'Mobile', 'Web' or 'Desktop').";
+        return false;
+    }
+
+    private static bool ParseYesNo(string? raw) =>
+        !string.IsNullOrWhiteSpace(raw) && raw.Trim().Equals("Yes", StringComparison.OrdinalIgnoreCase);
 
     private async Task PopulateImportCountryInfo()
     {
@@ -350,10 +407,16 @@ public class LicensesController : Controller
             ? _db.Countries.Where(c => c.IsActive).OrderBy(c => c.Name)
             : _db.Countries.Where(c => c.Id == _currentUser.CountryId);
         var countries = await countriesQuery.Select(c => new { c.Id, Label = c.DisplayName ?? c.Name }).ToListAsync();
-
         ViewBag.CountryOptions = new SelectList(countries, "Id", "Label");
 
         var companies = await _db.Companies.Where(c => c.IsActive).OrderBy(c => c.Name).ToListAsync();
         ViewBag.CompanyOptions = new SelectList(companies, "Id", "Name");
+
+        var effectiveCountryId = _currentUser.IsAdmin ? (int?)null : _currentUser.CountryId;
+        var licensesQuery = _db.Licenses.AsQueryable();
+        if (effectiveCountryId.HasValue)
+            licensesQuery = licensesQuery.Where(l => l.CountryId == effectiveCountryId.Value);
+        var licenses = await licensesQuery.OrderBy(l => l.LicenseName).ToListAsync();
+        ViewBag.LicenseOptions = new SelectList(licenses, "Id", "LicenseName");
     }
 }

@@ -19,6 +19,9 @@ public class LicenseFormViewModel
     [Display(Name = "Vendor/Supplier")]
     public string? VendorSupplier { get; set; }
 
+    [Display(Name = "Company")]
+    public int? CompanyId { get; set; }
+
     [StringLength(150)]
     [Display(Name = "Branch")]
     public string? Branch { get; set; }

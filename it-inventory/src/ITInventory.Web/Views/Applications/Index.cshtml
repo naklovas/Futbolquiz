@@ -1,6 +1,6 @@
-@model ITInventory.Web.Models.PagedResult<ITInventory.Data.Entities.License>
+@model ITInventory.Web.Models.PagedResult<ITInventory.Data.Entities.Application>
 @{
-    ViewData["Title"] = "Licenses";
+    ViewData["Title"] = "Applications";
     var countries = (List<ITInventory.Data.Entities.Country>)ViewBag.Countries;
     int? selectedCountryId = ViewBag.SelectedCountryId;
     bool canEdit = ViewBag.CanEdit;
@@ -11,7 +11,7 @@
 }
 
 <div class="flex items-center justify-between mb-6">
-    <h2 class="text-xl font-semibold text-slate-900">Licenses</h2>
+    <h2 class="text-xl font-semibold text-slate-900">Applications</h2>
     <div class="flex gap-2">
         @if (isAdmin && !requiresSelection)
         {
@@ -25,7 +25,7 @@
                 <i class="fa-solid fa-file-excel"></i>Import from Excel
             </a>
             <a asp-action="Create" class="inline-flex items-center gap-2 bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium px-4 py-2 rounded-md">
-                <i class="fa-solid fa-plus"></i>Add New License
+                <i class="fa-solid fa-plus"></i>Add New Application
             </a>
         }
     </div>
@@ -48,10 +48,10 @@
     <div class="flex items-center gap-2 ml-auto">
         <div class="relative max-w-xs">
             <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm"></i>
-            <input type="text" oninput="filterRows(this, 'licenses-table')" placeholder="Search licenses..."
+            <input type="text" oninput="filterRows(this, 'applications-table')" placeholder="Search applications..."
                    class="w-full pl-9 pr-3 py-2 text-sm rounded-md border border-slate-300 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500" />
         </div>
-        @await Html.PartialAsync("_ColumnChooserButton", "licenses-table")
+        @await Html.PartialAsync("_ColumnChooserButton", "applications-table")
     </div>
 </div>
 
@@ -72,21 +72,20 @@ else
 {
     <div class="bg-white rounded-lg shadow-sm border border-slate-200">
     <div class="overflow-x-auto">
-        <table id="licenses-table" data-colchooser="colprefs:licenses" class="min-w-full divide-y divide-slate-200 text-sm">
+        <table id="applications-table" data-colchooser="colprefs:applications" class="min-w-full divide-y divide-slate-200 text-sm">
             <thead class="bg-slate-50">
                 <tr>
                     @if (isAdmin)
                     {
                         <th data-col="country" class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Country</th>
                     }
-                    <th data-col="licenseName" class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">License Name</th>
-                    <th data-col="vendor" class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Vendor/Supplier</th>
-                    <th data-col="company" data-default-hidden="true" class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Company</th>
-                    <th data-col="branch" class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Branch</th>
-                    <th data-col="location" class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Location</th>
-                    <th data-col="supportStart" class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Support Start</th>
-                    <th data-col="supportEnd" class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Support End</th>
-                    <th data-col="expiration" class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">License Expiration</th>
+                    <th data-col="name" class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Application Name</th>
+                    <th data-col="company" class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Company</th>
+                    <th data-col="license" class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">License</th>
+                    <th data-col="type" class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Type</th>
+                    <th data-col="external" class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Externally Exposed?</th>
+                    <th data-col="cloud" data-default-hidden="true" class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Cloud?</th>
+                    <th data-col="url" data-default-hidden="true" class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">URL</th>
                     <th data-col="notes" data-default-hidden="true" class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Notes</th>
                     @if (canEdit)
                     {
@@ -102,14 +101,27 @@ else
                         {
                             <td data-col="country" class="px-4 py-3 text-slate-700">@(item.Country?.DisplayName ?? item.Country?.Name)</td>
                         }
-                        <td data-col="licenseName" class="px-4 py-3 text-slate-700 font-medium">@item.LicenseName</td>
-                        <td data-col="vendor" class="px-4 py-3 text-slate-700">@item.VendorSupplier</td>
+                        <td data-col="name" class="px-4 py-3 text-slate-700 font-medium">@item.Name</td>
                         <td data-col="company" class="px-4 py-3 text-slate-700">@item.Company?.Name</td>
-                        <td data-col="branch" class="px-4 py-3 text-slate-700">@item.Branch</td>
-                        <td data-col="location" class="px-4 py-3 text-slate-700">@item.Location</td>
-                        <td data-col="supportStart" class="px-4 py-3 text-slate-700">@(item.SupportStartDate?.ToString("dd.MM.yyyy") ?? "-")</td>
-                        <td data-col="supportEnd" class="px-4 py-3 text-slate-700">@(item.SupportEndDate?.ToString("dd.MM.yyyy") ?? "-")</td>
-                        <td data-col="expiration" class="px-4 py-3 @(item.ExpirationDate.HasValue && item.ExpirationDate < DateTime.UtcNow ? "text-red-700 font-medium" : "text-slate-700")">@(item.ExpirationDate?.ToString("dd.MM.yyyy") ?? "-")</td>
+                        <td data-col="license" class="px-4 py-3 text-slate-700">@item.License?.LicenseName</td>
+                        <td data-col="type" class="px-4 py-3 text-slate-700">@item.ApplicationType</td>
+                        <td data-col="external" class="px-4 py-3">
+                            @if (item.IsExternallyExposed)
+                            {
+                                <span class="inline-flex items-center gap-1 text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full text-xs font-medium">Yes</span>
+                            }
+                            else
+                            {
+                                <span class="inline-flex items-center gap-1 text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full text-xs font-medium">No</span>
+                            }
+                        </td>
+                        <td data-col="cloud" class="px-4 py-3 text-slate-700">@(item.IsCloudApplication ? "Yes" : "No")</td>
+                        <td data-col="url" class="px-4 py-3 text-slate-700">
+                            @if (!string.IsNullOrEmpty(item.Url))
+                            {
+                                <a href="@item.Url" target="_blank" rel="noopener" class="text-brand-600 hover:underline">@item.Url</a>
+                            }
+                        </td>
                         <td data-col="notes" class="px-4 py-3 text-slate-700 max-w-xs truncate" title="@item.Notes">@item.Notes</td>
                         @if (canEdit)
                         {

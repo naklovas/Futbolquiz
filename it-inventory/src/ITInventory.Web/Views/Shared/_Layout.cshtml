@@ -43,6 +43,9 @@
                         <a asp-controller="Servers" asp-action="Index" onclick="showLoadingOverlay()" class="flex-shrink-0 whitespace-nowrap px-2.5 py-2 rounded-md text-sm font-medium text-slate-600 hover:text-brand-700 hover:bg-brand-50 transition">
                             <i class="fa-solid fa-database mr-1.5"></i>Servers
                         </a>
+                        <a asp-controller="Applications" asp-action="Index" onclick="showLoadingOverlay()" class="flex-shrink-0 whitespace-nowrap px-2.5 py-2 rounded-md text-sm font-medium text-slate-600 hover:text-brand-700 hover:bg-brand-50 transition">
+                            <i class="fa-solid fa-window-restore mr-1.5"></i>Applications
+                        </a>
                         <a asp-controller="Licenses" asp-action="Index" onclick="showLoadingOverlay()" class="flex-shrink-0 whitespace-nowrap px-2.5 py-2 rounded-md text-sm font-medium text-slate-600 hover:text-brand-700 hover:bg-brand-50 transition">
                             <i class="fa-solid fa-key mr-1.5"></i>Licenses
                         </a>
@@ -62,6 +65,7 @@
                                     <a asp-controller="AdminUsers" asp-action="Index" class="block px-4 py-2 text-sm text-slate-700 hover:bg-slate-100">Users</a>
                                     <a asp-controller="AdminCountries" asp-action="Index" class="block px-4 py-2 text-sm text-slate-700 hover:bg-slate-100">Countries</a>
                                     <a asp-controller="AdminDeviceProfiles" asp-action="Index" class="block px-4 py-2 text-sm text-slate-700 hover:bg-slate-100">Device Profiles</a>
+                                    <a asp-controller="AdminCompanies" asp-action="Index" class="block px-4 py-2 text-sm text-slate-700 hover:bg-slate-100">Companies</a>
                                 </div>
                             </div>
                         }
@@ -99,6 +103,7 @@
                 <div id="mobile-menu" class="hidden md:hidden pb-3 space-y-1">
                     <a asp-controller="PhysicalDevices" asp-action="Index" onclick="showLoadingOverlay()" class="block px-3 py-2 rounded-md text-sm font-medium text-slate-600 hover:text-brand-700 hover:bg-brand-50">Physical Devices</a>
                     <a asp-controller="Servers" asp-action="Index" onclick="showLoadingOverlay()" class="block px-3 py-2 rounded-md text-sm font-medium text-slate-600 hover:text-brand-700 hover:bg-brand-50">Servers</a>
+                    <a asp-controller="Applications" asp-action="Index" onclick="showLoadingOverlay()" class="block px-3 py-2 rounded-md text-sm font-medium text-slate-600 hover:text-brand-700 hover:bg-brand-50">Applications</a>
                     <a asp-controller="Licenses" asp-action="Index" onclick="showLoadingOverlay()" class="block px-3 py-2 rounded-md text-sm font-medium text-slate-600 hover:text-brand-700 hover:bg-brand-50">Licenses</a>
                     <a asp-controller="Circuits" asp-action="Index" onclick="showLoadingOverlay()" class="block px-3 py-2 rounded-md text-sm font-medium text-slate-600 hover:text-brand-700 hover:bg-brand-50">Circuits</a>
                     <a asp-controller="DevicePool" asp-action="Index" onclick="showLoadingOverlay()" class="block px-3 py-2 rounded-md text-sm font-medium text-slate-600 hover:text-brand-700 hover:bg-brand-50">Device Pool</a>
@@ -107,6 +112,7 @@
                         <a asp-controller="AdminUsers" asp-action="Index" class="block px-3 py-2 rounded-md text-sm font-medium text-slate-600 hover:text-brand-700 hover:bg-brand-50">Users</a>
                         <a asp-controller="AdminCountries" asp-action="Index" class="block px-3 py-2 rounded-md text-sm font-medium text-slate-600 hover:text-brand-700 hover:bg-brand-50">Countries</a>
                         <a asp-controller="AdminDeviceProfiles" asp-action="Index" class="block px-3 py-2 rounded-md text-sm font-medium text-slate-600 hover:text-brand-700 hover:bg-brand-50">Device Profiles</a>
+                        <a asp-controller="AdminCompanies" asp-action="Index" class="block px-3 py-2 rounded-md text-sm font-medium text-slate-600 hover:text-brand-700 hover:bg-brand-50">Companies</a>
                     }
                     <form asp-controller="Account" asp-action="Logout" method="post">
                         <button type="submit" class="w-full text-left px-3 py-2 rounded-md text-sm font-medium text-slate-600 hover:text-brand-700 hover:bg-brand-50">Log Out</button>

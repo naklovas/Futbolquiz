@@ -66,6 +66,14 @@ incelenip çalıştırılan SQL script tercih edildiği için ayrıca burada tut
     oluşmaz); bu script sadece daha önce eski sürümleri çalıştırmış
     ortamlar içindir. İdempotenttir.
 
+11. **011_companies_and_applications.sql** — `Companies`, `CompanyContacts` ve
+    `Applications` tablolarını oluşturur; `Servers.ApplicationId` (bir sunucunun
+    barındırdığı uygulama) ve `Licenses.CompanyId` (lisansı sağlayan firma)
+    kolonlarını ekler. `Companies` ülkeye bağlı değildir (Countries/DeviceCategories
+    gibi global bir referans listesidir), `Applications` ise diğer envanter
+    tabloları gibi ülkeye bağlıdır. EF Core migration'ından üretildi, elle
+    düzenlemeyin. İdempotenttir.
+
 ## Bu scriptlerin DOKUNMADIĞI mevcut tablolar
 
 Aşağıdaki tablo bu proje tarafından oluşturulmaz; production'da başka bir

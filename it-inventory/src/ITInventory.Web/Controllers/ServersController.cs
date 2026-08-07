@@ -37,7 +37,7 @@ public class ServersController : Controller
         }
         else
         {
-            var query = _db.Servers.Include(s => s.Country).AsQueryable();
+            var query = _db.Servers.Include(s => s.Country).Include(s => s.Application).AsQueryable();
 
             if (!isAdmin)
                 query = query.Where(s => s.CountryId == _currentUser.CountryId);
@@ -65,7 +65,7 @@ public class ServersController : Controller
         int? selectedCountryId = !viewAll && int.TryParse(countryId, out var parsedCountryId) ? parsedCountryId : null;
         if (!viewAll && !selectedCountryId.HasValue) return BadRequest("Please select a country (or All Countries) first.");
 
-        var query = _db.Servers.Include(s => s.Country).AsQueryable();
+        var query = _db.Servers.Include(s => s.Country).Include(s => s.Application).AsQueryable();
         if (selectedCountryId.HasValue)
             query = query.Where(s => s.CountryId == selectedCountryId.Value);
 
@@ -73,7 +73,7 @@ public class ServersController : Controller
 
         var headers = new[]
         {
-            "Country", "Host Name", "Physical/Virtual", "IP Address", "Operating System",
+            "Country", "Host Name", "Application", "Physical/Virtual", "IP Address", "Operating System",
             "Brand", "Model", "Serial Number", "Vendor/Supplier", "Port", "Branch", "Location",
             "Support Start Date", "Support End Date", "End of Life Date", "Notes"
         };
@@ -81,6 +81,7 @@ public class ServersController : Controller
         {
             s.Country?.DisplayName ?? s.Country?.Name,
             s.HostName,
+            s.Application?.Name,
             s.ApplianceType.ToString(),
             s.IpAddress,
             s.OperatingSystem,
@@ -151,6 +152,7 @@ public class ServersController : Controller
             CountryId = vm.CountryId,
             DeviceProfileId = vm.DeviceProfileId,
             SourceZiraatYdId = vm.SourceZiraatYdId,
+            ApplicationId = vm.ApplicationId,
             HostName = vm.HostName,
             ApplianceType = vm.ApplianceType,
             IpAddress = vm.IpAddress,
@@ -189,6 +191,7 @@ public class ServersController : Controller
             CountryId = entity.CountryId,
             DeviceProfileId = entity.DeviceProfileId,
             SourceZiraatYdId = entity.SourceZiraatYdId,
+            ApplicationId = entity.ApplicationId,
             HostName = entity.HostName,
             ApplianceType = entity.ApplianceType,
             IpAddress = entity.IpAddress,
@@ -231,6 +234,7 @@ public class ServersController : Controller
         }
 
         entity.CountryId = vm.CountryId;
+        entity.ApplicationId = vm.ApplicationId;
         entity.HostName = vm.HostName;
         entity.ApplianceType = vm.ApplianceType;
         entity.IpAddress = vm.IpAddress;
@@ -413,5 +417,11 @@ public class ServersController : Controller
         var countries = await countriesQuery.Select(c => new { c.Id, Label = c.DisplayName ?? c.Name }).ToListAsync();
 
         ViewBag.CountryOptions = new SelectList(countries, "Id", "Label");
+
+        var applicationsQuery = _currentUser.IsAdmin
+            ? _db.Applications.AsQueryable()
+            : _db.Applications.Where(a => a.CountryId == _currentUser.CountryId);
+        var applications = await applicationsQuery.OrderBy(a => a.Name).ToListAsync();
+        ViewBag.ApplicationOptions = new SelectList(applications, "Id", "Name");
     }
 }

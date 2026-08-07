@@ -20,6 +20,9 @@ public class ITInventoryDbContext : DbContext
     public DbSet<Server> Servers => Set<Server>();
     public DbSet<License> Licenses => Set<License>();
     public DbSet<Circuit> Circuits => Set<Circuit>();
+    public DbSet<Company> Companies => Set<Company>();
+    public DbSet<CompanyContact> CompanyContacts => Set<CompanyContact>();
+    public DbSet<Application> Applications => Set<Application>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

@@ -18,6 +18,10 @@ public class Server : AuditableEntity
 
     public int? SourceZiraatYdId { get; set; }
 
+    /// <summary>Bu sunucuda çalışan/barınan uygulama (Servers &amp; Applications ilişkisi).</summary>
+    public int? ApplicationId { get; set; }
+    public Application? Application { get; set; }
+
     public string HostName { get; set; } = string.Empty;
     public ApplianceType ApplianceType { get; set; }
     public string? IpAddress { get; set; }

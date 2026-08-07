@@ -35,6 +35,12 @@ public class ServerConfiguration : IEntityTypeConfiguration<Server>
             .HasForeignKey(x => x.DeviceProfileId)
             .OnDelete(DeleteBehavior.SetNull);
 
+        builder.HasOne(x => x.Application)
+            .WithMany(a => a.Servers)
+            .HasForeignKey(x => x.ApplicationId)
+            .OnDelete(DeleteBehavior.SetNull);
+
         builder.HasIndex(x => x.CountryId);
+        builder.HasIndex(x => x.ApplicationId);
     }
 }

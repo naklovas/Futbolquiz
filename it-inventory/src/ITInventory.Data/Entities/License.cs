@@ -11,6 +11,10 @@ public class License : AuditableEntity
 
     public string LicenseName { get; set; } = string.Empty;
     public string? VendorSupplier { get; set; }
+
+    /// <summary>Lisansı sağlayan firma (Companies tablosuna bağlantı; VendorSupplier serbest metni ile birlikte durur).</summary>
+    public int? CompanyId { get; set; }
+    public Company? Company { get; set; }
     public string? Branch { get; set; }
     public string Location { get; set; } = string.Empty;
 

@@ -1,6 +1,7 @@
 @model ITInventory.Web.Models.Servers.ServerFormViewModel
 @{
     var countryOptions = (Microsoft.AspNetCore.Mvc.Rendering.SelectList)ViewBag.CountryOptions;
+    var applicationOptions = (Microsoft.AspNetCore.Mvc.Rendering.SelectList)ViewBag.ApplicationOptions;
     bool isAdmin = ViewBag.IsAdmin ?? false;
 }
 
@@ -52,6 +53,16 @@
     <div>
         <label asp-for="OperatingSystem" class="block text-sm font-medium text-slate-700 mb-1"></label>
         <input asp-for="OperatingSystem" class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500" />
+    </div>
+</div>
+
+<div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+    <div>
+        <label asp-for="ApplicationId" class="block text-sm font-medium text-slate-700 mb-1"></label>
+        <select asp-for="ApplicationId" asp-items="applicationOptions" class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
+            <option value="">-- None --</option>
+        </select>
+        <p class="text-xs text-slate-400 mt-1">The application this server hosts, if any.</p>
     </div>
 </div>
 

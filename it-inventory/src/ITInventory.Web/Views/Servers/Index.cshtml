@@ -1,6 +1,6 @@
 @model ITInventory.Web.Models.PagedResult<ITInventory.Data.Entities.Server>
 @{
-    ViewData["Title"] = "Servers";
+    ViewData["Title"] = "Servers & Applications";
     var countries = (List<ITInventory.Data.Entities.Country>)ViewBag.Countries;
     int? selectedCountryId = ViewBag.SelectedCountryId;
     bool canEdit = ViewBag.CanEdit;
@@ -11,7 +11,7 @@
 }
 
 <div class="flex items-center justify-between mb-6">
-    <h2 class="text-xl font-semibold text-slate-900">Servers</h2>
+    <h2 class="text-xl font-semibold text-slate-900">Servers & Applications</h2>
     <div class="flex gap-2">
         @if (isAdmin && !requiresSelection)
         {
@@ -80,6 +80,7 @@ else
                         <th data-col="country" class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Country</th>
                     }
                     <th data-col="hostName" class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Host Name</th>
+                    <th data-col="application" class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Application</th>
                     <th data-col="applianceType" class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Physical/Virtual</th>
                     <th data-col="ip" class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">IP</th>
                     <th data-col="os" class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Operating System</th>
@@ -108,6 +109,7 @@ else
                             <td data-col="country" class="px-4 py-3 text-slate-700">@(item.Country?.DisplayName ?? item.Country?.Name)</td>
                         }
                         <td data-col="hostName" class="px-4 py-3 text-slate-700 font-medium">@item.HostName</td>
+                        <td data-col="application" class="px-4 py-3 text-slate-700">@item.Application?.Name</td>
                         <td data-col="applianceType" class="px-4 py-3 text-slate-700">@item.ApplianceType</td>
                         <td data-col="ip" class="px-4 py-3 text-slate-700 font-mono text-xs">@item.IpAddress</td>
                         <td data-col="os" class="px-4 py-3 text-slate-700">@item.OperatingSystem</td>
