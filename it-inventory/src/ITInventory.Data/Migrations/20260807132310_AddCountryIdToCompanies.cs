@@ -25,11 +25,16 @@ namespace ITInventory.Data.Migrations
 
             // Any pre-existing Company rows (created before this migration) get CountryId = 0,
             // which would violate the FK below. Backfill them to the first available country.
+            // Wrapped in EXEC(N'...') so SQL Server parses it at run time, after the ADD COLUMN
+            // above has actually executed -- referencing the new column directly here would fail
+            // to compile because the whole idempotent script runs as a single batch.
             migrationBuilder.Sql(@"
-                UPDATE dbo.Companies
-                SET CountryId = (SELECT TOP 1 Id FROM dbo.Countries ORDER BY Id)
-                WHERE CountryId = 0
-                  AND EXISTS (SELECT 1 FROM dbo.Countries);
+                EXEC(N'
+                    UPDATE dbo.Companies
+                    SET CountryId = (SELECT TOP 1 Id FROM dbo.Countries ORDER BY Id)
+                    WHERE CountryId = 0
+                      AND EXISTS (SELECT 1 FROM dbo.Countries);
+                ');
             ");
 
             migrationBuilder.CreateIndex(

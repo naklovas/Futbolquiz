@@ -180,10 +180,12 @@ IF NOT EXISTS (
 )
 BEGIN
 
-                    UPDATE dbo.Companies
-                    SET CountryId = (SELECT TOP 1 Id FROM dbo.Countries ORDER BY Id)
-                    WHERE CountryId = 0
-                      AND EXISTS (SELECT 1 FROM dbo.Countries);
+                    EXEC(N'
+                        UPDATE dbo.Companies
+                        SET CountryId = (SELECT TOP 1 Id FROM dbo.Countries ORDER BY Id)
+                        WHERE CountryId = 0
+                          AND EXISTS (SELECT 1 FROM dbo.Countries);
+                    ');
                 
 END;
 
