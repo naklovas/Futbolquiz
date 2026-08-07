@@ -38,10 +38,13 @@
             </select>
         </form>
     }
-    <div class="relative max-w-xs">
-        <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm"></i>
-        <input type="text" oninput="filterRows(this, 'licenses-table')" placeholder="Search licenses..."
-               class="w-full pl-9 pr-3 py-2 text-sm rounded-md border border-slate-300 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500" />
+    <div class="flex items-center gap-2 ml-auto">
+        <div class="relative max-w-xs">
+            <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm"></i>
+            <input type="text" oninput="filterRows(this, 'licenses-table')" placeholder="Search licenses..."
+                   class="w-full pl-9 pr-3 py-2 text-sm rounded-md border border-slate-300 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500" />
+        </div>
+        @await Html.PartialAsync("_ColumnChooserButton", "licenses-table")
     </div>
 </div>
 
@@ -62,20 +65,20 @@ else
 {
     <div class="bg-white rounded-lg shadow-sm border border-slate-200">
     <div class="overflow-x-auto">
-        <table id="licenses-table" class="min-w-full divide-y divide-slate-200 text-sm">
+        <table id="licenses-table" data-colchooser="colprefs:licenses" class="min-w-full divide-y divide-slate-200 text-sm">
             <thead class="bg-slate-50">
                 <tr>
                     @if (isAdmin)
                     {
-                        <th class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Country</th>
+                        <th data-col="country" class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Country</th>
                     }
-                    <th class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">License Name</th>
-                    <th class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Vendor/Supplier</th>
-                    <th class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Branch</th>
-                    <th class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Location</th>
-                    <th class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Support Start</th>
-                    <th class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Support End</th>
-                    <th class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">License Expiration</th>
+                    <th data-col="licenseName" class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">License Name</th>
+                    <th data-col="vendor" class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Vendor/Supplier</th>
+                    <th data-col="branch" class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Branch</th>
+                    <th data-col="location" class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Location</th>
+                    <th data-col="supportStart" class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Support Start</th>
+                    <th data-col="supportEnd" class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Support End</th>
+                    <th data-col="expiration" class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">License Expiration</th>
                     @if (canEdit)
                     {
                         <th class="px-4 py-3"></th>
@@ -88,15 +91,15 @@ else
                     <tr class="hover:bg-slate-50">
                         @if (isAdmin)
                         {
-                            <td class="px-4 py-3 text-slate-700">@(item.Country?.DisplayName ?? item.Country?.Name)</td>
+                            <td data-col="country" class="px-4 py-3 text-slate-700">@(item.Country?.DisplayName ?? item.Country?.Name)</td>
                         }
-                        <td class="px-4 py-3 text-slate-700 font-medium">@item.LicenseName</td>
-                        <td class="px-4 py-3 text-slate-700">@item.VendorSupplier</td>
-                        <td class="px-4 py-3 text-slate-700">@item.Branch</td>
-                        <td class="px-4 py-3 text-slate-700">@item.Location</td>
-                        <td class="px-4 py-3 text-slate-700">@(item.SupportStartDate?.ToString("dd.MM.yyyy") ?? "-")</td>
-                        <td class="px-4 py-3 text-slate-700">@(item.SupportEndDate?.ToString("dd.MM.yyyy") ?? "-")</td>
-                        <td class="px-4 py-3 @(item.ExpirationDate.HasValue && item.ExpirationDate < DateTime.UtcNow ? "text-red-700 font-medium" : "text-slate-700")">@(item.ExpirationDate?.ToString("dd.MM.yyyy") ?? "-")</td>
+                        <td data-col="licenseName" class="px-4 py-3 text-slate-700 font-medium">@item.LicenseName</td>
+                        <td data-col="vendor" class="px-4 py-3 text-slate-700">@item.VendorSupplier</td>
+                        <td data-col="branch" class="px-4 py-3 text-slate-700">@item.Branch</td>
+                        <td data-col="location" class="px-4 py-3 text-slate-700">@item.Location</td>
+                        <td data-col="supportStart" class="px-4 py-3 text-slate-700">@(item.SupportStartDate?.ToString("dd.MM.yyyy") ?? "-")</td>
+                        <td data-col="supportEnd" class="px-4 py-3 text-slate-700">@(item.SupportEndDate?.ToString("dd.MM.yyyy") ?? "-")</td>
+                        <td data-col="expiration" class="px-4 py-3 @(item.ExpirationDate.HasValue && item.ExpirationDate < DateTime.UtcNow ? "text-red-700 font-medium" : "text-slate-700")">@(item.ExpirationDate?.ToString("dd.MM.yyyy") ?? "-")</td>
                         @if (canEdit)
                         {
                             <td class="px-4 py-3 text-right whitespace-nowrap">

@@ -47,10 +47,13 @@
             }
         </select>
     </form>
-    <div class="relative max-w-xs ml-auto">
-        <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm"></i>
-        <input type="text" oninput="filterRows(this, 'devices-table')" placeholder="Search devices..."
-               class="w-full pl-9 pr-3 py-2 text-sm rounded-md border border-slate-300 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500" />
+    <div class="flex items-center gap-2 ml-auto">
+        <div class="relative max-w-xs">
+            <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm"></i>
+            <input type="text" oninput="filterRows(this, 'devices-table')" placeholder="Search devices..."
+                   class="w-full pl-9 pr-3 py-2 text-sm rounded-md border border-slate-300 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500" />
+        </div>
+        @await Html.PartialAsync("_ColumnChooserButton", "devices-table")
     </div>
 </div>
 
@@ -71,20 +74,20 @@ else
 {
     <div class="bg-white rounded-lg shadow-sm border border-slate-200">
     <div class="overflow-x-auto">
-        <table id="devices-table" class="min-w-full divide-y divide-slate-200 text-sm">
+        <table id="devices-table" data-colchooser="colprefs:physicaldevices" class="min-w-full divide-y divide-slate-200 text-sm">
             <thead class="bg-slate-50">
                 <tr>
                     @if (isAdmin)
                     {
-                        <th class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Country</th>
+                        <th data-col="country" class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Country</th>
                     }
-                    <th class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Category</th>
-                    <th class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Device Name</th>
-                    <th class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Brand/Model</th>
-                    <th class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Physical/Virtual</th>
-                    <th class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">IP</th>
-                    <th class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Location</th>
-                    <th class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Support End</th>
+                    <th data-col="category" class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Category</th>
+                    <th data-col="deviceName" class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Device Name</th>
+                    <th data-col="brandModel" class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Brand/Model</th>
+                    <th data-col="applianceType" class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Physical/Virtual</th>
+                    <th data-col="ip" class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">IP</th>
+                    <th data-col="location" class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Location</th>
+                    <th data-col="supportEnd" class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Support End</th>
                     @if (canEdit)
                     {
                         <th class="px-4 py-3"></th>
@@ -97,15 +100,15 @@ else
                     <tr class="hover:bg-slate-50">
                         @if (isAdmin)
                         {
-                            <td class="px-4 py-3 text-slate-700">@(item.Country?.DisplayName ?? item.Country?.Name)</td>
+                            <td data-col="country" class="px-4 py-3 text-slate-700">@(item.Country?.DisplayName ?? item.Country?.Name)</td>
                         }
-                        <td class="px-4 py-3 text-slate-700">@item.Category?.Name</td>
-                        <td class="px-4 py-3 text-slate-700 font-medium">@item.DeviceName</td>
-                        <td class="px-4 py-3 text-slate-700">@item.Brand @item.Model</td>
-                        <td class="px-4 py-3 text-slate-700">@item.ApplianceType</td>
-                        <td class="px-4 py-3 text-slate-700 font-mono text-xs">@item.IpAddress</td>
-                        <td class="px-4 py-3 text-slate-700">@item.Location</td>
-                        <td class="px-4 py-3 text-slate-700">@(item.EndOfSupportDate?.ToString("dd.MM.yyyy") ?? "-")</td>
+                        <td data-col="category" class="px-4 py-3 text-slate-700">@item.Category?.Name</td>
+                        <td data-col="deviceName" class="px-4 py-3 text-slate-700 font-medium">@item.DeviceName</td>
+                        <td data-col="brandModel" class="px-4 py-3 text-slate-700">@item.Brand @item.Model</td>
+                        <td data-col="applianceType" class="px-4 py-3 text-slate-700">@item.ApplianceType</td>
+                        <td data-col="ip" class="px-4 py-3 text-slate-700 font-mono text-xs">@item.IpAddress</td>
+                        <td data-col="location" class="px-4 py-3 text-slate-700">@item.Location</td>
+                        <td data-col="supportEnd" class="px-4 py-3 text-slate-700">@(item.EndOfSupportDate?.ToString("dd.MM.yyyy") ?? "-")</td>
                         @if (canEdit)
                         {
                             <td class="px-4 py-3 text-right whitespace-nowrap">

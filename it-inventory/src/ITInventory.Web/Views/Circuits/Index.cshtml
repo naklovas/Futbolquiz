@@ -38,10 +38,13 @@
             </select>
         </form>
     }
-    <div class="relative max-w-xs">
-        <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm"></i>
-        <input type="text" oninput="filterRows(this, 'circuits-table')" placeholder="Search circuits..."
-               class="w-full pl-9 pr-3 py-2 text-sm rounded-md border border-slate-300 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500" />
+    <div class="flex items-center gap-2 ml-auto">
+        <div class="relative max-w-xs">
+            <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm"></i>
+            <input type="text" oninput="filterRows(this, 'circuits-table')" placeholder="Search circuits..."
+                   class="w-full pl-9 pr-3 py-2 text-sm rounded-md border border-slate-300 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500" />
+        </div>
+        @await Html.PartialAsync("_ColumnChooserButton", "circuits-table")
     </div>
 </div>
 
@@ -62,19 +65,19 @@ else
 {
     <div class="bg-white rounded-lg shadow-sm border border-slate-200">
     <div class="overflow-x-auto">
-        <table id="circuits-table" class="min-w-full divide-y divide-slate-200 text-sm">
+        <table id="circuits-table" data-colchooser="colprefs:circuits" class="min-w-full divide-y divide-slate-200 text-sm">
             <thead class="bg-slate-50">
                 <tr>
                     @if (isAdmin)
                     {
-                        <th class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Country</th>
+                        <th data-col="country" class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Country</th>
                     }
-                    <th class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Circuit Type</th>
-                    <th class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Capacity</th>
-                    <th class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Provider</th>
-                    <th class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Branch</th>
-                    <th class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Location</th>
-                    <th class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">End Date</th>
+                    <th data-col="circuitType" class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Circuit Type</th>
+                    <th data-col="capacity" class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Capacity</th>
+                    <th data-col="provider" class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Provider</th>
+                    <th data-col="branch" class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Branch</th>
+                    <th data-col="location" class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Location</th>
+                    <th data-col="endDate" class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">End Date</th>
                     @if (canEdit)
                     {
                         <th class="px-4 py-3"></th>
@@ -87,14 +90,14 @@ else
                     <tr class="hover:bg-slate-50">
                         @if (isAdmin)
                         {
-                            <td class="px-4 py-3 text-slate-700">@(item.Country?.DisplayName ?? item.Country?.Name)</td>
+                            <td data-col="country" class="px-4 py-3 text-slate-700">@(item.Country?.DisplayName ?? item.Country?.Name)</td>
                         }
-                        <td class="px-4 py-3 text-slate-700">@item.CircuitType</td>
-                        <td class="px-4 py-3 text-slate-700">@item.CircuitCapacity</td>
-                        <td class="px-4 py-3 text-slate-700">@item.Provider</td>
-                        <td class="px-4 py-3 text-slate-700">@item.Branch</td>
-                        <td class="px-4 py-3 text-slate-700">@item.Location</td>
-                        <td class="px-4 py-3 text-slate-700">@(item.EndDate?.ToString("dd.MM.yyyy") ?? "-")</td>
+                        <td data-col="circuitType" class="px-4 py-3 text-slate-700">@item.CircuitType</td>
+                        <td data-col="capacity" class="px-4 py-3 text-slate-700">@item.CircuitCapacity</td>
+                        <td data-col="provider" class="px-4 py-3 text-slate-700">@item.Provider</td>
+                        <td data-col="branch" class="px-4 py-3 text-slate-700">@item.Branch</td>
+                        <td data-col="location" class="px-4 py-3 text-slate-700">@item.Location</td>
+                        <td data-col="endDate" class="px-4 py-3 text-slate-700">@(item.EndDate?.ToString("dd.MM.yyyy") ?? "-")</td>
                         @if (canEdit)
                         {
                             <td class="px-4 py-3 text-right whitespace-nowrap">
