@@ -69,10 +69,19 @@ incelenip çalıştırılan SQL script tercih edildiği için ayrıca burada tut
 11. **011_companies_and_applications.sql** — `Companies`, `CompanyContacts` ve
     `Applications` tablolarını oluşturur; `Servers.ApplicationId` (bir sunucunun
     barındırdığı uygulama) ve `Licenses.CompanyId` (lisansı sağlayan firma)
-    kolonlarını ekler. `Companies` ülkeye bağlı değildir (Countries/DeviceCategories
-    gibi global bir referans listesidir), `Applications` ise diğer envanter
-    tabloları gibi ülkeye bağlıdır. EF Core migration'ından üretildi, elle
-    düzenlemeyin. İdempotenttir.
+    kolonlarını ekler. Bu sürümde `Companies` global/ülkeye bağlı olmayan bir liste
+    olarak tasarlanmıştı — **012 ile bu karar değişti**, bkz. aşağı. EF Core
+    migration'ından üretildi, elle düzenlemeyin. İdempotenttir.
+
+12. **012_companies_country_scope.sql** — `Companies` tablosunu da diğer envanter
+    tabloları (PhysicalDevices/Servers/Licenses/Circuits) gibi ülkeye bağlı hale
+    getirir: `CountryId` kolonu + `Countries` FK eklenir, isim tekilliği artık
+    ülke bazında kontrol edilir (`Name`+`CountryId`). Her kurum/ülke artık kendi
+    firma listesini kendi görüntüleyip yönetir; admin dropdown'undaki "Companies"
+    linki kaldırılıp ana menüye taşındı. Bu script **011'i de içerir** (011'i daha
+    önce çalıştırıp çalıştırmadığınızdan bağımsız olarak güvenle çalıştırılabilir —
+    `__EFMigrationsHistory` kaydına göre zaten uygulanmış kısımları otomatik atlar).
+    EF Core migration'ından üretildi, elle düzenlemeyin. İdempotenttir.
 
 ## Bu scriptlerin DOKUNMADIĞI mevcut tablolar
 

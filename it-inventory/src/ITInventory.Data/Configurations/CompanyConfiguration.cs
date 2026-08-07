@@ -16,6 +16,11 @@ public class CompanyConfiguration : IEntityTypeConfiguration<Company>
         builder.Property(x => x.CreatedBy).HasMaxLength(100);
         builder.Property(x => x.UpdatedBy).HasMaxLength(100);
 
-        builder.HasIndex(x => x.Name).IsUnique();
+        builder.HasOne(x => x.Country)
+            .WithMany()
+            .HasForeignKey(x => x.CountryId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasIndex(x => new { x.Name, x.CountryId }).IsUnique();
     }
 }

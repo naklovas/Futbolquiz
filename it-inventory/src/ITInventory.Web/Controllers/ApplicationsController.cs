@@ -409,10 +409,14 @@ public class ApplicationsController : Controller
         var countries = await countriesQuery.Select(c => new { c.Id, Label = c.DisplayName ?? c.Name }).ToListAsync();
         ViewBag.CountryOptions = new SelectList(countries, "Id", "Label");
 
-        var companies = await _db.Companies.Where(c => c.IsActive).OrderBy(c => c.Name).ToListAsync();
+        var effectiveCountryId = _currentUser.IsAdmin ? (int?)null : _currentUser.CountryId;
+
+        var companiesQuery = _db.Companies.Where(c => c.IsActive);
+        if (effectiveCountryId.HasValue)
+            companiesQuery = companiesQuery.Where(c => c.CountryId == effectiveCountryId.Value);
+        var companies = await companiesQuery.OrderBy(c => c.Name).ToListAsync();
         ViewBag.CompanyOptions = new SelectList(companies, "Id", "Name");
 
-        var effectiveCountryId = _currentUser.IsAdmin ? (int?)null : _currentUser.CountryId;
         var licensesQuery = _db.Licenses.AsQueryable();
         if (effectiveCountryId.HasValue)
             licensesQuery = licensesQuery.Where(l => l.CountryId == effectiveCountryId.Value);

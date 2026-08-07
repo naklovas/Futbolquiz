@@ -1,10 +1,14 @@
 using System.ComponentModel.DataAnnotations;
 
-namespace ITInventory.Web.Models.Admin;
+namespace ITInventory.Web.Models.Companies;
 
 public class CompanyFormViewModel
 {
     public int Id { get; set; }
+
+    [Required(ErrorMessage = "Country is required.")]
+    [Display(Name = "Country")]
+    public int CountryId { get; set; }
 
     [Required(ErrorMessage = "Company name is required.")]
     [StringLength(200)]

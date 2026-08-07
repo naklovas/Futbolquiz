@@ -353,7 +353,11 @@ public class LicensesController : Controller
 
         ViewBag.CountryOptions = new SelectList(countries, "Id", "Label");
 
-        var companies = await _db.Companies.Where(c => c.IsActive).OrderBy(c => c.Name).ToListAsync();
+        var effectiveCountryId = _currentUser.IsAdmin ? (int?)null : _currentUser.CountryId;
+        var companiesQuery = _db.Companies.Where(c => c.IsActive);
+        if (effectiveCountryId.HasValue)
+            companiesQuery = companiesQuery.Where(c => c.CountryId == effectiveCountryId.Value);
+        var companies = await companiesQuery.OrderBy(c => c.Name).ToListAsync();
         ViewBag.CompanyOptions = new SelectList(companies, "Id", "Name");
     }
 }

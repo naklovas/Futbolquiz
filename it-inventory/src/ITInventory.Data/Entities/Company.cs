@@ -3,16 +3,19 @@ using ITInventory.Data.Common;
 namespace ITInventory.Data.Entities;
 
 /// <summary>
-/// Firma/tedarikçi referans kaydı (Fortinet, Microsoft vb.). Ülkeye bağlı değildir,
-/// tüm ülkelerde ortak kullanılan global bir liste (Countries/DeviceCategories gibi).
+/// Firma/tedarikçi referans kaydı (Fortinet, Microsoft vb.). Diğer envanter kayıtları gibi
+/// ülkeye bağlıdır (CountryId) — her kurum/ülke kendi firma listesini yönetir.
 /// </summary>
 public class Company : AuditableEntity
 {
     public int Id { get; set; }
 
+    public int CountryId { get; set; }
+    public Country? Country { get; set; }
+
     public string Name { get; set; } = string.Empty;
 
-    /// <summary>Menşei ülkesi (serbest metin; bankanın operasyon ülkeleri ile ilgisi yoktur).</summary>
+    /// <summary>Menşei ülkesi (serbest metin; firmanın kendi menşei, kurumun operasyon ülkesi değil).</summary>
     public string? CountryOfOrigin { get; set; }
 
     public bool IsActive { get; set; } = true;
