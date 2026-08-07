@@ -1,5 +1,6 @@
 using ITInventory.Data;
 using ITInventory.Data.Entities;
+using ITInventory.Web.Common;
 using ITInventory.Web.Models;
 using ITInventory.Web.Models.Companies;
 using ITInventory.Web.Services;
@@ -276,5 +277,6 @@ public class CompaniesController : Controller
         var countries = await countriesQuery.Select(c => new { c.Id, Label = c.DisplayName ?? c.Name }).ToListAsync();
 
         ViewBag.CountryOptions = new SelectList(countries, "Id", "Label");
+        ViewBag.CountryOfOriginOptions = new SelectList(WorldCountryNames.All);
     }
 }
