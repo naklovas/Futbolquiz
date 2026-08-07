@@ -57,6 +57,50 @@ public class ServersController : Controller
         return View(items);
     }
 
+    public async Task<IActionResult> Export(string? countryId)
+    {
+        if (!_currentUser.IsAdmin) return Forbid();
+
+        var viewAll = countryId == "all";
+        int? selectedCountryId = !viewAll && int.TryParse(countryId, out var parsedCountryId) ? parsedCountryId : null;
+        if (!viewAll && !selectedCountryId.HasValue) return BadRequest("Please select a country (or All Countries) first.");
+
+        var query = _db.Servers.Include(s => s.Country).AsQueryable();
+        if (selectedCountryId.HasValue)
+            query = query.Where(s => s.CountryId == selectedCountryId.Value);
+
+        var items = await query.OrderBy(s => s.Country!.Name).ThenBy(s => s.HostName).ToListAsync();
+
+        var headers = new[]
+        {
+            "Country", "Host Name", "Physical/Virtual", "IP Address", "Operating System",
+            "Brand", "Model", "Serial Number", "Vendor/Supplier", "Port", "Branch", "Location",
+            "Support Start Date", "Support End Date", "End of Life Date", "Notes"
+        };
+        var rows = items.Select(s => new object?[]
+        {
+            s.Country?.DisplayName ?? s.Country?.Name,
+            s.HostName,
+            s.ApplianceType.ToString(),
+            s.IpAddress,
+            s.OperatingSystem,
+            s.Brand,
+            s.Model,
+            s.SerialNo,
+            s.VendorSupplier,
+            s.Port,
+            s.Branch,
+            s.Location,
+            s.StartOfSupportDate,
+            s.EndOfSupportDate,
+            s.EndOfLifeDate,
+            s.Notes
+        });
+
+        var bytes = ExcelImportHelpers.CreateExportBytes("Servers", headers, rows);
+        return File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", $"Servers_Export_{DateTime.UtcNow:yyyyMMdd_HHmmss}.xlsx");
+    }
+
     public async Task<IActionResult> Create(bool fromPool = false, int? sourceId = null, int? countryId = null)
     {
         if (!_currentUser.CanEdit) return Forbid();

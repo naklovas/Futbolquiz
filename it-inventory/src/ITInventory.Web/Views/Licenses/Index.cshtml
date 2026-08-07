@@ -7,21 +7,28 @@
     bool isAdmin = ViewBag.IsAdmin;
     bool viewAll = ViewBag.ViewAll;
     bool requiresSelection = ViewBag.RequiresSelection;
+    string? exportCountryId = viewAll ? "all" : selectedCountryId?.ToString();
 }
 
 <div class="flex items-center justify-between mb-6">
     <h2 class="text-xl font-semibold text-slate-900">Licenses</h2>
-    @if (canEdit)
-    {
-        <div class="flex gap-2">
+    <div class="flex gap-2">
+        @if (isAdmin && !requiresSelection)
+        {
+            <a asp-action="Export" asp-route-countryId="@exportCountryId" class="inline-flex items-center gap-2 border border-slate-300 text-slate-700 hover:bg-slate-50 text-sm font-medium px-4 py-2 rounded-md">
+                <i class="fa-solid fa-file-arrow-down"></i>Export to Excel
+            </a>
+        }
+        @if (canEdit)
+        {
             <a asp-action="Import" class="inline-flex items-center gap-2 border border-slate-300 text-slate-700 hover:bg-slate-50 text-sm font-medium px-4 py-2 rounded-md">
                 <i class="fa-solid fa-file-excel"></i>Import from Excel
             </a>
             <a asp-action="Create" class="inline-flex items-center gap-2 bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium px-4 py-2 rounded-md">
                 <i class="fa-solid fa-plus"></i>Add New License
             </a>
-        </div>
-    }
+        }
+    </div>
 </div>
 
 <div class="flex flex-wrap items-center gap-3 mb-4">

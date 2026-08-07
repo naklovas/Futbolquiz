@@ -57,6 +57,42 @@ public class LicensesController : Controller
         return View(items);
     }
 
+    public async Task<IActionResult> Export(string? countryId)
+    {
+        if (!_currentUser.IsAdmin) return Forbid();
+
+        var viewAll = countryId == "all";
+        int? selectedCountryId = !viewAll && int.TryParse(countryId, out var parsedCountryId) ? parsedCountryId : null;
+        if (!viewAll && !selectedCountryId.HasValue) return BadRequest("Please select a country (or All Countries) first.");
+
+        var query = _db.Licenses.Include(l => l.Country).AsQueryable();
+        if (selectedCountryId.HasValue)
+            query = query.Where(l => l.CountryId == selectedCountryId.Value);
+
+        var items = await query.OrderBy(l => l.Country!.Name).ThenBy(l => l.LicenseName).ToListAsync();
+
+        var headers = new[]
+        {
+            "Country", "License Name", "Vendor/Supplier", "Branch", "Location",
+            "Support Start Date", "Support End Date", "License Expiration Date", "Notes"
+        };
+        var rows = items.Select(l => new object?[]
+        {
+            l.Country?.DisplayName ?? l.Country?.Name,
+            l.LicenseName,
+            l.VendorSupplier,
+            l.Branch,
+            l.Location,
+            l.SupportStartDate,
+            l.SupportEndDate,
+            l.ExpirationDate,
+            l.Notes
+        });
+
+        var bytes = ExcelImportHelpers.CreateExportBytes("Licenses", headers, rows);
+        return File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", $"Licenses_Export_{DateTime.UtcNow:yyyyMMdd_HHmmss}.xlsx");
+    }
+
     public async Task<IActionResult> Create()
     {
         if (!_currentUser.CanEdit) return Forbid();

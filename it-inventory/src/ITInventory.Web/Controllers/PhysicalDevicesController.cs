@@ -67,6 +67,55 @@ public class PhysicalDevicesController : Controller
         return View(items);
     }
 
+    public async Task<IActionResult> Export(string? countryId, int? categoryId)
+    {
+        if (!_currentUser.IsAdmin) return Forbid();
+
+        var viewAll = countryId == "all";
+        int? selectedCountryId = !viewAll && int.TryParse(countryId, out var parsedCountryId) ? parsedCountryId : null;
+        if (!viewAll && !selectedCountryId.HasValue) return BadRequest("Please select a country (or All Countries) first.");
+
+        var query = _db.PhysicalDevices.Include(d => d.Country).Include(d => d.Category).AsQueryable();
+        if (selectedCountryId.HasValue)
+            query = query.Where(d => d.CountryId == selectedCountryId.Value);
+        if (categoryId.HasValue)
+            query = query.Where(d => d.CategoryId == categoryId.Value);
+
+        var items = await query.OrderBy(d => d.Country!.Name).ThenBy(d => d.DeviceName).ToListAsync();
+
+        var headers = new[]
+        {
+            "Country", "Category", "Device Name", "Brand", "Model", "Physical/Virtual",
+            "Software Version", "Serial Number", "IP Address", "Management IP", "Branch",
+            "Location", "Vendor/Supplier", "License Info", "Support Start Date", "Support End Date",
+            "End of Life Date", "Notes"
+        };
+        var rows = items.Select(d => new object?[]
+        {
+            d.Country?.DisplayName ?? d.Country?.Name,
+            d.Category?.Name,
+            d.DeviceName,
+            d.Brand,
+            d.Model,
+            d.ApplianceType.ToString(),
+            d.SoftwareVersion,
+            d.SerialNo,
+            d.IpAddress,
+            d.MgmtIp,
+            d.Branch,
+            d.Location,
+            d.VendorSupplier,
+            d.LicenceInfo,
+            d.StartOfSupportDate,
+            d.EndOfSupportDate,
+            d.EndOfLifeDate,
+            d.Notes
+        });
+
+        var bytes = ExcelImportHelpers.CreateExportBytes("Physical Devices", headers, rows);
+        return File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", $"PhysicalDevices_Export_{DateTime.UtcNow:yyyyMMdd_HHmmss}.xlsx");
+    }
+
     public async Task<IActionResult> Create(bool fromPool = false, int? sourceId = null, int? countryId = null, int? categoryId = null)
     {
         if (!_currentUser.CanEdit) return Forbid();

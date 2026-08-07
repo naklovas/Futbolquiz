@@ -57,6 +57,42 @@ public class CircuitsController : Controller
         return View(items);
     }
 
+    public async Task<IActionResult> Export(string? countryId)
+    {
+        if (!_currentUser.IsAdmin) return Forbid();
+
+        var viewAll = countryId == "all";
+        int? selectedCountryId = !viewAll && int.TryParse(countryId, out var parsedCountryId) ? parsedCountryId : null;
+        if (!viewAll && !selectedCountryId.HasValue) return BadRequest("Please select a country (or All Countries) first.");
+
+        var query = _db.Circuits.Include(c => c.Country).AsQueryable();
+        if (selectedCountryId.HasValue)
+            query = query.Where(c => c.CountryId == selectedCountryId.Value);
+
+        var items = await query.OrderBy(c => c.Country!.Name).ThenBy(c => c.CircuitType).ToListAsync();
+
+        var headers = new[]
+        {
+            "Country", "Circuit Type", "Capacity", "Provider", "Branch", "Location",
+            "Start Date", "End Date", "Notes"
+        };
+        var rows = items.Select(c => new object?[]
+        {
+            c.Country?.DisplayName ?? c.Country?.Name,
+            c.CircuitType,
+            c.CircuitCapacity,
+            c.Provider,
+            c.Branch,
+            c.Location,
+            c.StartDate,
+            c.EndDate,
+            c.Notes
+        });
+
+        var bytes = ExcelImportHelpers.CreateExportBytes("Circuits", headers, rows);
+        return File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", $"Circuits_Export_{DateTime.UtcNow:yyyyMMdd_HHmmss}.xlsx");
+    }
+
     public async Task<IActionResult> Create()
     {
         if (!_currentUser.CanEdit) return Forbid();

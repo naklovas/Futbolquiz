@@ -105,4 +105,50 @@ public static class ExcelImportHelpers
         workbook.SaveAs(stream);
         return stream.ToArray();
     }
+
+    public static byte[] CreateExportBytes(string title, string[] headers, IEnumerable<object?[]> rows)
+    {
+        using var workbook = new XLWorkbook();
+        var ws = workbook.Worksheets.Add(title);
+
+        for (var i = 0; i < headers.Length; i++)
+        {
+            var cell = ws.Cell(1, i + 1);
+            cell.Value = headers[i];
+            cell.Style.Font.Bold = true;
+            cell.Style.Fill.BackgroundColor = XLColor.FromHtml("#F1F5F9");
+        }
+
+        var rowNum = 2;
+        foreach (var row in rows)
+        {
+            for (var i = 0; i < row.Length; i++)
+            {
+                var cell = ws.Cell(rowNum, i + 1);
+                switch (row[i])
+                {
+                    case null:
+                        break;
+                    case DateTime dt:
+                        cell.Value = dt;
+                        cell.Style.DateFormat.Format = "dd.MM.yyyy";
+                        break;
+                    case int iv:
+                        cell.Value = iv;
+                        break;
+                    default:
+                        cell.Value = row[i]!.ToString();
+                        break;
+                }
+            }
+            rowNum++;
+        }
+
+        ws.SheetView.FreezeRows(1);
+        ws.Columns().AdjustToContents();
+
+        using var stream = new MemoryStream();
+        workbook.SaveAs(stream);
+        return stream.ToArray();
+    }
 }
