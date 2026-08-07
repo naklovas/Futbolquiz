@@ -22,6 +22,7 @@ public class ITInventoryDbContext : DbContext
     public DbSet<Circuit> Circuits => Set<Circuit>();
     public DbSet<Company> Companies => Set<Company>();
     public DbSet<OriginCountry> OriginCountries => Set<OriginCountry>();
+    public DbSet<Location> Locations => Set<Location>();
     public DbSet<CompanyContact> CompanyContacts => Set<CompanyContact>();
     public DbSet<Application> Applications => Set<Application>();
 

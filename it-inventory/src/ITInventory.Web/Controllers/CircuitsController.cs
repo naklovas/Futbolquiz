@@ -348,5 +348,8 @@ public class CircuitsController : Controller
         var countries = await countriesQuery.Select(c => new { c.Id, Label = c.DisplayName ?? c.Name }).ToListAsync();
 
         ViewBag.CountryOptions = new SelectList(countries, "Id", "Label");
+
+        ViewBag.AllLocations = await _db.Locations.Where(l => l.IsActive)
+            .Select(l => new { l.CountryId, l.Branch }).ToListAsync();
     }
 }

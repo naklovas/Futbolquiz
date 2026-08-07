@@ -1,0 +1,44 @@
+@model ITInventory.Web.Models.Admin.LocationFormViewModel
+@{
+    var countryOptions = (Microsoft.AspNetCore.Mvc.Rendering.SelectList)ViewBag.CountryOptions;
+}
+
+<div asp-validation-summary="ModelOnly" class="text-sm text-red-600 mb-3"></div>
+<input type="hidden" asp-for="Id" />
+
+<div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+    <div>
+        <label asp-for="CountryId" class="block text-sm font-medium text-slate-700 mb-1"></label>
+        <select asp-for="CountryId" asp-items="countryOptions" class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
+            <option value="">-- Select --</option>
+        </select>
+        <span asp-validation-for="CountryId" class="text-sm text-red-600"></span>
+    </div>
+    <div>
+        <label asp-for="Branch" class="block text-sm font-medium text-slate-700 mb-1"></label>
+        <input asp-for="Branch" class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500" />
+        <span asp-validation-for="Branch" class="text-sm text-red-600"></span>
+    </div>
+</div>
+
+<div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+    <div>
+        <label asp-for="Class" class="block text-sm font-medium text-slate-700 mb-1"></label>
+        <input asp-for="Class" list="location-class-datalist" placeholder="e.g. Yurtdışı Şube" class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500" />
+        <datalist id="location-class-datalist">
+            <option value="Yurtdışı Şube"></option>
+            <option value="Yurtdışı İştirak"></option>
+        </datalist>
+        <span asp-validation-for="Class" class="text-sm text-red-600"></span>
+    </div>
+</div>
+
+<div class="flex items-center gap-2 mb-6">
+    <input asp-for="IsActive" class="rounded border-slate-300 text-brand-600 focus:ring-brand-500" />
+    <label asp-for="IsActive" class="text-sm font-medium text-slate-700"></label>
+</div>
+
+<div class="flex gap-2">
+    <button type="submit" class="bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium px-5 py-2.5 rounded-md">Save</button>
+    <a asp-action="Index" class="border border-slate-300 text-slate-700 hover:bg-slate-50 text-sm font-medium px-5 py-2.5 rounded-md">Cancel</a>
+</div>

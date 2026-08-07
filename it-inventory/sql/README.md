@@ -92,6 +92,20 @@ incelenip çalıştırılan SQL script tercih edildiği için ayrıca burada tut
     çalıştırmadığınızdan bağımsız olarak güvenle çalıştırılabilir).
     EF Core migration'ından üretildi, elle düzenlemeyin. İdempotenttir.
 
+14. **014_locations.sql** — `Locations` tablosunu oluşturur (Country + Branch +
+    Class, admin ekranından "Locations" altında yönetilir; Excel import da
+    destekler). Bankanın gerçek şube listesiyle (118 satır) seed eder — her
+    satır `Countries.Name` ile **tam eşleşen** bir ülke bulunursa eklenir;
+    henüz `Countries` tablosunda olmayan ülkelerin satırları sessizce atlanır
+    (o ülkeyi Admin &gt; Countries'e ekledikten sonra Admin &gt; Locations &gt;
+    Import from Excel ile ayrıca yüklenebilir — aynı 118 satırlık dosya ayrıca
+    gönderildi). Physical Devices/Servers/Licenses/Circuits formlarındaki
+    "Branch" alanı artık seçili ülkeye göre bu listeden otomatik öneri
+    (datalist) gösteriyor; serbest metin girişi hâlâ mümkün. Bu script
+    **011, 012 ve 013'ü de içerir** (daha önce çalıştırıp çalıştırmadığınızdan
+    bağımsız olarak güvenle çalıştırılabilir). EF Core migration'ından
+    üretildi, elle düzenlemeyin. İdempotenttir.
+
 ## Bu scriptlerin DOKUNMADIĞI mevcut tablolar
 
 Aşağıdaki tablo bu proje tarafından oluşturulmaz; production'da başka bir

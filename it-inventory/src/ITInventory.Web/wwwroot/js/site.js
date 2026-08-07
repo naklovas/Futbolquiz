@@ -29,6 +29,45 @@ function hideLoadingOverlay() {
     if (overlay) overlay.classList.add('hidden');
 }
 
+// Populates a <datalist> of branch-name suggestions for a Branch <input>,
+// filtered to the currently selected Country. `locations` is an array of
+// { CountryId, Branch } for every active Location. Re-filters whenever the
+// #CountryId select/hidden-input changes, so it stays in sync with admin
+// users switching countries (and works unchanged for non-admins, whose
+// country never changes).
+function initBranchAutocomplete(inputId, locations) {
+    var input = document.getElementById(inputId);
+    if (!input) return;
+
+    var listId = inputId + '-locations-datalist';
+    var datalist = document.getElementById(listId);
+    if (!datalist) {
+        datalist = document.createElement('datalist');
+        datalist.id = listId;
+        input.insertAdjacentElement('afterend', datalist);
+        input.setAttribute('list', listId);
+    }
+
+    function refresh() {
+        var countryField = document.getElementById('CountryId');
+        var countryId = countryField ? parseInt(countryField.value, 10) : NaN;
+        datalist.innerHTML = '';
+        var seen = {};
+        (locations || []).forEach(function (loc) {
+            if (!isNaN(countryId) && loc.CountryId !== countryId) return;
+            if (seen[loc.Branch]) return;
+            seen[loc.Branch] = true;
+            var opt = document.createElement('option');
+            opt.value = loc.Branch;
+            datalist.appendChild(opt);
+        });
+    }
+
+    var countryField = document.getElementById('CountryId');
+    if (countryField) countryField.addEventListener('change', refresh);
+    refresh();
+}
+
 function filterRows(inputEl, tableId) {
     var filter = inputEl.value.toLowerCase();
     var rows = document.querySelectorAll('#' + tableId + ' tbody tr');

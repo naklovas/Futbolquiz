@@ -423,5 +423,8 @@ public class ServersController : Controller
             : _db.Applications.Where(a => a.CountryId == _currentUser.CountryId);
         var applications = await applicationsQuery.OrderBy(a => a.Name).ToListAsync();
         ViewBag.ApplicationOptions = new SelectList(applications, "Id", "Name");
+
+        ViewBag.AllLocations = await _db.Locations.Where(l => l.IsActive)
+            .Select(l => new { l.CountryId, l.Branch }).ToListAsync();
     }
 }

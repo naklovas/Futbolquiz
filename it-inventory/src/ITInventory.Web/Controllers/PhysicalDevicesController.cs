@@ -460,5 +460,7 @@ public class PhysicalDevicesController : Controller
 
         ViewBag.CountryOptions = new SelectList(countries, "Id", "Label");
         ViewBag.CategoryOptions = new SelectList(await _db.DeviceCategories.OrderBy(c => c.Name).ToListAsync(), "Id", "Name");
+        ViewBag.AllLocations = await _db.Locations.Where(l => l.IsActive)
+            .Select(l => new { l.CountryId, l.Branch }).ToListAsync();
     }
 }

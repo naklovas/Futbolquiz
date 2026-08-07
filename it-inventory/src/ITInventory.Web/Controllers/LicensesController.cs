@@ -359,5 +359,8 @@ public class LicensesController : Controller
             companiesQuery = companiesQuery.Where(c => c.CountryId == effectiveCountryId.Value);
         var companies = await companiesQuery.OrderBy(c => c.Name).ToListAsync();
         ViewBag.CompanyOptions = new SelectList(companies, "Id", "Name");
+
+        ViewBag.AllLocations = await _db.Locations.Where(l => l.IsActive)
+            .Select(l => new { l.CountryId, l.Branch }).ToListAsync();
     }
 }
