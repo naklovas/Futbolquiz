@@ -88,5 +88,7 @@
 </div>
 
 <script>
-    initBranchCombobox('Branch', @Html.Raw(Json.Serialize(ViewBag.AllLocations)), @Html.Raw(Json.Serialize(Model.Branch)));
+    document.addEventListener('DOMContentLoaded', function () {
+        initBranchCombobox('Branch', @Html.Raw(Json.Serialize(ViewBag.AllLocations)), @Html.Raw(Json.Serialize(Model.Branch)));
+    });
 </script>
