@@ -32,9 +32,14 @@
                 <div class="text-xs text-slate-500">Physical Devices</div>
             </div>
         </div>
-        <button type="button" onclick="filterByCategory('PhysicalDevice')" id="card-expired-btn-PhysicalDevice" class="hidden mt-2 text-xs font-medium text-red-600 hover:text-red-800 hover:underline">
-            <i class="fa-solid fa-triangle-exclamation mr-1"></i><span id="card-expired-count-PhysicalDevice">0</span> expired
-        </button>
+        <div class="mt-2 flex items-center gap-3">
+            <button type="button" onclick="filterByCategory('PhysicalDevice', 'expired')" id="card-expired-btn-PhysicalDevice" class="hidden text-xs font-medium text-red-600 hover:text-red-800 hover:underline">
+                <i class="fa-solid fa-triangle-exclamation mr-1"></i><span id="card-expired-count-PhysicalDevice">0</span> expired
+            </button>
+            <button type="button" onclick="filterByCategory('PhysicalDevice', 'upcoming')" id="card-upcoming-btn-PhysicalDevice" class="hidden text-xs font-medium text-amber-600 hover:text-amber-800 hover:underline">
+                <i class="fa-solid fa-hourglass-half mr-1"></i><span id="card-upcoming-count-PhysicalDevice">0</span> upcoming
+            </button>
+        </div>
     </div>
     <div id="card-Server" class="bg-white rounded-lg shadow-sm border border-slate-200 p-5 transition">
         <div class="flex items-center gap-3">
@@ -44,9 +49,14 @@
                 <div class="text-xs text-slate-500">Servers</div>
             </div>
         </div>
-        <button type="button" onclick="filterByCategory('Server')" id="card-expired-btn-Server" class="hidden mt-2 text-xs font-medium text-red-600 hover:text-red-800 hover:underline">
-            <i class="fa-solid fa-triangle-exclamation mr-1"></i><span id="card-expired-count-Server">0</span> expired
-        </button>
+        <div class="mt-2 flex items-center gap-3">
+            <button type="button" onclick="filterByCategory('Server', 'expired')" id="card-expired-btn-Server" class="hidden text-xs font-medium text-red-600 hover:text-red-800 hover:underline">
+                <i class="fa-solid fa-triangle-exclamation mr-1"></i><span id="card-expired-count-Server">0</span> expired
+            </button>
+            <button type="button" onclick="filterByCategory('Server', 'upcoming')" id="card-upcoming-btn-Server" class="hidden text-xs font-medium text-amber-600 hover:text-amber-800 hover:underline">
+                <i class="fa-solid fa-hourglass-half mr-1"></i><span id="card-upcoming-count-Server">0</span> upcoming
+            </button>
+        </div>
     </div>
     <div id="card-License" class="bg-white rounded-lg shadow-sm border border-slate-200 p-5 transition">
         <div class="flex items-center gap-3">
@@ -56,9 +66,14 @@
                 <div class="text-xs text-slate-500">Licenses</div>
             </div>
         </div>
-        <button type="button" onclick="filterByCategory('License')" id="card-expired-btn-License" class="hidden mt-2 text-xs font-medium text-red-600 hover:text-red-800 hover:underline">
-            <i class="fa-solid fa-triangle-exclamation mr-1"></i><span id="card-expired-count-License">0</span> expired
-        </button>
+        <div class="mt-2 flex items-center gap-3">
+            <button type="button" onclick="filterByCategory('License', 'expired')" id="card-expired-btn-License" class="hidden text-xs font-medium text-red-600 hover:text-red-800 hover:underline">
+                <i class="fa-solid fa-triangle-exclamation mr-1"></i><span id="card-expired-count-License">0</span> expired
+            </button>
+            <button type="button" onclick="filterByCategory('License', 'upcoming')" id="card-upcoming-btn-License" class="hidden text-xs font-medium text-amber-600 hover:text-amber-800 hover:underline">
+                <i class="fa-solid fa-hourglass-half mr-1"></i><span id="card-upcoming-count-License">0</span> upcoming
+            </button>
+        </div>
     </div>
     <div id="card-Circuit" class="bg-white rounded-lg shadow-sm border border-slate-200 p-5 transition">
         <div class="flex items-center gap-3">
@@ -68,9 +83,14 @@
                 <div class="text-xs text-slate-500">Circuits</div>
             </div>
         </div>
-        <button type="button" onclick="filterByCategory('Circuit')" id="card-expired-btn-Circuit" class="hidden mt-2 text-xs font-medium text-red-600 hover:text-red-800 hover:underline">
-            <i class="fa-solid fa-triangle-exclamation mr-1"></i><span id="card-expired-count-Circuit">0</span> expired
-        </button>
+        <div class="mt-2 flex items-center gap-3">
+            <button type="button" onclick="filterByCategory('Circuit', 'expired')" id="card-expired-btn-Circuit" class="hidden text-xs font-medium text-red-600 hover:text-red-800 hover:underline">
+                <i class="fa-solid fa-triangle-exclamation mr-1"></i><span id="card-expired-count-Circuit">0</span> expired
+            </button>
+            <button type="button" onclick="filterByCategory('Circuit', 'upcoming')" id="card-upcoming-btn-Circuit" class="hidden text-xs font-medium text-amber-600 hover:text-amber-800 hover:underline">
+                <i class="fa-solid fa-hourglass-half mr-1"></i><span id="card-upcoming-count-Circuit">0</span> upcoming
+            </button>
+        </div>
     </div>
 </div>
 
@@ -175,12 +195,18 @@
         var activeCategory = null;
 
         Object.keys(categoryLabels).forEach(function (key) {
-            var count = expiredItems.filter(categoryMatchers[key]).length;
-            var btn = document.getElementById('card-expired-btn-' + key);
-            if (!btn) return;
-            if (count > 0) {
-                document.getElementById('card-expired-count-' + key).textContent = count;
-                btn.classList.remove('hidden');
+            var expiredCount = expiredItems.filter(categoryMatchers[key]).length;
+            var expiredBtn = document.getElementById('card-expired-btn-' + key);
+            if (expiredBtn && expiredCount > 0) {
+                document.getElementById('card-expired-count-' + key).textContent = expiredCount;
+                expiredBtn.classList.remove('hidden');
+            }
+
+            var upcomingCount = upcomingItems.filter(categoryMatchers[key]).length;
+            var upcomingBtn = document.getElementById('card-upcoming-btn-' + key);
+            if (upcomingBtn && upcomingCount > 0) {
+                document.getElementById('card-upcoming-count-' + key).textContent = upcomingCount;
+                upcomingBtn.classList.remove('hidden');
             }
         });
 
@@ -250,10 +276,11 @@
             }
         }
 
-        window.filterByCategory = function (category) {
-            activeCategory = (activeCategory === category) ? null : category;
+        window.filterByCategory = function (category, tab) {
+            activeCategory = category;
             updateCardStyles();
             refresh();
+            if (category && tab) switchDashboardTab(tab);
         };
 
         function refresh() {
