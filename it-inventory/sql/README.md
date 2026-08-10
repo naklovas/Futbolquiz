@@ -106,6 +106,18 @@ incelenip çalıştırılan SQL script tercih edildiği için ayrıca burada tut
     bağımsız olarak güvenle çalıştırılabilir). EF Core migration'ından
     üretildi, elle düzenlemeyin. İdempotenttir.
 
+15. **015_split_server_endpoints.sql** — `Servers` tablosunu makine (host) bilgisine
+    indirger: `ApplicationId`, `IpAddress`, `Port` kolonlarını kaldırır, yerine
+    yeni `ServerEndpoints` tablosunu ekler (ServerId + IpAddress + Port +
+    ApplicationId — bir sunucunun birden fazla IP:PORT+Uygulama eşlemesi olabilir,
+    ayrı "Server Endpoints" sayfasından yönetilir). Mevcut Server kayıtlarındaki
+    IP/Port/Application verisi **kaybolmadan** yeni ServerEndpoints tablosuna
+    otomatik taşınır (kolonlar silinmeden önce). `Servers.HostPhysicalDeviceId`
+    (Physical Devices'a FK — sanal sunucunun çalıştığı ESX host'u) eklenir,
+    `Servers.Location` artık zorunlu değil (sanal sunucularda host'un konumu
+    geçerli olduğu için). Bu script **011-014'ü de içerir**. EF Core
+    migration'ından üretildi, elle düzenlemeyin. İdempotenttir.
+
 ## Bu scriptlerin DOKUNMADIĞI mevcut tablolar
 
 Aşağıdaki tablo bu proje tarafından oluşturulmaz; production'da başka bir

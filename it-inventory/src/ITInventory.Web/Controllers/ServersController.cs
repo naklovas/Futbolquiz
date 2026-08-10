@@ -37,7 +37,7 @@ public class ServersController : Controller
         }
         else
         {
-            var query = _db.Servers.Include(s => s.Country).Include(s => s.Application).AsQueryable();
+            var query = _db.Servers.Include(s => s.Country).Include(s => s.HostPhysicalDevice).AsQueryable();
 
             if (!isAdmin)
                 query = query.Where(s => s.CountryId == _currentUser.CountryId);
@@ -65,7 +65,7 @@ public class ServersController : Controller
         int? selectedCountryId = !viewAll && int.TryParse(countryId, out var parsedCountryId) ? parsedCountryId : null;
         if (!viewAll && !selectedCountryId.HasValue) return BadRequest("Please select a country (or All Countries) first.");
 
-        var query = _db.Servers.Include(s => s.Country).Include(s => s.Application).AsQueryable();
+        var query = _db.Servers.Include(s => s.Country).Include(s => s.HostPhysicalDevice).AsQueryable();
         if (selectedCountryId.HasValue)
             query = query.Where(s => s.CountryId == selectedCountryId.Value);
 
@@ -73,23 +73,21 @@ public class ServersController : Controller
 
         var headers = new[]
         {
-            "Country", "Host Name", "Application", "Physical/Virtual", "IP Address", "Operating System",
-            "Brand", "Model", "Serial Number", "Vendor/Supplier", "Port", "Branch", "Location",
+            "Country", "Host Name", "Physical/Virtual", "Host (ESX/Physical Device)", "Operating System",
+            "Brand", "Model", "Serial Number", "Vendor/Supplier", "Branch", "Location",
             "Support Start Date", "Support End Date", "End of Life Date", "Notes"
         };
         var rows = items.Select(s => new object?[]
         {
             s.Country?.DisplayName ?? s.Country?.Name,
             s.HostName,
-            s.Application?.Name,
             s.ApplianceType.ToString(),
-            s.IpAddress,
+            s.HostPhysicalDevice?.DeviceName,
             s.OperatingSystem,
             s.Brand,
             s.Model,
             s.SerialNo,
             s.VendorSupplier,
-            s.Port,
             s.Branch,
             s.Location,
             s.StartOfSupportDate,
@@ -118,7 +116,6 @@ public class ServersController : Controller
             {
                 vm.SourceZiraatYdId = source.Id;
                 vm.HostName = source.DnsName ?? source.NetbiosName ?? source.IpAddress;
-                vm.IpAddress = source.IpAddress;
                 vm.OperatingSystem = source.OperatingSystem;
 
                 var profile = await _db.DeviceProfileCatalogs
@@ -152,16 +149,14 @@ public class ServersController : Controller
             CountryId = vm.CountryId,
             DeviceProfileId = vm.DeviceProfileId,
             SourceZiraatYdId = vm.SourceZiraatYdId,
-            ApplicationId = vm.ApplicationId,
             HostName = vm.HostName,
             ApplianceType = vm.ApplianceType,
-            IpAddress = vm.IpAddress,
+            HostPhysicalDeviceId = vm.HostPhysicalDeviceId,
             OperatingSystem = vm.OperatingSystem,
             Brand = vm.Brand,
             Model = vm.Model,
             SerialNo = vm.SerialNo,
             VendorSupplier = vm.VendorSupplier,
-            Port = vm.Port,
             Branch = vm.Branch,
             Location = vm.Location,
             StartOfSupportDate = vm.StartOfSupportDate,
@@ -191,16 +186,14 @@ public class ServersController : Controller
             CountryId = entity.CountryId,
             DeviceProfileId = entity.DeviceProfileId,
             SourceZiraatYdId = entity.SourceZiraatYdId,
-            ApplicationId = entity.ApplicationId,
             HostName = entity.HostName,
             ApplianceType = entity.ApplianceType,
-            IpAddress = entity.IpAddress,
+            HostPhysicalDeviceId = entity.HostPhysicalDeviceId,
             OperatingSystem = entity.OperatingSystem,
             Brand = entity.Brand,
             Model = entity.Model,
             SerialNo = entity.SerialNo,
             VendorSupplier = entity.VendorSupplier,
-            Port = entity.Port,
             Branch = entity.Branch,
             Location = entity.Location,
             StartOfSupportDate = entity.StartOfSupportDate,
@@ -234,16 +227,14 @@ public class ServersController : Controller
         }
 
         entity.CountryId = vm.CountryId;
-        entity.ApplicationId = vm.ApplicationId;
         entity.HostName = vm.HostName;
         entity.ApplianceType = vm.ApplianceType;
-        entity.IpAddress = vm.IpAddress;
+        entity.HostPhysicalDeviceId = vm.HostPhysicalDeviceId;
         entity.OperatingSystem = vm.OperatingSystem;
         entity.Brand = vm.Brand;
         entity.Model = vm.Model;
         entity.SerialNo = vm.SerialNo;
         entity.VendorSupplier = vm.VendorSupplier;
-        entity.Port = vm.Port;
         entity.Branch = vm.Branch;
         entity.Location = vm.Location;
         entity.StartOfSupportDate = vm.StartOfSupportDate;
@@ -268,7 +259,16 @@ public class ServersController : Controller
         if (!_currentUser.IsAdmin && entity.CountryId != _currentUser.CountryId) return Forbid();
 
         _db.Servers.Remove(entity);
-        await _db.SaveChangesAsync();
+
+        try
+        {
+            await _db.SaveChangesAsync();
+        }
+        catch (DbUpdateException)
+        {
+            TempData["Error"] = "Could not delete because endpoints (IP/Port/Application mappings) are linked to this server. Delete those first.";
+        }
+
         return RedirectToAction(nameof(Index));
     }
 
@@ -285,8 +285,8 @@ public class ServersController : Controller
         if (!_currentUser.CanEdit) return Forbid();
 
         var bytes = ExcelImportHelpers.CreateTemplateBytes("Servers",
-            "Host Name", "Physical/Virtual", "IP Address", "Operating System",
-            "Brand", "Model", "Serial Number", "Vendor/Supplier", "Port", "Branch", "Location",
+            "Host Name", "Physical/Virtual", "Operating System",
+            "Brand", "Model", "Serial Number", "Vendor/Supplier", "Branch", "Location",
             "Support Start Date", "Support End Date", "End of Life Date", "Notes");
 
         return File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "Servers_Template.xlsx");
@@ -335,18 +335,11 @@ public class ServersController : Controller
                 if (ExcelImportHelpers.IsRowEmpty(ws, row, headers)) continue;
 
                 var hostName = ExcelImportHelpers.GetString(ws, row, headers, "Host Name");
-                var location = ExcelImportHelpers.GetString(ws, row, headers, "Location");
                 var applianceRaw = ExcelImportHelpers.GetString(ws, row, headers, "Physical/Virtual");
 
                 if (string.IsNullOrEmpty(hostName))
                 {
                     result.Errors.Add(new ImportRowError { RowNumber = row, Message = "Host Name is required." });
-                    continue;
-                }
-
-                if (string.IsNullOrEmpty(location))
-                {
-                    result.Errors.Add(new ImportRowError { RowNumber = row, Message = "Location is required." });
                     continue;
                 }
 
@@ -361,15 +354,13 @@ public class ServersController : Controller
                     CountryId = country.Id,
                     HostName = hostName,
                     ApplianceType = applianceType,
-                    IpAddress = ExcelImportHelpers.GetString(ws, row, headers, "IP Address"),
                     OperatingSystem = ExcelImportHelpers.GetString(ws, row, headers, "Operating System"),
                     Brand = ExcelImportHelpers.GetString(ws, row, headers, "Brand"),
                     Model = ExcelImportHelpers.GetString(ws, row, headers, "Model"),
                     SerialNo = ExcelImportHelpers.GetString(ws, row, headers, "Serial Number"),
                     VendorSupplier = ExcelImportHelpers.GetString(ws, row, headers, "Vendor/Supplier"),
-                    Port = ExcelImportHelpers.GetInt(ws, row, headers, "Port"),
                     Branch = ExcelImportHelpers.GetString(ws, row, headers, "Branch"),
-                    Location = location,
+                    Location = ExcelImportHelpers.GetString(ws, row, headers, "Location"),
                     StartOfSupportDate = ExcelImportHelpers.GetDate(ws, row, headers, "Support Start Date"),
                     EndOfSupportDate = ExcelImportHelpers.GetDate(ws, row, headers, "Support End Date"),
                     EndOfLifeDate = ExcelImportHelpers.GetDate(ws, row, headers, "End of Life Date"),
@@ -418,16 +409,17 @@ public class ServersController : Controller
 
         ViewBag.CountryOptions = new SelectList(countries, "Id", "Label");
 
-        var applicationsQuery = _currentUser.IsAdmin
-            ? _db.Applications.AsQueryable()
-            : _db.Applications.Where(a => a.CountryId == _currentUser.CountryId);
-        var applications = await applicationsQuery.OrderBy(a => a.Name).ToListAsync();
-        ViewBag.ApplicationOptions = new SelectList(applications, "Id", "Name");
+        var effectiveCountryId = _currentUser.IsAdmin ? (int?)null : _currentUser.CountryId;
+
+        var physicalDevicesQuery = _db.PhysicalDevices.AsQueryable();
+        if (effectiveCountryId.HasValue)
+            physicalDevicesQuery = physicalDevicesQuery.Where(d => d.CountryId == effectiveCountryId.Value);
+        var physicalDevices = await physicalDevicesQuery.OrderBy(d => d.DeviceName).ToListAsync();
+        ViewBag.HostPhysicalDeviceOptions = new SelectList(physicalDevices, "Id", "DeviceName");
 
         ViewBag.AllLocations = await _db.Locations.Where(l => l.IsActive)
             .Select(l => new { l.CountryId, l.Branch }).ToListAsync();
 
-        var effectiveCountryId = _currentUser.IsAdmin ? (int?)null : _currentUser.CountryId;
         var companiesQuery = _db.Companies.Where(c => c.IsActive);
         if (effectiveCountryId.HasValue)
             companiesQuery = companiesQuery.Where(c => c.CountryId == effectiveCountryId.Value);

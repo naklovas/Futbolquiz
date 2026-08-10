@@ -26,9 +26,9 @@ public class DevicePoolService : IDevicePoolService
                 .Where(d => d.IpAddress != null)
                 .Select(d => d.IpAddress!)
                 .ToListAsync())
-            .Concat(await _db.Servers
-                .Where(s => s.IpAddress != null)
-                .Select(s => s.IpAddress!)
+            .Concat(await _db.ServerEndpoints
+                .Where(e => e.IpAddress != null)
+                .Select(e => e.IpAddress!)
                 .ToListAsync())
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 

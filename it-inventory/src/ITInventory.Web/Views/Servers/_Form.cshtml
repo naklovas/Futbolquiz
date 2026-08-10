@@ -1,8 +1,8 @@
 @model ITInventory.Web.Models.Servers.ServerFormViewModel
 @{
     var countryOptions = (Microsoft.AspNetCore.Mvc.Rendering.SelectList)ViewBag.CountryOptions;
-    var applicationOptions = (Microsoft.AspNetCore.Mvc.Rendering.SelectList)ViewBag.ApplicationOptions;
     var vendorOptions = (Microsoft.AspNetCore.Mvc.Rendering.SelectList)ViewBag.VendorOptions;
+    var hostPhysicalDeviceOptions = (Microsoft.AspNetCore.Mvc.Rendering.SelectList)ViewBag.HostPhysicalDeviceOptions;
     bool isAdmin = ViewBag.IsAdmin ?? false;
 }
 
@@ -29,41 +29,34 @@
     </div>
     <div>
         <label asp-for="ApplianceType" class="block text-sm font-medium text-slate-700 mb-1"></label>
-        <select asp-for="ApplianceType" class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
+        <select asp-for="ApplianceType" id="ApplianceType" class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
             <option value="Physical">Physical</option>
             <option value="Virtual">Virtual</option>
         </select>
     </div>
     <div>
-        <label asp-for="Port" class="block text-sm font-medium text-slate-700 mb-1"></label>
-        <input asp-for="Port" class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500" />
-        <span asp-validation-for="Port" class="text-sm text-red-600"></span>
-    </div>
-</div>
-
-<div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-    <div>
         <label asp-for="HostName" class="block text-sm font-medium text-slate-700 mb-1"></label>
         <input asp-for="HostName" class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500" />
         <span asp-validation-for="HostName" class="text-sm text-red-600"></span>
     </div>
-    <div>
-        <label asp-for="IpAddress" class="block text-sm font-medium text-slate-700 mb-1"></label>
-        <input asp-for="IpAddress" class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500" />
+</div>
+
+<div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+    <div id="location-field">
+        <label asp-for="Location" class="block text-sm font-medium text-slate-700 mb-1"></label>
+        <input asp-for="Location" class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500" />
+        <span asp-validation-for="Location" class="text-sm text-red-600"></span>
+    </div>
+    <div id="host-physical-device-field" class="hidden">
+        <label asp-for="HostPhysicalDeviceId" class="block text-sm font-medium text-slate-700 mb-1"></label>
+        <select asp-for="HostPhysicalDeviceId" asp-items="hostPhysicalDeviceOptions" class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
+            <option value="">-- None --</option>
+        </select>
+        <p class="text-xs text-slate-400 mt-1">Which physical device (ESX host) this virtual server runs on.</p>
     </div>
     <div>
         <label asp-for="OperatingSystem" class="block text-sm font-medium text-slate-700 mb-1"></label>
         <input asp-for="OperatingSystem" class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500" />
-    </div>
-</div>
-
-<div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-    <div>
-        <label asp-for="ApplicationId" class="block text-sm font-medium text-slate-700 mb-1"></label>
-        <select asp-for="ApplicationId" asp-items="applicationOptions" class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
-            <option value="">-- None --</option>
-        </select>
-        <p class="text-xs text-slate-400 mt-1">The application this server hosts, if any.</p>
     </div>
 </div>
 
@@ -95,11 +88,6 @@
             <option value="">-- Select --</option>
         </select>
     </div>
-    <div class="md:col-span-2">
-        <label asp-for="Location" class="block text-sm font-medium text-slate-700 mb-1"></label>
-        <input asp-for="Location" class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500" />
-        <span asp-validation-for="Location" class="text-sm text-red-600"></span>
-    </div>
 </div>
 
 <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
@@ -130,5 +118,18 @@
 <script>
     document.addEventListener('DOMContentLoaded', function () {
         initBranchCombobox('Branch', @Html.Raw(Json.Serialize(ViewBag.AllLocations)), @Html.Raw(Json.Serialize(Model.Branch)));
+
+        var applianceField = document.getElementById('ApplianceType');
+        var locationField = document.getElementById('location-field');
+        var hostField = document.getElementById('host-physical-device-field');
+
+        function refreshApplianceFields() {
+            var isVirtual = applianceField.value === 'Virtual';
+            locationField.classList.toggle('hidden', isVirtual);
+            hostField.classList.toggle('hidden', !isVirtual);
+        }
+
+        applianceField.addEventListener('change', refreshApplianceFields);
+        refreshApplianceFields();
     });
 </script>

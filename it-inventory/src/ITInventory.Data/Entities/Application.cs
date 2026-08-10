@@ -30,5 +30,5 @@ public class Application : AuditableEntity
 
     public string? Notes { get; set; }
 
-    public ICollection<Server> Servers { get; set; } = new List<Server>();
+    public ICollection<ServerEndpoint> ServerEndpoints { get; set; } = new List<ServerEndpoint>();
 }

@@ -32,16 +32,19 @@
 
                 @if (User.Identity?.IsAuthenticated == true)
                 {
-                    <button id="mobile-menu-toggle" class="md:hidden text-slate-500 hover:text-slate-900 flex-shrink-0">
+                    <button id="mobile-menu-toggle" class="xl:hidden text-slate-500 hover:text-slate-900 flex-shrink-0">
                         <i class="fa-solid fa-bars text-xl"></i>
                     </button>
 
-                    <div class="hidden md:flex items-center gap-0.5">
+                    <div class="hidden xl:flex items-center gap-0.5">
                         <a asp-controller="PhysicalDevices" asp-action="Index" onclick="showLoadingOverlay()" class="flex-shrink-0 whitespace-nowrap px-2.5 py-2 rounded-md text-sm font-medium text-slate-600 hover:text-brand-700 hover:bg-brand-50 transition">
                             <i class="fa-solid fa-desktop mr-1.5"></i>Physical Devices
                         </a>
                         <a asp-controller="Servers" asp-action="Index" onclick="showLoadingOverlay()" class="flex-shrink-0 whitespace-nowrap px-2.5 py-2 rounded-md text-sm font-medium text-slate-600 hover:text-brand-700 hover:bg-brand-50 transition">
-                            <i class="fa-solid fa-database mr-1.5"></i>Servers & Applications
+                            <i class="fa-solid fa-database mr-1.5"></i>Servers
+                        </a>
+                        <a asp-controller="ServerEndpoints" asp-action="Index" onclick="showLoadingOverlay()" class="flex-shrink-0 whitespace-nowrap px-2.5 py-2 rounded-md text-sm font-medium text-slate-600 hover:text-brand-700 hover:bg-brand-50 transition">
+                            <i class="fa-solid fa-network-wired mr-1.5"></i>Server Endpoints
                         </a>
                         <a asp-controller="Applications" asp-action="Index" onclick="showLoadingOverlay()" class="flex-shrink-0 whitespace-nowrap px-2.5 py-2 rounded-md text-sm font-medium text-slate-600 hover:text-brand-700 hover:bg-brand-50 transition">
                             <i class="fa-solid fa-window-restore mr-1.5"></i>Applications
@@ -78,7 +81,7 @@
                     var fullName = User.FindFirst(ITInventory.Web.Services.AppClaimTypes.FullName)?.Value;
                     var country = User.FindFirst(ITInventory.Web.Services.AppClaimTypes.CountryDisplayName)?.Value
                         ?? User.FindFirst(ITInventory.Web.Services.AppClaimTypes.Country)?.Value;
-                    <div class="hidden md:block relative group flex-shrink-0 ml-2 pl-3 border-l border-slate-200">
+                    <div class="hidden xl:block relative group flex-shrink-0 ml-2 pl-3 border-l border-slate-200">
                         <button class="flex items-center gap-1.5 px-2 py-2 rounded-md text-sm font-medium text-slate-600 hover:text-brand-700 hover:bg-brand-50 transition max-w-[10rem]">
                             <i class="fa-solid fa-user-circle"></i>
                             <span class="truncate">@fullName</span>
@@ -104,9 +107,10 @@
 
             @if (User.Identity?.IsAuthenticated == true)
             {
-                <div id="mobile-menu" class="hidden md:hidden pb-3 space-y-1">
+                <div id="mobile-menu" class="hidden xl:hidden pb-3 space-y-1">
                     <a asp-controller="PhysicalDevices" asp-action="Index" onclick="showLoadingOverlay()" class="block px-3 py-2 rounded-md text-sm font-medium text-slate-600 hover:text-brand-700 hover:bg-brand-50">Physical Devices</a>
-                    <a asp-controller="Servers" asp-action="Index" onclick="showLoadingOverlay()" class="block px-3 py-2 rounded-md text-sm font-medium text-slate-600 hover:text-brand-700 hover:bg-brand-50">Servers & Applications</a>
+                    <a asp-controller="Servers" asp-action="Index" onclick="showLoadingOverlay()" class="block px-3 py-2 rounded-md text-sm font-medium text-slate-600 hover:text-brand-700 hover:bg-brand-50">Servers</a>
+                    <a asp-controller="ServerEndpoints" asp-action="Index" onclick="showLoadingOverlay()" class="block px-3 py-2 rounded-md text-sm font-medium text-slate-600 hover:text-brand-700 hover:bg-brand-50">Server Endpoints</a>
                     <a asp-controller="Applications" asp-action="Index" onclick="showLoadingOverlay()" class="block px-3 py-2 rounded-md text-sm font-medium text-slate-600 hover:text-brand-700 hover:bg-brand-50">Applications</a>
                     <a asp-controller="Licenses" asp-action="Index" onclick="showLoadingOverlay()" class="block px-3 py-2 rounded-md text-sm font-medium text-slate-600 hover:text-brand-700 hover:bg-brand-50">Licenses</a>
                     <a asp-controller="Circuits" asp-action="Index" onclick="showLoadingOverlay()" class="block px-3 py-2 rounded-md text-sm font-medium text-slate-600 hover:text-brand-700 hover:bg-brand-50">Circuits</a>

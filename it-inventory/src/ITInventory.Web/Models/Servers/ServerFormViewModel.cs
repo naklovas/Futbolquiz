@@ -16,9 +16,6 @@ public class ServerFormViewModel
 
     public int? SourceZiraatYdId { get; set; }
 
-    [Display(Name = "Application")]
-    public int? ApplicationId { get; set; }
-
     [Required(ErrorMessage = "Host name is required.")]
     [StringLength(255)]
     [Display(Name = "Host Name")]
@@ -27,9 +24,8 @@ public class ServerFormViewModel
     [Display(Name = "Physical/Virtual")]
     public ApplianceType ApplianceType { get; set; }
 
-    [StringLength(50)]
-    [Display(Name = "IP Address")]
-    public string? IpAddress { get; set; }
+    [Display(Name = "Host (ESX/Physical Device)")]
+    public int? HostPhysicalDeviceId { get; set; }
 
     [StringLength(255)]
     [Display(Name = "Operating System")]
@@ -51,18 +47,13 @@ public class ServerFormViewModel
     [Display(Name = "Vendor/Supplier")]
     public string? VendorSupplier { get; set; }
 
-    [Range(1, 65535)]
-    [Display(Name = "Port")]
-    public int? Port { get; set; }
-
     [StringLength(150)]
     [Display(Name = "Branch")]
     public string? Branch { get; set; }
 
-    [Required(ErrorMessage = "Location is required.")]
     [StringLength(255)]
     [Display(Name = "Location")]
-    public string Location { get; set; } = string.Empty;
+    public string? Location { get; set; }
 
     [DataType(DataType.Date)]
     [Display(Name = "Support Start Date")]

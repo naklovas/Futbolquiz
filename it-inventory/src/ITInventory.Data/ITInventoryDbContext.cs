@@ -18,6 +18,7 @@ public class ITInventoryDbContext : DbContext
     public DbSet<YdUserRole> YdUserRoles => Set<YdUserRole>();
     public DbSet<PhysicalDevice> PhysicalDevices => Set<PhysicalDevice>();
     public DbSet<Server> Servers => Set<Server>();
+    public DbSet<ServerEndpoint> ServerEndpoints => Set<ServerEndpoint>();
     public DbSet<License> Licenses => Set<License>();
     public DbSet<Circuit> Circuits => Set<Circuit>();
     public DbSet<Company> Companies => Set<Company>();

@@ -13,14 +13,13 @@ public class ServerConfiguration : IEntityTypeConfiguration<Server>
         builder.HasKey(x => x.Id);
 
         builder.Property(x => x.HostName).HasMaxLength(255).IsRequired();
-        builder.Property(x => x.IpAddress).HasMaxLength(50);
         builder.Property(x => x.OperatingSystem).HasMaxLength(255);
         builder.Property(x => x.Brand).HasMaxLength(100);
         builder.Property(x => x.Model).HasMaxLength(150);
         builder.Property(x => x.SerialNo).HasMaxLength(150);
         builder.Property(x => x.VendorSupplier).HasMaxLength(150);
         builder.Property(x => x.Branch).HasMaxLength(150);
-        builder.Property(x => x.Location).HasMaxLength(255).IsRequired();
+        builder.Property(x => x.Location).HasMaxLength(255);
         builder.Property(x => x.CreatedBy).HasMaxLength(100);
         builder.Property(x => x.UpdatedBy).HasMaxLength(100);
         builder.Property(x => x.ApplianceType).HasConversion<string>().HasMaxLength(20);
@@ -35,12 +34,12 @@ public class ServerConfiguration : IEntityTypeConfiguration<Server>
             .HasForeignKey(x => x.DeviceProfileId)
             .OnDelete(DeleteBehavior.SetNull);
 
-        builder.HasOne(x => x.Application)
-            .WithMany(a => a.Servers)
-            .HasForeignKey(x => x.ApplicationId)
+        builder.HasOne(x => x.HostPhysicalDevice)
+            .WithMany()
+            .HasForeignKey(x => x.HostPhysicalDeviceId)
             .OnDelete(DeleteBehavior.SetNull);
 
         builder.HasIndex(x => x.CountryId);
-        builder.HasIndex(x => x.ApplicationId);
+        builder.HasIndex(x => x.HostPhysicalDeviceId);
     }
 }
