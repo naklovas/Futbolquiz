@@ -5,6 +5,7 @@
     int? selectedCountryId = ViewBag.SelectedCountryId;
     bool isAdmin = ViewBag.IsAdmin;
     bool viewAll = ViewBag.ViewAll;
+    string? cardCountryId = isAdmin ? (viewAll ? "all" : selectedCountryId?.ToString()) : null;
 }
 
 <div class="flex flex-wrap items-center justify-between gap-3 mb-6">
@@ -24,42 +25,46 @@
 </div>
 
 <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-    <div class="bg-white rounded-lg shadow-sm border border-slate-200 p-5">
+    <a asp-controller="PhysicalDevices" asp-action="Index" asp-route-countryId="@cardCountryId" onclick="showLoadingOverlay()" class="group block bg-white rounded-lg shadow-sm border border-slate-200 p-5 hover:shadow-md hover:border-brand-300 transition">
         <div class="flex items-center gap-3">
             <div class="w-10 h-10 rounded-lg bg-brand-50 text-brand-600 flex items-center justify-center"><i class="fa-solid fa-desktop"></i></div>
-            <div>
+            <div class="flex-1">
                 <div class="text-2xl font-semibold text-slate-900">@Model.PhysicalDeviceCount</div>
                 <div class="text-xs text-slate-500">Physical Devices</div>
             </div>
+            <i class="fa-solid fa-chevron-right text-slate-300 group-hover:text-brand-500 transition text-xs"></i>
         </div>
-    </div>
-    <div class="bg-white rounded-lg shadow-sm border border-slate-200 p-5">
+    </a>
+    <a asp-controller="Servers" asp-action="Index" asp-route-countryId="@cardCountryId" onclick="showLoadingOverlay()" class="group block bg-white rounded-lg shadow-sm border border-slate-200 p-5 hover:shadow-md hover:border-brand-300 transition">
         <div class="flex items-center gap-3">
             <div class="w-10 h-10 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center"><i class="fa-solid fa-database"></i></div>
-            <div>
+            <div class="flex-1">
                 <div class="text-2xl font-semibold text-slate-900">@Model.ServerCount</div>
                 <div class="text-xs text-slate-500">Servers</div>
             </div>
+            <i class="fa-solid fa-chevron-right text-slate-300 group-hover:text-brand-500 transition text-xs"></i>
         </div>
-    </div>
-    <div class="bg-white rounded-lg shadow-sm border border-slate-200 p-5">
+    </a>
+    <a asp-controller="Licenses" asp-action="Index" asp-route-countryId="@cardCountryId" onclick="showLoadingOverlay()" class="group block bg-white rounded-lg shadow-sm border border-slate-200 p-5 hover:shadow-md hover:border-brand-300 transition">
         <div class="flex items-center gap-3">
             <div class="w-10 h-10 rounded-lg bg-amber-50 text-amber-600 flex items-center justify-center"><i class="fa-solid fa-key"></i></div>
-            <div>
+            <div class="flex-1">
                 <div class="text-2xl font-semibold text-slate-900">@Model.LicenseCount</div>
                 <div class="text-xs text-slate-500">Licenses</div>
             </div>
+            <i class="fa-solid fa-chevron-right text-slate-300 group-hover:text-brand-500 transition text-xs"></i>
         </div>
-    </div>
-    <div class="bg-white rounded-lg shadow-sm border border-slate-200 p-5">
+    </a>
+    <a asp-controller="Circuits" asp-action="Index" asp-route-countryId="@cardCountryId" onclick="showLoadingOverlay()" class="group block bg-white rounded-lg shadow-sm border border-slate-200 p-5 hover:shadow-md hover:border-brand-300 transition">
         <div class="flex items-center gap-3">
             <div class="w-10 h-10 rounded-lg bg-purple-50 text-purple-600 flex items-center justify-center"><i class="fa-solid fa-diagram-project"></i></div>
-            <div>
+            <div class="flex-1">
                 <div class="text-2xl font-semibold text-slate-900">@Model.CircuitCount</div>
                 <div class="text-xs text-slate-500">Circuits</div>
             </div>
+            <i class="fa-solid fa-chevron-right text-slate-300 group-hover:text-brand-500 transition text-xs"></i>
         </div>
-    </div>
+    </a>
 </div>
 
 <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-8">
