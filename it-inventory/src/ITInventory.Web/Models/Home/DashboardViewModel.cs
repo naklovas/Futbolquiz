@@ -21,7 +21,14 @@ public enum ExpirationType
 public class ExpiringItem
 {
     public string Type { get; set; } = string.Empty;
-    public ExpirationType ExpirationType { get; set; }
+
+    /// <summary>
+    /// String, not the ExpirationType enum -- System.Text.Json serializes enums as their
+    /// numeric value by default, and the dashboard's client-side JS (badges, filter, chart
+    /// grouping) matches against the string names ("License"/"EndOfSupport"/"EndOfLife").
+    /// </summary>
+    public string ExpirationType { get; set; } = string.Empty;
+
     public string Name { get; set; } = string.Empty;
     public string? Country { get; set; }
     public DateTime ExpiresAt { get; set; }

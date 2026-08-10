@@ -53,7 +53,7 @@ public class HomeController : Controller
 
         void Add(string label, ExpirationType type, string name, string? country, DateTime expiresAt)
         {
-            var item = new ExpiringItem { Type = label, ExpirationType = type, Name = name, Country = country, ExpiresAt = expiresAt };
+            var item = new ExpiringItem { Type = label, ExpirationType = type.ToString(), Name = name, Country = country, ExpiresAt = expiresAt };
             (expiresAt < now ? expired : upcoming).Add(item);
         }
 
