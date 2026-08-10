@@ -224,7 +224,7 @@ public class LicensesController : Controller
 
     public async Task<IActionResult> Import()
     {
-        if (!_currentUser.CanEdit) return Forbid();
+        if (!_currentUser.IsAdmin) return Forbid();
         ViewBag.EntityName = "Licenses";
         await PopulateImportCountryInfo();
         return View("Import");
@@ -232,7 +232,7 @@ public class LicensesController : Controller
 
     public IActionResult DownloadTemplate()
     {
-        if (!_currentUser.CanEdit) return Forbid();
+        if (!_currentUser.IsAdmin) return Forbid();
 
         var bytes = ExcelImportHelpers.CreateTemplateBytes("Licenses",
             "License Name", "Vendor/Supplier", "Branch", "Location",
@@ -245,7 +245,7 @@ public class LicensesController : Controller
     [ValidateAntiForgeryToken]
     public async Task<IActionResult> Import(IFormFile file, int? countryId)
     {
-        if (!_currentUser.CanEdit) return Forbid();
+        if (!_currentUser.IsAdmin) return Forbid();
 
         if (file is null || file.Length == 0)
         {

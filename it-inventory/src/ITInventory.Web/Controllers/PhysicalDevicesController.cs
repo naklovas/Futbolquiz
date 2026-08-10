@@ -306,7 +306,7 @@ public class PhysicalDevicesController : Controller
 
     public async Task<IActionResult> Import()
     {
-        if (!_currentUser.CanEdit) return Forbid();
+        if (!_currentUser.IsAdmin) return Forbid();
         ViewBag.EntityName = "Physical Devices";
         await PopulateImportCountryInfo();
         return View("Import");
@@ -314,7 +314,7 @@ public class PhysicalDevicesController : Controller
 
     public IActionResult DownloadTemplate()
     {
-        if (!_currentUser.CanEdit) return Forbid();
+        if (!_currentUser.IsAdmin) return Forbid();
 
         var bytes = ExcelImportHelpers.CreateTemplateBytes("Physical Devices",
             "Category", "Device Name", "Brand", "Model", "Physical/Virtual", "Location Category",
@@ -329,7 +329,7 @@ public class PhysicalDevicesController : Controller
     [ValidateAntiForgeryToken]
     public async Task<IActionResult> Import(IFormFile file, int? countryId)
     {
-        if (!_currentUser.CanEdit) return Forbid();
+        if (!_currentUser.IsAdmin) return Forbid();
 
         if (file is null || file.Length == 0)
         {

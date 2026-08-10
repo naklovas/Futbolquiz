@@ -220,7 +220,7 @@ public class CircuitsController : Controller
 
     public async Task<IActionResult> Import()
     {
-        if (!_currentUser.CanEdit) return Forbid();
+        if (!_currentUser.IsAdmin) return Forbid();
         ViewBag.EntityName = "Circuits";
         await PopulateImportCountryInfo();
         return View("Import");
@@ -228,7 +228,7 @@ public class CircuitsController : Controller
 
     public IActionResult DownloadTemplate()
     {
-        if (!_currentUser.CanEdit) return Forbid();
+        if (!_currentUser.IsAdmin) return Forbid();
 
         var bytes = ExcelImportHelpers.CreateTemplateBytes("Circuits",
             "Circuit Type", "Capacity", "Provider", "Branch", "Location",
@@ -241,7 +241,7 @@ public class CircuitsController : Controller
     [ValidateAntiForgeryToken]
     public async Task<IActionResult> Import(IFormFile file, int? countryId)
     {
-        if (!_currentUser.CanEdit) return Forbid();
+        if (!_currentUser.IsAdmin) return Forbid();
 
         if (file is null || file.Length == 0)
         {

@@ -272,6 +272,32 @@
             return typeOrder.map(function (t) { return items.filter(function (i) { return i.ExpirationType === t; }).length; });
         }
 
+        // Chart.js has no built-in "show the number on the chart" -- draw it ourselves
+        // instead of pulling in the chartjs-plugin-datalabels CDN just for this.
+        var valueLabelsPlugin = {
+            id: 'valueLabels',
+            afterDatasetsDraw: function (chart) {
+                var isDoughnut = chart.config.type === 'doughnut';
+                var ctx = chart.ctx;
+                chart.data.datasets.forEach(function (dataset, datasetIndex) {
+                    var meta = chart.getDatasetMeta(datasetIndex);
+                    if (meta.hidden) return;
+                    meta.data.forEach(function (element, index) {
+                        var value = dataset.data[index];
+                        if (!value) return;
+                        var pos = element.tooltipPosition();
+                        ctx.save();
+                        ctx.fillStyle = isDoughnut ? '#fff' : '#334155';
+                        ctx.font = 'bold 11px sans-serif';
+                        ctx.textAlign = 'center';
+                        ctx.textBaseline = 'middle';
+                        ctx.fillText(String(value), pos.x, isDoughnut ? pos.y : pos.y - 8);
+                        ctx.restore();
+                    });
+                });
+            }
+        };
+
         var expirationChart = new Chart(document.getElementById('expirationChart'), {
             type: 'bar',
             data: {
@@ -286,7 +312,8 @@
                 maintainAspectRatio: false,
                 plugins: { legend: { position: 'bottom' } },
                 scales: { y: { beginAtZero: true, ticks: { precision: 0 } } }
-            }
+            },
+            plugins: [valueLabelsPlugin]
         });
 
         refresh();
@@ -306,7 +333,8 @@
                 responsive: true,
                 maintainAspectRatio: false,
                 plugins: { legend: { position: 'bottom' } }
-            }
+            },
+            plugins: [valueLabelsPlugin]
         });
     });
 </script>
