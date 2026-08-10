@@ -306,13 +306,26 @@
                     meta.data.forEach(function (element, index) {
                         var value = dataset.data[index];
                         if (!value) return;
-                        var pos = element.tooltipPosition();
                         ctx.save();
-                        ctx.fillStyle = isDoughnut ? '#fff' : '#334155';
                         ctx.font = 'bold 11px sans-serif';
                         ctx.textAlign = 'center';
                         ctx.textBaseline = 'middle';
-                        ctx.fillText(String(value), pos.x, isDoughnut ? pos.y : pos.y - 8);
+                        if (isDoughnut) {
+                            var pos = element.tooltipPosition();
+                            ctx.fillStyle = '#fff';
+                            ctx.fillText(String(value), pos.x, pos.y);
+                        } else {
+                            // Center the number inside the bar; if the bar is too short to fit
+                            // it legibly, fall back to drawing it just above the bar instead.
+                            var barHeight = Math.abs(element.base - element.y);
+                            if (barHeight < 16) {
+                                ctx.fillStyle = '#334155';
+                                ctx.fillText(String(value), element.x, element.y - 8);
+                            } else {
+                                ctx.fillStyle = '#fff';
+                                ctx.fillText(String(value), element.x, (element.y + element.base) / 2);
+                            }
+                        }
                         ctx.restore();
                     });
                 });
