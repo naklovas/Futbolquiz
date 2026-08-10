@@ -468,11 +468,6 @@ public class PhysicalDevicesController : Controller
             .Select(d => d.VendorSupplier!).Distinct().OrderBy(v => v).ToListAsync();
         ViewBag.VendorOptions = new SelectList(vendors);
 
-        var brands = await _db.PhysicalDevices
-            .Where(d => d.Brand != null && d.Brand != "")
-            .Select(d => d.Brand!).Distinct().OrderBy(v => v).ToListAsync();
-        ViewBag.BrandOptions = new SelectList(brands);
-
         var licenceInfos = await _db.PhysicalDevices
             .Where(d => d.LicenceInfo != null && d.LicenceInfo != "")
             .Select(d => d.LicenceInfo!).Distinct().OrderBy(v => v).ToListAsync();
