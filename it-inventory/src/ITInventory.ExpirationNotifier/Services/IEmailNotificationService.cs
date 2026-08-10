@@ -4,5 +4,5 @@ namespace ITInventory.ExpirationNotifier.Services;
 
 public interface IEmailNotificationService
 {
-    Task NotifyAsync(IReadOnlyList<ExpiringItemNotification> expiredItems, IReadOnlyList<ExpiringItemNotification> upcomingItems);
+    Task NotifyAsync(IReadOnlyList<CountryNotificationGroup> groups);
 }

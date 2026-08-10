@@ -4,8 +4,8 @@ using Microsoft.Extensions.Logging;
 namespace ITInventory.ExpirationNotifier.Services;
 
 /// <summary>
-/// Placeholder until the real mail service is wired in. Logs what would be sent so the
-/// call site (ExpirationCheckService) and its data shape are already final; swap the
+/// Placeholder until the real mail service is wired in. Logs what would be sent to whom so
+/// the call site (ExpirationCheckService) and its data shape are already final; swap the
 /// registration in Program.cs for a real implementation later without touching anything else.
 /// </summary>
 public class DummyEmailNotificationService : IEmailNotificationService
@@ -17,18 +17,28 @@ public class DummyEmailNotificationService : IEmailNotificationService
         _logger = logger;
     }
 
-    public Task NotifyAsync(IReadOnlyList<ExpiringItemNotification> expiredItems, IReadOnlyList<ExpiringItemNotification> upcomingItems)
+    public Task NotifyAsync(IReadOnlyList<CountryNotificationGroup> groups)
     {
-        _logger.LogInformation("[DUMMY EMAIL] Would send notification: {ExpiredCount} expired, {UpcomingCount} upcoming.",
-            expiredItems.Count, upcomingItems.Count);
+        foreach (var group in groups)
+        {
+            if (group.RecipientEmails.Count == 0)
+            {
+                _logger.LogWarning("[DUMMY EMAIL] {Country}: {ExpiredCount} expired, {UpcomingCount} upcoming, but no recipient email is configured (no matching YDUsers.Email and no admin has one either).",
+                    group.CountryName, group.ExpiredItems.Count, group.UpcomingItems.Count);
+                continue;
+            }
 
-        foreach (var item in expiredItems)
-            _logger.LogInformation("[DUMMY EMAIL]   EXPIRED  - {Label} '{Name}' ({Country}) - {ExpirationType} - {ExpiresAt:dd.MM.yyyy}",
-                item.Label, item.Name, item.Country ?? "-", item.ExpirationType, item.ExpiresAt);
+            _logger.LogInformation("[DUMMY EMAIL] {Country} -> {Recipients}: {ExpiredCount} expired, {UpcomingCount} upcoming.",
+                group.CountryName, string.Join(", ", group.RecipientEmails), group.ExpiredItems.Count, group.UpcomingItems.Count);
 
-        foreach (var item in upcomingItems)
-            _logger.LogInformation("[DUMMY EMAIL]   UPCOMING - {Label} '{Name}' ({Country}) - {ExpirationType} - {ExpiresAt:dd.MM.yyyy}",
-                item.Label, item.Name, item.Country ?? "-", item.ExpirationType, item.ExpiresAt);
+            foreach (var item in group.ExpiredItems)
+                _logger.LogInformation("[DUMMY EMAIL]   EXPIRED  - {Label} '{Name}' - {ExpirationType} - {ExpiresAt:dd.MM.yyyy}",
+                    item.Label, item.Name, item.ExpirationType, item.ExpiresAt);
+
+            foreach (var item in group.UpcomingItems)
+                _logger.LogInformation("[DUMMY EMAIL]   UPCOMING - {Label} '{Name}' - {ExpirationType} - {ExpiresAt:dd.MM.yyyy}",
+                    item.Label, item.Name, item.ExpirationType, item.ExpiresAt);
+        }
 
         return Task.CompletedTask;
     }

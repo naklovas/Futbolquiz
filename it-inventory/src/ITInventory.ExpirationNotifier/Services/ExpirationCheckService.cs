@@ -1,4 +1,5 @@
 using ITInventory.Data;
+using ITInventory.Data.Common;
 using ITInventory.ExpirationNotifier.Models;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -7,7 +8,9 @@ namespace ITInventory.ExpirationNotifier.Services;
 
 /// <summary>
 /// Same expired/upcoming categorization as the web dashboard (Home/Index), run standalone
-/// against every country -- there is no signed-in user to scope this to.
+/// against every country -- there is no signed-in user to scope this to. Recipients are
+/// resolved per country: that country's YDUsers (RepositoryName == Countries.Name, the same
+/// match the web app uses) union every admin, so nobody is left without a recipient list.
 /// </summary>
 public class ExpirationCheckService
 {
@@ -32,7 +35,7 @@ public class ExpirationCheckService
         var expired = new List<ExpiringItemNotification>();
         var upcoming = new List<ExpiringItemNotification>();
 
-        void Add(string category, string label, ExpirationType type, string name, string? country, DateTime expiresAt)
+        void Add(string category, string label, ExpirationType type, string name, int countryId, string countryName, DateTime expiresAt)
         {
             var item = new ExpiringItemNotification
             {
@@ -40,7 +43,8 @@ public class ExpirationCheckService
                 Label = label,
                 ExpirationType = type,
                 Name = name,
-                Country = country,
+                CountryId = countryId,
+                CountryName = countryName,
                 ExpiresAt = expiresAt
             };
             (expiresAt < now ? expired : upcoming).Add(item);
@@ -52,11 +56,11 @@ public class ExpirationCheckService
             .ToListAsync();
         foreach (var d in devices)
         {
-            var country = d.Country != null ? (d.Country.DisplayName ?? d.Country.Name) : null;
+            var countryName = d.Country?.DisplayName ?? d.Country?.Name ?? "?";
             if (d.EndOfSupportDate != null && d.EndOfSupportDate <= threshold)
-                Add("PhysicalDevice", "Physical Device", ExpirationType.EndOfSupport, d.DeviceName, country, d.EndOfSupportDate.Value);
+                Add("PhysicalDevice", "Physical Device", ExpirationType.EndOfSupport, d.DeviceName, d.CountryId, countryName, d.EndOfSupportDate.Value);
             if (d.EndOfLifeDate != null && d.EndOfLifeDate <= threshold)
-                Add("PhysicalDevice", "Physical Device", ExpirationType.EndOfLife, d.DeviceName, country, d.EndOfLifeDate.Value);
+                Add("PhysicalDevice", "Physical Device", ExpirationType.EndOfLife, d.DeviceName, d.CountryId, countryName, d.EndOfLifeDate.Value);
         }
 
         var servers = await _db.Servers.Include(s => s.Country)
@@ -65,11 +69,11 @@ public class ExpirationCheckService
             .ToListAsync();
         foreach (var s in servers)
         {
-            var country = s.Country != null ? (s.Country.DisplayName ?? s.Country.Name) : null;
+            var countryName = s.Country?.DisplayName ?? s.Country?.Name ?? "?";
             if (s.EndOfSupportDate != null && s.EndOfSupportDate <= threshold)
-                Add("Server", "Server", ExpirationType.EndOfSupport, s.HostName, country, s.EndOfSupportDate.Value);
+                Add("Server", "Server", ExpirationType.EndOfSupport, s.HostName, s.CountryId, countryName, s.EndOfSupportDate.Value);
             if (s.EndOfLifeDate != null && s.EndOfLifeDate <= threshold)
-                Add("Server", "Server", ExpirationType.EndOfLife, s.HostName, country, s.EndOfLifeDate.Value);
+                Add("Server", "Server", ExpirationType.EndOfLife, s.HostName, s.CountryId, countryName, s.EndOfLifeDate.Value);
         }
 
         var licenses = await _db.Licenses.Include(l => l.Country)
@@ -78,11 +82,11 @@ public class ExpirationCheckService
             .ToListAsync();
         foreach (var l in licenses)
         {
-            var country = l.Country != null ? (l.Country.DisplayName ?? l.Country.Name) : null;
+            var countryName = l.Country?.DisplayName ?? l.Country?.Name ?? "?";
             if (l.SupportEndDate != null && l.SupportEndDate <= threshold)
-                Add("License", "License (Support)", ExpirationType.License, l.LicenseName, country, l.SupportEndDate.Value);
+                Add("License", "License (Support)", ExpirationType.License, l.LicenseName, l.CountryId, countryName, l.SupportEndDate.Value);
             if (l.ExpirationDate != null && l.ExpirationDate <= threshold)
-                Add("License", "License (Expiration)", ExpirationType.License, l.LicenseName, country, l.ExpirationDate.Value);
+                Add("License", "License (Expiration)", ExpirationType.License, l.LicenseName, l.CountryId, countryName, l.ExpirationDate.Value);
         }
 
         var circuits = await _db.Circuits.Include(c => c.Country)
@@ -90,8 +94,8 @@ public class ExpirationCheckService
             .ToListAsync();
         foreach (var c in circuits)
         {
-            var country = c.Country != null ? (c.Country.DisplayName ?? c.Country.Name) : null;
-            Add("Circuit", "Circuit", ExpirationType.EndOfSupport, c.CircuitType, country, c.EndDate!.Value);
+            var countryName = c.Country?.DisplayName ?? c.Country?.Name ?? "?";
+            Add("Circuit", "Circuit", ExpirationType.EndOfSupport, c.CircuitType, c.CountryId, countryName, c.EndDate!.Value);
         }
 
         _logger.LogInformation("Expiration check: {ExpiredCount} expired, {UpcomingCount} upcoming (within {Days} days).",
@@ -103,6 +107,54 @@ public class ExpirationCheckService
             return;
         }
 
-        await _emailService.NotifyAsync(expired, upcoming);
+        var groups = await BuildCountryGroupsAsync(expired, upcoming);
+        await _emailService.NotifyAsync(groups);
+    }
+
+    private async Task<List<CountryNotificationGroup>> BuildCountryGroupsAsync(
+        List<ExpiringItemNotification> expired, List<ExpiringItemNotification> upcoming)
+    {
+        var adminEmails = await _db.YdUserRoles
+            .Where(ur => ur.Role!.RoleName == RoleNames.Admin)
+            .Select(ur => ur.User!)
+            .Where(u => u.IsActive && !string.IsNullOrWhiteSpace(u.Email))
+            .Select(u => u.Email!)
+            .Distinct()
+            .ToListAsync();
+
+        var countries = await _db.Countries.ToDictionaryAsync(c => c.Id);
+
+        var byCountry = expired.Concat(upcoming)
+            .Select(i => i.CountryId)
+            .Distinct()
+            .ToList();
+
+        var groups = new List<CountryNotificationGroup>();
+        foreach (var countryId in byCountry)
+        {
+            countries.TryGetValue(countryId, out var country);
+            var countryName = country != null ? (country.DisplayName ?? country.Name) : "?";
+
+            var countryEmails = country != null
+                ? await _db.YdUsers
+                    .Where(u => u.IsActive && u.RepositoryName == country.Name && !string.IsNullOrWhiteSpace(u.Email))
+                    .Select(u => u.Email!)
+                    .Distinct()
+                    .ToListAsync()
+                : new List<string>();
+
+            var recipients = countryEmails.Concat(adminEmails).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+
+            groups.Add(new CountryNotificationGroup
+            {
+                CountryId = countryId,
+                CountryName = countryName,
+                RecipientEmails = recipients,
+                ExpiredItems = expired.Where(i => i.CountryId == countryId).ToList(),
+                UpcomingItems = upcoming.Where(i => i.CountryId == countryId).ToList()
+            });
+        }
+
+        return groups;
     }
 }
