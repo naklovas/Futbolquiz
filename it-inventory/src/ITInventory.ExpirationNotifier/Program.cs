@@ -17,7 +17,19 @@ builder.Services.AddWindowsService(options =>
 var connectionString = builder.Configuration.GetConnectionString("ITInventory");
 builder.Services.AddDbContext<ITInventoryDbContext>(options => options.UseSqlServer(connectionString));
 
-builder.Services.AddScoped<IEmailNotificationService, DummyEmailNotificationService>();
+// Relay not configured yet (or Smtp:Enabled is false) -> keep logging what would be sent
+// instead of actually sending. Once the relay details are filled in and Enabled is set to
+// true, this switches to real email with no other code changes needed.
+var smtpEnabled = builder.Configuration.GetValue<bool?>("Smtp:Enabled") ?? false;
+var smtpHost = builder.Configuration["Smtp:Host"];
+if (smtpEnabled && !string.IsNullOrWhiteSpace(smtpHost) && smtpHost != "CHANGE_ME")
+{
+    builder.Services.AddScoped<IEmailNotificationService, SmtpEmailNotificationService>();
+}
+else
+{
+    builder.Services.AddScoped<IEmailNotificationService, DummyEmailNotificationService>();
+}
 
 var upcomingWindowDays = builder.Configuration.GetValue<int?>("ExpirationNotifier:UpcomingWindowDays") ?? 90;
 builder.Services.AddScoped(sp => new ExpirationCheckService(
