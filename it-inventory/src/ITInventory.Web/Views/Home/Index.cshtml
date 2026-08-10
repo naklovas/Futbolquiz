@@ -5,7 +5,6 @@
     int? selectedCountryId = ViewBag.SelectedCountryId;
     bool isAdmin = ViewBag.IsAdmin;
     bool viewAll = ViewBag.ViewAll;
-    string? cardCountryId = isAdmin ? (viewAll ? "all" : selectedCountryId?.ToString()) : null;
 }
 
 <div class="flex flex-wrap items-center justify-between gap-3 mb-6">
@@ -24,47 +23,44 @@
     }
 </div>
 
+<p class="text-xs text-slate-400 -mt-4 mb-3"><i class="fa-solid fa-circle-info mr-1"></i>Click a card to filter the expiring items below by that category.</p>
 <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-    <a asp-controller="PhysicalDevices" asp-action="Index" asp-route-countryId="@cardCountryId" onclick="showLoadingOverlay()" class="group block bg-white rounded-lg shadow-sm border border-slate-200 p-5 hover:shadow-md hover:border-brand-300 transition">
+    <button type="button" id="card-PhysicalDevice" onclick="filterByCategory('PhysicalDevice')" class="dash-card text-left bg-white rounded-lg shadow-sm border border-slate-200 p-5 hover:shadow-md hover:border-brand-300 transition">
         <div class="flex items-center gap-3">
             <div class="w-10 h-10 rounded-lg bg-brand-50 text-brand-600 flex items-center justify-center"><i class="fa-solid fa-desktop"></i></div>
             <div class="flex-1">
                 <div class="text-2xl font-semibold text-slate-900">@Model.PhysicalDeviceCount</div>
                 <div class="text-xs text-slate-500">Physical Devices</div>
             </div>
-            <i class="fa-solid fa-chevron-right text-slate-300 group-hover:text-brand-500 transition text-xs"></i>
         </div>
-    </a>
-    <a asp-controller="Servers" asp-action="Index" asp-route-countryId="@cardCountryId" onclick="showLoadingOverlay()" class="group block bg-white rounded-lg shadow-sm border border-slate-200 p-5 hover:shadow-md hover:border-brand-300 transition">
+    </button>
+    <button type="button" id="card-Server" onclick="filterByCategory('Server')" class="dash-card text-left bg-white rounded-lg shadow-sm border border-slate-200 p-5 hover:shadow-md hover:border-brand-300 transition">
         <div class="flex items-center gap-3">
             <div class="w-10 h-10 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center"><i class="fa-solid fa-database"></i></div>
             <div class="flex-1">
                 <div class="text-2xl font-semibold text-slate-900">@Model.ServerCount</div>
                 <div class="text-xs text-slate-500">Servers</div>
             </div>
-            <i class="fa-solid fa-chevron-right text-slate-300 group-hover:text-brand-500 transition text-xs"></i>
         </div>
-    </a>
-    <a asp-controller="Licenses" asp-action="Index" asp-route-countryId="@cardCountryId" onclick="showLoadingOverlay()" class="group block bg-white rounded-lg shadow-sm border border-slate-200 p-5 hover:shadow-md hover:border-brand-300 transition">
+    </button>
+    <button type="button" id="card-License" onclick="filterByCategory('License')" class="dash-card text-left bg-white rounded-lg shadow-sm border border-slate-200 p-5 hover:shadow-md hover:border-brand-300 transition">
         <div class="flex items-center gap-3">
             <div class="w-10 h-10 rounded-lg bg-amber-50 text-amber-600 flex items-center justify-center"><i class="fa-solid fa-key"></i></div>
             <div class="flex-1">
                 <div class="text-2xl font-semibold text-slate-900">@Model.LicenseCount</div>
                 <div class="text-xs text-slate-500">Licenses</div>
             </div>
-            <i class="fa-solid fa-chevron-right text-slate-300 group-hover:text-brand-500 transition text-xs"></i>
         </div>
-    </a>
-    <a asp-controller="Circuits" asp-action="Index" asp-route-countryId="@cardCountryId" onclick="showLoadingOverlay()" class="group block bg-white rounded-lg shadow-sm border border-slate-200 p-5 hover:shadow-md hover:border-brand-300 transition">
+    </button>
+    <button type="button" id="card-Circuit" onclick="filterByCategory('Circuit')" class="dash-card text-left bg-white rounded-lg shadow-sm border border-slate-200 p-5 hover:shadow-md hover:border-brand-300 transition">
         <div class="flex items-center gap-3">
             <div class="w-10 h-10 rounded-lg bg-purple-50 text-purple-600 flex items-center justify-center"><i class="fa-solid fa-diagram-project"></i></div>
             <div class="flex-1">
                 <div class="text-2xl font-semibold text-slate-900">@Model.CircuitCount</div>
                 <div class="text-xs text-slate-500">Circuits</div>
             </div>
-            <i class="fa-solid fa-chevron-right text-slate-300 group-hover:text-brand-500 transition text-xs"></i>
         </div>
-    </a>
+    </button>
 </div>
 
 <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-8">
@@ -93,14 +89,20 @@
             <span id="tab-count-upcoming" class="inline-flex items-center justify-center min-w-[1.5rem] rounded-full bg-amber-100 text-amber-700 text-xs font-semibold px-2 py-0.5">0</span>
         </button>
     </div>
-    <div>
-        <label class="text-xs text-slate-500 mr-2">Expiration Type</label>
-        <select id="expirationTypeFilter" class="rounded-md border border-slate-300 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
-            <option value="">All Types</option>
-            <option value="License">License</option>
-            <option value="EndOfSupport">End of Support</option>
-            <option value="EndOfLife">End of Life</option>
-        </select>
+    <div class="flex items-center gap-3">
+        <button type="button" id="category-filter-chip" onclick="filterByCategory(null)" class="hidden items-center gap-1.5 text-xs font-medium text-brand-700 bg-brand-50 border border-brand-200 rounded-full pl-3 pr-2 py-1 hover:bg-brand-100 transition">
+            <span id="category-filter-label"></span>
+            <i class="fa-solid fa-xmark"></i>
+        </button>
+        <div>
+            <label class="text-xs text-slate-500 mr-2">Expiration Type</label>
+            <select id="expirationTypeFilter" class="rounded-md border border-slate-300 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
+                <option value="">All Types</option>
+                <option value="License">License</option>
+                <option value="EndOfSupport">End of Support</option>
+                <option value="EndOfLife">End of Life</option>
+            </select>
+        </div>
     </div>
 </div>
 
@@ -147,6 +149,20 @@
             EndOfLife: 'bg-red-100 text-red-700'
         };
 
+        var categoryLabels = {
+            PhysicalDevice: 'Physical Devices',
+            Server: 'Servers',
+            License: 'Licenses',
+            Circuit: 'Circuits'
+        };
+        var categoryMatchers = {
+            PhysicalDevice: function (i) { return i.Type === 'Physical Device'; },
+            Server: function (i) { return i.Type === 'Server'; },
+            License: function (i) { return i.Type.indexOf('License') === 0; },
+            Circuit: function (i) { return i.Type === 'Circuit'; }
+        };
+        var activeCategory = null;
+
         function fmtDate(iso) {
             var d = new Date(iso);
             return ('0' + d.getDate()).slice(-2) + '.' + ('0' + (d.getMonth() + 1)).slice(-2) + '.' + d.getFullYear();
@@ -181,10 +197,43 @@
             });
         }
 
+        function categoryFiltered(items) {
+            return activeCategory ? items.filter(categoryMatchers[activeCategory]) : items;
+        }
+
         function filtered(items) {
             var t = document.getElementById('expirationTypeFilter').value;
-            return t ? items.filter(function (i) { return i.ExpirationType === t; }) : items;
+            var result = categoryFiltered(items);
+            return t ? result.filter(function (i) { return i.ExpirationType === t; }) : result;
         }
+
+        function updateCardStyles() {
+            Object.keys(categoryLabels).forEach(function (key) {
+                var el = document.getElementById('card-' + key);
+                if (!el) return;
+                if (activeCategory === key) {
+                    el.classList.add('ring-2', 'ring-brand-500', 'border-brand-300');
+                } else {
+                    el.classList.remove('ring-2', 'ring-brand-500', 'border-brand-300');
+                }
+            });
+
+            var chip = document.getElementById('category-filter-chip');
+            if (activeCategory) {
+                document.getElementById('category-filter-label').textContent = categoryLabels[activeCategory];
+                chip.classList.remove('hidden');
+                chip.classList.add('inline-flex');
+            } else {
+                chip.classList.add('hidden');
+                chip.classList.remove('inline-flex');
+            }
+        }
+
+        window.filterByCategory = function (category) {
+            activeCategory = (activeCategory === category) ? null : category;
+            updateCardStyles();
+            refresh();
+        };
 
         function refresh() {
             var fe = filtered(expiredItems);
@@ -193,6 +242,12 @@
             renderTable('upcoming-tbody', fu, false);
             document.getElementById('tab-count-expired').textContent = fe.length;
             document.getElementById('tab-count-upcoming').textContent = fu.length;
+
+            var ceCat = categoryFiltered(expiredItems);
+            var cuCat = categoryFiltered(upcomingItems);
+            expirationChart.data.datasets[0].data = countByType(ceCat);
+            expirationChart.data.datasets[1].data = countByType(cuCat);
+            expirationChart.update();
         }
 
         window.switchDashboardTab = function (tab) {
@@ -212,15 +267,12 @@
 
         document.getElementById('expirationTypeFilter').addEventListener('change', refresh);
 
-        refresh();
-        switchDashboardTab('expired');
-
         var typeOrder = ['License', 'EndOfSupport', 'EndOfLife'];
         function countByType(items) {
             return typeOrder.map(function (t) { return items.filter(function (i) { return i.ExpirationType === t; }).length; });
         }
 
-        new Chart(document.getElementById('expirationChart'), {
+        var expirationChart = new Chart(document.getElementById('expirationChart'), {
             type: 'bar',
             data: {
                 labels: ['License', 'End of Support', 'End of Life'],
@@ -236,6 +288,9 @@
                 scales: { y: { beginAtZero: true, ticks: { precision: 0 } } }
             }
         });
+
+        refresh();
+        switchDashboardTab('expired');
 
         new Chart(document.getElementById('inventoryChart'), {
             type: 'doughnut',
