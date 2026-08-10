@@ -8,7 +8,12 @@ using Microsoft.EntityFrameworkCore;
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
-builder.Services.AddControllersWithViews();
+// PropertyNamingPolicy = null keeps @Json.Serialize(...) output in the exact C# PascalCase
+// property names (CountryId, Branch, ...) instead of the framework's camelCase default --
+// the inline <script> blocks that read this JSON (branch/vendor comboboxes, company contacts)
+// all reference the PascalCase names.
+builder.Services.AddControllersWithViews()
+    .AddJsonOptions(options => options.JsonSerializerOptions.PropertyNamingPolicy = null);
 
 builder.Services.AddDbContext<ITInventoryDbContext>(options =>
     options.UseSqlServer(builder.Configuration.GetConnectionString("ITInventory")));
