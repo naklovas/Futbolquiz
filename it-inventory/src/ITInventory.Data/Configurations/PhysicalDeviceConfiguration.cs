@@ -26,6 +26,7 @@ public class PhysicalDeviceConfiguration : IEntityTypeConfiguration<PhysicalDevi
         builder.Property(x => x.CreatedBy).HasMaxLength(100);
         builder.Property(x => x.UpdatedBy).HasMaxLength(100);
         builder.Property(x => x.ApplianceType).HasConversion<string>().HasMaxLength(20);
+        builder.Property(x => x.LocationCategory).HasConversion<string>().HasMaxLength(20);
 
         builder.HasOne(x => x.Country)
             .WithMany(c => c.PhysicalDevices)

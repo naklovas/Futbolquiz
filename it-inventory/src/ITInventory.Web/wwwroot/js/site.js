@@ -81,6 +81,57 @@ function initBranchCombobox(selectId, locations, currentValue) {
     refresh();
 }
 
+function initLocationCategoryToggle(categorySelectId, branchSelectId, evmBranchValue) {
+    var categoryField = document.getElementById(categorySelectId);
+    var branchSelect = document.getElementById(branchSelectId);
+    if (!categoryField || !branchSelect) return;
+
+    var hiddenBranch = document.createElement('input');
+    hiddenBranch.type = 'hidden';
+    hiddenBranch.name = branchSelect.name;
+    hiddenBranch.disabled = true;
+    branchSelect.insertAdjacentElement('afterend', hiddenBranch);
+
+    function forceBranchOption(value) {
+        var found = false;
+        for (var i = 0; i < branchSelect.options.length; i++) {
+            if (branchSelect.options[i].value === value) {
+                branchSelect.options[i].selected = true;
+                found = true;
+                break;
+            }
+        }
+        if (!found && value) {
+            var opt = document.createElement('option');
+            opt.value = value;
+            opt.textContent = value;
+            opt.selected = true;
+            branchSelect.insertBefore(opt, branchSelect.children[1] || null);
+        }
+    }
+
+    function refresh() {
+        var category = categoryField.value;
+        if (category === 'EVM') {
+            forceBranchOption(evmBranchValue);
+            branchSelect.disabled = true;
+            hiddenBranch.value = evmBranchValue;
+            hiddenBranch.disabled = false;
+        } else if (category === 'Cloud') {
+            branchSelect.value = '';
+            branchSelect.disabled = true;
+            hiddenBranch.value = '';
+            hiddenBranch.disabled = false;
+        } else {
+            branchSelect.disabled = false;
+            hiddenBranch.disabled = true;
+        }
+    }
+
+    categoryField.addEventListener('change', refresh);
+    refresh();
+}
+
 function filterRows(inputEl, tableId) {
     var filter = inputEl.value.toLowerCase();
     var rows = document.querySelectorAll('#' + tableId + ' tbody tr');

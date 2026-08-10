@@ -21,6 +21,7 @@ public class Server : AuditableEntity
 
     public string HostName { get; set; } = string.Empty;
     public ApplianceType ApplianceType { get; set; }
+    public LocationCategory LocationCategory { get; set; }
 
     /// <summary>Sanal ise bu sunucunun üzerinde çalıştığı fiziksel host (Physical Devices'a bağlantı).</summary>
     public int? HostPhysicalDeviceId { get; set; }

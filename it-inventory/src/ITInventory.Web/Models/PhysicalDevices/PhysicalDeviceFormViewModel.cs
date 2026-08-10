@@ -36,6 +36,9 @@ public class PhysicalDeviceFormViewModel
     [Display(Name = "Physical/Virtual")]
     public ApplianceType ApplianceType { get; set; }
 
+    [Display(Name = "Location Category")]
+    public LocationCategory LocationCategory { get; set; }
+
     [StringLength(150)]
     [Display(Name = "Software Version")]
     public string? SoftwareVersion { get; set; }

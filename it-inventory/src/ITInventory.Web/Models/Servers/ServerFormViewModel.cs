@@ -24,6 +24,9 @@ public class ServerFormViewModel
     [Display(Name = "Physical/Virtual")]
     public ApplianceType ApplianceType { get; set; }
 
+    [Display(Name = "Location Category")]
+    public LocationCategory LocationCategory { get; set; }
+
     [Display(Name = "Host (ESX/Physical Device)")]
     public int? HostPhysicalDeviceId { get; set; }
 

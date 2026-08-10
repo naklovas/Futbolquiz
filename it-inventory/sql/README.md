@@ -118,6 +118,15 @@ incelenip çalıştırılan SQL script tercih edildiği için ayrıca burada tut
     geçerli olduğu için). Bu script **011-014'ü de içerir**. EF Core
     migration'ından üretildi, elle düzenlemeyin. İdempotenttir.
 
+16. **016_location_category.sql** — `PhysicalDevices` ve `Servers` tablolarına
+    `LocationCategory` kolonunu ekler (Local / EVM / Cloud, admin ve kullanıcı
+    formlarında "Location Category" adıyla görünür). Mevcut kayıtlar `Local`
+    olarak başlar. Formda **Local** seçiliyken Branch alanı normal (Locations
+    tablosundan combobox) kalır; **EVM** seçilince Branch otomatik ve sabit
+    olarak "Esenyurt Veri Merkezi" olur (alan kilitlenir); **Cloud** seçilince
+    Branch boşalıp kilitlenir. Bu script **011-015'i de içerir**. EF Core
+    migration'ından üretildi, elle düzenlemeyin. İdempotenttir.
+
 ## Bu scriptlerin DOKUNMADIĞI mevcut tablolar
 
 Aşağıdaki tablo bu proje tarafından oluşturulmaz; production'da başka bir

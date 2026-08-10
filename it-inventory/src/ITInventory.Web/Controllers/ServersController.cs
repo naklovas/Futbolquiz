@@ -73,7 +73,7 @@ public class ServersController : Controller
 
         var headers = new[]
         {
-            "Country", "Host Name", "Physical/Virtual", "Host (ESX/Physical Device)", "Operating System",
+            "Country", "Host Name", "Physical/Virtual", "Location Category", "Host (ESX/Physical Device)", "Operating System",
             "Brand", "Model", "Serial Number", "Vendor/Supplier", "Branch", "Location",
             "Support Start Date", "Support End Date", "End of Life Date", "Notes"
         };
@@ -82,6 +82,7 @@ public class ServersController : Controller
             s.Country?.DisplayName ?? s.Country?.Name,
             s.HostName,
             s.ApplianceType.ToString(),
+            s.LocationCategory.ToString(),
             s.HostPhysicalDevice?.DeviceName,
             s.OperatingSystem,
             s.Brand,
@@ -151,6 +152,7 @@ public class ServersController : Controller
             SourceZiraatYdId = vm.SourceZiraatYdId,
             HostName = vm.HostName,
             ApplianceType = vm.ApplianceType,
+            LocationCategory = vm.LocationCategory,
             HostPhysicalDeviceId = vm.HostPhysicalDeviceId,
             OperatingSystem = vm.OperatingSystem,
             Brand = vm.Brand,
@@ -188,6 +190,7 @@ public class ServersController : Controller
             SourceZiraatYdId = entity.SourceZiraatYdId,
             HostName = entity.HostName,
             ApplianceType = entity.ApplianceType,
+            LocationCategory = entity.LocationCategory,
             HostPhysicalDeviceId = entity.HostPhysicalDeviceId,
             OperatingSystem = entity.OperatingSystem,
             Brand = entity.Brand,
@@ -229,6 +232,7 @@ public class ServersController : Controller
         entity.CountryId = vm.CountryId;
         entity.HostName = vm.HostName;
         entity.ApplianceType = vm.ApplianceType;
+        entity.LocationCategory = vm.LocationCategory;
         entity.HostPhysicalDeviceId = vm.HostPhysicalDeviceId;
         entity.OperatingSystem = vm.OperatingSystem;
         entity.Brand = vm.Brand;
@@ -285,7 +289,7 @@ public class ServersController : Controller
         if (!_currentUser.CanEdit) return Forbid();
 
         var bytes = ExcelImportHelpers.CreateTemplateBytes("Servers",
-            "Host Name", "Physical/Virtual", "Operating System",
+            "Host Name", "Physical/Virtual", "Location Category", "Operating System",
             "Brand", "Model", "Serial Number", "Vendor/Supplier", "Branch", "Location",
             "Support Start Date", "Support End Date", "End of Life Date", "Notes");
 
@@ -349,11 +353,19 @@ public class ServersController : Controller
                     continue;
                 }
 
+                var locationCategoryRaw = ExcelImportHelpers.GetString(ws, row, headers, "Location Category");
+                if (!ExcelImportHelpers.TryParseLocationCategory(locationCategoryRaw, out var locationCategory, out var locationCategoryError))
+                {
+                    result.Errors.Add(new ImportRowError { RowNumber = row, Message = locationCategoryError! });
+                    continue;
+                }
+
                 toAdd.Add(new Server
                 {
                     CountryId = country.Id,
                     HostName = hostName,
                     ApplianceType = applianceType,
+                    LocationCategory = locationCategory,
                     OperatingSystem = ExcelImportHelpers.GetString(ws, row, headers, "Operating System"),
                     Brand = ExcelImportHelpers.GetString(ws, row, headers, "Brand"),
                     Model = ExcelImportHelpers.GetString(ws, row, headers, "Model"),

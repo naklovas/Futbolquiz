@@ -87,7 +87,7 @@ public class PhysicalDevicesController : Controller
         var headers = new[]
         {
             "Country", "Category", "Device Name", "Brand", "Model", "Physical/Virtual",
-            "Software Version", "Serial Number", "IP Address", "Management IP", "Branch",
+            "Location Category", "Software Version", "Serial Number", "IP Address", "Management IP", "Branch",
             "Location", "Vendor/Supplier", "License Info", "Support Start Date", "Support End Date",
             "End of Life Date", "Notes"
         };
@@ -99,6 +99,7 @@ public class PhysicalDevicesController : Controller
             d.Brand,
             d.Model,
             d.ApplianceType.ToString(),
+            d.LocationCategory.ToString(),
             d.SoftwareVersion,
             d.SerialNo,
             d.IpAddress,
@@ -179,6 +180,7 @@ public class PhysicalDevicesController : Controller
             Brand = vm.Brand,
             Model = vm.Model,
             ApplianceType = vm.ApplianceType,
+            LocationCategory = vm.LocationCategory,
             SoftwareVersion = vm.SoftwareVersion,
             SerialNo = vm.SerialNo,
             IpAddress = vm.IpAddress,
@@ -219,6 +221,7 @@ public class PhysicalDevicesController : Controller
             Brand = entity.Brand,
             Model = entity.Model,
             ApplianceType = entity.ApplianceType,
+            LocationCategory = entity.LocationCategory,
             SoftwareVersion = entity.SoftwareVersion,
             SerialNo = entity.SerialNo,
             IpAddress = entity.IpAddress,
@@ -266,6 +269,7 @@ public class PhysicalDevicesController : Controller
         entity.Brand = vm.Brand;
         entity.Model = vm.Model;
         entity.ApplianceType = vm.ApplianceType;
+        entity.LocationCategory = vm.LocationCategory;
         entity.SoftwareVersion = vm.SoftwareVersion;
         entity.SerialNo = vm.SerialNo;
         entity.IpAddress = vm.IpAddress;
@@ -313,7 +317,7 @@ public class PhysicalDevicesController : Controller
         if (!_currentUser.CanEdit) return Forbid();
 
         var bytes = ExcelImportHelpers.CreateTemplateBytes("Physical Devices",
-            "Category", "Device Name", "Brand", "Model", "Physical/Virtual",
+            "Category", "Device Name", "Brand", "Model", "Physical/Virtual", "Location Category",
             "Software Version", "Serial Number", "IP Address", "Management IP", "Branch",
             "Location", "Vendor/Supplier", "License Info", "Support Start Date", "Support End Date",
             "End of Life Date", "Notes");
@@ -401,6 +405,13 @@ public class PhysicalDevicesController : Controller
                     continue;
                 }
 
+                var locationCategoryRaw = ExcelImportHelpers.GetString(ws, row, headers, "Location Category");
+                if (!ExcelImportHelpers.TryParseLocationCategory(locationCategoryRaw, out var locationCategory, out var locationCategoryError))
+                {
+                    result.Errors.Add(new ImportRowError { RowNumber = row, Message = locationCategoryError! });
+                    continue;
+                }
+
                 toAdd.Add(new PhysicalDevice
                 {
                     CountryId = country.Id,
@@ -409,6 +420,7 @@ public class PhysicalDevicesController : Controller
                     Brand = ExcelImportHelpers.GetString(ws, row, headers, "Brand"),
                     Model = ExcelImportHelpers.GetString(ws, row, headers, "Model"),
                     ApplianceType = applianceType,
+                    LocationCategory = locationCategory,
                     SoftwareVersion = ExcelImportHelpers.GetString(ws, row, headers, "Software Version"),
                     SerialNo = ExcelImportHelpers.GetString(ws, row, headers, "Serial Number"),
                     IpAddress = ExcelImportHelpers.GetString(ws, row, headers, "IP Address"),

@@ -85,6 +85,39 @@ public static class ExcelImportHelpers
         return false;
     }
 
+    public static bool TryParseLocationCategory(string? raw, out LocationCategory value, out string? error)
+    {
+        error = null;
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            value = LocationCategory.Local;
+            return true;
+        }
+
+        var trimmed = raw.Trim();
+        if (trimmed.Equals("Local", StringComparison.OrdinalIgnoreCase))
+        {
+            value = LocationCategory.Local;
+            return true;
+        }
+
+        if (trimmed.Equals("EVM", StringComparison.OrdinalIgnoreCase))
+        {
+            value = LocationCategory.EVM;
+            return true;
+        }
+
+        if (trimmed.Equals("Cloud", StringComparison.OrdinalIgnoreCase))
+        {
+            value = LocationCategory.Cloud;
+            return true;
+        }
+
+        value = LocationCategory.Local;
+        error = $"Unrecognized Location Category value '{raw}' (expected 'Local', 'EVM' or 'Cloud').";
+        return false;
+    }
+
     public static byte[] CreateTemplateBytes(string title, params string[] headers)
     {
         using var workbook = new XLWorkbook();
