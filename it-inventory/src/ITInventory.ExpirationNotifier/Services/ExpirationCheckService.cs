@@ -114,12 +114,11 @@ public class ExpirationCheckService
     private async Task<List<CountryNotificationGroup>> BuildCountryGroupsAsync(
         List<ExpiringItemNotification> expired, List<ExpiringItemNotification> upcoming)
     {
-        var adminEmails = await _db.YdUserRoles
+        var adminRecipients = await _db.YdUserRoles
             .Where(ur => ur.Role!.RoleName == RoleNames.Admin)
             .Select(ur => ur.User!)
             .Where(u => u.IsActive && !string.IsNullOrWhiteSpace(u.Email))
-            .Select(u => u.Email!)
-            .Distinct()
+            .Select(u => new NotificationRecipient { FullName = u.FullName, Email = u.Email! })
             .ToListAsync();
 
         var countries = await _db.Countries.ToDictionaryAsync(c => c.Id);
@@ -135,21 +134,23 @@ public class ExpirationCheckService
             countries.TryGetValue(countryId, out var country);
             var countryName = country != null ? (country.DisplayName ?? country.Name) : "?";
 
-            var countryEmails = country != null
+            var countryRecipients = country != null
                 ? await _db.YdUsers
                     .Where(u => u.IsActive && u.RepositoryName == country.Name && !string.IsNullOrWhiteSpace(u.Email))
-                    .Select(u => u.Email!)
-                    .Distinct()
+                    .Select(u => new NotificationRecipient { FullName = u.FullName, Email = u.Email! })
                     .ToListAsync()
-                : new List<string>();
+                : new List<NotificationRecipient>();
 
-            var recipients = countryEmails.Concat(adminEmails).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            var recipients = countryRecipients.Concat(adminRecipients)
+                .GroupBy(r => r.Email, StringComparer.OrdinalIgnoreCase)
+                .Select(g => g.First())
+                .ToList();
 
             groups.Add(new CountryNotificationGroup
             {
                 CountryId = countryId,
                 CountryName = countryName,
-                RecipientEmails = recipients,
+                Recipients = recipients,
                 ExpiredItems = expired.Where(i => i.CountryId == countryId).ToList(),
                 UpcomingItems = upcoming.Where(i => i.CountryId == countryId).ToList()
             });

@@ -21,15 +21,16 @@ public class DummyEmailNotificationService : IEmailNotificationService
     {
         foreach (var group in groups)
         {
-            if (group.RecipientEmails.Count == 0)
+            if (group.Recipients.Count == 0)
             {
                 _logger.LogWarning("[DUMMY EMAIL] {Country}: {ExpiredCount} expired, {UpcomingCount} upcoming, but no recipient email is configured (no matching YDUsers.Email and no admin has one either).",
                     group.CountryName, group.ExpiredItems.Count, group.UpcomingItems.Count);
                 continue;
             }
 
+            var recipientList = string.Join(", ", group.Recipients.Select(r => $"{r.FullName} <{r.Email}>"));
             _logger.LogInformation("[DUMMY EMAIL] {Country} -> {Recipients}: {ExpiredCount} expired, {UpcomingCount} upcoming.",
-                group.CountryName, string.Join(", ", group.RecipientEmails), group.ExpiredItems.Count, group.UpcomingItems.Count);
+                group.CountryName, recipientList, group.ExpiredItems.Count, group.UpcomingItems.Count);
 
             foreach (var item in group.ExpiredItems)
                 _logger.LogInformation("[DUMMY EMAIL]   EXPIRED  - {Label} '{Name}' - {ExpirationType} - {ExpiresAt:dd.MM.yyyy}",

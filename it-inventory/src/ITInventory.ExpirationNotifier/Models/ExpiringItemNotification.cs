@@ -18,6 +18,12 @@ public class ExpiringItemNotification
     public DateTime ExpiresAt { get; set; }
 }
 
+public class NotificationRecipient
+{
+    public string FullName { get; set; } = string.Empty;
+    public string Email { get; set; } = string.Empty;
+}
+
 /// <summary>
 /// One country's worth of expiring items plus who should be emailed about them:
 /// that country's users (YDUsers.RepositoryName == Countries.Name, same match the
@@ -27,7 +33,7 @@ public class CountryNotificationGroup
 {
     public int CountryId { get; set; }
     public string CountryName { get; set; } = string.Empty;
-    public List<string> RecipientEmails { get; set; } = new();
+    public List<NotificationRecipient> Recipients { get; set; } = new();
     public List<ExpiringItemNotification> ExpiredItems { get; set; } = new();
     public List<ExpiringItemNotification> UpcomingItems { get; set; } = new();
 }
