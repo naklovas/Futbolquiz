@@ -71,11 +71,18 @@ namespace ITInventory.Data.Migrations
 
             // Carry over each existing Server's IP/Port/Application into its own ServerEndpoint row
             // BEFORE the source columns are dropped below, so no data is lost.
+            // Wrapped in EXEC(N'...') because in a combined idempotent script (fresh DB running
+            // 011-015+ in one batch) the ApplicationId/IpAddress/Port columns on Servers were just
+            // added earlier in THIS SAME BATCH by migration 011 -- SQL Server resolves ordinary DML
+            // column references against pre-batch schema, so without EXEC this SELECT fails with
+            // "Invalid column name" even though the ALTER TABLE ADD already ran moments earlier.
             migrationBuilder.Sql(@"
-                INSERT INTO dbo.ServerEndpoints (ServerId, IpAddress, Port, ApplicationId, CreatedAt)
-                SELECT Id, IpAddress, Port, ApplicationId, SYSUTCDATETIME()
-                FROM dbo.Servers
-                WHERE IpAddress IS NOT NULL OR Port IS NOT NULL OR ApplicationId IS NOT NULL;
+                EXEC(N'
+                    INSERT INTO dbo.ServerEndpoints (ServerId, IpAddress, Port, ApplicationId, CreatedAt)
+                    SELECT Id, IpAddress, Port, ApplicationId, SYSUTCDATETIME()
+                    FROM dbo.Servers
+                    WHERE IpAddress IS NOT NULL OR Port IS NOT NULL OR ApplicationId IS NOT NULL;
+                ');
             ");
 
             migrationBuilder.DropColumn(

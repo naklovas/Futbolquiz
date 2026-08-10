@@ -751,10 +751,12 @@ IF NOT EXISTS (
 )
 BEGIN
 
-                    INSERT INTO dbo.ServerEndpoints (ServerId, IpAddress, Port, ApplicationId, CreatedAt)
-                    SELECT Id, IpAddress, Port, ApplicationId, SYSUTCDATETIME()
-                    FROM dbo.Servers
-                    WHERE IpAddress IS NOT NULL OR Port IS NOT NULL OR ApplicationId IS NOT NULL;
+                    EXEC(N'
+                        INSERT INTO dbo.ServerEndpoints (ServerId, IpAddress, Port, ApplicationId, CreatedAt)
+                        SELECT Id, IpAddress, Port, ApplicationId, SYSUTCDATETIME()
+                        FROM dbo.Servers
+                        WHERE IpAddress IS NOT NULL OR Port IS NOT NULL OR ApplicationId IS NOT NULL;
+                    ');
                 
 END;
 
