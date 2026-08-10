@@ -1,9 +1,27 @@
 @model ITInventory.Web.Models.Home.DashboardViewModel
 @{
     ViewData["Title"] = "Home";
+    var countries = (List<ITInventory.Data.Entities.Country>)ViewBag.Countries;
+    int? selectedCountryId = ViewBag.SelectedCountryId;
+    bool isAdmin = ViewBag.IsAdmin;
+    bool viewAll = ViewBag.ViewAll;
 }
 
-<h2 class="text-xl font-semibold text-slate-900 mb-6">Overview</h2>
+<div class="flex flex-wrap items-center justify-between gap-3 mb-6">
+    <h2 class="text-xl font-semibold text-slate-900">Overview</h2>
+    @if (isAdmin)
+    {
+        <form method="get">
+            <select name="countryId" onchange="showLoadingOverlay(); this.form.submit();" class="rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
+                <option value="all" selected="@viewAll">All Countries</option>
+                @foreach (var c in countries)
+                {
+                    <option value="@c.Id" selected="@(c.Id == selectedCountryId)">@(c.DisplayName ?? c.Name)</option>
+                }
+            </select>
+        </form>
+    }
+</div>
 
 <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
     <div class="bg-white rounded-lg shadow-sm border border-slate-200 p-5">
@@ -44,37 +62,191 @@
     </div>
 </div>
 
-<h3 class="text-base font-semibold text-slate-900 mb-3">Upcoming Expirations (within 90 days)</h3>
-@if (!Model.ExpiringItems.Any())
-{
-    <div class="bg-brand-50 border border-brand-200 text-brand-700 rounded-md px-4 py-3 text-sm">
-        <i class="fa-solid fa-circle-check mr-1.5"></i>No upcoming expirations.
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-8">
+    <div class="bg-white rounded-lg shadow-sm border border-slate-200 p-5">
+        <h3 class="text-sm font-semibold text-slate-700 mb-3">Inventory Composition</h3>
+        <div class="relative" style="height: 220px;">
+            <canvas id="inventoryChart"></canvas>
+        </div>
     </div>
-}
-else
-{
-    <div class="bg-white rounded-lg shadow-sm border border-slate-200 overflow-x-auto">
-        <table class="min-w-full divide-y divide-slate-200 text-sm">
-            <thead class="bg-slate-50">
-                <tr>
-                    <th class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Type</th>
-                    <th class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Name</th>
-                    <th class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Country</th>
-                    <th class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Expiration Date</th>
-                </tr>
-            </thead>
-            <tbody class="divide-y divide-slate-100">
-                @foreach (var item in Model.ExpiringItems)
-                {
-                    var isPast = item.ExpiresAt < DateTime.UtcNow;
-                    <tr class="@(isPast ? "bg-red-50" : "hover:bg-slate-50")">
-                        <td class="px-4 py-3 text-slate-700">@item.Type</td>
-                        <td class="px-4 py-3 text-slate-700">@item.Name</td>
-                        <td class="px-4 py-3 text-slate-700">@item.Country</td>
-                        <td class="px-4 py-3 @(isPast ? "text-red-700 font-medium" : "text-slate-700")">@item.ExpiresAt.ToString("dd.MM.yyyy")</td>
-                    </tr>
-                }
-            </tbody>
-        </table>
+    <div class="bg-white rounded-lg shadow-sm border border-slate-200 p-5">
+        <h3 class="text-sm font-semibold text-slate-700 mb-3">Expirations by Type</h3>
+        <div class="relative" style="height: 220px;">
+            <canvas id="expirationChart"></canvas>
+        </div>
     </div>
-}
+</div>
+
+<div class="flex flex-wrap items-center justify-between gap-3 mb-3">
+    <div class="flex items-center gap-1 border-b border-slate-200 -mb-px">
+        <button type="button" id="tab-btn-expired" onclick="switchDashboardTab('expired')" class="flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 transition">
+            Expired
+            <span id="tab-count-expired" class="inline-flex items-center justify-center min-w-[1.5rem] rounded-full bg-red-100 text-red-700 text-xs font-semibold px-2 py-0.5">0</span>
+        </button>
+        <button type="button" id="tab-btn-upcoming" onclick="switchDashboardTab('upcoming')" class="flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 transition">
+            Upcoming Expiration
+            <span id="tab-count-upcoming" class="inline-flex items-center justify-center min-w-[1.5rem] rounded-full bg-amber-100 text-amber-700 text-xs font-semibold px-2 py-0.5">0</span>
+        </button>
+    </div>
+    <div>
+        <label class="text-xs text-slate-500 mr-2">Expiration Type</label>
+        <select id="expirationTypeFilter" class="rounded-md border border-slate-300 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
+            <option value="">All Types</option>
+            <option value="License">License</option>
+            <option value="EndOfSupport">End of Support</option>
+            <option value="EndOfLife">End of Life</option>
+        </select>
+    </div>
+</div>
+
+<div id="panel-expired" class="bg-white rounded-lg shadow-sm border border-slate-200 overflow-x-auto">
+    <table class="min-w-full divide-y divide-slate-200 text-sm">
+        <thead class="bg-slate-50">
+            <tr>
+                <th class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Type</th>
+                <th class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Expiration Type</th>
+                <th class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Name</th>
+                <th class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Country</th>
+                <th class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Expiration Date</th>
+            </tr>
+        </thead>
+        <tbody id="expired-tbody" class="divide-y divide-slate-100"></tbody>
+    </table>
+</div>
+
+<div id="panel-upcoming" class="hidden bg-white rounded-lg shadow-sm border border-slate-200 overflow-x-auto">
+    <table class="min-w-full divide-y divide-slate-200 text-sm">
+        <thead class="bg-slate-50">
+            <tr>
+                <th class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Type</th>
+                <th class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Expiration Type</th>
+                <th class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Name</th>
+                <th class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Country</th>
+                <th class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Expiration Date</th>
+            </tr>
+        </thead>
+        <tbody id="upcoming-tbody" class="divide-y divide-slate-100"></tbody>
+    </table>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<script>
+    document.addEventListener('DOMContentLoaded', function () {
+        var expiredItems = @Html.Raw(Json.Serialize(Model.ExpiredItems));
+        var upcomingItems = @Html.Raw(Json.Serialize(Model.UpcomingItems));
+
+        var typeLabels = { License: 'License', EndOfSupport: 'End of Support', EndOfLife: 'End of Life' };
+        var typeBadgeClass = {
+            License: 'bg-amber-100 text-amber-700',
+            EndOfSupport: 'bg-blue-100 text-blue-700',
+            EndOfLife: 'bg-red-100 text-red-700'
+        };
+
+        function fmtDate(iso) {
+            var d = new Date(iso);
+            return ('0' + d.getDate()).slice(-2) + '.' + ('0' + (d.getMonth() + 1)).slice(-2) + '.' + d.getFullYear();
+        }
+
+        function escapeHtml(s) {
+            var div = document.createElement('div');
+            div.textContent = s == null ? '' : s;
+            return div.innerHTML;
+        }
+
+        function renderTable(tbodyId, items, isExpiredTab) {
+            var tbody = document.getElementById(tbodyId);
+            tbody.innerHTML = '';
+            if (items.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="5" class="px-4 py-8 text-center text-slate-400 text-sm">No records.</td></tr>';
+                return;
+            }
+            var now = new Date();
+            items.forEach(function (item) {
+                var tr = document.createElement('tr');
+                var expiresAt = new Date(item.ExpiresAt);
+                var soon = !isExpiredTab && ((expiresAt - now) / 86400000 <= 14);
+                tr.className = isExpiredTab ? 'bg-red-50' : (soon ? 'bg-amber-50' : 'hover:bg-slate-50');
+                tr.innerHTML =
+                    '<td class="px-4 py-3 text-slate-700">' + escapeHtml(item.Type) + '</td>' +
+                    '<td class="px-4 py-3"><span class="inline-flex items-center rounded-full text-xs font-medium px-2 py-0.5 ' + typeBadgeClass[item.ExpirationType] + '">' + typeLabels[item.ExpirationType] + '</span></td>' +
+                    '<td class="px-4 py-3 text-slate-700">' + escapeHtml(item.Name) + '</td>' +
+                    '<td class="px-4 py-3 text-slate-700">' + escapeHtml(item.Country) + '</td>' +
+                    '<td class="px-4 py-3 ' + (isExpiredTab ? 'text-red-700 font-medium' : 'text-slate-700') + '">' + fmtDate(item.ExpiresAt) + '</td>';
+                tbody.appendChild(tr);
+            });
+        }
+
+        function filtered(items) {
+            var t = document.getElementById('expirationTypeFilter').value;
+            return t ? items.filter(function (i) { return i.ExpirationType === t; }) : items;
+        }
+
+        function refresh() {
+            var fe = filtered(expiredItems);
+            var fu = filtered(upcomingItems);
+            renderTable('expired-tbody', fe, true);
+            renderTable('upcoming-tbody', fu, false);
+            document.getElementById('tab-count-expired').textContent = fe.length;
+            document.getElementById('tab-count-upcoming').textContent = fu.length;
+        }
+
+        window.switchDashboardTab = function (tab) {
+            document.getElementById('panel-expired').classList.toggle('hidden', tab !== 'expired');
+            document.getElementById('panel-upcoming').classList.toggle('hidden', tab !== 'upcoming');
+
+            var expiredBtn = document.getElementById('tab-btn-expired');
+            var upcomingBtn = document.getElementById('tab-btn-upcoming');
+            var activeClasses = ['border-brand-600', 'text-brand-700'];
+            var inactiveClasses = ['border-transparent', 'text-slate-500'];
+
+            expiredBtn.classList.remove.apply(expiredBtn.classList, activeClasses.concat(inactiveClasses));
+            upcomingBtn.classList.remove.apply(upcomingBtn.classList, activeClasses.concat(inactiveClasses));
+            expiredBtn.classList.add.apply(expiredBtn.classList, tab === 'expired' ? activeClasses : inactiveClasses);
+            upcomingBtn.classList.add.apply(upcomingBtn.classList, tab === 'upcoming' ? activeClasses : inactiveClasses);
+        };
+
+        document.getElementById('expirationTypeFilter').addEventListener('change', refresh);
+
+        refresh();
+        switchDashboardTab('expired');
+
+        var typeOrder = ['License', 'EndOfSupport', 'EndOfLife'];
+        function countByType(items) {
+            return typeOrder.map(function (t) { return items.filter(function (i) { return i.ExpirationType === t; }).length; });
+        }
+
+        new Chart(document.getElementById('expirationChart'), {
+            type: 'bar',
+            data: {
+                labels: ['License', 'End of Support', 'End of Life'],
+                datasets: [
+                    { label: 'Expired', data: countByType(expiredItems), backgroundColor: '#ef4444', borderRadius: 4 },
+                    { label: 'Upcoming', data: countByType(upcomingItems), backgroundColor: '#f59e0b', borderRadius: 4 }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { position: 'bottom' } },
+                scales: { y: { beginAtZero: true, ticks: { precision: 0 } } }
+            }
+        });
+
+        new Chart(document.getElementById('inventoryChart'), {
+            type: 'doughnut',
+            data: {
+                labels: ['Physical Devices', 'Servers', 'Licenses', 'Circuits'],
+                datasets: [{
+                    data: [@Model.PhysicalDeviceCount, @Model.ServerCount, @Model.LicenseCount, @Model.CircuitCount],
+                    backgroundColor: ['#059669', '#2563eb', '#d97706', '#7c3aed'],
+                    borderWidth: 0
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { position: 'bottom' } }
+            }
+        });
+    });
+</script>
