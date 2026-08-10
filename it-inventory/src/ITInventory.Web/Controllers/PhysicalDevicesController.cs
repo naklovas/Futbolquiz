@@ -1,5 +1,6 @@
 using ClosedXML.Excel;
 using ITInventory.Data;
+using ITInventory.Data.Common;
 using ITInventory.Data.Entities;
 using ITInventory.Web.Models;
 using ITInventory.Web.Models.Import;
@@ -160,6 +161,8 @@ public class PhysicalDevicesController : Controller
         if (!_currentUser.IsAdmin)
             vm.CountryId = _currentUser.CountryId ?? 0;
 
+        vm.ApplianceType = ApplianceType.Physical;
+
         if (!ModelState.IsValid)
         {
             await PopulateDropdowns();
@@ -247,6 +250,8 @@ public class PhysicalDevicesController : Controller
 
         if (!_currentUser.IsAdmin)
             vm.CountryId = _currentUser.CountryId ?? 0;
+
+        vm.ApplianceType = ApplianceType.Physical;
 
         if (!ModelState.IsValid)
         {
@@ -463,14 +468,18 @@ public class PhysicalDevicesController : Controller
         ViewBag.AllLocations = await _db.Locations.Where(l => l.IsActive)
             .Select(l => new { l.CountryId, l.Branch }).ToListAsync();
 
-        var vendors = await _db.PhysicalDevices
-            .Where(d => d.VendorSupplier != null && d.VendorSupplier != "")
-            .Select(d => d.VendorSupplier!).Distinct().OrderBy(v => v).ToListAsync();
+        var effectiveCountryId = _currentUser.IsAdmin ? (int?)null : _currentUser.CountryId;
+
+        var companiesQuery = _db.Companies.Where(c => c.IsActive);
+        if (effectiveCountryId.HasValue)
+            companiesQuery = companiesQuery.Where(c => c.CountryId == effectiveCountryId.Value);
+        var vendors = await companiesQuery.OrderBy(c => c.Name).Select(c => c.Name).ToListAsync();
         ViewBag.VendorOptions = new SelectList(vendors);
 
-        var licenceInfos = await _db.PhysicalDevices
-            .Where(d => d.LicenceInfo != null && d.LicenceInfo != "")
-            .Select(d => d.LicenceInfo!).Distinct().OrderBy(v => v).ToListAsync();
+        var licensesQuery = _db.Licenses.AsQueryable();
+        if (effectiveCountryId.HasValue)
+            licensesQuery = licensesQuery.Where(l => l.CountryId == effectiveCountryId.Value);
+        var licenceInfos = await licensesQuery.OrderBy(l => l.LicenseName).Select(l => l.LicenseName).Distinct().ToListAsync();
         ViewBag.LicenceInfoOptions = new SelectList(licenceInfos);
     }
 }
