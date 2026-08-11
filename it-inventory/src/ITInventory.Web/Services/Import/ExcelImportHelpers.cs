@@ -101,9 +101,11 @@ public static class ExcelImportHelpers
             return true;
         }
 
-        if (trimmed.Equals("EVM", StringComparison.OrdinalIgnoreCase))
+        if (trimmed.Equals("Turkiye", StringComparison.OrdinalIgnoreCase)
+            || trimmed.Equals("Türkiye", StringComparison.OrdinalIgnoreCase)
+            || trimmed.Equals("EVM", StringComparison.OrdinalIgnoreCase))
         {
-            value = LocationCategory.EVM;
+            value = LocationCategory.Turkiye;
             return true;
         }
 
@@ -114,7 +116,7 @@ public static class ExcelImportHelpers
         }
 
         value = LocationCategory.Local;
-        error = $"Unrecognized Location Category value '{raw}' (expected 'Local', 'EVM' or 'Cloud').";
+        error = $"Unrecognized Location Category value '{raw}' (expected 'Local', 'Türkiye' or 'Cloud').";
         return false;
     }
 

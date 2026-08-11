@@ -1,3 +1,4 @@
+using ITInventory.Data.Common;
 using ITInventory.Data.Entities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
@@ -23,7 +24,11 @@ public class ServerConfiguration : IEntityTypeConfiguration<Server>
         builder.Property(x => x.CreatedBy).HasMaxLength(100);
         builder.Property(x => x.UpdatedBy).HasMaxLength(100);
         builder.Property(x => x.ApplianceType).HasConversion<string>().HasMaxLength(20);
-        builder.Property(x => x.LocationCategory).HasConversion<string>().HasMaxLength(20);
+        builder.Property(x => x.LocationCategory)
+            .HasConversion(
+                v => v.ToString(),
+                v => v == "EVM" ? LocationCategory.Turkiye : Enum.Parse<LocationCategory>(v))
+            .HasMaxLength(20);
 
         builder.HasOne(x => x.Country)
             .WithMany(c => c.Servers)

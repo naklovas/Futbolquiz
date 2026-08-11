@@ -112,7 +112,7 @@ function initLocationCategoryToggle(categorySelectId, branchSelectId, evmBranchV
 
     function refresh() {
         var category = categoryField.value;
-        if (category === 'EVM') {
+        if (category === 'Turkiye') {
             forceBranchOption(evmBranchValue);
             branchSelect.disabled = true;
             hiddenBranch.value = evmBranchValue;
