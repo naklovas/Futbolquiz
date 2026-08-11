@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: itinventory-web
+  labels:
+    app: itinventory-web
+spec:
+  selector:
+    app: itinventory-web
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080

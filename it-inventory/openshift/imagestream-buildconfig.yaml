@@ -1,0 +1,62 @@
+# OPTIONAL: only needed if you want OpenShift itself to build the images from git (Docker
+# build strategy) instead of pushing images built elsewhere (your own CI, `docker push`,
+# etc.) into the same ImageStreams. If you already have a pipeline, skip this file --
+# just push to whatever registry/tag deployment-web.yaml and deployment-notifier.yaml
+# reference and skip this file entirely.
+#
+# CHANGE_ME: repo URL/branch below point at this project's GitHub remote; update the
+# branch (and add a `contextDir`/`sourceSecret` if the repo is private) for your setup.
+# Trigger a build after applying with:  oc start-build itinventory-web
+apiVersion: image.openshift.io/v1
+kind: ImageStream
+metadata:
+  name: itinventory-web
+---
+apiVersion: build.openshift.io/v1
+kind: BuildConfig
+metadata:
+  name: itinventory-web
+spec:
+  source:
+    type: Git
+    git:
+      uri: https://github.com/naklovas/Futbolquiz.git
+      ref: CHANGE_ME
+    contextDir: it-inventory
+  strategy:
+    type: Docker
+    dockerStrategy:
+      dockerfilePath: Dockerfile
+  output:
+    to:
+      kind: ImageStreamTag
+      name: itinventory-web:latest
+  triggers:
+    - type: ConfigChange
+---
+apiVersion: image.openshift.io/v1
+kind: ImageStream
+metadata:
+  name: itinventory-notifier
+---
+apiVersion: build.openshift.io/v1
+kind: BuildConfig
+metadata:
+  name: itinventory-notifier
+spec:
+  source:
+    type: Git
+    git:
+      uri: https://github.com/naklovas/Futbolquiz.git
+      ref: CHANGE_ME
+    contextDir: it-inventory
+  strategy:
+    type: Docker
+    dockerStrategy:
+      dockerfilePath: src/ITInventory.ExpirationNotifier/Dockerfile
+  output:
+    to:
+      kind: ImageStreamTag
+      name: itinventory-notifier:latest
+  triggers:
+    - type: ConfigChange

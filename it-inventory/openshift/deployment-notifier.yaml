@@ -1,0 +1,56 @@
+# ITInventory.ExpirationNotifier is a long-running worker that schedules its own daily run
+# internally (see Workers/ExpirationCheckWorker.cs) -- not a one-shot job, so this is a
+# Deployment, not a CronJob. Keep replicas at 1: it's not built for leader election, so a
+# second replica would send every expiration email twice.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: itinventory-notifier
+  labels:
+    app: itinventory-notifier
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: itinventory-notifier
+  template:
+    metadata:
+      labels:
+        app: itinventory-notifier
+    spec:
+      containers:
+        - name: itinventory-notifier
+          # Replace with your pushed image, e.g. an ImageStream tag:
+          # image-registry.openshift-image-registry.svc:5000/<namespace>/itinventory-notifier:latest
+          image: CHANGE_ME/itinventory-notifier:latest
+          envFrom:
+            - configMapRef:
+                name: itinventory-notifier-config
+            - secretRef:
+                name: itinventory-secrets
+          volumeMounts:
+            - name: logs
+              mountPath: /app/logs
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            capabilities:
+              drop:
+                - ALL
+            seccompProfile:
+              type: RuntimeDefault
+      volumes:
+        # Its daily text log file is a convenience copy of what already goes to stdout
+        # (readable via `oc logs`) -- emptyDir is fine, nothing here needs to survive a
+        # pod restart.
+        - name: logs
+          emptyDir: {}
