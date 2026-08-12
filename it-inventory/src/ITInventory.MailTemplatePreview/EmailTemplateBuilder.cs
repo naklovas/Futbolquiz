@@ -12,7 +12,14 @@ public static class EmailTemplateBuilder
 {
     private const string FontFamily = "'Segoe UI', Arial, sans-serif";
 
-    public static string BuildHtml(string countryName, int windowDays, IReadOnlyList<MockItem> expired, IReadOnlyList<MockItem> upcoming)
+    /// <param name="logoCid">
+    /// Content-ID of a logo image linked into the message (see Program.cs's LinkedResource
+    /// wiring) -- rendered as &lt;img src="cid:{logoCid}"&gt;. Null/empty skips the logo and
+    /// falls back to the text-only header. Deliberately not a data: URI: classic Outlook
+    /// desktop's Word rendering engine does not display data: URI images at all, so a linked
+    /// cid: attachment is the only reliable way to embed an image in this kind of email.
+    /// </param>
+    public static string BuildHtml(string countryName, int windowDays, IReadOnlyList<MockItem> expired, IReadOnlyList<MockItem> upcoming, string? logoCid = null)
     {
         var sb = new StringBuilder();
         var now = DateTime.Now;
@@ -31,10 +38,18 @@ public static class EmailTemplateBuilder
         sb.Append("<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" bgcolor=\"#f1f5f9\" style=\"background:#f1f5f9; padding:24px 0;\"><tr><td align=\"center\">");
         sb.Append("<table role=\"presentation\" width=\"640\" cellpadding=\"0\" cellspacing=\"0\" bgcolor=\"#ffffff\" style=\"background:#ffffff; border-radius:8px; overflow:hidden;\">");
 
-        // Header
-        sb.Append("<tr><td bgcolor=\"#0f172a\" style=\"background:#0f172a; padding:24px 32px;\">");
-        sb.Append("<div style=\"color:#ffffff; font-size:20px; font-weight:600;\">IT Inventory System</div>");
-        sb.Append($"<div style=\"color:#94a3b8; font-size:13px; margin-top:4px;\">Expiration Notice &mdash; {WebUtility.HtmlEncode(countryName)}</div>");
+        // Header -- light background so the bank's regular (non-reversed) logo works as-is.
+        sb.Append("<tr><td bgcolor=\"#f8fafc\" style=\"background:#f8fafc; padding:20px 32px; border-bottom:1px solid #e2e8f0;\">");
+        sb.Append("<table role=\"presentation\" cellpadding=\"0\" cellspacing=\"0\"><tr>");
+        if (!string.IsNullOrEmpty(logoCid))
+        {
+            sb.Append($"<td style=\"padding-right:16px;\"><img src=\"cid:{logoCid}\" alt=\"Ziraat\" height=\"48\" style=\"display:block; border:0; height:48px;\"></td>");
+        }
+        sb.Append("<td>");
+        sb.Append("<div style=\"color:#0f172a; font-size:20px; font-weight:600;\">IT Inventory System</div>");
+        sb.Append($"<div style=\"color:#64748b; font-size:13px; margin-top:4px;\">Expiration Notice &mdash; {WebUtility.HtmlEncode(countryName)}</div>");
+        sb.Append("</td>");
+        sb.Append("</tr></table>");
         sb.Append("</td></tr>");
 
         // Summary + badges
