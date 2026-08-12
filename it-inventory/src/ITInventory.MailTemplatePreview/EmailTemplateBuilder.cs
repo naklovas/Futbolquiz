@@ -65,6 +65,7 @@ public static class EmailTemplateBuilder
         AppendHeaderCell(sb, "Category", "left");
         AppendHeaderCell(sb, "Name", "left");
         AppendHeaderCell(sb, "Type", "left");
+        AppendHeaderCell(sb, "Expiration Type", "left");
         AppendHeaderCell(sb, isExpired ? "Expired On" : "Expires On", "left");
         AppendHeaderCell(sb, isExpired ? "Overdue" : "Remaining", "right");
         sb.Append("</tr>");
@@ -76,11 +77,13 @@ public static class EmailTemplateBuilder
             var days = Math.Abs((item.ExpiresAt.Date - now.Date).Days);
             var daysLabel = days == 0 ? "today" : days == 1 ? "1 day" : $"{days} days";
             var (badgeBg, badgeFg) = CategoryColors(item.Category);
+            var (expBadgeBg, expBadgeFg) = ExpirationTypeColors(item.ExpirationType);
 
             sb.Append($"<tr style=\"background:{rowBg};\">");
             sb.Append($"<td style=\"padding:8px; border-bottom:1px solid #e2e8f0;\"><span style=\"display:inline-block; background:{badgeBg}; color:{badgeFg}; font-size:11px; font-weight:600; padding:2px 8px; border-radius:999px; white-space:nowrap;\">{WebUtility.HtmlEncode(CategoryDisplayName(item.Category))}</span></td>");
             sb.Append($"<td style=\"padding:8px; border-bottom:1px solid #e2e8f0; color:#1e293b; font-weight:500;\">{WebUtility.HtmlEncode(item.Name)}</td>");
             sb.Append($"<td style=\"padding:8px; border-bottom:1px solid #e2e8f0; color:#64748b;\">{WebUtility.HtmlEncode(item.Label)}</td>");
+            sb.Append($"<td style=\"padding:8px; border-bottom:1px solid #e2e8f0;\"><span style=\"display:inline-block; background:{expBadgeBg}; color:{expBadgeFg}; font-size:11px; font-weight:600; padding:2px 8px; border-radius:999px; white-space:nowrap;\">{WebUtility.HtmlEncode(ExpirationTypeDisplayName(item.ExpirationType))}</span></td>");
             sb.Append($"<td style=\"padding:8px; border-bottom:1px solid #e2e8f0; color:#64748b;\">{item.ExpiresAt:dd MMM yyyy}</td>");
             sb.Append($"<td align=\"right\" style=\"padding:8px; border-bottom:1px solid #e2e8f0; color:{accentColor}; font-weight:600; white-space:nowrap;\">{daysLabel}</td>");
             sb.Append("</tr>");
@@ -111,5 +114,24 @@ public static class EmailTemplateBuilder
     {
         "PhysicalDevice" => "Physical Device",
         _ => category
+    };
+
+    // Matches Home/Index.cshtml's typeBadgeClass/typeLabels exactly (Tailwind's
+    // amber-100/700, blue-100/700, red-100/700) so the same expiration type reads as the
+    // same color whether you're looking at the dashboard or this email.
+    private static (string Bg, string Fg) ExpirationTypeColors(string expirationType) => expirationType switch
+    {
+        "License" => ("#fef3c7", "#b45309"),
+        "EndOfSupport" => ("#dbeafe", "#1d4ed8"),
+        "EndOfLife" => ("#fee2e2", "#b91c1c"),
+        _ => ("#e2e8f0", "#334155")
+    };
+
+    private static string ExpirationTypeDisplayName(string expirationType) => expirationType switch
+    {
+        "License" => "License",
+        "EndOfSupport" => "End of Support",
+        "EndOfLife" => "End of Life",
+        _ => expirationType
     };
 }

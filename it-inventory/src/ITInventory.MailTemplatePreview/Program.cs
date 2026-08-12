@@ -24,16 +24,16 @@ var toAddress = config["Smtp:ToAddress"] ?? throw new InvalidOperationException(
 var now = DateTime.Now;
 var expired = new List<MockItem>
 {
-    new("PhysicalDevice", "Physical Device", "FW-ISTANBUL-01", now.AddDays(-58)),
-    new("Server", "Server", "SRV-DB-PROD-02", now.AddDays(-42)),
-    new("License", "License (Expiration)", "Microsoft 365 E3", now.AddDays(-23)),
+    new("PhysicalDevice", "Physical Device", "EndOfSupport", "FW-ISTANBUL-01", now.AddDays(-58)),
+    new("Server", "Server", "EndOfLife", "SRV-DB-PROD-02", now.AddDays(-42)),
+    new("License", "License (Expiration)", "License", "Microsoft 365 E3", now.AddDays(-23)),
 };
 var upcoming = new List<MockItem>
 {
-    new("Server", "Server", "SRV-APP-WEB-01", now.AddDays(29)),
-    new("License", "License (Support)", "Symantec Endpoint Protection", now.AddDays(44)),
-    new("Circuit", "Circuit", "MPLS-Ankara-Link", now.AddDays(54)),
-    new("PhysicalDevice", "Physical Device", "SW-CORE-3", now.AddDays(81)),
+    new("Server", "Server", "EndOfSupport", "SRV-APP-WEB-01", now.AddDays(29)),
+    new("License", "License (Support)", "License", "Symantec Endpoint Protection", now.AddDays(44)),
+    new("Circuit", "Circuit", "EndOfSupport", "MPLS-Ankara-Link", now.AddDays(54)),
+    new("PhysicalDevice", "Physical Device", "EndOfLife", "SW-CORE-3", now.AddDays(81)),
 };
 
 const int windowDays = 90;
