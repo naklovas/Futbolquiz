@@ -1,11 +1,8 @@
 using ITInventory.Data;
 using ITInventory.Web.Configuration;
-using ITInventory.Web.HealthChecks;
 using ITInventory.Web.Services;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.DataProtection;
-using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -20,23 +17,6 @@ builder.Services.AddControllersWithViews()
 
 builder.Services.AddDbContext<ITInventoryDbContext>(options =>
     options.UseSqlServer(builder.Configuration.GetConnectionString("ITInventory")));
-
-// OpenShift/Kubernetes pods get a fresh, ephemeral filesystem by default and the container
-// runs as an arbitrary non-root UID with no home directory, so the framework's default
-// Data Protection key location isn't writable -- keys would silently regenerate on every
-// pod restart and log everyone out. Persisting them to a mounted, group-writable directory
-// (see openshift/deployment.yaml's volumeMount) keeps auth cookies valid across restarts.
-// Same directory works unchanged for a normal Windows/IIS deployment.
-var dataProtectionKeysPath = builder.Configuration["DataProtection:KeysDirectory"];
-if (!string.IsNullOrWhiteSpace(dataProtectionKeysPath))
-{
-    builder.Services.AddDataProtection()
-        .PersistKeysToFileSystem(new DirectoryInfo(dataProtectionKeysPath))
-        .SetApplicationName("ITInventory");
-}
-
-builder.Services.AddHealthChecks()
-    .AddCheck<DatabaseHealthCheck>("database", tags: ["ready"]);
 
 builder.Services.Configure<LdapSettings>(builder.Configuration.GetSection(LdapSettings.SectionName));
 builder.Services.AddSingleton<ILdapAuthenticationService, LdapAuthenticationService>();
@@ -85,20 +65,5 @@ app.UseAuthorization();
 app.MapControllerRoute(
     name: "default",
     pattern: "{controller=Home}/{action=Index}/{id?}");
-
-// OpenShift/Kubernetes liveness+readiness probes hit these anonymously (no session cookie);
-// AllowAnonymous is required or the app's global RequireAuthenticatedUser fallback policy
-// would redirect them to /Account/Login instead of returning a health status.
-// /healthz/live: process is up, no dependency checks (never fails while the app is running).
-// /healthz/ready: also confirms the database is reachable, for "can this pod take traffic".
-app.MapHealthChecks("/healthz/live", new HealthCheckOptions
-{
-    Predicate = check => !check.Tags.Contains("ready")
-}).AllowAnonymous();
-
-app.MapHealthChecks("/healthz/ready", new HealthCheckOptions
-{
-    Predicate = check => check.Tags.Contains("ready")
-}).AllowAnonymous();
 
 app.Run();
