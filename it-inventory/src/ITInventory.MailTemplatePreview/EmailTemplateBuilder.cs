@@ -17,23 +17,39 @@ public static class EmailTemplateBuilder
         var sb = new StringBuilder();
         var now = DateTime.Now;
 
-        sb.Append("<!DOCTYPE html><html><body style=\"margin:0; padding:0; background:#f1f5f9; font-family:").Append(FontFamily).Append(";\">");
-        sb.Append("<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"background:#f1f5f9; padding:24px 0;\"><tr><td align=\"center\">");
-        sb.Append("<table role=\"presentation\" width=\"640\" cellpadding=\"0\" cellspacing=\"0\" style=\"background:#ffffff; border-radius:8px; overflow:hidden;\">");
+        sb.Append("<!DOCTYPE html><html><head>");
+        // Tells dark-mode-aware clients (new Outlook, Outlook.com, Apple Mail, Gmail app)
+        // this email is light-only and was designed on purpose -- without this, several of
+        // them "helpfully" auto-invert/recolor the HTML, which is what mangled the badge
+        // spacing and colors in testing (classic Outlook desktop ignores this meta and
+        // always does its own thing, which is why every color below is also set via the
+        // bgcolor HTML attribute, not just inline CSS -- Outlook's Word engine respects
+        // bgcolor more reliably than CSS background during its own dark-mode pass).
+        sb.Append("<meta name=\"color-scheme\" content=\"light\"><meta name=\"supported-color-schemes\" content=\"light\">");
+        sb.Append("</head>");
+        sb.Append("<body style=\"margin:0; padding:0; background:#f1f5f9; font-family:").Append(FontFamily).Append(";\">");
+        sb.Append("<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" bgcolor=\"#f1f5f9\" style=\"background:#f1f5f9; padding:24px 0;\"><tr><td align=\"center\">");
+        sb.Append("<table role=\"presentation\" width=\"640\" cellpadding=\"0\" cellspacing=\"0\" bgcolor=\"#ffffff\" style=\"background:#ffffff; border-radius:8px; overflow:hidden;\">");
 
         // Header
-        sb.Append("<tr><td style=\"background:#0f172a; padding:24px 32px;\">");
+        sb.Append("<tr><td bgcolor=\"#0f172a\" style=\"background:#0f172a; padding:24px 32px;\">");
         sb.Append("<div style=\"color:#ffffff; font-size:20px; font-weight:600;\">IT Inventory System</div>");
         sb.Append($"<div style=\"color:#94a3b8; font-size:13px; margin-top:4px;\">Expiration Notice &mdash; {WebUtility.HtmlEncode(countryName)}</div>");
         sb.Append("</td></tr>");
 
         // Summary + badges
-        sb.Append("<tr><td style=\"padding:24px 32px 8px 32px;\">");
+        sb.Append("<tr><td bgcolor=\"#ffffff\" style=\"background:#ffffff; padding:24px 32px 8px 32px;\">");
         sb.Append($"<p style=\"margin:0; color:#334155; font-size:14px; line-height:1.6;\">This is an automated summary of IT assets that have expired or are expiring within the next {windowDays} days.</p>");
-        sb.Append("<div style=\"margin-top:16px;\">");
-        sb.Append($"<span style=\"display:inline-block; background:#fee2e2; color:#dc2626; font-size:13px; font-weight:600; padding:4px 12px; border-radius:999px; margin-right:16px;\">{expired.Count} Expired</span>");
-        sb.Append($"<span style=\"display:inline-block; background:#fef3c7; color:#d97706; font-size:13px; font-weight:600; padding:4px 12px; border-radius:999px;\">{upcoming.Count} Upcoming</span>");
-        sb.Append("</div></td></tr>");
+        // Nested table instead of two <span>s with margin-right: Outlook's Word rendering
+        // engine is unreliable about honoring margin on inline-block elements (this is what
+        // caused the badges to render touching in testing) but always honors real table
+        // cells, so the gap is a spacer <td> instead of a CSS margin.
+        sb.Append("<table role=\"presentation\" cellpadding=\"0\" cellspacing=\"0\" style=\"margin-top:16px;\"><tr>");
+        sb.Append($"<td bgcolor=\"#fee2e2\" style=\"background:#fee2e2; border-radius:999px;\"><div style=\"color:#dc2626; font-size:13px; font-weight:600; padding:4px 12px; white-space:nowrap;\">{expired.Count} Expired</div></td>");
+        sb.Append("<td style=\"width:16px; font-size:1px; line-height:1px;\">&nbsp;</td>");
+        sb.Append($"<td bgcolor=\"#fef3c7\" style=\"background:#fef3c7; border-radius:999px;\"><div style=\"color:#d97706; font-size:13px; font-weight:600; padding:4px 12px; white-space:nowrap;\">{upcoming.Count} Upcoming</div></td>");
+        sb.Append("</tr></table>");
+        sb.Append("</td></tr>");
 
         if (expired.Count > 0)
         {
@@ -46,7 +62,7 @@ public static class EmailTemplateBuilder
         }
 
         // Footer
-        sb.Append("<tr><td style=\"padding:20px 32px; background:#f8fafc; border-top:1px solid #e2e8f0;\">");
+        sb.Append("<tr><td bgcolor=\"#f8fafc\" style=\"padding:20px 32px; background:#f8fafc; border-top:1px solid #e2e8f0;\">");
         sb.Append("<p style=\"margin:0; color:#94a3b8; font-size:12px;\">This is an automated message from IT Inventory System. Please do not reply to this email.</p>");
         sb.Append($"<p style=\"margin:4px 0 0 0; color:#94a3b8; font-size:12px;\">Generated on {now:dd MMM yyyy HH:mm}</p>");
         sb.Append("</td></tr>");
@@ -57,7 +73,7 @@ public static class EmailTemplateBuilder
 
     private static void AppendSection(StringBuilder sb, string title, string accentColor, IReadOnlyList<MockItem> items, DateTime now, bool isExpired)
     {
-        sb.Append("<tr><td style=\"padding:16px 32px 8px 32px;\">");
+        sb.Append("<tr><td bgcolor=\"#ffffff\" style=\"background:#ffffff; padding:16px 32px 8px 32px;\">");
         sb.Append($"<div style=\"color:{accentColor}; font-size:14px; font-weight:600; margin-bottom:8px;\">{WebUtility.HtmlEncode(title)} ({items.Count})</div>");
         sb.Append("<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"border-collapse:collapse; font-size:13px;\">");
 
@@ -79,7 +95,7 @@ public static class EmailTemplateBuilder
             var (badgeBg, badgeFg) = CategoryColors(item.Category);
             var (expBadgeBg, expBadgeFg) = ExpirationTypeColors(item.ExpirationType);
 
-            sb.Append($"<tr style=\"background:{rowBg};\">");
+            sb.Append($"<tr bgcolor=\"{rowBg}\" style=\"background:{rowBg};\">");
             sb.Append($"<td style=\"padding:8px; border-bottom:1px solid #e2e8f0;\"><span style=\"display:inline-block; background:{badgeBg}; color:{badgeFg}; font-size:11px; font-weight:600; padding:2px 8px; border-radius:999px; white-space:nowrap;\">{WebUtility.HtmlEncode(CategoryDisplayName(item.Category))}</span></td>");
             sb.Append($"<td style=\"padding:8px; border-bottom:1px solid #e2e8f0; color:#1e293b; font-weight:500;\">{WebUtility.HtmlEncode(item.Name)}</td>");
             sb.Append($"<td style=\"padding:8px; border-bottom:1px solid #e2e8f0; color:#64748b;\">{WebUtility.HtmlEncode(item.Label)}</td>");
