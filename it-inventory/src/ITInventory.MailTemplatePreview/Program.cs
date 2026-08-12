@@ -1,7 +1,15 @@
-using System.Net;
-using System.Net.Mail;
-using ITInventory.MailTemplatePreview;
+using ITInventory.Data;
+using ITInventory.ExpirationNotifier.Services;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
+
+// Runs the real expiration check against the real database, right now, once -- no Windows
+// Service install, no waiting for ExpirationNotifier:RunAtHour/RunAtMinute. Reuses the exact
+// same ExpirationCheckService/SmtpEmailNotificationService/DummyEmailNotificationService
+// classes as the real service (via a ProjectReference), so a clean run here means the
+// service will behave identically once it's actually installed -- this is purely a faster
+// way to run the same logic while testing, not a separate reimplementation of it.
 
 var config = new ConfigurationBuilder()
     .SetBasePath(AppContext.BaseDirectory)
@@ -10,84 +18,40 @@ var config = new ConfigurationBuilder()
     .AddEnvironmentVariables()
     .Build();
 
-var host = config["Smtp:Host"] ?? throw new InvalidOperationException("Smtp:Host is not set.");
-var port = config.GetValue<int?>("Smtp:Port") ?? 25;
-var enableSsl = config.GetValue<bool?>("Smtp:EnableSsl") ?? false;
-var username = config["Smtp:Username"] ?? string.Empty;
-var password = config["Smtp:Password"] ?? string.Empty;
-var fromAddress = config["Smtp:FromAddress"] ?? throw new InvalidOperationException("Smtp:FromAddress is not set.");
-var fromDisplayName = config["Smtp:FromDisplayName"] ?? "IT Inventory System";
-var toAddress = config["Smtp:ToAddress"] ?? throw new InvalidOperationException("Smtp:ToAddress is not set.");
+using var loggerFactory = LoggerFactory.Create(builder => builder
+    .AddSimpleConsole(o => { o.SingleLine = true; o.TimestampFormat = "HH:mm:ss "; })
+    .SetMinimumLevel(LogLevel.Information));
 
-// Sample data only -- no DB involved. Dates are relative to "now" so the email always looks
-// sensible whenever you run this, no matter how much time has passed since you last tested.
-var now = DateTime.Now;
-var expired = new List<MockItem>
+var connectionString = config.GetConnectionString("ITInventory");
+if (string.IsNullOrWhiteSpace(connectionString) || connectionString.Contains("CHANGE_ME"))
 {
-    new("PhysicalDevice", "Physical Device", "EndOfSupport", "FW-ISTANBUL-01", now.AddDays(-58)),
-    new("Server", "Server", "EndOfLife", "SRV-DB-PROD-02", now.AddDays(-42)),
-    new("License", "License (Expiration)", "License", "Microsoft 365 E3", now.AddDays(-23)),
-};
-var upcoming = new List<MockItem>
-{
-    new("Server", "Server", "EndOfSupport", "SRV-APP-WEB-01", now.AddDays(29)),
-    new("License", "License (Support)", "License", "Symantec Endpoint Protection", now.AddDays(44)),
-    new("Circuit", "Circuit", "EndOfSupport", "MPLS-Ankara-Link", now.AddDays(54)),
-    new("PhysicalDevice", "Physical Device", "EndOfLife", "SW-CORE-3", now.AddDays(81)),
-};
-
-const int windowDays = 90;
-const string countryName = "Turkiye (Sample)";
-
-// Drop the bank logo next to this project as logo.png or logo.jpg (see the .csproj) and it's
-// picked up automatically -- no code changes needed. Without it, the header just falls back
-// to text-only, same as before.
-var logoPath = new[] { "logo.png", "logo.jpg" }
-    .Select(name => Path.Combine(AppContext.BaseDirectory, name))
-    .FirstOrDefault(File.Exists);
-const string logoCid = "logo";
-
-var html = EmailTemplateBuilder.BuildHtml(countryName, windowDays, expired, upcoming, logoPath != null ? logoCid : null);
-
-// Also dump the rendered HTML to disk so you can eyeball it in a browser without waiting on
-// mail delivery/spam filters every time you tweak EmailTemplateBuilder.cs. The cid: image
-// reference won't resolve when opened directly like this (it's only valid inside the actual
-// MIME message) -- that's expected, the browser preview is for layout/text, not the logo.
-var previewPath = Path.Combine(AppContext.BaseDirectory, "preview.html");
-File.WriteAllText(previewPath, html);
-Console.WriteLine($"Wrote HTML preview to: {previewPath}");
-Console.WriteLine(logoPath != null ? $"Logo found: {logoPath}" : "No logo.png/logo.jpg found next to the .exe -- sending without a logo.");
-
-using var client = new SmtpClient(host, port) { EnableSsl = enableSsl };
-if (!string.IsNullOrWhiteSpace(username))
-{
-    client.Credentials = new NetworkCredential(username, password);
+    Console.WriteLine("ConnectionStrings:ITInventory is not set. Set it with:");
+    Console.WriteLine("  dotnet user-secrets set \"ConnectionStrings:ITInventory\" \"<real connection string>\"");
+    return;
 }
 
-using var message = new MailMessage
-{
-    From = new MailAddress(fromAddress, fromDisplayName),
-    Subject = $"[IT Inventory] {countryName} - Expired/Upcoming Records ({expired.Count} expired, {upcoming.Count} upcoming)"
-};
-message.To.Add(toAddress);
+var dbOptions = new DbContextOptionsBuilder<ITInventoryDbContext>()
+    .UseSqlServer(connectionString)
+    .Options;
+using var db = new ITInventoryDbContext(dbOptions);
 
-// A logo needs an HTML body wrapped in an AlternateView with a LinkedResource attached to
-// it (MIME multipart/related) so the <img src="cid:logo"> tag in the HTML has something to
-// resolve against -- setting message.Body directly (like before) has no way to carry that
-// linked attachment.
-if (logoPath != null)
-{
-    var htmlView = AlternateView.CreateAlternateViewFromString(html, null, "text/html");
-    var logo = new LinkedResource(logoPath) { ContentId = logoCid };
-    htmlView.LinkedResources.Add(logo);
-    message.AlternateViews.Add(htmlView);
-}
-else
-{
-    message.IsBodyHtml = true;
-    message.Body = html;
-}
+var smtpEnabled = config.GetValue<bool?>("Smtp:Enabled") ?? false;
+var smtpHost = config["Smtp:Host"];
+var sendingForReal = smtpEnabled && !string.IsNullOrWhiteSpace(smtpHost) && smtpHost != "CHANGE_ME";
 
-Console.WriteLine($"Sending to {toAddress} via {host}:{port} (SSL={enableSsl})...");
-await client.SendMailAsync(message);
-Console.WriteLine("Sent.");
+IEmailNotificationService emailService = sendingForReal
+    ? new SmtpEmailNotificationService(config, loggerFactory.CreateLogger<SmtpEmailNotificationService>())
+    : new DummyEmailNotificationService(loggerFactory.CreateLogger<DummyEmailNotificationService>());
+
+Console.WriteLine(sendingForReal
+    ? "Smtp:Enabled=true -> this WILL send real emails to real recipients from the database."
+    : "Smtp:Enabled=false -> DUMMY mode: nothing is actually sent, recipients/content are only logged below.");
+Console.WriteLine();
+
+var upcomingWindowDays = config.GetValue<int?>("ExpirationNotifier:UpcomingWindowDays") ?? 90;
+var checker = new ExpirationCheckService(db, emailService, loggerFactory.CreateLogger<ExpirationCheckService>(), upcomingWindowDays);
+
+await checker.RunAsync();
+
+Console.WriteLine();
+Console.WriteLine("Done.");
