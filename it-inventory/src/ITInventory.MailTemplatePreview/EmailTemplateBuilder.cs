@@ -31,7 +31,7 @@ public static class EmailTemplateBuilder
         sb.Append("<tr><td style=\"padding:24px 32px 8px 32px;\">");
         sb.Append($"<p style=\"margin:0; color:#334155; font-size:14px; line-height:1.6;\">This is an automated summary of IT assets that have expired or are expiring within the next {windowDays} days.</p>");
         sb.Append("<div style=\"margin-top:16px;\">");
-        sb.Append($"<span style=\"display:inline-block; background:#fee2e2; color:#dc2626; font-size:13px; font-weight:600; padding:4px 12px; border-radius:999px; margin-right:8px;\">{expired.Count} Expired</span>");
+        sb.Append($"<span style=\"display:inline-block; background:#fee2e2; color:#dc2626; font-size:13px; font-weight:600; padding:4px 12px; border-radius:999px; margin-right:16px;\">{expired.Count} Expired</span>");
         sb.Append($"<span style=\"display:inline-block; background:#fef3c7; color:#d97706; font-size:13px; font-weight:600; padding:4px 12px; border-radius:999px;\">{upcoming.Count} Upcoming</span>");
         sb.Append("</div></td></tr>");
 
