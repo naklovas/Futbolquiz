@@ -149,6 +149,15 @@ public class ServersController : Controller
         if (!_currentUser.IsAdmin)
             vm.CountryId = _currentUser.CountryId ?? 0;
 
+        // IP Address and ESXi/Physical Server only exist on the "New Server" form (see the
+        // isNew branching in _Form.cshtml) -- they're absent entirely when editing, so they
+        // can't carry a ViewModel-level [Required] without breaking Edit. Enforced here instead,
+        // Create-only.
+        if (string.IsNullOrWhiteSpace(vm.IpAddress))
+            ModelState.AddModelError(nameof(vm.IpAddress), "IP address is required.");
+        if (!vm.HostPhysicalDeviceId.HasValue)
+            ModelState.AddModelError(nameof(vm.HostPhysicalDeviceId), "ESXi / Physical Server is required.");
+
         if (!ModelState.IsValid)
         {
             await PopulateDropdowns();

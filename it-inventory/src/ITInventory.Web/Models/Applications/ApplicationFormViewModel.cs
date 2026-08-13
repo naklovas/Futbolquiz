@@ -24,8 +24,9 @@ public class ApplicationFormViewModel
     [Display(Name = "License")]
     public int? LicenseId { get; set; }
 
+    [Required(ErrorMessage = "Application type is required.")]
     [Display(Name = "Application Type")]
-    public ApplicationType ApplicationType { get; set; }
+    public ApplicationType? ApplicationType { get; set; }
 
     [Display(Name = "Externally Exposed?")]
     public bool IsExternallyExposed { get; set; }

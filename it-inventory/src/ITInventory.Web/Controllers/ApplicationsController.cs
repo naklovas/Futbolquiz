@@ -135,7 +135,7 @@ public class ApplicationsController : Controller
             Name = vm.Name,
             CompanyId = vm.CompanyId,
             LicenseId = vm.LicenseId,
-            ApplicationType = vm.ApplicationType,
+            ApplicationType = vm.ApplicationType!.Value,
             IsExternallyExposed = vm.IsExternallyExposed,
             Url = vm.Url,
             IsCloudApplication = vm.IsCloudApplication,
@@ -200,7 +200,7 @@ public class ApplicationsController : Controller
         entity.Name = vm.Name;
         entity.CompanyId = vm.CompanyId;
         entity.LicenseId = vm.LicenseId;
-        entity.ApplicationType = vm.ApplicationType;
+        entity.ApplicationType = vm.ApplicationType!.Value;
         entity.IsExternallyExposed = vm.IsExternallyExposed;
         entity.Url = vm.Url;
         entity.IsCloudApplication = vm.IsCloudApplication;

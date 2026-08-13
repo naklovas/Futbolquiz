@@ -37,8 +37,9 @@ public class PhysicalDeviceFormViewModel
     [Display(Name = "Physical/Virtual")]
     public ApplianceType ApplianceType { get; set; }
 
+    [Required(ErrorMessage = "Location category is required.")]
     [Display(Name = "Location Category")]
-    public LocationCategory LocationCategory { get; set; }
+    public LocationCategory? LocationCategory { get; set; }
 
     [Required(ErrorMessage = "Software version is required.")]
     [StringLength(150)]
