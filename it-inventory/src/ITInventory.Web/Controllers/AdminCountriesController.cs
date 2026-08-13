@@ -102,6 +102,27 @@ public class AdminCountriesController : Controller
         if (country is null) return NotFound();
 
         var countryLabel = country.DisplayName ?? country.Name;
+
+        // Seven different tables carry a CountryId FK (Restrict) into Countries -- Physical
+        // Devices/Servers/Licenses/Circuits are the obvious "inventory" ones, but Companies,
+        // Applications, and Locations (branches) also reference it and are easy to forget to
+        // check, so a generic "records are linked" message left the admin guessing which one.
+        // Naming the exact table(s) here instead turns that into a one-look answer.
+        var blockers = new List<string>();
+        if (await _db.PhysicalDevices.AnyAsync(x => x.CountryId == id)) blockers.Add("Physical Devices");
+        if (await _db.Servers.AnyAsync(x => x.CountryId == id)) blockers.Add("Servers");
+        if (await _db.Licenses.AnyAsync(x => x.CountryId == id)) blockers.Add("Licenses");
+        if (await _db.Circuits.AnyAsync(x => x.CountryId == id)) blockers.Add("Circuits");
+        if (await _db.Companies.AnyAsync(x => x.CountryId == id)) blockers.Add("Companies");
+        if (await _db.Applications.AnyAsync(x => x.CountryId == id)) blockers.Add("Applications");
+        if (await _db.Locations.AnyAsync(x => x.CountryId == id)) blockers.Add("Locations (Branches)");
+
+        if (blockers.Count > 0)
+        {
+            TempData["Error"] = $"Could not delete '{countryLabel}' because it still has records in: {string.Join(", ", blockers)}. Delete or move those first.";
+            return RedirectToAction(nameof(Index));
+        }
+
         _db.Countries.Remove(country);
 
         try
@@ -111,7 +132,7 @@ public class AdminCountriesController : Controller
         }
         catch (DbUpdateException)
         {
-            TempData["Error"] = "Could not delete because inventory records are linked to this country. Delete or move the related records first.";
+            TempData["Error"] = $"Could not delete '{countryLabel}' because inventory records are linked to it. Delete or move the related records first.";
         }
 
         return RedirectToAction(nameof(Index));
