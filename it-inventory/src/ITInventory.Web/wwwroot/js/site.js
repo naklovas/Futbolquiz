@@ -132,6 +132,53 @@ function initLocationCategoryToggle(categorySelectId, branchSelectId, evmBranchV
     refresh();
 }
 
+// Lightweight custom combobox for a handful of static suggestions (e.g. Location "Class").
+// A plain HTML5 <input list="..."> + <datalist> looks similar but its native suggestion
+// popup is unreliable about reopening once the field already holds a value that matches an
+// option -- behavior varies by browser, and on some it takes clearing the field and refocusing
+// to see the list again. This version manages the dropdown itself: clicking/focusing the
+// field always shows the full list (not filtered by whatever it already contains), typing
+// narrows it down, and picking an option always sets the value and closes the list. Requires
+// a wrapper markup of <div class="relative"><input id="X">...<div id="X-options">.
+function initSimpleCombobox(inputId, options) {
+    var input = document.getElementById(inputId);
+    var panel = document.getElementById(inputId + '-options');
+    if (!input || !panel) return;
+
+    function renderOptions(filter) {
+        panel.innerHTML = '';
+        var lower = (filter || '').toLowerCase();
+        var matches = options.filter(function (o) { return o.toLowerCase().indexOf(lower) !== -1; });
+        if (matches.length === 0) { panel.classList.add('hidden'); return; }
+
+        matches.forEach(function (opt) {
+            var item = document.createElement('div');
+            item.className = 'px-3 py-2 text-sm text-slate-700 hover:bg-brand-50 cursor-pointer';
+            item.textContent = opt;
+            item.addEventListener('mousedown', function (e) {
+                e.preventDefault();
+                input.value = opt;
+                panel.classList.add('hidden');
+            });
+            panel.appendChild(item);
+        });
+        panel.classList.remove('hidden');
+    }
+
+    input.addEventListener('focus', function () {
+        renderOptions('');
+        input.select();
+    });
+    input.addEventListener('click', function () { renderOptions(''); });
+    input.addEventListener('input', function () { renderOptions(input.value); });
+
+    document.addEventListener('click', function (e) {
+        if (e.target !== input && !panel.contains(e.target)) {
+            panel.classList.add('hidden');
+        }
+    });
+}
+
 function filterRows(inputEl, tableId) {
     var filter = inputEl.value.toLowerCase();
     var rows = document.querySelectorAll('#' + tableId + ' tbody tr');
