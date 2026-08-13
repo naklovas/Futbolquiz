@@ -39,7 +39,7 @@ else
                 <option value="">All Categories</option>
                 @foreach (var cat in categories)
                 {
-                    <option value="@cat.Id" selected="@(cat.Id == selectedCategoryId)">@cat.Name</option>
+                    <option value="@cat.Id" selected="@(cat.Id == selectedCategoryId)">@(cat.Name == "ESXi / Physical Server" ? "ESXi / Physical Server / Virtual Server" : cat.Name)</option>
                 }
             </select>
         </form>

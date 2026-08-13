@@ -64,7 +64,17 @@ public class DevicePoolService : IDevicePoolService
                     OperatingSystem = z.OperatingSystem,
                     DeviceProfile = z.DeviceProfile,
                     CategoryId = profile?.CategoryId,
-                    CategoryName = profile?.Category?.Name,
+                    // Nessus tags a physical Windows server and a VM running Windows with the
+                    // exact same DeviceProfile ("Sunucu (Windows)") -- there's no field in the
+                    // scan data that says which one a given row actually is. The category here
+                    // is only ever used as a starting suggestion for "Add as Device"; showing
+                    // the ambiguity in the label itself (Pool-only -- the underlying
+                    // DeviceCategories.Name stays "ESXi / Physical Server", since Physical
+                    // Devices only ever holds physical hardware) makes that clear instead of
+                    // implying a firm answer this list can't actually give.
+                    CategoryName = profile?.Category?.Name == "ESXi / Physical Server"
+                        ? "ESXi / Physical Server / Virtual Server"
+                        : profile?.Category?.Name,
                     LastSeenAt = z.LastSeenAt ?? z.TenableLastSeen,
                     AlreadyInInventory = usedIps.Contains(z.IpAddress) || usedSourceIds.Contains(z.Id)
                 };
