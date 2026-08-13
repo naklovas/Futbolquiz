@@ -23,6 +23,7 @@ public class CompanyFormViewModel
     [Display(Name = "Other Type (please specify)")]
     public string? OtherTypeDescription { get; set; }
 
+    [Required(ErrorMessage = "Country of origin is required.")]
     [Display(Name = "Country of Origin")]
     public int? OriginCountryId { get; set; }
 

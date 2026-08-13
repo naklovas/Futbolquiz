@@ -31,6 +31,7 @@
     <div>
         <label asp-for="CircuitCapacity" class="block text-sm font-medium text-slate-700 mb-1"></label>
         <input asp-for="CircuitCapacity" placeholder="100Mbps" class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500" />
+        <span asp-validation-for="CircuitCapacity" class="text-sm text-red-600"></span>
     </div>
 </div>
 
@@ -38,17 +39,18 @@
     <div>
         <label asp-for="Provider" class="block text-sm font-medium text-slate-700 mb-1"></label>
         <input asp-for="Provider" class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500" />
+        <span asp-validation-for="Provider" class="text-sm text-red-600"></span>
     </div>
     <div>
         <label asp-for="Branch" class="block text-sm font-medium text-slate-700 mb-1"></label>
         <select asp-for="Branch" id="Branch" class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
             <option value="">-- Select --</option>
         </select>
+        <span asp-validation-for="Branch" class="text-sm text-red-600"></span>
     </div>
     <div>
         <label asp-for="Location" class="block text-sm font-medium text-slate-700 mb-1"></label>
         <input asp-for="Location" class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500" />
-        <span asp-validation-for="Location" class="text-sm text-red-600"></span>
     </div>
 </div>
 
@@ -56,10 +58,12 @@
     <div>
         <label asp-for="StartDate" class="block text-sm font-medium text-slate-700 mb-1"></label>
         <input asp-for="StartDate" class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500" />
+        <span asp-validation-for="StartDate" class="text-sm text-red-600"></span>
     </div>
     <div>
         <label asp-for="EndDate" class="block text-sm font-medium text-slate-700 mb-1"></label>
         <input asp-for="EndDate" class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500" />
+        <span asp-validation-for="EndDate" class="text-sm text-red-600"></span>
     </div>
 </div>
 

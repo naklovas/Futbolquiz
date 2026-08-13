@@ -40,6 +40,7 @@ public class ServerFormViewModel
     [Display(Name = "ESXi / Physical Server")]
     public int? HostPhysicalDeviceId { get; set; }
 
+    [Required(ErrorMessage = "Operating system is required.")]
     [StringLength(255)]
     [Display(Name = "Operating System")]
     public string? OperatingSystem { get; set; }
@@ -60,6 +61,7 @@ public class ServerFormViewModel
     [Display(Name = "Vendor/Supplier")]
     public string? VendorSupplier { get; set; }
 
+    [Required(ErrorMessage = "Branch is required.")]
     [StringLength(150)]
     [Display(Name = "Branch")]
     public string? Branch { get; set; }

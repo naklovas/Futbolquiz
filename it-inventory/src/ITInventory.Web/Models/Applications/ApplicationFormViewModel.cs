@@ -16,9 +16,11 @@ public class ApplicationFormViewModel
     [Display(Name = "Application Name")]
     public string Name { get; set; } = string.Empty;
 
+    [Required(ErrorMessage = "Company is required.")]
     [Display(Name = "Company")]
     public int? CompanyId { get; set; }
 
+    [Required(ErrorMessage = "License is required.")]
     [Display(Name = "License")]
     public int? LicenseId { get; set; }
 

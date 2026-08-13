@@ -18,8 +18,9 @@
     <div>
         <label asp-for="ApplicationId" class="block text-sm font-medium text-slate-700 mb-1"></label>
         <select asp-for="ApplicationId" asp-items="applicationOptions" class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
-            <option value="">-- None --</option>
+            <option value="">-- Select --</option>
         </select>
+        <span asp-validation-for="ApplicationId" class="text-sm text-red-600"></span>
     </div>
 </div>
 
@@ -27,6 +28,7 @@
     <div>
         <label asp-for="IpAddress" class="block text-sm font-medium text-slate-700 mb-1"></label>
         <input asp-for="IpAddress" class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500" />
+        <span asp-validation-for="IpAddress" class="text-sm text-red-600"></span>
     </div>
     <div>
         <label asp-for="Port" class="block text-sm font-medium text-slate-700 mb-1"></label>
