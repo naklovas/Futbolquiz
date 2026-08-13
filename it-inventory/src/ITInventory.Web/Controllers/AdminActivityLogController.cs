@@ -30,7 +30,12 @@ public class AdminActivityLogController : Controller
         _activityLogger = activityLogger;
     }
 
-    public async Task<IActionResult> Index(string? username, string? action, string? entityType, DateTime? fromDate, DateTime? toDate, int page = 1)
+    // Renamed from "action" to "actionFilter": "action" is a reserved MVC routing token (which
+    // controller action method to invoke), so a parameter literally named "action" gets bound
+    // from route data ("Index", the current action's own name) instead of the query string --
+    // the filter dropdown's real value was silently discarded and replaced with "Index", which
+    // never matches any ActivityLogs.Action value, so the filtered result was always empty.
+    public async Task<IActionResult> Index(string? username, string? actionFilter, string? entityType, DateTime? fromDate, DateTime? toDate, int page = 1)
     {
         // Only the first filter/search submit (the hidden "searched" field) triggers a query --
         // a bare navigation to the page (no querystring at all) shows the filter form and
@@ -42,7 +47,7 @@ public class AdminActivityLogController : Controller
         ViewBag.ActionOptions = Actions;
         ViewBag.EntityTypeOptions = EntityTypes;
         ViewBag.Username = username;
-        ViewBag.SelectedAction = action;
+        ViewBag.SelectedAction = actionFilter;
         ViewBag.SelectedEntityType = entityType;
         ViewBag.FromDate = fromDate?.ToString("yyyy-MM-dd");
         ViewBag.ToDate = toDate?.ToString("yyyy-MM-dd");
@@ -52,38 +57,15 @@ public class AdminActivityLogController : Controller
             return View(new PagedResult<ActivityLog> { Items = Array.Empty<ActivityLog>(), PageNumber = 1, PageSize = PaginationExtensions.DefaultPageSize, TotalCount = 0 });
         }
 
-        // Diagnostic numbers shown on the page itself -- if TotalUnfiltered is 0, the app
-        // genuinely isn't seeing any rows (wrong DB/connection string, or the SQL script was
-        // never run there); if TotalUnfiltered > 0 but the filtered count is 0, the filters
-        // (most likely the date range) are excluding real rows and that's the next thing to
-        // narrow down from these exact numbers instead of guessing blind.
-        var unfilteredRows = await _db.ActivityLogs.OrderByDescending(l => l.CreatedAt).ToListAsync();
-        ViewBag.TotalUnfiltered = unfilteredRows.Count;
-        ViewBag.UnfilteredRows = unfilteredRows;
-        ViewBag.ServerTimeZone = TimeZoneInfo.Local.Id;
-        ViewBag.ServerNowLocal = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
-        ViewBag.ServerNowUtc = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss");
-
-        DateTime? fromUtc = fromDate.HasValue
-            ? TimeZoneInfo.ConvertTimeToUtc(DateTime.SpecifyKind(fromDate.Value.Date, DateTimeKind.Unspecified), TimeZoneInfo.Local)
-            : null;
-        DateTime? toUtcExclusive = toDate.HasValue
-            ? TimeZoneInfo.ConvertTimeToUtc(DateTime.SpecifyKind(toDate.Value.Date.AddDays(1), DateTimeKind.Unspecified), TimeZoneInfo.Local)
-            : null;
-        ViewBag.ComputedFromUtc = fromUtc?.ToString("yyyy-MM-dd HH:mm:ss");
-        ViewBag.ComputedToUtcExclusive = toUtcExclusive?.ToString("yyyy-MM-dd HH:mm:ss");
-
-        var query = BuildFilteredQuery(username, action, entityType, fromDate, toDate);
-        ViewBag.TotalFiltered = await query.CountAsync();
-
+        var query = BuildFilteredQuery(username, actionFilter, entityType, fromDate, toDate);
         var items = await query.OrderByDescending(l => l.CreatedAt).ToPagedResultAsync(page);
 
         return View(items);
     }
 
-    public async Task<IActionResult> Export(string? username, string? action, string? entityType, DateTime? fromDate, DateTime? toDate)
+    public async Task<IActionResult> Export(string? username, string? actionFilter, string? entityType, DateTime? fromDate, DateTime? toDate)
     {
-        var query = BuildFilteredQuery(username, action, entityType, fromDate, toDate);
+        var query = BuildFilteredQuery(username, actionFilter, entityType, fromDate, toDate);
         var items = await query.OrderByDescending(l => l.CreatedAt).ToListAsync();
 
         var headers = new[] { "Time", "Username", "Full Name", "Country", "Action", "Entity Type", "Entity Name", "Details", "IP Address" };
@@ -105,15 +87,15 @@ public class AdminActivityLogController : Controller
         return File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", $"ActivityLog_Export_{DateTime.UtcNow:yyyyMMdd_HHmmss}.xlsx");
     }
 
-    private IQueryable<ActivityLog> BuildFilteredQuery(string? username, string? action, string? entityType, DateTime? fromDate, DateTime? toDate)
+    private IQueryable<ActivityLog> BuildFilteredQuery(string? username, string? actionFilter, string? entityType, DateTime? fromDate, DateTime? toDate)
     {
         var query = _db.ActivityLogs.AsQueryable();
 
         if (!string.IsNullOrWhiteSpace(username))
             query = query.Where(l => l.Username.Contains(username) || (l.FullName != null && l.FullName.Contains(username)));
 
-        if (!string.IsNullOrWhiteSpace(action))
-            query = query.Where(l => l.Action == action);
+        if (!string.IsNullOrWhiteSpace(actionFilter))
+            query = query.Where(l => l.Action == actionFilter);
 
         if (!string.IsNullOrWhiteSpace(entityType))
             query = query.Where(l => l.EntityType == entityType);
@@ -121,10 +103,8 @@ public class AdminActivityLogController : Controller
         // CreatedAt is stored as UTC (DateTime.UtcNow), but fromDate/toDate are calendar days
         // picked in the admin's local time (same convention the table already uses to *display*
         // CreatedAt via ToLocalTime()). Comparing a UTC column directly against a naive local
-        // date boundary is off by the server's UTC offset -- a record made "today" in local time
-        // can carry a UTC timestamp dated "yesterday" (or vice versa near midnight), so it would
-        // silently fall outside a same-day filter. Converting the local day boundaries to UTC
-        // first keeps the filter and the displayed time consistent.
+        // date boundary is off by the server's UTC offset, so the local day boundaries are
+        // converted to UTC first.
         if (fromDate.HasValue)
         {
             var fromUtc = TimeZoneInfo.ConvertTimeToUtc(DateTime.SpecifyKind(fromDate.Value.Date, DateTimeKind.Unspecified), TimeZoneInfo.Local);
