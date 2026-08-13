@@ -150,6 +150,14 @@ incelenip çalıştırılan SQL script tercih edildiği için ayrıca burada tut
     açılır. Mevcut kayıtlar Vendor olarak başlar. EF Core migration'ından üretildi,
     elle düzenlemeyin. İdempotenttir.
 
+20. **020_rename_server_category.sql** — `DeviceCategories` tablosunda Id=1 olan kategorinin
+    adını "Server"'dan "ESXi / Physical Server"'a değiştirir (yalnızca veri güncellemesi,
+    kolon/tablo değişikliği yok). Servers modülündeki "ESXi / Physical Server" (host)
+    dropdown'ı artık bu kategoriye göre filtrelendiği için isim netleştirildi. Physical
+    Devices'ta bu kategoriyle etiketlenmemiş ama aslında ESXi/fiziksel sunucu olan cihazlar
+    varsa, onları Physical Devices ekranından elle bu kategoriye taşımanız gerekir (script
+    bunu otomatik yapmaz). EF Core migration'ından üretildi, elle düzenlemeyin. İdempotenttir.
+
 ## Bu scriptlerin DOKUNMADIĞI mevcut tablolar
 
 Aşağıdaki tablo bu proje tarafından oluşturulmaz; production'da başka bir

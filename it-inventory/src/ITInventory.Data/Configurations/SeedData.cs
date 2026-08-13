@@ -8,7 +8,7 @@ internal static class SeedData
 {
     public static readonly (int Id, string Name)[] Categories =
     {
-        (1, "Server"),
+        (1, "ESXi / Physical Server"),
         (2, "Network Device"),
         (3, "Security"),
         (4, "Audio/Video"),

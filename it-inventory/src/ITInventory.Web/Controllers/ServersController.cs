@@ -459,9 +459,9 @@ public class ServersController : Controller
 
         var effectiveCountryId = _currentUser.IsAdmin ? (int?)null : _currentUser.CountryId;
 
-        // Only "Server" category Physical Devices can host a VM (ESXi/physical servers) --
-        // without this filter every switch/firewall/etc. in the country showed up here too.
-        var physicalDevicesQuery = _db.PhysicalDevices.Where(d => d.Category!.Name == "Server");
+        // Only "ESXi / Physical Server" category Physical Devices can host a VM -- without
+        // this filter every switch/firewall/etc. in the country showed up here too.
+        var physicalDevicesQuery = _db.PhysicalDevices.Where(d => d.Category!.Name == "ESXi / Physical Server");
         if (effectiveCountryId.HasValue)
             physicalDevicesQuery = physicalDevicesQuery.Where(d => d.CountryId == effectiveCountryId.Value);
         var physicalDevices = await physicalDevicesQuery.OrderBy(d => d.DeviceName).ToListAsync();
