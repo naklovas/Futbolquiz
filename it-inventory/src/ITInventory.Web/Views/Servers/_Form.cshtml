@@ -60,6 +60,7 @@
     </div>
 </div>
 
+<div id="hardware-fields">
 <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
     <div>
         <label asp-for="Brand" class="block text-sm font-medium text-slate-700 mb-1"></label>
@@ -83,6 +84,22 @@
 
 <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
     <div>
+        <label asp-for="StartOfSupportDate" class="block text-sm font-medium text-slate-700 mb-1"></label>
+        <input asp-for="StartOfSupportDate" class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500" />
+    </div>
+    <div>
+        <label asp-for="EndOfSupportDate" class="block text-sm font-medium text-slate-700 mb-1"></label>
+        <input asp-for="EndOfSupportDate" class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500" />
+    </div>
+    <div>
+        <label asp-for="EndOfLifeDate" class="block text-sm font-medium text-slate-700 mb-1"></label>
+        <input asp-for="EndOfLifeDate" class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500" />
+    </div>
+</div>
+</div>
+
+<div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+    <div>
         <label asp-for="LocationCategory" class="block text-sm font-medium text-slate-700 mb-1"></label>
         <select asp-for="LocationCategory" id="LocationCategory" class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
             <option value="Local">Local</option>
@@ -95,21 +112,6 @@
         <select asp-for="Branch" id="Branch" class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
             <option value="">-- Select --</option>
         </select>
-    </div>
-</div>
-
-<div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-    <div>
-        <label asp-for="StartOfSupportDate" class="block text-sm font-medium text-slate-700 mb-1"></label>
-        <input asp-for="StartOfSupportDate" class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500" />
-    </div>
-    <div>
-        <label asp-for="EndOfSupportDate" class="block text-sm font-medium text-slate-700 mb-1"></label>
-        <input asp-for="EndOfSupportDate" class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500" />
-    </div>
-    <div>
-        <label asp-for="EndOfLifeDate" class="block text-sm font-medium text-slate-700 mb-1"></label>
-        <input asp-for="EndOfLifeDate" class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500" />
     </div>
 </div>
 
@@ -131,11 +133,22 @@
         var applianceField = document.getElementById('ApplianceType');
         var locationField = document.getElementById('location-field');
         var hostField = document.getElementById('host-physical-device-field');
+        var hardwareFields = document.getElementById('hardware-fields');
 
         function refreshApplianceFields() {
             var isVirtual = applianceField.value === 'Virtual';
             locationField.classList.toggle('hidden', isVirtual);
             hostField.classList.toggle('hidden', !isVirtual);
+
+            // A VM's brand/model/serial/vendor/support dates belong to the physical host it
+            // runs on (tracked there instead), not to the VM itself -- hiding these fields for
+            // Virtual keeps the form from asking for hardware details that don't apply, and
+            // clearing them avoids silently submitting a stale value left over from switching
+            // away from Physical.
+            hardwareFields.classList.toggle('hidden', isVirtual);
+            if (isVirtual) {
+                hardwareFields.querySelectorAll('input, select').forEach(function (el) { el.value = ''; });
+            }
         }
 
         applianceField.addEventListener('change', refreshApplianceFields);

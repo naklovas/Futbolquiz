@@ -1,5 +1,6 @@
 using ClosedXML.Excel;
 using ITInventory.Data;
+using ITInventory.Data.Common;
 using ITInventory.Data.Entities;
 using ITInventory.Web.Models;
 using ITInventory.Web.Models.Import;
@@ -104,7 +105,7 @@ public class ServersController : Controller
         return File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", $"Servers_Export_{DateTime.UtcNow:yyyyMMdd_HHmmss}.xlsx");
     }
 
-    public async Task<IActionResult> Create(bool fromPool = false, int? sourceId = null, int? countryId = null)
+    public async Task<IActionResult> Create(bool fromPool = false, int? sourceId = null, int? countryId = null, ApplianceType? applianceType = null)
     {
         if (!_currentUser.CanEdit) return Forbid();
 
@@ -112,6 +113,9 @@ public class ServersController : Controller
         {
             CountryId = _currentUser.IsAdmin ? countryId ?? 0 : _currentUser.CountryId ?? 0
         };
+
+        if (applianceType.HasValue)
+            vm.ApplianceType = applianceType.Value;
 
         if (fromPool && sourceId.HasValue)
         {
