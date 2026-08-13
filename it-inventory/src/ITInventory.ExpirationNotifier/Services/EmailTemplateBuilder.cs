@@ -94,12 +94,12 @@ public static class EmailTemplateBuilder
         sb.Append("<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"border-collapse:collapse; font-size:13px;\">");
 
         sb.Append("<tr>");
-        AppendHeaderCell(sb, "Category", "left");
-        AppendHeaderCell(sb, "Name", "left");
-        AppendHeaderCell(sb, "Type", "left");
-        AppendHeaderCell(sb, "Expiration Type", "left");
-        AppendHeaderCell(sb, isExpired ? "Expired On" : "Expires On", "left");
-        AppendHeaderCell(sb, isExpired ? "Overdue" : "Remaining", "right");
+        AppendHeaderCell(sb, "CATEGORY", "left");
+        AppendHeaderCell(sb, "NAME", "left");
+        AppendHeaderCell(sb, "TYPE", "left");
+        AppendHeaderCell(sb, "EXPIRATION TYPE", "left");
+        AppendHeaderCell(sb, isExpired ? "EXPIRED ON" : "EXPIRES ON", "left");
+        AppendHeaderCell(sb, isExpired ? "OVERDUE" : "REMAINING", "right");
         sb.Append("</tr>");
 
         var rowIndex = 0;
@@ -126,9 +126,15 @@ public static class EmailTemplateBuilder
         sb.Append("</table></td></tr>");
     }
 
+    // Text passed in is already upper-case in the literal C# string (not via CSS
+    // text-transform:uppercase) on purpose: that CSS property re-cases text using the
+    // *viewer's* OS/browser locale, and on a Turkish locale a lowercase "i" upper-cases to
+    // "İ" (dotted) instead of "I" -- e.g. "Remaining" rendered as "REMAİNİNG" for a Turkish
+    // reader even though the source text is plain English. Baking the upper-case in avoids
+    // any client-side re-casing entirely.
     private static void AppendHeaderCell(StringBuilder sb, string text, string align)
     {
-        sb.Append($"<th align=\"{align}\" style=\"padding:8px; border-bottom:2px solid #e2e8f0; color:#64748b; font-size:11px; text-transform:uppercase; letter-spacing:0.03em;\">{WebUtility.HtmlEncode(text)}</th>");
+        sb.Append($"<th align=\"{align}\" style=\"padding:8px; border-bottom:2px solid #e2e8f0; color:#64748b; font-size:11px; letter-spacing:0.03em;\">{WebUtility.HtmlEncode(text)}</th>");
     }
 
     // Category values here match ExpirationCheckService.Add() calls verbatim
