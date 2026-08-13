@@ -13,13 +13,13 @@ public class ActivityLogger : IActivityLogger
 {
     private readonly ITInventoryDbContext _db;
     private readonly ICurrentUserService _currentUser;
-    private readonly IHttpContextAccessor _httpContextAccessor;
+    private readonly IConfiguration _configuration;
 
-    public ActivityLogger(ITInventoryDbContext db, ICurrentUserService currentUser, IHttpContextAccessor httpContextAccessor)
+    public ActivityLogger(ITInventoryDbContext db, ICurrentUserService currentUser, IConfiguration configuration)
     {
         _db = db;
         _currentUser = currentUser;
-        _httpContextAccessor = httpContextAccessor;
+        _configuration = configuration;
     }
 
     public async Task LogAsync(string action, string entityType, string? entityName = null, string? details = null)
@@ -34,7 +34,10 @@ public class ActivityLogger : IActivityLogger
             EntityType = entityType,
             EntityName = entityName,
             Details = details,
-            IpAddress = _httpContextAccessor.HttpContext?.Connection.RemoteIpAddress?.ToString()
+            // Set per-deployment in appsettings.json (e.g. "dev", "test", "prod") -- lets a log
+            // entry be traced back to which environment produced it without exposing the
+            // client's real IP address.
+            EnvironmentName = _configuration["AppEnvironment"]
         };
 
         _db.ActivityLogs.Add(entry);

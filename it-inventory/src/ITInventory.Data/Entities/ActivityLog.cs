@@ -11,5 +11,5 @@ public class ActivityLog
     public string EntityType { get; set; } = string.Empty;
     public string? EntityName { get; set; }
     public string? Details { get; set; }
-    public string? IpAddress { get; set; }
+    public string? EnvironmentName { get; set; }
 }

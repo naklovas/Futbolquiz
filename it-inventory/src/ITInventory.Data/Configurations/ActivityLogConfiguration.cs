@@ -19,7 +19,7 @@ public class ActivityLogConfiguration : IEntityTypeConfiguration<ActivityLog>
         builder.Property(x => x.EntityType).HasMaxLength(100).IsRequired();
         builder.Property(x => x.EntityName).HasMaxLength(255);
         builder.Property(x => x.Details).HasMaxLength(1000);
-        builder.Property(x => x.IpAddress).HasMaxLength(64);
+        builder.Property(x => x.EnvironmentName).HasMaxLength(64);
 
         builder.HasIndex(x => x.CreatedAt);
         builder.HasIndex(x => x.Username);

@@ -68,7 +68,7 @@ public class AdminActivityLogController : Controller
         var query = BuildFilteredQuery(username, actionFilter, entityType, fromDate, toDate);
         var items = await query.OrderByDescending(l => l.CreatedAt).ToListAsync();
 
-        var headers = new[] { "Time", "Username", "Full Name", "Country", "Action", "Entity Type", "Entity Name", "Details", "IP Address" };
+        var headers = new[] { "Time", "Username", "Full Name", "Country", "Action", "Entity Type", "Entity Name", "Details", "Environment" };
         var rows = items.Select(l => new object?[]
         {
             l.CreatedAt,
@@ -79,7 +79,7 @@ public class AdminActivityLogController : Controller
             l.EntityType,
             l.EntityName,
             l.Details,
-            l.IpAddress
+            l.EnvironmentName
         });
 
         var bytes = ExcelImportHelpers.CreateExportBytes("Activity Log", headers, rows);

@@ -158,6 +158,15 @@ incelenip çalıştırılan SQL script tercih edildiği için ayrıca burada tut
     varsa, onları Physical Devices ekranından elle bu kategoriye taşımanız gerekir (script
     bunu otomatik yapmaz). EF Core migration'ından üretildi, elle düzenlemeyin. İdempotenttir.
 
+21. **021_activity_log_environment.sql** — `ActivityLogs` tablosundaki `IpAddress`
+    kolonunu `EnvironmentName` olarak yeniden adlandırır (`sp_rename`, veri korunur).
+    Artık gerçek istemci IP'si yerine, uygulamanın `appsettings.json` dosyasındaki
+    `AppEnvironment` ayarında yazılı değer (ör. "dev", "test", "prod") loglanıyor —
+    her ortamın kendi appsettings.json'ında bu değeri elle ayarlaması gerekir (varsayılan
+    `appsettings.json`'da "prod", `appsettings.Development.json`'da "dev"). Rename'den
+    önceki satırlardaki eski IP değerleri olduğu gibi kalır, yeni satırlar ortam adını
+    içerir. EF Core migration'ından üretildi, elle düzenlemeyin. İdempotenttir.
+
 ## Bu scriptlerin DOKUNMADIĞI mevcut tablolar
 
 Aşağıdaki tablo bu proje tarafından oluşturulmaz; production'da başka bir
