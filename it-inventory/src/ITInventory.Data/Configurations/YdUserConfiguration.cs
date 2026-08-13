@@ -16,6 +16,7 @@ public class YdUserConfiguration : IEntityTypeConfiguration<YdUser>
         builder.Property(x => x.FullName).HasMaxLength(100).IsRequired();
         builder.Property(x => x.Email).HasMaxLength(100);
         builder.Property(x => x.RepositoryName).HasMaxLength(255);
+        builder.Property(x => x.ReceiveExpirationNotifications).HasDefaultValue(true);
         builder.HasIndex(x => x.Username).IsUnique();
     }
 }

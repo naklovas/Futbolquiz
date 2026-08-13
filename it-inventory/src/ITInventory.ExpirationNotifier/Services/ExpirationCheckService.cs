@@ -117,7 +117,7 @@ public class ExpirationCheckService
         var adminRecipients = await _db.YdUserRoles
             .Where(ur => ur.Role!.RoleName == RoleNames.Admin)
             .Select(ur => ur.User!)
-            .Where(u => u.IsActive && !string.IsNullOrWhiteSpace(u.Email))
+            .Where(u => u.IsActive && u.ReceiveExpirationNotifications && !string.IsNullOrWhiteSpace(u.Email))
             .Select(u => new NotificationRecipient { FullName = u.FullName, Email = u.Email! })
             .ToListAsync();
 
@@ -136,7 +136,7 @@ public class ExpirationCheckService
 
             var countryRecipients = country != null
                 ? await _db.YdUsers
-                    .Where(u => u.IsActive && u.RepositoryName == country.Name && !string.IsNullOrWhiteSpace(u.Email))
+                    .Where(u => u.IsActive && u.ReceiveExpirationNotifications && u.RepositoryName == country.Name && !string.IsNullOrWhiteSpace(u.Email))
                     .Select(u => new NotificationRecipient { FullName = u.FullName, Email = u.Email! })
                     .ToListAsync()
                 : new List<NotificationRecipient>();

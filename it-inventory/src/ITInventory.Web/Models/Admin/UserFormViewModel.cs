@@ -27,6 +27,9 @@ public class UserFormViewModel
     [Display(Name = "Active")]
     public bool IsActive { get; set; } = true;
 
+    [Display(Name = "Send Expiration Notifications")]
+    public bool ReceiveExpirationNotifications { get; set; } = true;
+
     [Display(Name = "Roles")]
     public List<int> SelectedRoleIds { get; set; } = new();
 }

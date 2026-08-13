@@ -27,6 +27,7 @@
                 <th class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Country/Branch</th>
                 <th class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Roles</th>
                 <th class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Active</th>
+                <th class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Notifications</th>
                 <th class="px-4 py-3"></th>
             </tr>
         </thead>
@@ -50,6 +51,16 @@
                         @if (user.IsActive)
                         {
                             <span class="inline-flex items-center gap-1 text-brand-700 bg-brand-50 px-2 py-0.5 rounded-full text-xs font-medium"><i class="fa-solid fa-circle-check"></i>Yes</span>
+                        }
+                        else
+                        {
+                            <span class="inline-flex items-center gap-1 text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full text-xs font-medium">No</span>
+                        }
+                    </td>
+                    <td class="px-4 py-3">
+                        @if (user.ReceiveExpirationNotifications)
+                        {
+                            <span class="inline-flex items-center gap-1 text-brand-700 bg-brand-50 px-2 py-0.5 rounded-full text-xs font-medium"><i class="fa-solid fa-envelope"></i>Yes</span>
                         }
                         else
                         {

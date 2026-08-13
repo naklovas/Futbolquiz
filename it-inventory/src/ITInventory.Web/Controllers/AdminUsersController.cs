@@ -62,6 +62,7 @@ public class AdminUsersController : Controller
             Email = vm.Email,
             RepositoryName = country?.Name,
             IsActive = vm.IsActive,
+            ReceiveExpirationNotifications = vm.ReceiveExpirationNotifications,
             CreatedAt = DateTime.UtcNow
         };
 
@@ -92,6 +93,7 @@ public class AdminUsersController : Controller
             Email = user.Email,
             CountryId = country?.Id,
             IsActive = user.IsActive,
+            ReceiveExpirationNotifications = user.ReceiveExpirationNotifications,
             SelectedRoleIds = user.UserRoles.Select(ur => ur.RoleId).ToList()
         };
 
@@ -126,6 +128,7 @@ public class AdminUsersController : Controller
         user.Email = vm.Email;
         user.RepositoryName = country?.Name;
         user.IsActive = vm.IsActive;
+        user.ReceiveExpirationNotifications = vm.ReceiveExpirationNotifications;
 
         user.UserRoles.Clear();
         foreach (var roleId in vm.SelectedRoleIds)

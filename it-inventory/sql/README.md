@@ -127,6 +127,14 @@ incelenip çalıştırılan SQL script tercih edildiği için ayrıca burada tut
     Branch boşalıp kilitlenir. Bu script **011-015'i de içerir**. EF Core
     migration'ından üretildi, elle düzenlemeyin. İdempotenttir.
 
+17. **017_yd_users_notification_flag.sql** — `YDUsers` tablosuna
+    `ReceiveExpirationNotifications` (bit, varsayılan 1) kolonunu ekler.
+    Bu tablo EF migration'larına dahil değil (bkz. 003. script), bu yüzden
+    diğerlerinin aksine **elle yazıldı**, bir migration'dan üretilmedi.
+    Admin Users formundaki "Send Expiration Notifications" kutusuyla
+    kullanıcı bazlı kapatılabilir; `ExpirationCheckService` alıcı listesini
+    oluştururken bu alanı kontrol eder. İdempotenttir.
+
 ## Bu scriptlerin DOKUNMADIĞI mevcut tablolar
 
 Aşağıdaki tablo bu proje tarafından oluşturulmaz; production'da başka bir

@@ -12,5 +12,8 @@ public class YdUser
     /// <summary>Kullanıcının bağlı olduğu ülke/şube (Ziraat_YD.RepositoryName ile aynı değer kümesi).</summary>
     public string? RepositoryName { get; set; }
 
+    /// <summary>ExpirationNotifier'ın bu kullanıcıya süre dolum maili atıp atmayacağı. Varsayılan true.</summary>
+    public bool ReceiveExpirationNotifications { get; set; } = true;
+
     public ICollection<YdUserRole> UserRoles { get; set; } = new List<YdUserRole>();
 }
