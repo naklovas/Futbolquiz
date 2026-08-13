@@ -1,7 +1,9 @@
 using ITInventory.Data;
 using ITInventory.Data.Common;
+using ITInventory.Data.Entities;
 using ITInventory.Web.Models;
 using ITInventory.Web.Services;
+using ITInventory.Web.Services.Import;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -16,17 +18,71 @@ public class AdminActivityLogController : Controller
     private static readonly string[] EntityTypes =
     {
         "PhysicalDevice", "Server", "ServerEndpoint", "License", "Circuit", "Company", "Application",
-        "User", "Country", "OriginCountry", "Location", "DeviceProfile"
+        "User", "Country", "OriginCountry", "Location", "DeviceProfile", "ActivityLog"
     };
 
     private readonly ITInventoryDbContext _db;
+    private readonly IActivityLogger _activityLogger;
 
-    public AdminActivityLogController(ITInventoryDbContext db)
+    public AdminActivityLogController(ITInventoryDbContext db, IActivityLogger activityLogger)
     {
         _db = db;
+        _activityLogger = activityLogger;
     }
 
     public async Task<IActionResult> Index(string? username, string? action, string? entityType, DateTime? fromDate, DateTime? toDate, int page = 1)
+    {
+        // Only the first filter/search submit (the hidden "searched" field) triggers a query --
+        // a bare navigation to the page (no querystring at all) shows the filter form and
+        // nothing else, so a genuinely empty log table can never be mistaken for "the page is
+        // broken" and a real result set is never confused with "you forgot to search".
+        var hasSearched = Request.Query.ContainsKey("searched");
+
+        ViewBag.HasSearched = hasSearched;
+        ViewBag.ActionOptions = Actions;
+        ViewBag.EntityTypeOptions = EntityTypes;
+        ViewBag.Username = username;
+        ViewBag.SelectedAction = action;
+        ViewBag.SelectedEntityType = entityType;
+        ViewBag.FromDate = fromDate?.ToString("yyyy-MM-dd");
+        ViewBag.ToDate = toDate?.ToString("yyyy-MM-dd");
+
+        if (!hasSearched)
+        {
+            return View(new PagedResult<ActivityLog> { Items = Array.Empty<ActivityLog>(), PageNumber = 1, PageSize = PaginationExtensions.DefaultPageSize, TotalCount = 0 });
+        }
+
+        var query = BuildFilteredQuery(username, action, entityType, fromDate, toDate);
+        var items = await query.OrderByDescending(l => l.CreatedAt).ToPagedResultAsync(page);
+
+        return View(items);
+    }
+
+    public async Task<IActionResult> Export(string? username, string? action, string? entityType, DateTime? fromDate, DateTime? toDate)
+    {
+        var query = BuildFilteredQuery(username, action, entityType, fromDate, toDate);
+        var items = await query.OrderByDescending(l => l.CreatedAt).ToListAsync();
+
+        var headers = new[] { "Time", "Username", "Full Name", "Country", "Action", "Entity Type", "Entity Name", "Details", "IP Address" };
+        var rows = items.Select(l => new object?[]
+        {
+            l.CreatedAt,
+            l.Username,
+            l.FullName,
+            l.CountryName,
+            l.Action,
+            l.EntityType,
+            l.EntityName,
+            l.Details,
+            l.IpAddress
+        });
+
+        var bytes = ExcelImportHelpers.CreateExportBytes("Activity Log", headers, rows);
+        await _activityLogger.LogAsync("Export", "ActivityLog", details: $"{items.Count} record(s) exported to Excel.");
+        return File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", $"ActivityLog_Export_{DateTime.UtcNow:yyyyMMdd_HHmmss}.xlsx");
+    }
+
+    private IQueryable<ActivityLog> BuildFilteredQuery(string? username, string? action, string? entityType, DateTime? fromDate, DateTime? toDate)
     {
         var query = _db.ActivityLogs.AsQueryable();
 
@@ -45,16 +101,6 @@ public class AdminActivityLogController : Controller
         if (toDate.HasValue)
             query = query.Where(l => l.CreatedAt < toDate.Value.Date.AddDays(1));
 
-        var items = await query.OrderByDescending(l => l.CreatedAt).ToPagedResultAsync(page);
-
-        ViewBag.ActionOptions = Actions;
-        ViewBag.EntityTypeOptions = EntityTypes;
-        ViewBag.Username = username;
-        ViewBag.SelectedAction = action;
-        ViewBag.SelectedEntityType = entityType;
-        ViewBag.FromDate = fromDate?.ToString("yyyy-MM-dd");
-        ViewBag.ToDate = toDate?.ToString("yyyy-MM-dd");
-
-        return View(items);
+        return query;
     }
 }

@@ -3,6 +3,7 @@
     ViewData["Title"] = "Activity Log";
     var actionOptions = (string[])ViewBag.ActionOptions;
     var entityTypeOptions = (string[])ViewBag.EntityTypeOptions;
+    bool hasSearched = ViewBag.HasSearched;
     string? username = ViewBag.Username;
     string? selectedAction = ViewBag.SelectedAction;
     string? selectedEntityType = ViewBag.SelectedEntityType;
@@ -24,10 +25,18 @@
 
 <div class="flex items-center justify-between mb-6">
     <h2 class="text-xl font-semibold text-slate-900">Activity Log</h2>
+    @if (hasSearched && Model.Items.Any())
+    {
+        <a asp-action="Export" asp-route-username="@username" asp-route-action="@selectedAction" asp-route-entityType="@selectedEntityType" asp-route-fromDate="@fromDate" asp-route-toDate="@toDate"
+           class="inline-flex items-center gap-2 border border-slate-300 text-slate-700 hover:bg-slate-50 text-sm font-medium px-4 py-2 rounded-md">
+            <i class="fa-solid fa-file-arrow-down"></i>Export to Excel
+        </a>
+    }
 </div>
 
 <div class="bg-white rounded-lg shadow-sm border border-slate-200 p-4 mb-4">
     <form method="get" class="flex flex-wrap items-end gap-3">
+        <input type="hidden" name="searched" value="true" />
         <div>
             <label class="block text-xs font-medium text-slate-500 mb-1">User</label>
             <input type="text" name="username" value="@username" placeholder="Username or full name"
@@ -64,13 +73,23 @@
                    class="rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500" />
         </div>
         <button type="submit" onclick="showLoadingOverlay()" class="bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium px-4 py-2 rounded-md">
-            <i class="fa-solid fa-filter mr-1.5"></i>Filter
+            <i class="fa-solid fa-magnifying-glass mr-1.5"></i>Search
         </button>
-        <a asp-action="Index" class="border border-slate-300 text-slate-700 hover:bg-slate-50 text-sm font-medium px-4 py-2 rounded-md">Clear</a>
+        @if (hasSearched)
+        {
+            <a asp-action="Index" class="border border-slate-300 text-slate-700 hover:bg-slate-50 text-sm font-medium px-4 py-2 rounded-md">Clear</a>
+        }
     </form>
 </div>
 
-@if (!Model.Items.Any())
+@if (!hasSearched)
+{
+    <div class="text-center py-12 text-slate-400 bg-white rounded-lg border border-slate-200">
+        <i class="fa-solid fa-filter text-3xl mb-2"></i>
+        <p class="text-sm">Set filters above (or leave them blank for everything) and click Search to load activity.</p>
+    </div>
+}
+else if (!Model.Items.Any())
 {
     <div class="text-center py-12 text-slate-400 bg-white rounded-lg border border-slate-200">
         <i class="fa-solid fa-inbox text-3xl mb-2"></i>
