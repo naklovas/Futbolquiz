@@ -52,7 +52,19 @@ public class AdminActivityLogController : Controller
             return View(new PagedResult<ActivityLog> { Items = Array.Empty<ActivityLog>(), PageNumber = 1, PageSize = PaginationExtensions.DefaultPageSize, TotalCount = 0 });
         }
 
+        // Diagnostic numbers shown on the page itself -- if TotalUnfiltered is 0, the app
+        // genuinely isn't seeing any rows (wrong DB/connection string, or the SQL script was
+        // never run there); if TotalUnfiltered > 0 but the filtered count is 0, the filters
+        // (most likely the date range) are excluding real rows and that's the next thing to
+        // narrow down from these exact numbers instead of guessing blind.
+        ViewBag.TotalUnfiltered = await _db.ActivityLogs.CountAsync();
+        ViewBag.ServerTimeZone = TimeZoneInfo.Local.Id;
+        ViewBag.ServerNowLocal = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
+        ViewBag.ServerNowUtc = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss");
+
         var query = BuildFilteredQuery(username, action, entityType, fromDate, toDate);
+        ViewBag.TotalFiltered = await query.CountAsync();
+
         var items = await query.OrderByDescending(l => l.CreatedAt).ToPagedResultAsync(page);
 
         return View(items);
