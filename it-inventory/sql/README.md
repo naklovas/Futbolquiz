@@ -135,6 +135,14 @@ incelenip çalıştırılan SQL script tercih edildiği için ayrıca burada tut
     kullanıcı bazlı kapatılabilir; `ExpirationCheckService` alıcı listesini
     oluştururken bu alanı kontrol eder. İdempotenttir.
 
+18. **018_activity_log.sql** — `ActivityLogs` tablosunu oluşturur (Id, CreatedAt,
+    Username, FullName, CountryName, Action, EntityType, EntityName, Details,
+    IpAddress). Uygulamadaki tüm ekleme/düzenleme/silme/Excel import-export ve
+    giriş/çıkış işlemleri `IActivityLogger` servisi üzerinden bu tabloya yazılır;
+    Admin &gt; Activity Log ekranından kullanıcı/işlem/tablo/tarih filtreleriyle
+    görüntülenir. EF Core migration'ından üretildi, elle düzenlemeyin.
+    İdempotenttir.
+
 ## Bu scriptlerin DOKUNMADIĞI mevcut tablolar
 
 Aşağıdaki tablo bu proje tarafından oluşturulmaz; production'da başka bir

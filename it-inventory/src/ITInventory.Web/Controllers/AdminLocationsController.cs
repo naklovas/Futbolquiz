@@ -4,6 +4,7 @@ using ITInventory.Data.Common;
 using ITInventory.Data.Entities;
 using ITInventory.Web.Models.Admin;
 using ITInventory.Web.Models.Import;
+using ITInventory.Web.Services;
 using ITInventory.Web.Services.Import;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -16,10 +17,12 @@ namespace ITInventory.Web.Controllers;
 public class AdminLocationsController : Controller
 {
     private readonly ITInventoryDbContext _db;
+    private readonly IActivityLogger _activityLogger;
 
-    public AdminLocationsController(ITInventoryDbContext db)
+    public AdminLocationsController(ITInventoryDbContext db, IActivityLogger activityLogger)
     {
         _db = db;
+        _activityLogger = activityLogger;
     }
 
     public async Task<IActionResult> Index()
@@ -59,6 +62,7 @@ public class AdminLocationsController : Controller
         });
 
         await _db.SaveChangesAsync();
+        await _activityLogger.LogAsync("Create", "Location", vm.Branch);
         return RedirectToAction(nameof(Index));
     }
 
@@ -103,6 +107,7 @@ public class AdminLocationsController : Controller
         location.UpdatedAt = DateTime.UtcNow;
 
         await _db.SaveChangesAsync();
+        await _activityLogger.LogAsync("Update", "Location", location.Branch);
         return RedirectToAction(nameof(Index));
     }
 
@@ -113,11 +118,13 @@ public class AdminLocationsController : Controller
         var location = await _db.Locations.FindAsync(id);
         if (location is null) return NotFound();
 
+        var branch = location.Branch;
         _db.Locations.Remove(location);
 
         try
         {
             await _db.SaveChangesAsync();
+            await _activityLogger.LogAsync("Delete", "Location", branch);
         }
         catch (DbUpdateException)
         {
@@ -220,6 +227,7 @@ public class AdminLocationsController : Controller
         {
             _db.Locations.AddRange(toAdd);
             await _db.SaveChangesAsync();
+            await _activityLogger.LogAsync("Import", "Location", details: $"{toAdd.Count} record(s) imported from Excel.");
         }
 
         result.SuccessCount = toAdd.Count;

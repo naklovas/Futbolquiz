@@ -2,6 +2,7 @@ using ITInventory.Data;
 using ITInventory.Data.Common;
 using ITInventory.Data.Entities;
 using ITInventory.Web.Models.Admin;
+using ITInventory.Web.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -12,10 +13,12 @@ namespace ITInventory.Web.Controllers;
 public class AdminOriginCountriesController : Controller
 {
     private readonly ITInventoryDbContext _db;
+    private readonly IActivityLogger _activityLogger;
 
-    public AdminOriginCountriesController(ITInventoryDbContext db)
+    public AdminOriginCountriesController(ITInventoryDbContext db, IActivityLogger activityLogger)
     {
         _db = db;
+        _activityLogger = activityLogger;
     }
 
     public async Task<IActionResult> Index()
@@ -44,6 +47,7 @@ public class AdminOriginCountriesController : Controller
         });
 
         await _db.SaveChangesAsync();
+        await _activityLogger.LogAsync("Create", "OriginCountry", vm.Name);
         return RedirectToAction(nameof(Index));
     }
 
@@ -80,6 +84,7 @@ public class AdminOriginCountriesController : Controller
         originCountry.UpdatedAt = DateTime.UtcNow;
 
         await _db.SaveChangesAsync();
+        await _activityLogger.LogAsync("Update", "OriginCountry", originCountry.Name);
         return RedirectToAction(nameof(Index));
     }
 
@@ -90,11 +95,13 @@ public class AdminOriginCountriesController : Controller
         var originCountry = await _db.OriginCountries.FindAsync(id);
         if (originCountry is null) return NotFound();
 
+        var name = originCountry.Name;
         _db.OriginCountries.Remove(originCountry);
 
         try
         {
             await _db.SaveChangesAsync();
+            await _activityLogger.LogAsync("Delete", "OriginCountry", name);
         }
         catch (DbUpdateException)
         {

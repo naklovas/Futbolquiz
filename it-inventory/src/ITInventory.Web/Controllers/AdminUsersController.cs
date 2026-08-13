@@ -2,6 +2,7 @@ using ITInventory.Data;
 using ITInventory.Data.Common;
 using ITInventory.Data.Entities;
 using ITInventory.Web.Models.Admin;
+using ITInventory.Web.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Rendering;
@@ -13,10 +14,12 @@ namespace ITInventory.Web.Controllers;
 public class AdminUsersController : Controller
 {
     private readonly ITInventoryDbContext _db;
+    private readonly IActivityLogger _activityLogger;
 
-    public AdminUsersController(ITInventoryDbContext db)
+    public AdminUsersController(ITInventoryDbContext db, IActivityLogger activityLogger)
     {
         _db = db;
+        _activityLogger = activityLogger;
     }
 
     public async Task<IActionResult> Index()
@@ -71,6 +74,7 @@ public class AdminUsersController : Controller
 
         _db.YdUsers.Add(user);
         await _db.SaveChangesAsync();
+        await _activityLogger.LogAsync("Create", "User", user.Username);
         return RedirectToAction(nameof(Index));
     }
 
@@ -135,6 +139,7 @@ public class AdminUsersController : Controller
             user.UserRoles.Add(new YdUserRole { UserId = user.Id, RoleId = roleId });
 
         await _db.SaveChangesAsync();
+        await _activityLogger.LogAsync("Update", "User", user.Username);
         return RedirectToAction(nameof(Index));
     }
 
@@ -145,8 +150,10 @@ public class AdminUsersController : Controller
         var user = await _db.YdUsers.FindAsync(id);
         if (user is null) return NotFound();
 
+        var username = user.Username;
         _db.YdUsers.Remove(user);
         await _db.SaveChangesAsync();
+        await _activityLogger.LogAsync("Delete", "User", username);
         return RedirectToAction(nameof(Index));
     }
 

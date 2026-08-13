@@ -26,6 +26,7 @@ builder.Services.Configure<TestLoginSettings>(builder.Configuration.GetSection(T
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ICurrentUserService, CurrentUserService>();
 builder.Services.AddScoped<IDevicePoolService, DevicePoolService>();
+builder.Services.AddScoped<IActivityLogger, ActivityLogger>();
 
 builder.Services
     .AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)

@@ -14,11 +14,13 @@ public class CompaniesController : Controller
 {
     private readonly ITInventoryDbContext _db;
     private readonly ICurrentUserService _currentUser;
+    private readonly IActivityLogger _activityLogger;
 
-    public CompaniesController(ITInventoryDbContext db, ICurrentUserService currentUser)
+    public CompaniesController(ITInventoryDbContext db, ICurrentUserService currentUser, IActivityLogger activityLogger)
     {
         _db = db;
         _currentUser = currentUser;
+        _activityLogger = activityLogger;
     }
 
     public async Task<IActionResult> Index(string? countryId, int page = 1)
@@ -80,6 +82,7 @@ public class CompaniesController : Controller
         });
 
         var bytes = ExcelImportHelpers.CreateExportBytes("Companies", headers, rows);
+        await _activityLogger.LogAsync("Export", "Company", details: $"{items.Count} record(s) exported to Excel.");
         return File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", $"Companies_Export_{DateTime.UtcNow:yyyyMMdd_HHmmss}.xlsx");
     }
 
@@ -138,6 +141,7 @@ public class CompaniesController : Controller
 
         _db.Companies.Add(entity);
         await _db.SaveChangesAsync();
+        await _activityLogger.LogAsync("Create", "Company", entity.Name);
         return RedirectToAction(nameof(Index));
     }
 
@@ -235,6 +239,7 @@ public class CompaniesController : Controller
         }
 
         await _db.SaveChangesAsync();
+        await _activityLogger.LogAsync("Update", "Company", entity.Name);
         return RedirectToAction(nameof(Index));
     }
 
@@ -248,11 +253,13 @@ public class CompaniesController : Controller
         if (company is null) return NotFound();
         if (!_currentUser.IsAdmin && company.CountryId != _currentUser.CountryId) return Forbid();
 
+        var companyName = company.Name;
         _db.Companies.Remove(company);
 
         try
         {
             await _db.SaveChangesAsync();
+            await _activityLogger.LogAsync("Delete", "Company", companyName);
         }
         catch (DbUpdateException)
         {

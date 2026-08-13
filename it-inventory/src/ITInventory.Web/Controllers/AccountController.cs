@@ -19,17 +19,20 @@ public class AccountController : Controller
     private readonly ITInventoryDbContext _db;
     private readonly ILogger<AccountController> _logger;
     private readonly TestLoginSettings _testLoginSettings;
+    private readonly IActivityLogger _activityLogger;
 
     public AccountController(
         ILdapAuthenticationService ldapAuth,
         ITInventoryDbContext db,
         ILogger<AccountController> logger,
-        IOptions<TestLoginSettings> testLoginSettings)
+        IOptions<TestLoginSettings> testLoginSettings,
+        IActivityLogger activityLogger)
     {
         _ldapAuth = ldapAuth;
         _db = db;
         _logger = logger;
         _testLoginSettings = testLoginSettings.Value;
+        _activityLogger = activityLogger;
     }
 
     [HttpGet]
@@ -128,6 +131,12 @@ public class AccountController : Controller
             ExpiresUtc = DateTimeOffset.UtcNow.AddHours(8)
         });
 
+        // SignInAsync only sets the auth cookie for future requests -- HttpContext.User still
+        // reflects the anonymous principal from the start of this request unless set here, so
+        // without this the login's own ActivityLog row would be written with an empty username.
+        HttpContext.User = principal;
+        await _activityLogger.LogAsync("Login", "User", user.Username);
+
         if (!string.IsNullOrEmpty(model.ReturnUrl) && Url.IsLocalUrl(model.ReturnUrl))
             return Redirect(model.ReturnUrl);
 
@@ -139,6 +148,9 @@ public class AccountController : Controller
     [Authorize]
     public async Task<IActionResult> Logout()
     {
+        var username = User.FindFirstValue(ClaimTypes.Name);
+        if (!string.IsNullOrEmpty(username))
+            await _activityLogger.LogAsync("Logout", "User", username);
         await HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
         return RedirectToAction(nameof(Login));
     }

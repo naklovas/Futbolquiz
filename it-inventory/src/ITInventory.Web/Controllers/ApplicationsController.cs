@@ -17,11 +17,13 @@ public class ApplicationsController : Controller
 {
     private readonly ITInventoryDbContext _db;
     private readonly ICurrentUserService _currentUser;
+    private readonly IActivityLogger _activityLogger;
 
-    public ApplicationsController(ITInventoryDbContext db, ICurrentUserService currentUser)
+    public ApplicationsController(ITInventoryDbContext db, ICurrentUserService currentUser, IActivityLogger activityLogger)
     {
         _db = db;
         _currentUser = currentUser;
+        _activityLogger = activityLogger;
     }
 
     public async Task<IActionResult> Index(string? countryId, int page = 1)
@@ -95,6 +97,7 @@ public class ApplicationsController : Controller
         });
 
         var bytes = ExcelImportHelpers.CreateExportBytes("Applications", headers, rows);
+        await _activityLogger.LogAsync("Export", "Application", details: $"{items.Count} record(s) exported to Excel.");
         return File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", $"Applications_Export_{DateTime.UtcNow:yyyyMMdd_HHmmss}.xlsx");
     }
 
@@ -143,6 +146,7 @@ public class ApplicationsController : Controller
 
         _db.Applications.Add(entity);
         await _db.SaveChangesAsync();
+        await _activityLogger.LogAsync("Create", "Application", entity.Name);
         return RedirectToAction(nameof(Index));
     }
 
@@ -205,6 +209,7 @@ public class ApplicationsController : Controller
         entity.UpdatedBy = _currentUser.Username;
 
         await _db.SaveChangesAsync();
+        await _activityLogger.LogAsync("Update", "Application", entity.Name);
         return RedirectToAction(nameof(Index));
     }
 
@@ -218,11 +223,13 @@ public class ApplicationsController : Controller
         if (entity is null) return NotFound();
         if (!_currentUser.IsAdmin && entity.CountryId != _currentUser.CountryId) return Forbid();
 
+        var appName = entity.Name;
         _db.Applications.Remove(entity);
 
         try
         {
             await _db.SaveChangesAsync();
+            await _activityLogger.LogAsync("Delete", "Application", appName);
         }
         catch (DbUpdateException)
         {
@@ -349,6 +356,7 @@ public class ApplicationsController : Controller
         {
             _db.Applications.AddRange(toAdd);
             await _db.SaveChangesAsync();
+            await _activityLogger.LogAsync("Import", "Application", country.DisplayName ?? country.Name, $"{toAdd.Count} record(s) imported from Excel.");
         }
 
         result.SuccessCount = toAdd.Count;

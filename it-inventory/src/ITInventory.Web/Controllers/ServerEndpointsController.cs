@@ -14,11 +14,13 @@ public class ServerEndpointsController : Controller
 {
     private readonly ITInventoryDbContext _db;
     private readonly ICurrentUserService _currentUser;
+    private readonly IActivityLogger _activityLogger;
 
-    public ServerEndpointsController(ITInventoryDbContext db, ICurrentUserService currentUser)
+    public ServerEndpointsController(ITInventoryDbContext db, ICurrentUserService currentUser, IActivityLogger activityLogger)
     {
         _db = db;
         _currentUser = currentUser;
+        _activityLogger = activityLogger;
     }
 
     public async Task<IActionResult> Index(string? countryId, int page = 1)
@@ -87,6 +89,7 @@ public class ServerEndpointsController : Controller
         });
 
         var bytes = ExcelImportHelpers.CreateExportBytes("Server Endpoints", headers, rows);
+        await _activityLogger.LogAsync("Export", "ServerEndpoint", details: $"{items.Count} record(s) exported to Excel.");
         return File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", $"ServerEndpoints_Export_{DateTime.UtcNow:yyyyMMdd_HHmmss}.xlsx");
     }
 
@@ -127,6 +130,7 @@ public class ServerEndpointsController : Controller
 
         _db.ServerEndpoints.Add(entity);
         await _db.SaveChangesAsync();
+        await _activityLogger.LogAsync("Create", "ServerEndpoint", $"{entity.IpAddress}:{entity.Port}");
         return RedirectToAction(nameof(Index));
     }
 
@@ -182,6 +186,7 @@ public class ServerEndpointsController : Controller
         entity.UpdatedBy = _currentUser.Username;
 
         await _db.SaveChangesAsync();
+        await _activityLogger.LogAsync("Update", "ServerEndpoint", $"{entity.IpAddress}:{entity.Port}");
         return RedirectToAction(nameof(Index));
     }
 
@@ -195,8 +200,10 @@ public class ServerEndpointsController : Controller
         if (entity is null) return NotFound();
         if (!_currentUser.IsAdmin && entity.Server!.CountryId != _currentUser.CountryId) return Forbid();
 
+        var label = $"{entity.IpAddress}:{entity.Port}";
         _db.ServerEndpoints.Remove(entity);
         await _db.SaveChangesAsync();
+        await _activityLogger.LogAsync("Delete", "ServerEndpoint", label);
         return RedirectToAction(nameof(Index));
     }
 

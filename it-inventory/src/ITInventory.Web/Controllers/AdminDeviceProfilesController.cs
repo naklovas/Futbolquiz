@@ -1,5 +1,6 @@
 using ITInventory.Data;
 using ITInventory.Data.Common;
+using ITInventory.Web.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -10,10 +11,12 @@ namespace ITInventory.Web.Controllers;
 public class AdminDeviceProfilesController : Controller
 {
     private readonly ITInventoryDbContext _db;
+    private readonly IActivityLogger _activityLogger;
 
-    public AdminDeviceProfilesController(ITInventoryDbContext db)
+    public AdminDeviceProfilesController(ITInventoryDbContext db, IActivityLogger activityLogger)
     {
         _db = db;
+        _activityLogger = activityLogger;
     }
 
     public async Task<IActionResult> Index()
@@ -36,6 +39,7 @@ public class AdminDeviceProfilesController : Controller
 
         profile.CategoryId = categoryId;
         await _db.SaveChangesAsync();
+        await _activityLogger.LogAsync("Update", "DeviceProfile", profile.ProfileName);
         return RedirectToAction(nameof(Index));
     }
 }

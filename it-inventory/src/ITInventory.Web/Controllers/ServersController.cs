@@ -16,11 +16,13 @@ public class ServersController : Controller
 {
     private readonly ITInventoryDbContext _db;
     private readonly ICurrentUserService _currentUser;
+    private readonly IActivityLogger _activityLogger;
 
-    public ServersController(ITInventoryDbContext db, ICurrentUserService currentUser)
+    public ServersController(ITInventoryDbContext db, ICurrentUserService currentUser, IActivityLogger activityLogger)
     {
         _db = db;
         _currentUser = currentUser;
+        _activityLogger = activityLogger;
     }
 
     public async Task<IActionResult> Index(string? countryId, int page = 1)
@@ -98,6 +100,7 @@ public class ServersController : Controller
         });
 
         var bytes = ExcelImportHelpers.CreateExportBytes("Servers", headers, rows);
+        await _activityLogger.LogAsync("Export", "Server", details: $"{items.Count} record(s) exported to Excel.");
         return File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", $"Servers_Export_{DateTime.UtcNow:yyyyMMdd_HHmmss}.xlsx");
     }
 
@@ -171,6 +174,7 @@ public class ServersController : Controller
 
         _db.Servers.Add(entity);
         await _db.SaveChangesAsync();
+        await _activityLogger.LogAsync("Create", "Server", entity.HostName);
         return RedirectToAction(nameof(Index));
     }
 
@@ -249,6 +253,7 @@ public class ServersController : Controller
         entity.UpdatedBy = _currentUser.Username;
 
         await _db.SaveChangesAsync();
+        await _activityLogger.LogAsync("Update", "Server", entity.HostName);
         return RedirectToAction(nameof(Index));
     }
 
@@ -262,11 +267,13 @@ public class ServersController : Controller
         if (entity is null) return NotFound();
         if (!_currentUser.IsAdmin && entity.CountryId != _currentUser.CountryId) return Forbid();
 
+        var hostName = entity.HostName;
         _db.Servers.Remove(entity);
 
         try
         {
             await _db.SaveChangesAsync();
+            await _activityLogger.LogAsync("Delete", "Server", hostName);
         }
         catch (DbUpdateException)
         {
@@ -387,6 +394,7 @@ public class ServersController : Controller
         {
             _db.Servers.AddRange(toAdd);
             await _db.SaveChangesAsync();
+            await _activityLogger.LogAsync("Import", "Server", country.DisplayName ?? country.Name, $"{toAdd.Count} record(s) imported from Excel.");
         }
 
         result.SuccessCount = toAdd.Count;

@@ -16,11 +16,13 @@ public class CircuitsController : Controller
 {
     private readonly ITInventoryDbContext _db;
     private readonly ICurrentUserService _currentUser;
+    private readonly IActivityLogger _activityLogger;
 
-    public CircuitsController(ITInventoryDbContext db, ICurrentUserService currentUser)
+    public CircuitsController(ITInventoryDbContext db, ICurrentUserService currentUser, IActivityLogger activityLogger)
     {
         _db = db;
         _currentUser = currentUser;
+        _activityLogger = activityLogger;
     }
 
     public async Task<IActionResult> Index(string? countryId, int page = 1)
@@ -90,6 +92,7 @@ public class CircuitsController : Controller
         });
 
         var bytes = ExcelImportHelpers.CreateExportBytes("Circuits", headers, rows);
+        await _activityLogger.LogAsync("Export", "Circuit", details: $"{items.Count} record(s) exported to Excel.");
         return File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", $"Circuits_Export_{DateTime.UtcNow:yyyyMMdd_HHmmss}.xlsx");
     }
 
@@ -138,6 +141,7 @@ public class CircuitsController : Controller
 
         _db.Circuits.Add(entity);
         await _db.SaveChangesAsync();
+        await _activityLogger.LogAsync("Create", "Circuit", entity.CircuitType);
         return RedirectToAction(nameof(Index));
     }
 
@@ -200,6 +204,7 @@ public class CircuitsController : Controller
         entity.UpdatedBy = _currentUser.Username;
 
         await _db.SaveChangesAsync();
+        await _activityLogger.LogAsync("Update", "Circuit", entity.CircuitType);
         return RedirectToAction(nameof(Index));
     }
 
@@ -213,8 +218,10 @@ public class CircuitsController : Controller
         if (entity is null) return NotFound();
         if (!_currentUser.IsAdmin && entity.CountryId != _currentUser.CountryId) return Forbid();
 
+        var circuitType = entity.CircuitType;
         _db.Circuits.Remove(entity);
         await _db.SaveChangesAsync();
+        await _activityLogger.LogAsync("Delete", "Circuit", circuitType);
         return RedirectToAction(nameof(Index));
     }
 
@@ -315,6 +322,7 @@ public class CircuitsController : Controller
         {
             _db.Circuits.AddRange(toAdd);
             await _db.SaveChangesAsync();
+            await _activityLogger.LogAsync("Import", "Circuit", country.DisplayName ?? country.Name, $"{toAdd.Count} record(s) imported from Excel.");
         }
 
         result.SuccessCount = toAdd.Count;

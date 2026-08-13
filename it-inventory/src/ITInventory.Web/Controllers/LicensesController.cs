@@ -16,11 +16,13 @@ public class LicensesController : Controller
 {
     private readonly ITInventoryDbContext _db;
     private readonly ICurrentUserService _currentUser;
+    private readonly IActivityLogger _activityLogger;
 
-    public LicensesController(ITInventoryDbContext db, ICurrentUserService currentUser)
+    public LicensesController(ITInventoryDbContext db, ICurrentUserService currentUser, IActivityLogger activityLogger)
     {
         _db = db;
         _currentUser = currentUser;
+        _activityLogger = activityLogger;
     }
 
     public async Task<IActionResult> Index(string? countryId, int page = 1)
@@ -91,6 +93,7 @@ public class LicensesController : Controller
         });
 
         var bytes = ExcelImportHelpers.CreateExportBytes("Licenses", headers, rows);
+        await _activityLogger.LogAsync("Export", "License", details: $"{items.Count} record(s) exported to Excel.");
         return File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", $"Licenses_Export_{DateTime.UtcNow:yyyyMMdd_HHmmss}.xlsx");
     }
 
@@ -140,6 +143,7 @@ public class LicensesController : Controller
 
         _db.Licenses.Add(entity);
         await _db.SaveChangesAsync();
+        await _activityLogger.LogAsync("Create", "License", entity.LicenseName);
         return RedirectToAction(nameof(Index));
     }
 
@@ -204,6 +208,7 @@ public class LicensesController : Controller
         entity.UpdatedBy = _currentUser.Username;
 
         await _db.SaveChangesAsync();
+        await _activityLogger.LogAsync("Update", "License", entity.LicenseName);
         return RedirectToAction(nameof(Index));
     }
 
@@ -217,8 +222,10 @@ public class LicensesController : Controller
         if (entity is null) return NotFound();
         if (!_currentUser.IsAdmin && entity.CountryId != _currentUser.CountryId) return Forbid();
 
+        var licenseName = entity.LicenseName;
         _db.Licenses.Remove(entity);
         await _db.SaveChangesAsync();
+        await _activityLogger.LogAsync("Delete", "License", licenseName);
         return RedirectToAction(nameof(Index));
     }
 
@@ -319,6 +326,7 @@ public class LicensesController : Controller
         {
             _db.Licenses.AddRange(toAdd);
             await _db.SaveChangesAsync();
+            await _activityLogger.LogAsync("Import", "License", country.DisplayName ?? country.Name, $"{toAdd.Count} record(s) imported from Excel.");
         }
 
         result.SuccessCount = toAdd.Count;

@@ -17,11 +17,13 @@ public class PhysicalDevicesController : Controller
 {
     private readonly ITInventoryDbContext _db;
     private readonly ICurrentUserService _currentUser;
+    private readonly IActivityLogger _activityLogger;
 
-    public PhysicalDevicesController(ITInventoryDbContext db, ICurrentUserService currentUser)
+    public PhysicalDevicesController(ITInventoryDbContext db, ICurrentUserService currentUser, IActivityLogger activityLogger)
     {
         _db = db;
         _currentUser = currentUser;
+        _activityLogger = activityLogger;
     }
 
     public async Task<IActionResult> Index(string? countryId, int? categoryId, int page = 1)
@@ -115,6 +117,7 @@ public class PhysicalDevicesController : Controller
         });
 
         var bytes = ExcelImportHelpers.CreateExportBytes("Physical Devices", headers, rows);
+        await _activityLogger.LogAsync("Export", "PhysicalDevice", details: $"{items.Count} record(s) exported to Excel.");
         return File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", $"PhysicalDevices_Export_{DateTime.UtcNow:yyyyMMdd_HHmmss}.xlsx");
     }
 
@@ -199,6 +202,7 @@ public class PhysicalDevicesController : Controller
 
         _db.PhysicalDevices.Add(entity);
         await _db.SaveChangesAsync();
+        await _activityLogger.LogAsync("Create", "PhysicalDevice", entity.DeviceName);
         return RedirectToAction(nameof(Index));
     }
 
@@ -286,6 +290,7 @@ public class PhysicalDevicesController : Controller
         entity.UpdatedBy = _currentUser.Username;
 
         await _db.SaveChangesAsync();
+        await _activityLogger.LogAsync("Update", "PhysicalDevice", entity.DeviceName);
         return RedirectToAction(nameof(Index));
     }
 
@@ -299,8 +304,10 @@ public class PhysicalDevicesController : Controller
         if (entity is null) return NotFound();
         if (!_currentUser.IsAdmin && entity.CountryId != _currentUser.CountryId) return Forbid();
 
+        var deviceName = entity.DeviceName;
         _db.PhysicalDevices.Remove(entity);
         await _db.SaveChangesAsync();
+        await _activityLogger.LogAsync("Delete", "PhysicalDevice", deviceName);
         return RedirectToAction(nameof(Index));
     }
 
@@ -443,6 +450,7 @@ public class PhysicalDevicesController : Controller
         {
             _db.PhysicalDevices.AddRange(toAdd);
             await _db.SaveChangesAsync();
+            await _activityLogger.LogAsync("Import", "PhysicalDevice", country.DisplayName ?? country.Name, $"{toAdd.Count} record(s) imported from Excel.");
         }
 
         result.SuccessCount = toAdd.Count;
