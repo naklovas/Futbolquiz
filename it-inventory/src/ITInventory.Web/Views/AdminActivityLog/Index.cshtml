@@ -89,13 +89,43 @@
     string serverTimeZone = ViewBag.ServerTimeZone;
     string serverNowLocal = ViewBag.ServerNowLocal;
     string serverNowUtc = ViewBag.ServerNowUtc;
+    string? computedFromUtc = ViewBag.ComputedFromUtc;
+    string? computedToUtcExclusive = ViewBag.ComputedToUtcExclusive;
+    var unfilteredRows = (List<ITInventory.Data.Entities.ActivityLog>)ViewBag.UnfilteredRows;
 
-    <div class="bg-slate-50 border border-slate-200 rounded-md px-4 py-2 mb-4 text-xs text-slate-500 flex flex-wrap gap-x-4 gap-y-1">
-        <span><strong class="text-slate-700">@totalUnfiltered</strong> total row(s) in ActivityLogs (no filters)</span>
-        <span><strong class="text-slate-700">@totalFiltered</strong> matching current filters</span>
-        <span>Server time zone: <strong class="text-slate-700">@serverTimeZone</strong></span>
-        <span>Server local now: <strong class="text-slate-700">@serverNowLocal</strong></span>
-        <span>Server UTC now: <strong class="text-slate-700">@serverNowUtc</strong></span>
+    <div class="bg-slate-50 border border-slate-200 rounded-md px-4 py-3 mb-4 text-xs text-slate-500 space-y-2">
+        <div class="flex flex-wrap gap-x-4 gap-y-1">
+            <span><strong class="text-slate-700">@totalUnfiltered</strong> total row(s) in ActivityLogs (no filters)</span>
+            <span><strong class="text-slate-700">@totalFiltered</strong> matching current filters</span>
+            <span>Server time zone: <strong class="text-slate-700">@serverTimeZone</strong></span>
+            <span>Server local now: <strong class="text-slate-700">@serverNowLocal</strong></span>
+            <span>Server UTC now: <strong class="text-slate-700">@serverNowUtc</strong></span>
+        </div>
+        <div class="flex flex-wrap gap-x-4 gap-y-1">
+            <span>Filters received -- User: <strong class="text-slate-700">'@username'</strong></span>
+            <span>Action: <strong class="text-slate-700">'@selectedAction'</strong></span>
+            <span>EntityType: <strong class="text-slate-700">'@selectedEntityType'</strong></span>
+            <span>From (raw): <strong class="text-slate-700">'@fromDate'</strong></span>
+            <span>To (raw): <strong class="text-slate-700">'@toDate'</strong></span>
+        </div>
+        @if (computedFromUtc != null || computedToUtcExclusive != null)
+        {
+            <div class="flex flex-wrap gap-x-4 gap-y-1">
+                <span>Computed UTC range used in the query: <strong class="text-slate-700">[@(computedFromUtc ?? "(none)"), @(computedToUtcExclusive ?? "(none)"))</strong></span>
+            </div>
+        }
+        @if (unfilteredRows.Any())
+        {
+            <div>
+                <span class="block mb-1">All rows currently in ActivityLogs (CreatedAt is UTC, ignoring every filter):</span>
+                <ul class="list-disc list-inside">
+                    @foreach (var r in unfilteredRows)
+                    {
+                        <li>Id @r.Id: CreatedAt(UTC)=<strong class="text-slate-700">@r.CreatedAt.ToString("yyyy-MM-dd HH:mm:ss")</strong>, @r.Action @r.EntityType by @r.Username</li>
+                    }
+                </ul>
+            </div>
+        }
     </div>
 }
 

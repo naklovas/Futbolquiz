@@ -57,10 +57,21 @@ public class AdminActivityLogController : Controller
         // never run there); if TotalUnfiltered > 0 but the filtered count is 0, the filters
         // (most likely the date range) are excluding real rows and that's the next thing to
         // narrow down from these exact numbers instead of guessing blind.
-        ViewBag.TotalUnfiltered = await _db.ActivityLogs.CountAsync();
+        var unfilteredRows = await _db.ActivityLogs.OrderByDescending(l => l.CreatedAt).ToListAsync();
+        ViewBag.TotalUnfiltered = unfilteredRows.Count;
+        ViewBag.UnfilteredRows = unfilteredRows;
         ViewBag.ServerTimeZone = TimeZoneInfo.Local.Id;
         ViewBag.ServerNowLocal = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
         ViewBag.ServerNowUtc = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss");
+
+        DateTime? fromUtc = fromDate.HasValue
+            ? TimeZoneInfo.ConvertTimeToUtc(DateTime.SpecifyKind(fromDate.Value.Date, DateTimeKind.Unspecified), TimeZoneInfo.Local)
+            : null;
+        DateTime? toUtcExclusive = toDate.HasValue
+            ? TimeZoneInfo.ConvertTimeToUtc(DateTime.SpecifyKind(toDate.Value.Date.AddDays(1), DateTimeKind.Unspecified), TimeZoneInfo.Local)
+            : null;
+        ViewBag.ComputedFromUtc = fromUtc?.ToString("yyyy-MM-dd HH:mm:ss");
+        ViewBag.ComputedToUtcExclusive = toUtcExclusive?.ToString("yyyy-MM-dd HH:mm:ss");
 
         var query = BuildFilteredQuery(username, action, entityType, fromDate, toDate);
         ViewBag.TotalFiltered = await query.CountAsync();
