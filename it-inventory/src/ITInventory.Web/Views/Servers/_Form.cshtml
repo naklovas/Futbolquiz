@@ -68,7 +68,7 @@
         <select asp-for="HostPhysicalDeviceId" asp-items="hostPhysicalDeviceOptions" class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
             <option value="">-- None --</option>
         </select>
-        <p class="text-xs text-slate-400 mt-1">Which physical device (ESX host) this virtual server runs on.</p>
+        <p class="text-xs text-slate-400 mt-1">Which ESXi/physical server this virtual server runs on -- only "Server" category Physical Devices are listed.</p>
     </div>
     <div>
         <label asp-for="OperatingSystem" class="block text-sm font-medium text-slate-700 mb-1"></label>

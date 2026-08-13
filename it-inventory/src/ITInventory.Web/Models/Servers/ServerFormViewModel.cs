@@ -37,7 +37,7 @@ public class ServerFormViewModel
     [Display(Name = "Location Category")]
     public LocationCategory LocationCategory { get; set; }
 
-    [Display(Name = "Host (ESX/Physical Device)")]
+    [Display(Name = "ESXi / Physical Server")]
     public int? HostPhysicalDeviceId { get; set; }
 
     [StringLength(255)]
