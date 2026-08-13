@@ -16,6 +16,9 @@ public class ServerFormViewModel
 
     public int? SourceZiraatYdId { get; set; }
 
+    /// <summary>IP address carried over from the selected Device Pool row when creating "from pool" -- used to pre-create a ServerEndpoint. Not shown/edited in the form.</summary>
+    public string? PoolIpAddress { get; set; }
+
     [Required(ErrorMessage = "Host name is required.")]
     [StringLength(255)]
     [Display(Name = "Host Name")]

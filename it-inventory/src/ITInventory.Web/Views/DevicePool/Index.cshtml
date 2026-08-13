@@ -12,19 +12,8 @@
     int? matchedCountryId = ViewBag.MatchedCountryId;
 }
 
-<div class="flex items-start justify-between gap-4 mb-6">
-    <div>
-        <h2 class="text-xl font-semibold text-slate-900 mb-1">Device Pool</h2>
-        <p class="text-sm text-slate-500">Devices discovered in Nessus scans. Select from the relevant row to add it to the inventory.</p>
-    </div>
-    @if (!noCountryAssigned && selectedCountry != null && canEdit)
-    {
-        <a asp-controller="Servers" asp-action="Create" asp-route-applianceType="Virtual" asp-route-countryId="@matchedCountryId"
-           class="flex-shrink-0 inline-flex items-center gap-2 bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium px-4 py-2 rounded-md whitespace-nowrap">
-            <i class="fa-solid fa-server"></i>Add Virtual Server
-        </a>
-    }
-</div>
+<h2 class="text-xl font-semibold text-slate-900 mb-1">Device Pool</h2>
+<p class="text-sm text-slate-500 mb-6">Devices discovered in Nessus scans. Select from the relevant row to add it to the inventory.</p>
 
 @if (noCountryAssigned)
 {
@@ -133,7 +122,7 @@ else
                                                asp-route-fromPool="true"
                                                asp-route-sourceId="@d.ZiraatYdId"
                                                asp-route-countryId="@matchedCountryId">
-                                                <i class="fa-solid fa-database mr-1"></i>Add as Server
+                                                <i class="fa-solid fa-server mr-1"></i>Add Virtual Server
                                             </a>
                                         </div>
                                     }

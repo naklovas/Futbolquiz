@@ -105,17 +105,19 @@ public class ServersController : Controller
         return File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", $"Servers_Export_{DateTime.UtcNow:yyyyMMdd_HHmmss}.xlsx");
     }
 
-    public async Task<IActionResult> Create(bool fromPool = false, int? sourceId = null, int? countryId = null, ApplianceType? applianceType = null)
+    // New Servers are always virtual -- a physical server is just a Physical Device (there's
+    // already a "Server" device category for that), so keeping a Physical option here only
+    // duplicated that. Existing rows created before this change may still be Physical; Edit
+    // leaves those alone and fully editable, this only affects new records.
+    public async Task<IActionResult> Create(bool fromPool = false, int? sourceId = null, int? countryId = null)
     {
         if (!_currentUser.CanEdit) return Forbid();
 
         var vm = new ServerFormViewModel
         {
-            CountryId = _currentUser.IsAdmin ? countryId ?? 0 : _currentUser.CountryId ?? 0
+            CountryId = _currentUser.IsAdmin ? countryId ?? 0 : _currentUser.CountryId ?? 0,
+            ApplianceType = ApplianceType.Virtual
         };
-
-        if (applianceType.HasValue)
-            vm.ApplianceType = applianceType.Value;
 
         if (fromPool && sourceId.HasValue)
         {
@@ -125,6 +127,7 @@ public class ServersController : Controller
                 vm.SourceZiraatYdId = source.Id;
                 vm.HostName = source.DnsName ?? source.NetbiosName ?? source.IpAddress;
                 vm.OperatingSystem = source.OperatingSystem;
+                vm.PoolIpAddress = source.IpAddress;
 
                 var profile = await _db.DeviceProfileCatalogs
                     .FirstOrDefaultAsync(p => p.ProfileName == source.DeviceProfile);
@@ -158,7 +161,10 @@ public class ServersController : Controller
             DeviceProfileId = vm.DeviceProfileId,
             SourceZiraatYdId = vm.SourceZiraatYdId,
             HostName = vm.HostName,
-            ApplianceType = vm.ApplianceType,
+            // Create's form no longer submits ApplianceType (it's gone from the "New Server"
+            // view since new Servers are always virtual) -- forcing it here rather than trusting
+            // vm.ApplianceType avoids it silently binding to the enum's default (Physical = 0).
+            ApplianceType = ApplianceType.Virtual,
             LocationCategory = vm.LocationCategory,
             HostPhysicalDeviceId = vm.HostPhysicalDeviceId,
             OperatingSystem = vm.OperatingSystem,
@@ -178,6 +184,23 @@ public class ServersController : Controller
 
         _db.Servers.Add(entity);
         await _db.SaveChangesAsync();
+
+        // The pool row's IP never lands anywhere otherwise -- a Server's IP lives on a separate
+        // ServerEndpoint, which "Add as Server" never used to create at all (see the Device Pool
+        // "In Inventory" fix). Capturing it here means both AlreadyInInventory-by-IP and having
+        // the endpoint pre-populated work immediately for pool-sourced virtual servers.
+        if (!string.IsNullOrWhiteSpace(vm.PoolIpAddress))
+        {
+            _db.ServerEndpoints.Add(new ServerEndpoint
+            {
+                ServerId = entity.Id,
+                IpAddress = vm.PoolIpAddress,
+                CreatedAt = DateTime.UtcNow,
+                CreatedBy = _currentUser.Username
+            });
+            await _db.SaveChangesAsync();
+        }
+
         await _activityLogger.LogAsync("Create", "Server", entity.HostName);
         return RedirectToAction(nameof(Index));
     }
