@@ -127,7 +127,7 @@ public class ServersController : Controller
                 vm.SourceZiraatYdId = source.Id;
                 vm.HostName = source.DnsName ?? source.NetbiosName ?? source.IpAddress;
                 vm.OperatingSystem = source.OperatingSystem;
-                vm.PoolIpAddress = source.IpAddress;
+                vm.IpAddress = source.IpAddress;
 
                 var profile = await _db.DeviceProfileCatalogs
                     .FirstOrDefaultAsync(p => p.ProfileName == source.DeviceProfile);
@@ -185,16 +185,17 @@ public class ServersController : Controller
         _db.Servers.Add(entity);
         await _db.SaveChangesAsync();
 
-        // The pool row's IP never lands anywhere otherwise -- a Server's IP lives on a separate
-        // ServerEndpoint, which "Add as Server" never used to create at all (see the Device Pool
-        // "In Inventory" fix). Capturing it here means both AlreadyInInventory-by-IP and having
-        // the endpoint pre-populated work immediately for pool-sourced virtual servers.
-        if (!string.IsNullOrWhiteSpace(vm.PoolIpAddress))
+        // A Server's IP lives on a separate ServerEndpoint row, not on the Server itself, so the
+        // IP Address field on Create (pre-filled from the pool row, or typed in manually) isn't
+        // saved as part of the entity above -- it creates the server's first ServerEndpoint here
+        // instead. Without this, "Add as Server" never used to create an endpoint at all (see
+        // the Device Pool "In Inventory" fix), so the pool row's IP just vanished.
+        if (!string.IsNullOrWhiteSpace(vm.IpAddress))
         {
             _db.ServerEndpoints.Add(new ServerEndpoint
             {
                 ServerId = entity.Id,
-                IpAddress = vm.PoolIpAddress,
+                IpAddress = vm.IpAddress,
                 CreatedAt = DateTime.UtcNow,
                 CreatedBy = _currentUser.Username
             });
