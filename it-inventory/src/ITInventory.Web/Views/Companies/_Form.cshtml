@@ -37,6 +37,28 @@
     </div>
 </div>
 
+<div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+    <div>
+        <label asp-for="CompanyType" class="block text-sm font-medium text-slate-700 mb-1"></label>
+        <select asp-for="CompanyType" id="CompanyType" class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
+            <option value="Vendor">Vendor</option>
+            <option value="Supplier">Supplier</option>
+            <option value="Support">Support</option>
+            <option value="Manufacturer">Manufacturer</option>
+            <option value="Reseller">Reseller</option>
+            <option value="Consultant">Consultant</option>
+            <option value="Partner">Partner</option>
+            <option value="Other">Other</option>
+        </select>
+    </div>
+    <div id="other-type-wrapper" class="md:col-span-2 hidden">
+        <label asp-for="OtherTypeDescription" class="block text-sm font-medium text-slate-700 mb-1"></label>
+        <input asp-for="OtherTypeDescription" id="OtherTypeDescription" placeholder="Please specify the type"
+               class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500" />
+        <span asp-validation-for="OtherTypeDescription" class="text-sm text-red-600"></span>
+    </div>
+</div>
+
 <div class="flex items-center gap-2 mb-6">
     <input asp-for="IsActive" class="rounded border-slate-300 text-brand-600 focus:ring-brand-500" />
     <label asp-for="IsActive" class="text-sm font-medium text-slate-700"></label>
@@ -73,6 +95,24 @@
 </template>
 
     <script>
+        (function () {
+            var typeSelect = document.getElementById('CompanyType');
+            var otherWrapper = document.getElementById('other-type-wrapper');
+            var otherInput = document.getElementById('OtherTypeDescription');
+
+            function refreshOtherType() {
+                if (typeSelect.value === 'Other') {
+                    otherWrapper.classList.remove('hidden');
+                } else {
+                    otherWrapper.classList.add('hidden');
+                    otherInput.value = '';
+                }
+            }
+
+            typeSelect.addEventListener('change', refreshOtherType);
+            refreshOtherType();
+        })();
+
         (function () {
             var list = document.getElementById('contacts-list');
             var template = document.getElementById('contact-row-template');

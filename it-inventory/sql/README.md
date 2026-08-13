@@ -143,6 +143,13 @@ incelenip çalıştırılan SQL script tercih edildiği için ayrıca burada tut
     görüntülenir. EF Core migration'ından üretildi, elle düzenlemeyin.
     İdempotenttir.
 
+19. **019_company_type.sql** — `Companies` tablosuna `CompanyType` (int, varsayılan 0 =
+    Vendor) ve `OtherTypeDescription` (nvarchar(200), NULL) kolonlarını ekler. Company
+    formunda "Type" olarak görünür: Vendor / Supplier / Support / Manufacturer /
+    Reseller / Consultant / Partner / Other; "Other" seçilince serbest metin alanı
+    açılır. Mevcut kayıtlar Vendor olarak başlar. EF Core migration'ından üretildi,
+    elle düzenlemeyin. İdempotenttir.
+
 ## Bu scriptlerin DOKUNMADIĞI mevcut tablolar
 
 Aşağıdaki tablo bu proje tarafından oluşturulmaz; production'da başka bir

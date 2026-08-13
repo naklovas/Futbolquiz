@@ -82,6 +82,7 @@ else
                         <th data-col="country" class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Country</th>
                     }
                     <th data-col="name" class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Company Name</th>
+                    <th data-col="type" class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Type</th>
                     <th data-col="origin" class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Country of Origin</th>
                     <th data-col="contacts" class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Contacts</th>
                     <th data-col="active" class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Active</th>
@@ -100,6 +101,11 @@ else
                             <td data-col="country" class="px-4 py-3 text-slate-700">@(item.Country?.DisplayName ?? item.Country?.Name)</td>
                         }
                         <td data-col="name" class="px-4 py-3 text-slate-700 font-medium">@item.Name</td>
+                        <td data-col="type" class="px-4 py-3 text-slate-700">
+                            <span class="inline-block bg-slate-100 text-slate-600 text-xs px-2 py-0.5 rounded-full">
+                                @(item.CompanyType == ITInventory.Data.Common.CompanyType.Other ? $"Other ({item.OtherTypeDescription})" : item.CompanyType.ToString())
+                            </span>
+                        </td>
                         <td data-col="origin" class="px-4 py-3 text-slate-700">@item.OriginCountry?.Name</td>
                         <td data-col="contacts" class="px-4 py-3 text-slate-500">
                             @if (item.Contacts.Any())

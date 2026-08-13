@@ -1,4 +1,5 @@
 using ITInventory.Data;
+using ITInventory.Data.Common;
 using ITInventory.Data.Entities;
 using ITInventory.Web.Models;
 using ITInventory.Web.Models.Companies;
@@ -71,11 +72,12 @@ public class CompaniesController : Controller
 
         var items = await query.OrderBy(c => c.Country!.Name).ThenBy(c => c.Name).ToListAsync();
 
-        var headers = new[] { "Country", "Company Name", "Country of Origin", "Contacts", "Active" };
+        var headers = new[] { "Country", "Company Name", "Type", "Country of Origin", "Contacts", "Active" };
         var rows = items.Select(c => new object?[]
         {
             c.Country?.DisplayName ?? c.Country?.Name,
             c.Name,
+            c.CompanyType == CompanyType.Other ? $"Other ({c.OtherTypeDescription})" : c.CompanyType.ToString(),
             c.OriginCountry?.Name,
             string.Join(", ", c.Contacts.Select(x => x.PersonName ?? x.Title ?? x.Email ?? "(contact)")),
             c.IsActive ? "Yes" : "No"
@@ -112,6 +114,9 @@ public class CompaniesController : Controller
         if (await _db.Companies.AnyAsync(c => c.Name == vm.Name && c.CountryId == vm.CountryId))
             ModelState.AddModelError(nameof(vm.Name), "A company with this name already exists for this country.");
 
+        if (vm.CompanyType == CompanyType.Other && string.IsNullOrWhiteSpace(vm.OtherTypeDescription))
+            ModelState.AddModelError(nameof(vm.OtherTypeDescription), "Please specify the type.");
+
         if (!ModelState.IsValid)
         {
             await PopulateDropdowns();
@@ -122,6 +127,8 @@ public class CompaniesController : Controller
         {
             CountryId = vm.CountryId,
             Name = vm.Name,
+            CompanyType = vm.CompanyType,
+            OtherTypeDescription = vm.CompanyType == CompanyType.Other ? vm.OtherTypeDescription : null,
             OriginCountryId = vm.OriginCountryId,
             IsActive = vm.IsActive,
             CreatedAt = DateTime.UtcNow,
@@ -158,6 +165,8 @@ public class CompaniesController : Controller
             Id = company.Id,
             CountryId = company.CountryId,
             Name = company.Name,
+            CompanyType = company.CompanyType,
+            OtherTypeDescription = company.OtherTypeDescription,
             OriginCountryId = company.OriginCountryId,
             IsActive = company.IsActive,
             Contacts = company.Contacts.Select(c => new CompanyContactFormViewModel
@@ -194,6 +203,9 @@ public class CompaniesController : Controller
         if (await _db.Companies.AnyAsync(c => c.Name == vm.Name && c.CountryId == vm.CountryId && c.Id != id))
             ModelState.AddModelError(nameof(vm.Name), "A company with this name already exists for this country.");
 
+        if (vm.CompanyType == CompanyType.Other && string.IsNullOrWhiteSpace(vm.OtherTypeDescription))
+            ModelState.AddModelError(nameof(vm.OtherTypeDescription), "Please specify the type.");
+
         if (!ModelState.IsValid)
         {
             await PopulateDropdowns();
@@ -202,6 +214,8 @@ public class CompaniesController : Controller
 
         entity.CountryId = vm.CountryId;
         entity.Name = vm.Name;
+        entity.CompanyType = vm.CompanyType;
+        entity.OtherTypeDescription = vm.CompanyType == CompanyType.Other ? vm.OtherTypeDescription : null;
         entity.OriginCountryId = vm.OriginCountryId;
         entity.IsActive = vm.IsActive;
         entity.UpdatedAt = DateTime.UtcNow;

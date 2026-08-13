@@ -15,6 +15,11 @@ public class Company : AuditableEntity
 
     public string Name { get; set; } = string.Empty;
 
+    public CompanyType CompanyType { get; set; } = CompanyType.Vendor;
+
+    /// <summary>Only used when CompanyType is Other -- the free-text description of that type.</summary>
+    public string? OtherTypeDescription { get; set; }
+
     /// <summary>Menşei ülkesi (OriginCountries referans listesinden; firmanın kendi menşei, kurumun operasyon ülkesi değil).</summary>
     public int? OriginCountryId { get; set; }
     public OriginCountry? OriginCountry { get; set; }

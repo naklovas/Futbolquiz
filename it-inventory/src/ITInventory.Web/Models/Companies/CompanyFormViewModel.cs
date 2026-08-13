@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using ITInventory.Data.Common;
 
 namespace ITInventory.Web.Models.Companies;
 
@@ -14,6 +15,13 @@ public class CompanyFormViewModel
     [StringLength(200)]
     [Display(Name = "Company Name")]
     public string Name { get; set; } = string.Empty;
+
+    [Display(Name = "Type")]
+    public CompanyType CompanyType { get; set; } = CompanyType.Vendor;
+
+    [StringLength(200)]
+    [Display(Name = "Other Type (please specify)")]
+    public string? OtherTypeDescription { get; set; }
 
     [Display(Name = "Country of Origin")]
     public int? OriginCountryId { get; set; }
