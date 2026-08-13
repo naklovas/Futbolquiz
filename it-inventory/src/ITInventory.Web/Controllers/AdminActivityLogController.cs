@@ -95,11 +95,24 @@ public class AdminActivityLogController : Controller
         if (!string.IsNullOrWhiteSpace(entityType))
             query = query.Where(l => l.EntityType == entityType);
 
+        // CreatedAt is stored as UTC (DateTime.UtcNow), but fromDate/toDate are calendar days
+        // picked in the admin's local time (same convention the table already uses to *display*
+        // CreatedAt via ToLocalTime()). Comparing a UTC column directly against a naive local
+        // date boundary is off by the server's UTC offset -- a record made "today" in local time
+        // can carry a UTC timestamp dated "yesterday" (or vice versa near midnight), so it would
+        // silently fall outside a same-day filter. Converting the local day boundaries to UTC
+        // first keeps the filter and the displayed time consistent.
         if (fromDate.HasValue)
-            query = query.Where(l => l.CreatedAt >= fromDate.Value.Date);
+        {
+            var fromUtc = TimeZoneInfo.ConvertTimeToUtc(DateTime.SpecifyKind(fromDate.Value.Date, DateTimeKind.Unspecified), TimeZoneInfo.Local);
+            query = query.Where(l => l.CreatedAt >= fromUtc);
+        }
 
         if (toDate.HasValue)
-            query = query.Where(l => l.CreatedAt < toDate.Value.Date.AddDays(1));
+        {
+            var toUtcExclusive = TimeZoneInfo.ConvertTimeToUtc(DateTime.SpecifyKind(toDate.Value.Date.AddDays(1), DateTimeKind.Unspecified), TimeZoneInfo.Local);
+            query = query.Where(l => l.CreatedAt < toUtcExclusive);
+        }
 
         return query;
     }
