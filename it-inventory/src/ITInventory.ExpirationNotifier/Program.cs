@@ -22,7 +22,16 @@ builder.Services.AddDbContext<ITInventoryDbContext>(options => options.UseSqlSer
 // true, this switches to real email with no other code changes needed.
 var smtpEnabled = builder.Configuration.GetValue<bool?>("Smtp:Enabled") ?? false;
 var smtpHost = builder.Configuration["Smtp:Host"];
-if (smtpEnabled && !string.IsNullOrWhiteSpace(smtpHost) && smtpHost != "CHANGE_ME")
+var useRealSmtp = smtpEnabled && !string.IsNullOrWhiteSpace(smtpHost) && smtpHost != "CHANGE_ME";
+
+// Printed unconditionally (not behind ILogger, which isn't built yet) so a wrong Smtp:Enabled/
+// Smtp:Host reading is visible immediately at startup instead of silently falling back to the
+// dummy sender -- appsettings.json path resolution issues (stale copy in bin\, wrong working
+// directory, etc.) show up here as the values not matching what's actually in the file.
+Console.WriteLine($"[Startup] Smtp:Enabled={smtpEnabled}, Smtp:Host=\"{smtpHost}\" -> {(useRealSmtp ? "SmtpEmailNotificationService (real mail will be sent)" : "DummyEmailNotificationService (log only, no mail sent)")}");
+Console.WriteLine($"[Startup] appsettings.json read from: {Path.Combine(AppContext.BaseDirectory, "appsettings.json")}");
+
+if (useRealSmtp)
 {
     builder.Services.AddScoped<IEmailNotificationService, SmtpEmailNotificationService>();
 }
