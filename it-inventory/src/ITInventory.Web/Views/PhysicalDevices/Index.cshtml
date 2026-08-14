@@ -96,6 +96,7 @@ else
                     <th data-col="brandModel" class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Brand/Model</th>
                     <th data-col="applianceType" class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Physical/Virtual</th>
                     <th data-col="locationCategory" class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Location Category</th>
+                    <th data-col="siteRole" class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Site Role</th>
                     <th data-col="ip" class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">IP</th>
                     <th data-col="location" class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Location</th>
                     <th data-col="vendor" data-default-hidden="true" class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Vendor/Supplier</th>
@@ -127,6 +128,7 @@ else
                         <td data-col="brandModel" class="px-4 py-3 text-slate-700">@item.Brand @item.Model</td>
                         <td data-col="applianceType" class="px-4 py-3 text-slate-700">@item.ApplianceType</td>
                         <td data-col="locationCategory" class="px-4 py-3 text-slate-700">@item.LocationCategory</td>
+                        <td data-col="siteRole" class="px-4 py-3 text-slate-700">@(item.SiteRole == ITInventory.Data.Common.SiteRole.Primary ? "Primary Datacenter" : "Disaster Recovery")</td>
                         <td data-col="ip" class="px-4 py-3 text-slate-700 font-mono text-xs">@item.IpAddress</td>
                         <td data-col="location" class="px-4 py-3 text-slate-700">@item.Location</td>
                         <td data-col="vendor" class="px-4 py-3 text-slate-700">@item.VendorSupplier</td>

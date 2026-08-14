@@ -85,6 +85,7 @@ else
                     <th data-col="hostName" class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Host Name</th>
                     <th data-col="applianceType" class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Physical/Virtual</th>
                     <th data-col="locationCategory" class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Location Category</th>
+                    <th data-col="siteRole" class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Site Role</th>
                     <th data-col="host" class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Host (ESX)</th>
                     <th data-col="os" class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Operating System</th>
                     <th data-col="location" class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Location</th>
@@ -113,6 +114,7 @@ else
                         <td data-col="hostName" class="px-4 py-3 text-slate-700 font-medium">@item.HostName</td>
                         <td data-col="applianceType" class="px-4 py-3 text-slate-700">@item.ApplianceType</td>
                         <td data-col="locationCategory" class="px-4 py-3 text-slate-700">@item.LocationCategory</td>
+                        <td data-col="siteRole" class="px-4 py-3 text-slate-700">@(item.SiteRole == ITInventory.Data.Common.SiteRole.Primary ? "Primary Datacenter" : "Disaster Recovery")</td>
                         <td data-col="host" class="px-4 py-3 text-slate-700">@item.HostPhysicalDevice?.DeviceName</td>
                         <td data-col="os" class="px-4 py-3 text-slate-700">@item.OperatingSystem</td>
                         <td data-col="location" class="px-4 py-3 text-slate-700">@item.Location</td>
