@@ -155,7 +155,33 @@ public class CountryTopologyController : Controller
         var file = await _db.CountryTopologyFiles.FirstOrDefaultAsync(f => f.CountryId == countryId);
         if (file is null) return NotFound();
 
+        // fileDownloadName forces Content-Disposition: attachment -- always a plain save,
+        // never rendered by the browser, regardless of content type.
         return File(file.FileData, file.ContentType, file.FileName);
+    }
+
+    private static readonly HashSet<string> InlinePreviewableContentTypes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "application/pdf", "image/png", "image/jpeg"
+    };
+
+    /// <summary>
+    /// Separate from Download on purpose: this renders inline (no fileDownloadName, so no
+    /// forced attachment disposition) instead of prompting a save. Only ever serves PDF/PNG/
+    /// JPEG -- both browsers' native PDF viewer and &lt;img&gt; rendering are safe sandboxed
+    /// contexts that can't execute script from the file's content, unlike e.g. serving an XML
+    /// (.drawio) file inline. Visio/draw.io have no safe/native in-browser viewer anyway, so
+    /// they're not offered a preview at all (and .drawio specifically is never sent to an
+    /// external viewer service -- that would leak the diagram off-premises).
+    /// </summary>
+    public async Task<IActionResult> Preview(int countryId)
+    {
+        if (!_currentUser.IsAdmin && countryId != _currentUser.CountryId) return Forbid();
+
+        var file = await _db.CountryTopologyFiles.FirstOrDefaultAsync(f => f.CountryId == countryId);
+        if (file is null || !InlinePreviewableContentTypes.Contains(file.ContentType)) return NotFound();
+
+        return File(file.FileData, file.ContentType);
     }
 
     [HttpPost]

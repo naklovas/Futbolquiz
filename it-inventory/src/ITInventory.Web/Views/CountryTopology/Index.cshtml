@@ -40,7 +40,7 @@
 }
 else
 {
-    <div class="bg-white rounded-lg shadow-sm border border-slate-200 p-6 max-w-xl">
+    <div class="bg-white rounded-lg shadow-sm border border-slate-200 p-6 max-w-4xl">
         @if (!isAdmin)
         {
             <h3 class="text-sm font-medium text-slate-500 mb-4">@countryLabel</h3>
@@ -62,6 +62,25 @@ else
                     <i class="fa-solid fa-download mr-1"></i>Download
                 </a>
             </div>
+
+            var previewableTypes = new HashSet<string> { "application/pdf", "image/png", "image/jpeg" };
+            @if (previewableTypes.Contains(Model.ContentType))
+            {
+                <div class="mb-4">
+                    @if (Model.ContentType == "application/pdf")
+                    {
+                        <iframe src="@Url.Action("Preview", new { countryId = selectedCountryId })" class="w-full rounded-md border border-slate-200" style="height: 600px;"></iframe>
+                    }
+                    else
+                    {
+                        <img src="@Url.Action("Preview", new { countryId = selectedCountryId })" alt="@Model.FileName" class="max-w-full max-h-[600px] rounded-md border border-slate-200" />
+                    }
+                </div>
+            }
+            else
+            {
+                <p class="text-xs text-slate-400 mb-4">No inline preview available for this file type -- use Download to open it in Visio/draw.io.</p>
+            }
         }
 
         @if (canEdit)
