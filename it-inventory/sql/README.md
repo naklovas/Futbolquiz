@@ -178,6 +178,16 @@ incelenip çalıştırılan SQL script tercih edildiği için ayrıca burada tut
     UPDATE ifadesi vermem gerekir (uygulamada henüz bunun için bir admin ekranı yok).
     EF Core migration'ından üretildi (seed kısmı hariç), elle düzenlemeyin. İdempotenttir.
 
+23. **023_site_role_and_topology.sql** — İki bağımsız değişikliği birlikte getirir:
+    (1) `Servers` ve `PhysicalDevices` tablolarına `SiteRole` (nvarchar(20), varsayılan
+    `'Primary'`) kolonu ekler — "Primary Datacenter" / "Disaster Recovery" seçimi. Mevcut
+    kayıtlar `Primary` olarak başlar, elle gözden geçirip gerekenleri Disaster Recovery'e
+    çevirmeniz gerekir. (2) `dbo.CountryTopologyFiles` tablosunu oluşturur (`CountryId` hem
+    PK hem `Countries.Id`'ye FK, ülke başına tek dosya — yeni yükleme eskisinin üzerine
+    yazar) — ülke bazlı ağ topolojisi diyagramlarını (PDF/Visio/draw.io/resim, veritabanında
+    `varbinary(max)` olarak) saklamak için. EF Core migration'ından üretildi, elle
+    düzenlemeyin. İdempotenttir.
+
 ## Bu scriptlerin DOKUNMADIĞI mevcut tablolar
 
 Aşağıdaki tablo bu proje tarafından oluşturulmaz; production'da başka bir

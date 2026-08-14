@@ -41,6 +41,10 @@ public class PhysicalDeviceFormViewModel
     [Display(Name = "Location Category")]
     public LocationCategory? LocationCategory { get; set; }
 
+    [Required(ErrorMessage = "Site role is required.")]
+    [Display(Name = "Site Role")]
+    public SiteRole? SiteRole { get; set; }
+
     [Required(ErrorMessage = "Software version is required.")]
     [StringLength(150)]
     [Display(Name = "Software Version")]

@@ -76,7 +76,7 @@ public class ServersController : Controller
 
         var headers = new[]
         {
-            "Country", "Host Name", "Physical/Virtual", "Location Category", "Host (ESX/Physical Device)", "Operating System",
+            "Country", "Host Name", "Physical/Virtual", "Location Category", "Site Role", "Host (ESX/Physical Device)", "Operating System",
             "Brand", "Model", "Serial Number", "Vendor/Supplier", "Branch", "Location",
             "Support Start Date", "Support End Date", "End of Life Date", "Notes"
         };
@@ -86,6 +86,7 @@ public class ServersController : Controller
             s.HostName,
             s.ApplianceType.ToString(),
             s.LocationCategory.ToString(),
+            s.SiteRole.ToString(),
             s.HostPhysicalDevice?.DeviceName,
             s.OperatingSystem,
             s.Brand,
@@ -186,6 +187,7 @@ public class ServersController : Controller
             // vm.ApplianceType avoids it silently binding to the enum's default (Physical = 0).
             ApplianceType = ApplianceType.Virtual,
             LocationCategory = hostDevice!.LocationCategory,
+            SiteRole = hostDevice.SiteRole,
             HostPhysicalDeviceId = vm.HostPhysicalDeviceId,
             OperatingSystem = vm.OperatingSystem,
             Brand = vm.Brand,
@@ -243,6 +245,7 @@ public class ServersController : Controller
             HostName = entity.HostName,
             ApplianceType = entity.ApplianceType,
             LocationCategory = entity.LocationCategory,
+            SiteRole = entity.SiteRole,
             HostPhysicalDeviceId = entity.HostPhysicalDeviceId,
             OperatingSystem = entity.OperatingSystem,
             Brand = entity.Brand,
@@ -285,6 +288,7 @@ public class ServersController : Controller
         entity.HostName = vm.HostName;
         entity.ApplianceType = vm.ApplianceType;
         entity.LocationCategory = vm.LocationCategory;
+        entity.SiteRole = vm.SiteRole;
         entity.HostPhysicalDeviceId = vm.HostPhysicalDeviceId;
         entity.OperatingSystem = vm.OperatingSystem;
         entity.Brand = vm.Brand;
@@ -344,7 +348,7 @@ public class ServersController : Controller
         if (!_currentUser.IsAdmin) return Forbid();
 
         var bytes = ExcelImportHelpers.CreateTemplateBytes("Servers",
-            "Host Name", "Physical/Virtual", "Location Category", "Operating System",
+            "Host Name", "Physical/Virtual", "Location Category", "Site Role", "Operating System",
             "Brand", "Model", "Serial Number", "Vendor/Supplier", "Branch", "Location",
             "Support Start Date", "Support End Date", "End of Life Date", "Notes");
 
@@ -415,12 +419,20 @@ public class ServersController : Controller
                     continue;
                 }
 
+                var siteRoleRaw = ExcelImportHelpers.GetString(ws, row, headers, "Site Role");
+                if (!ExcelImportHelpers.TryParseSiteRole(siteRoleRaw, out var siteRole, out var siteRoleError))
+                {
+                    result.Errors.Add(new ImportRowError { RowNumber = row, Message = siteRoleError! });
+                    continue;
+                }
+
                 toAdd.Add(new Server
                 {
                     CountryId = country.Id,
                     HostName = hostName,
                     ApplianceType = applianceType,
                     LocationCategory = locationCategory,
+                    SiteRole = siteRole,
                     OperatingSystem = ExcelImportHelpers.GetString(ws, row, headers, "Operating System"),
                     Brand = ExcelImportHelpers.GetString(ws, row, headers, "Brand"),
                     Model = ExcelImportHelpers.GetString(ws, row, headers, "Model"),

@@ -1,0 +1,89 @@
+@model ITInventory.Data.Entities.CountryTopologyFile?
+@{
+    ViewData["Title"] = "Network Topology";
+    bool isAdmin = ViewBag.IsAdmin ?? false;
+    bool canEdit = ViewBag.CanEdit ?? false;
+    int? selectedCountryId = ViewBag.SelectedCountryId;
+    string? countryLabel = ViewBag.CountryLabel;
+}
+
+<h2 class="text-xl font-semibold text-slate-900 mb-1">Network Topology</h2>
+<p class="text-sm text-slate-500 mb-6">One logical network topology diagram per country -- PDF, Visio (.vsdx/.vsd), draw.io (.drawio) or image (.png/.jpg), max 20 MB.</p>
+
+@if (TempData["Success"] != null)
+{
+    <div class="bg-green-50 border border-green-200 text-green-700 rounded-md px-4 py-3 text-sm mb-4">@TempData["Success"]</div>
+}
+@if (TempData["Error"] != null)
+{
+    <div class="bg-red-50 border border-red-200 text-red-700 rounded-md px-4 py-3 text-sm mb-4">@TempData["Error"]</div>
+}
+
+@if (isAdmin)
+{
+    <form method="get" class="mb-6">
+        <select name="countryId" onchange="this.form.submit();" class="rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
+            <option value="">-- Select Country --</option>
+            @foreach (var item in (Microsoft.AspNetCore.Mvc.Rendering.SelectList)ViewBag.CountryOptions)
+            {
+                <option value="@item.Value" selected="@item.Selected">@item.Text</option>
+            }
+        </select>
+    </form>
+}
+
+@if (!selectedCountryId.HasValue)
+{
+    <div class="bg-blue-50 border border-blue-200 text-blue-700 rounded-md px-4 py-3 text-sm">
+        <i class="fa-solid fa-circle-info mr-1.5"></i>Select a country to view its topology diagram.
+    </div>
+}
+else
+{
+    <div class="bg-white rounded-lg shadow-sm border border-slate-200 p-6 max-w-xl">
+        @if (!isAdmin)
+        {
+            <h3 class="text-sm font-medium text-slate-500 mb-4">@countryLabel</h3>
+        }
+
+        @if (Model is null)
+        {
+            <p class="text-sm text-slate-400 mb-4">No topology diagram uploaded yet.</p>
+        }
+        else
+        {
+            <div class="flex items-center gap-3 mb-4 bg-slate-50 border border-slate-200 rounded-md p-3">
+                <i class="fa-solid fa-diagram-project text-xl text-brand-600"></i>
+                <div class="flex-1 min-w-0">
+                    <div class="text-sm font-medium text-slate-700 truncate">@Model.FileName</div>
+                    <div class="text-xs text-slate-400">@((Model.FileSize / 1024.0).ToString("N0")) KB &middot; uploaded @Model.UploadedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm") @(Model.UploadedBy != null ? $"by {Model.UploadedBy}" : "")</div>
+                </div>
+                <a asp-action="Download" asp-route-countryId="@selectedCountryId" class="text-xs font-medium text-brand-700 bg-brand-50 hover:bg-brand-100 px-3 py-1.5 rounded-md whitespace-nowrap">
+                    <i class="fa-solid fa-download mr-1"></i>Download
+                </a>
+            </div>
+        }
+
+        @if (canEdit)
+        {
+            <form asp-action="Upload" method="post" enctype="multipart/form-data" class="flex items-center gap-2">
+                <input type="hidden" name="countryId" value="@selectedCountryId" />
+                <input type="file" name="file" accept=".pdf,.vsdx,.vsd,.drawio,.png,.jpg,.jpeg" required
+                       class="flex-1 text-sm text-slate-600 file:mr-3 file:py-2 file:px-3 file:rounded-md file:border-0 file:bg-slate-100 file:text-sm file:font-medium file:text-slate-700 hover:file:bg-slate-200" />
+                <button type="submit" class="bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium px-4 py-2 rounded-md whitespace-nowrap">
+                    @(Model is null ? "Upload" : "Replace")
+                </button>
+            </form>
+
+            @if (Model is not null)
+            {
+                <form asp-action="Delete" method="post" class="mt-2" onsubmit="return confirm('Delete the topology diagram for this country?');">
+                    <input type="hidden" name="countryId" value="@selectedCountryId" />
+                    <button type="submit" class="text-xs font-medium text-red-600 hover:text-red-800">
+                        <i class="fa-solid fa-trash mr-1"></i>Delete
+                    </button>
+                </form>
+            }
+        }
+    </div>
+}

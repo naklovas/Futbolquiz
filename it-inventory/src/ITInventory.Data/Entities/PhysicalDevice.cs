@@ -27,6 +27,7 @@ public class PhysicalDevice : AuditableEntity
     public string? Model { get; set; }
     public ApplianceType ApplianceType { get; set; }
     public LocationCategory LocationCategory { get; set; }
+    public SiteRole SiteRole { get; set; }
     public string? SoftwareVersion { get; set; }
     public string? SerialNo { get; set; }
     public string? IpAddress { get; set; }

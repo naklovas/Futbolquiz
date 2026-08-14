@@ -115,6 +115,21 @@ public class HomeController : Controller
             UpcomingItems = upcoming.OrderBy(e => e.ExpiresAt).ToList()
         };
 
+        // Only makes sense for a single, specific country -- "All Countries" has no one
+        // topology diagram to show.
+        var topologyCountryId = isAdmin ? selectedCountryId : _currentUser.CountryId;
+        if (topologyCountryId.HasValue)
+        {
+            var topology = await _db.CountryTopologyFiles
+                .Where(f => f.CountryId == topologyCountryId.Value)
+                .Select(f => new { f.FileName, f.UploadedAt })
+                .FirstOrDefaultAsync();
+
+            vm.TopologyCountryId = topologyCountryId;
+            vm.TopologyFileName = topology?.FileName;
+            vm.TopologyUploadedAt = topology?.UploadedAt;
+        }
+
         ViewBag.Countries = await _db.Countries.OrderBy(c => c.Name).ToListAsync();
         ViewBag.SelectedCountryId = selectedCountryId;
         ViewBag.ViewAll = viewAll;

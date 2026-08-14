@@ -150,6 +150,37 @@ public static class ExcelImportHelpers
         return false;
     }
 
+    public static bool TryParseSiteRole(string? raw, out SiteRole value, out string? error)
+    {
+        error = null;
+        value = SiteRole.Primary;
+
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            error = "Site Role is required (expected 'Primary Datacenter' or 'Disaster Recovery').";
+            return false;
+        }
+
+        var trimmed = raw.Trim();
+        if (trimmed.Equals("Primary", StringComparison.OrdinalIgnoreCase)
+            || trimmed.Equals("Primary Datacenter", StringComparison.OrdinalIgnoreCase))
+        {
+            value = SiteRole.Primary;
+            return true;
+        }
+
+        if (trimmed.Equals("DisasterRecovery", StringComparison.OrdinalIgnoreCase)
+            || trimmed.Equals("Disaster Recovery", StringComparison.OrdinalIgnoreCase)
+            || trimmed.Equals("DR", StringComparison.OrdinalIgnoreCase))
+        {
+            value = SiteRole.DisasterRecovery;
+            return true;
+        }
+
+        error = $"Unrecognized Site Role value '{raw}' (expected 'Primary Datacenter' or 'Disaster Recovery').";
+        return false;
+    }
+
     public static byte[] CreateTemplateBytes(string title, params string[] headers)
     {
         using var workbook = new XLWorkbook();

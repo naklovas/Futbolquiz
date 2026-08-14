@@ -29,6 +29,7 @@ public class ServerConfiguration : IEntityTypeConfiguration<Server>
                 v => v.ToString(),
                 v => v == "EVM" ? LocationCategory.Turkiye : Enum.Parse<LocationCategory>(v))
             .HasMaxLength(20);
+        builder.Property(x => x.SiteRole).HasConversion<string>().HasMaxLength(20);
 
         builder.HasOne(x => x.Country)
             .WithMany(c => c.Servers)

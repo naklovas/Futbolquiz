@@ -9,6 +9,11 @@ public class DashboardViewModel
 
     public List<ExpiringItem> ExpiredItems { get; set; } = new();
     public List<ExpiringItem> UpcomingItems { get; set; } = new();
+
+    /// <summary>Only set when exactly one country is in view (selected, or the current non-admin user's own).</summary>
+    public int? TopologyCountryId { get; set; }
+    public string? TopologyFileName { get; set; }
+    public DateTime? TopologyUploadedAt { get; set; }
 }
 
 public enum ExpirationType
