@@ -66,10 +66,13 @@ else
 
         @if (canEdit)
         {
-            <form asp-action="Upload" method="post" enctype="multipart/form-data" onsubmit="showLoadingOverlay()" class="flex items-center gap-2">
+            <form id="topology-upload-form" asp-action="Upload" method="post" enctype="multipart/form-data" class="flex items-center gap-2">
                 <input type="hidden" name="countryId" value="@selectedCountryId" />
-                <input type="file" name="file" accept=".pdf,.vsdx,.vsd,.drawio,.png,.jpg,.jpeg" required
-                       class="flex-1 text-sm text-slate-600 file:mr-3 file:py-2 file:px-3 file:rounded-md file:border-0 file:bg-slate-100 file:text-sm file:font-medium file:text-slate-700 hover:file:bg-slate-200" />
+                <div class="flex-1">
+                    <input type="file" id="topology-file-input" name="file" accept=".pdf,.vsdx,.vsd,.drawio,.png,.jpg,.jpeg" required
+                           class="w-full text-sm text-slate-600 file:mr-3 file:py-2 file:px-3 file:rounded-md file:border-0 file:bg-slate-100 file:text-sm file:font-medium file:text-slate-700 hover:file:bg-slate-200" />
+                    <p id="topology-file-error" class="hidden text-xs text-red-600 mt-1"></p>
+                </div>
                 <button type="submit" class="bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium px-4 py-2 rounded-md whitespace-nowrap">
                     @(Model is null ? "Upload" : "Replace")
                 </button>
@@ -86,4 +89,89 @@ else
             }
         }
     </div>
+
+    <script>
+        // Mirrors the server-side extension + magic-number check in CountryTopologyController
+        // so a disallowed/renamed file (e.g. an .exe saved as diagram.png) never leaves the
+        // browser at all -- some network-level protection on the server (antivirus / IIS)
+        // resets the connection for recognizable executable content with a bare "HTTP ERROR
+        // 400" before our own friendly validation message ever gets a chance to render.
+        // Catching it here means the request for a bad file is never sent in the first place.
+        document.addEventListener('DOMContentLoaded', function () {
+            var form = document.getElementById('topology-upload-form');
+            if (!form) return;
+
+            var fileInput = document.getElementById('topology-file-input');
+            var errorEl = document.getElementById('topology-file-error');
+
+            var signatures = {
+                '.pdf': [0x25, 0x50, 0x44, 0x46, 0x2D],
+                '.png': [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A],
+                '.jpg': [0xFF, 0xD8, 0xFF],
+                '.jpeg': [0xFF, 0xD8, 0xFF],
+                '.vsdx': [0x50, 0x4B, 0x03, 0x04],
+                '.vsd': [0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1]
+            };
+
+            function getExtension(name) {
+                var i = name.lastIndexOf('.');
+                return i >= 0 ? name.slice(i).toLowerCase() : '';
+            }
+
+            function matchesSignature(bytes, ext) {
+                if (ext === '.drawio') {
+                    var text = new TextDecoder('utf-8').decode(bytes).replace(/^\uFEFF/, '').trimStart();
+                    return text.charAt(0) === '<';
+                }
+                var sig = signatures[ext];
+                if (!sig) return false;
+                if (bytes.length < sig.length) return false;
+                for (var i = 0; i < sig.length; i++) {
+                    if (bytes[i] !== sig[i]) return false;
+                }
+                return true;
+            }
+
+            function showError(message) {
+                errorEl.textContent = message;
+                errorEl.classList.remove('hidden');
+            }
+
+            function clearError() {
+                errorEl.classList.add('hidden');
+                errorEl.textContent = '';
+            }
+
+            fileInput.addEventListener('change', clearError);
+
+            form.addEventListener('submit', function (event) {
+                var file = fileInput.files[0];
+                if (!file) return;
+
+                event.preventDefault();
+                clearError();
+
+                var ext = getExtension(file.name);
+                if (!signatures[ext] && ext !== '.drawio') {
+                    showError('Only PDF, Visio (.vsdx/.vsd), draw.io (.drawio) or image (.png/.jpg) files are supported.');
+                    return;
+                }
+
+                var reader = new FileReader();
+                reader.onload = function () {
+                    var bytes = new Uint8Array(reader.result);
+                    if (!matchesSignature(bytes, ext)) {
+                        showError("The file's contents don't match its extension. Make sure it's a genuine " + ext.slice(1).toUpperCase() + " file.");
+                        return;
+                    }
+                    showLoadingOverlay();
+                    form.submit();
+                };
+                reader.onerror = function () {
+                    showError('Could not read the selected file. Please try again.');
+                };
+                reader.readAsArrayBuffer(file.slice(0, 512));
+            });
+        });
+    </script>
 }
