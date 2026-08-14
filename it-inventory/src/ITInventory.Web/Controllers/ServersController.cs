@@ -40,7 +40,7 @@ public class ServersController : Controller
         }
         else
         {
-            var query = _db.Servers.Include(s => s.Country).Include(s => s.HostPhysicalDevice).AsQueryable();
+            var query = _db.Servers.Include(s => s.Country).Include(s => s.HostPhysicalDevice).Include(s => s.Endpoints).AsQueryable();
 
             if (!isAdmin)
                 query = query.Where(s => s.CountryId == _currentUser.CountryId);
