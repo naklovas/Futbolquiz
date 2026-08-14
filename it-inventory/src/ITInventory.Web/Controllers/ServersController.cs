@@ -158,6 +158,17 @@ public class ServersController : Controller
         if (!vm.HostPhysicalDeviceId.HasValue)
             ModelState.AddModelError(nameof(vm.HostPhysicalDeviceId), "ESXi / Physical Server is required.");
 
+        // Location Category/Branch aren't collected on "New Server" at all -- the VM's location
+        // is the same as the ESXi/physical host it runs on, so it's taken from there instead of
+        // asking the user to enter it a second time.
+        PhysicalDevice? hostDevice = null;
+        if (vm.HostPhysicalDeviceId.HasValue)
+        {
+            hostDevice = await _db.PhysicalDevices.FindAsync(vm.HostPhysicalDeviceId.Value);
+            if (hostDevice is null)
+                ModelState.AddModelError(nameof(vm.HostPhysicalDeviceId), "Selected ESXi / Physical Server was not found.");
+        }
+
         if (!ModelState.IsValid)
         {
             await PopulateDropdowns();
@@ -174,14 +185,14 @@ public class ServersController : Controller
             // view since new Servers are always virtual) -- forcing it here rather than trusting
             // vm.ApplianceType avoids it silently binding to the enum's default (Physical = 0).
             ApplianceType = ApplianceType.Virtual,
-            LocationCategory = vm.LocationCategory,
+            LocationCategory = hostDevice!.LocationCategory,
             HostPhysicalDeviceId = vm.HostPhysicalDeviceId,
             OperatingSystem = vm.OperatingSystem,
             Brand = vm.Brand,
             Model = vm.Model,
             SerialNo = vm.SerialNo,
             VendorSupplier = vm.VendorSupplier,
-            Branch = vm.Branch,
+            Branch = hostDevice.Branch,
             Location = vm.Location,
             StartOfSupportDate = vm.StartOfSupportDate,
             EndOfSupportDate = vm.EndOfSupportDate,

@@ -119,23 +119,30 @@
     </div>
 }
 
-<div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-    <div>
-        <label asp-for="LocationCategory" class="block text-sm font-medium text-slate-700 mb-1"></label>
-        <select asp-for="LocationCategory" id="LocationCategory" class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
-            <option value="Local">Local</option>
-            <option value="Turkiye">Türkiye</option>
-            <option value="Cloud">Cloud</option>
-        </select>
+@if (!isNew)
+{
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+        <div>
+            <label asp-for="LocationCategory" class="block text-sm font-medium text-slate-700 mb-1"></label>
+            <select asp-for="LocationCategory" id="LocationCategory" class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
+                <option value="Local">Local</option>
+                <option value="Turkiye">Türkiye</option>
+                <option value="Cloud">Cloud</option>
+            </select>
+        </div>
+        <div>
+            <label asp-for="Branch" class="block text-sm font-medium text-slate-700 mb-1"></label>
+            <select asp-for="Branch" id="Branch" class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
+                <option value="">-- Select --</option>
+            </select>
+            <span asp-validation-for="Branch" class="text-sm text-red-600"></span>
+        </div>
     </div>
-    <div>
-        <label asp-for="Branch" class="block text-sm font-medium text-slate-700 mb-1"></label>
-        <select asp-for="Branch" id="Branch" class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
-            <option value="">-- Select --</option>
-        </select>
-        <span asp-validation-for="Branch" class="text-sm text-red-600"></span>
-    </div>
-</div>
+}
+else
+{
+    <p class="text-xs text-slate-400 mb-4">Location category and branch are taken automatically from the selected ESXi / Physical Server host.</p>
+}
 
 <div class="mb-6">
     <label asp-for="Notes" class="block text-sm font-medium text-slate-700 mb-1"></label>
@@ -149,8 +156,12 @@
 
 <script>
     document.addEventListener('DOMContentLoaded', function () {
-        initBranchCombobox('Branch', @Html.Raw(Json.Serialize(ViewBag.AllLocations)), @Html.Raw(Json.Serialize(Model.Branch)));
-        initLocationCategoryToggle('LocationCategory', 'Branch', 'Esenyurt Veri Merkezi');
+        // Location Category/Branch aren't rendered at all on "New Server" -- they're taken from
+        // the selected ESXi/Physical Server host server-side instead. Only present when editing.
+        if (document.getElementById('Branch')) {
+            initBranchCombobox('Branch', @Html.Raw(Json.Serialize(ViewBag.AllLocations)), @Html.Raw(Json.Serialize(Model.Branch)));
+            initLocationCategoryToggle('LocationCategory', 'Branch', 'Esenyurt Veri Merkezi');
+        }
 
         // Only present when editing a record created before Servers became virtual-only --
         // a "New Server" page has neither element, since there's nothing to toggle.
