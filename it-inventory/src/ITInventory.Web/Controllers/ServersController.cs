@@ -278,6 +278,12 @@ public class ServersController : Controller
         if (!_currentUser.IsAdmin)
             vm.CountryId = _currentUser.CountryId ?? 0;
 
+        // Branch is shown/editable here (unlike Create, where it's taken from the ESXi host
+        // instead and the field doesn't exist at all) -- see ServerFormViewModel.Branch for why
+        // this isn't a blanket [Required] on the model.
+        if (string.IsNullOrWhiteSpace(vm.Branch))
+            ModelState.AddModelError(nameof(vm.Branch), "Branch is required.");
+
         if (!ModelState.IsValid)
         {
             await PopulateDropdowns();

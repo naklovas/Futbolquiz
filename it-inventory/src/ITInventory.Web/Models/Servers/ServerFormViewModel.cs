@@ -64,7 +64,10 @@ public class ServerFormViewModel
     [Display(Name = "Vendor/Supplier")]
     public string? VendorSupplier { get; set; }
 
-    [Required(ErrorMessage = "Branch is required.")]
+    // Not [Required] here on purpose: on Create this is absent from the form entirely (taken
+    // from the selected ESXi host instead, see ServersController.Create) -- a blanket
+    // [Required] would fail validation with no way for the user to see why, since there's no
+    // field on that page for it. Enforced on Edit specifically in ServersController.Edit.
     [StringLength(150)]
     [Display(Name = "Branch")]
     public string? Branch { get; set; }
