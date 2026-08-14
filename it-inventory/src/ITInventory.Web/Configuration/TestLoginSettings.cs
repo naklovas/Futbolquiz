@@ -4,8 +4,9 @@ public class TestLoginSettings
 {
     public const string SectionName = "TestLogin";
 
-    /// <summary>Defaults to enabled so the feature works even without an appsettings.json entry.</summary>
-    public bool Enabled { get; set; } = true;
-
-    public string Password { get; set; } = "12345";
+    /// <summary>
+    /// Defaults to disabled -- a missing/deleted config entry should fail closed, not silently
+    /// re-enable the LDAP bypass. The password itself lives in dbo.TestLoginConfig, not here.
+    /// </summary>
+    public bool Enabled { get; set; }
 }

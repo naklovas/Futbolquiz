@@ -346,9 +346,9 @@ public class ServersController : Controller
     {
         if (!_currentUser.IsAdmin) return Forbid();
 
-        if (file is null || file.Length == 0)
+        if (!ExcelImportHelpers.IsValidUpload(file, out var uploadError))
         {
-            TempData["ImportError"] = "Please choose a file.";
+            TempData["ImportError"] = uploadError;
             return RedirectToAction(nameof(Import));
         }
 

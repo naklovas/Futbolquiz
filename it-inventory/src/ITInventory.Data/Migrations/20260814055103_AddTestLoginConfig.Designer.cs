@@ -4,6 +4,7 @@ using ITInventory.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,9 +12,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace ITInventory.Data.Migrations
 {
     [DbContext(typeof(ITInventoryDbContext))]
-    partial class ITInventoryDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260814055103_AddTestLoginConfig")]
+    partial class AddTestLoginConfig
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder

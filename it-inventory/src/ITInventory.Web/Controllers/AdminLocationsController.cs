@@ -149,9 +149,9 @@ public class AdminLocationsController : Controller
     [ValidateAntiForgeryToken]
     public async Task<IActionResult> Import(IFormFile file)
     {
-        if (file is null || file.Length == 0)
+        if (!ExcelImportHelpers.IsValidUpload(file, out var uploadError))
         {
-            TempData["ImportError"] = "Please choose a file.";
+            TempData["ImportError"] = uploadError;
             return RedirectToAction(nameof(Import));
         }
 

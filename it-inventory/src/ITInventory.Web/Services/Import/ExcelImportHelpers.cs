@@ -5,6 +5,36 @@ namespace ITInventory.Web.Services.Import;
 
 public static class ExcelImportHelpers
 {
+    private const long MaxUploadBytes = 10 * 1024 * 1024; // 10 MB
+
+    /// <summary>
+    /// Rejects missing/empty files, anything that isn't a .xlsx by extension, and anything
+    /// over 10 MB, before it ever reaches ClosedXML.
+    /// </summary>
+    public static bool IsValidUpload(IFormFile? file, out string error)
+    {
+        if (file is null || file.Length == 0)
+        {
+            error = "Please choose a file.";
+            return false;
+        }
+
+        if (!string.Equals(Path.GetExtension(file.FileName), ".xlsx", StringComparison.OrdinalIgnoreCase))
+        {
+            error = "Only .xlsx files are supported.";
+            return false;
+        }
+
+        if (file.Length > MaxUploadBytes)
+        {
+            error = "File is too large (max 10 MB).";
+            return false;
+        }
+
+        error = string.Empty;
+        return true;
+    }
+
     public static Dictionary<string, int> ReadHeaders(IXLWorksheet ws)
     {
         var headers = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);

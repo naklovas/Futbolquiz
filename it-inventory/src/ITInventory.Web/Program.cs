@@ -34,8 +34,16 @@ builder.Services
     {
         options.LoginPath = "/Account/Login";
         options.AccessDeniedPath = "/Account/AccessDenied";
-        options.ExpireTimeSpan = TimeSpan.FromHours(8);
+        options.ExpireTimeSpan = TimeSpan.FromMinutes(30);
         options.SlidingExpiration = true;
+        options.Cookie.HttpOnly = true;
+        options.Cookie.SameSite = SameSiteMode.Strict;
+        // SameAsRequest only in Development so the plain-http launch profile still works locally --
+        // everywhere else HTTPS is enforced (UseHttpsRedirection/UseHsts below) so the cookie should
+        // never be sent unencrypted.
+        options.Cookie.SecurePolicy = builder.Environment.IsDevelopment()
+            ? CookieSecurePolicy.SameAsRequest
+            : CookieSecurePolicy.Always;
     });
 
 builder.Services.AddAuthorization(options =>
@@ -56,6 +64,18 @@ if (!app.Environment.IsDevelopment())
 }
 
 app.UseHttpsRedirection();
+
+// Baseline security response headers. No Content-Security-Policy here on purpose -- the app's
+// views rely on inline <script> blocks throughout, and a CSP tight enough to matter would need
+// per-page nonces to avoid breaking them; that's a larger, separate piece of work.
+app.Use(async (context, next) =>
+{
+    context.Response.Headers.Append("X-Content-Type-Options", "nosniff");
+    context.Response.Headers.Append("X-Frame-Options", "DENY");
+    context.Response.Headers.Append("Referrer-Policy", "strict-origin-when-cross-origin");
+    await next();
+});
+
 app.UseStaticFiles();
 
 app.UseRouting();

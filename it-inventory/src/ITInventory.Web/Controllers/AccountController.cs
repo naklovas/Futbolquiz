@@ -58,7 +58,8 @@ public class AccountController : Controller
                 return View(model);
             }
 
-            if (string.IsNullOrEmpty(_testLoginSettings.Password) || model.Password != _testLoginSettings.Password)
+            var credential = await _db.TestLoginCredentials.FindAsync(1);
+            if (credential is null || !TestLoginPasswordHasher.Verify(model.Password, credential.PasswordHash))
             {
                 ModelState.AddModelError(string.Empty, "Invalid test password.");
                 return View(model);

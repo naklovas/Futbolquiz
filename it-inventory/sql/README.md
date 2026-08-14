@@ -167,6 +167,17 @@ incelenip çalıştırılan SQL script tercih edildiği için ayrıca burada tut
     önceki satırlardaki eski IP değerleri olduğu gibi kalır, yeni satırlar ortam adını
     içerir. EF Core migration'ından üretildi, elle düzenlemeyin. İdempotenttir.
 
+22. **022_test_login_config.sql** — Güvenlik taraması bulgusu düzeltmesi: `dbo.TestLoginConfig`
+    (tek satırlık, Id=1) tablosunu oluşturur ve Test Login şifresini bu tabloya PBKDF2 hash
+    olarak seed eder. Daha önce şifre hem `appsettings.json`'da açık metin (`TestLogin:Password`)
+    hem de kodda literal default değer olarak duruyordu, hem de login sayfasında (`Login.cshtml`)
+    kullanıcıya açıkça gösteriliyordu — üçü de kaldırıldı. Seed edilen hash, mevcut "12345"
+    şifresinin karşılığıdır (davranış değişmedi, sadece nerede tutulduğu değişti); script zaten
+    bir satır varsa üzerine yazmaz, yani şifreyi elle değiştirdiyseniz script'i tekrar
+    çalıştırmak güvenlidir. Şifreyi değiştirmek isterseniz yeni hash'i üretip size ayrı bir
+    UPDATE ifadesi vermem gerekir (uygulamada henüz bunun için bir admin ekranı yok).
+    EF Core migration'ından üretildi (seed kısmı hariç), elle düzenlemeyin. İdempotenttir.
+
 ## Bu scriptlerin DOKUNMADIĞI mevcut tablolar
 
 Aşağıdaki tablo bu proje tarafından oluşturulmaz; production'da başka bir
