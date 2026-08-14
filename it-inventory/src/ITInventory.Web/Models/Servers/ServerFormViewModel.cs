@@ -1,5 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 using ITInventory.Data.Common;
+using ITInventory.Web.Common;
 
 namespace ITInventory.Web.Models.Servers;
 
@@ -23,6 +24,7 @@ public class ServerFormViewModel
     /// this set creates the server's first ServerEndpoint.
     /// </summary>
     [StringLength(50)]
+    [IpAddress]
     [Display(Name = "IP Address")]
     public string? IpAddress { get; set; }
 

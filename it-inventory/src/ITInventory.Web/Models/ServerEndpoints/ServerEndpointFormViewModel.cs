@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using ITInventory.Web.Common;
 
 namespace ITInventory.Web.Models.ServerEndpoints;
 
@@ -12,6 +13,7 @@ public class ServerEndpointFormViewModel
 
     [Required(ErrorMessage = "IP address is required.")]
     [StringLength(50)]
+    [IpAddress]
     [Display(Name = "IP Address")]
     public string? IpAddress { get; set; }
 

@@ -1,5 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 using ITInventory.Data.Common;
+using ITInventory.Web.Common;
 
 namespace ITInventory.Web.Models.PhysicalDevices;
 
@@ -57,11 +58,13 @@ public class PhysicalDeviceFormViewModel
 
     [Required(ErrorMessage = "IP address is required.")]
     [StringLength(50)]
+    [IpAddress]
     [Display(Name = "IP Address")]
     public string? IpAddress { get; set; }
 
     [Required(ErrorMessage = "Management IP is required.")]
     [StringLength(50)]
+    [IpAddress]
     [Display(Name = "Management IP")]
     public string? MgmtIp { get; set; }
 
