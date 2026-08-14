@@ -32,7 +32,7 @@ public class CircuitFormViewModel
 
     [StringLength(255)]
     [Display(Name = "Location")]
-    public string Location { get; set; } = string.Empty;
+    public string? Location { get; set; }
 
     [Required(ErrorMessage = "Start date is required.")]
     [DataType(DataType.Date)]

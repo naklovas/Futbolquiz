@@ -131,7 +131,7 @@ public class CircuitsController : Controller
             CircuitCapacity = vm.CircuitCapacity,
             Provider = vm.Provider,
             Branch = vm.Branch,
-            Location = vm.Location,
+            Location = vm.Location ?? string.Empty,
             StartDate = vm.StartDate,
             EndDate = vm.EndDate,
             Notes = vm.Notes,
@@ -196,7 +196,7 @@ public class CircuitsController : Controller
         entity.CircuitCapacity = vm.CircuitCapacity;
         entity.Provider = vm.Provider;
         entity.Branch = vm.Branch;
-        entity.Location = vm.Location;
+        entity.Location = vm.Location ?? string.Empty;
         entity.StartDate = vm.StartDate;
         entity.EndDate = vm.EndDate;
         entity.Notes = vm.Notes;

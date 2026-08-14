@@ -72,7 +72,7 @@ public class PhysicalDeviceFormViewModel
 
     [StringLength(255)]
     [Display(Name = "Location")]
-    public string Location { get; set; } = string.Empty;
+    public string? Location { get; set; }
 
     [Required(ErrorMessage = "Vendor/Supplier is required.")]
     [StringLength(150)]

@@ -191,7 +191,7 @@ public class PhysicalDevicesController : Controller
             IpAddress = vm.IpAddress,
             MgmtIp = vm.MgmtIp,
             Branch = vm.Branch,
-            Location = vm.Location,
+            Location = vm.Location ?? string.Empty,
             VendorSupplier = vm.VendorSupplier,
             LicenceInfo = vm.LicenceInfo,
             StartOfSupportDate = vm.StartOfSupportDate,
@@ -283,7 +283,7 @@ public class PhysicalDevicesController : Controller
         entity.IpAddress = vm.IpAddress;
         entity.MgmtIp = vm.MgmtIp;
         entity.Branch = vm.Branch;
-        entity.Location = vm.Location;
+        entity.Location = vm.Location ?? string.Empty;
         entity.VendorSupplier = vm.VendorSupplier;
         entity.LicenceInfo = vm.LicenceInfo;
         entity.StartOfSupportDate = vm.StartOfSupportDate;

@@ -31,7 +31,7 @@ public class LicenseFormViewModel
 
     [StringLength(255)]
     [Display(Name = "Location")]
-    public string Location { get; set; } = string.Empty;
+    public string? Location { get; set; }
 
     [Required(ErrorMessage = "Support start date is required.")]
     [DataType(DataType.Date)]

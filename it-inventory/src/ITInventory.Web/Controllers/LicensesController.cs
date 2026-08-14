@@ -132,7 +132,7 @@ public class LicensesController : Controller
             VendorSupplier = vm.VendorSupplier,
             CompanyId = vm.CompanyId,
             Branch = vm.Branch,
-            Location = vm.Location,
+            Location = vm.Location ?? string.Empty,
             SupportStartDate = vm.SupportStartDate,
             SupportEndDate = vm.SupportEndDate,
             ExpirationDate = vm.ExpirationDate,
@@ -199,7 +199,7 @@ public class LicensesController : Controller
         entity.VendorSupplier = vm.VendorSupplier;
         entity.CompanyId = vm.CompanyId;
         entity.Branch = vm.Branch;
-        entity.Location = vm.Location;
+        entity.Location = vm.Location ?? string.Empty;
         entity.SupportStartDate = vm.SupportStartDate;
         entity.SupportEndDate = vm.SupportEndDate;
         entity.ExpirationDate = vm.ExpirationDate;
