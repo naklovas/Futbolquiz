@@ -27,6 +27,31 @@ public class CountryTopologyController : Controller
 
     private const long MaxFileBytes = 20 * 1024 * 1024; // 20 MB
 
+    /// <summary>
+    /// Checks the file's actual bytes against its claimed extension so a renamed file (e.g.
+    /// something.exe saved as diagram.png) can't slip past the extension allow-list above.
+    /// .vsdx is a ZIP/OOXML package (PK signature, same as .docx/.xlsx); .vsd is a legacy OLE
+    /// compound file; .drawio is plain XML/text, so it's checked for a leading '&lt;' instead of
+    /// a fixed binary signature.
+    /// </summary>
+    private static bool ContentMatchesExtension(string extension, byte[] data)
+    {
+        bool StartsWith(params byte[] signature) =>
+            data.Length >= signature.Length && signature.AsSpan().SequenceEqual(data.AsSpan(0, signature.Length));
+
+        return extension.ToLowerInvariant() switch
+        {
+            ".pdf" => StartsWith((byte)'%', (byte)'P', (byte)'D', (byte)'F', (byte)'-'),
+            ".png" => StartsWith(0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A),
+            ".jpg" or ".jpeg" => StartsWith(0xFF, 0xD8, 0xFF),
+            ".vsdx" => StartsWith(0x50, 0x4B, 0x03, 0x04),
+            ".vsd" => StartsWith(0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1),
+            ".drawio" => data.Length > 0
+                && System.Text.Encoding.UTF8.GetString(data, 0, Math.Min(data.Length, 512)).TrimStart('\uFEFF', ' ', '\r', '\n', '\t').StartsWith('<'),
+            _ => false
+        };
+    }
+
     private readonly ITInventoryDbContext _db;
     private readonly ICurrentUserService _currentUser;
     private readonly IActivityLogger _activityLogger;
@@ -94,6 +119,13 @@ public class CountryTopologyController : Controller
 
         using var stream = new MemoryStream();
         await file.CopyToAsync(stream);
+        var bytes = stream.ToArray();
+
+        if (!ContentMatchesExtension(extension, bytes))
+        {
+            TempData["Error"] = "The file's contents don't match its extension. Make sure it's a genuine PDF, Visio, draw.io or image file.";
+            return RedirectToAction(nameof(Index), new { countryId });
+        }
 
         var existing = await _db.CountryTopologyFiles.FirstOrDefaultAsync(f => f.CountryId == countryId);
         if (existing is null)
@@ -104,7 +136,7 @@ public class CountryTopologyController : Controller
 
         existing.FileName = file.FileName;
         existing.ContentType = contentType;
-        existing.FileData = stream.ToArray();
+        existing.FileData = bytes;
         existing.FileSize = file.Length;
         existing.UploadedAt = DateTime.UtcNow;
         existing.UploadedBy = _currentUser.Username;
