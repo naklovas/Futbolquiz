@@ -25,18 +25,14 @@
 <body class="min-h-screen bg-slate-50 text-slate-800 flex flex-col">
     <header class="bg-white border-b border-slate-200 shadow-sm">
         <nav class="max-w-7xl mx-auto px-4">
-            <div class="flex items-center justify-between h-16 gap-3">
+            <div class="flex items-center justify-between flex-wrap min-h-16 py-2 gap-3">
                 <a asp-controller="Home" asp-action="Index" class="flex-shrink-0 flex items-center">
                     <img src="~/images/ziraat-bank-logo.png" alt="Ziraat Bank" class="h-7 w-auto" />
                 </a>
 
                 @if (User.Identity?.IsAuthenticated == true)
                 {
-                    <button id="mobile-menu-toggle" class="xl:hidden text-slate-500 hover:text-slate-900 flex-shrink-0">
-                        <i class="fa-solid fa-bars text-xl"></i>
-                    </button>
-
-                    <div class="hidden xl:flex items-center gap-0.5">
+                    <div class="flex flex-wrap items-center gap-0.5">
                         <a asp-controller="PhysicalDevices" asp-action="Index" onclick="showLoadingOverlay()" class="flex-shrink-0 whitespace-nowrap px-2.5 py-2 rounded-md text-sm font-medium text-slate-600 hover:text-brand-700 hover:bg-brand-50 transition">
                             <i class="fa-solid fa-desktop mr-1.5"></i>Physical Devices
                         </a>
@@ -85,7 +81,7 @@
                     var fullName = User.FindFirst(ITInventory.Web.Services.AppClaimTypes.FullName)?.Value;
                     var country = User.FindFirst(ITInventory.Web.Services.AppClaimTypes.CountryDisplayName)?.Value
                         ?? User.FindFirst(ITInventory.Web.Services.AppClaimTypes.Country)?.Value;
-                    <div class="hidden xl:block relative group flex-shrink-0 ml-2 pl-3 border-l border-slate-200">
+                    <div class="relative group flex-shrink-0 ml-2 pl-3 border-l border-slate-200">
                         <button class="flex items-center gap-1.5 px-2 py-2 rounded-md text-sm font-medium text-slate-600 hover:text-brand-700 hover:bg-brand-50 transition max-w-[10rem]">
                             <i class="fa-solid fa-user-circle"></i>
                             <span class="truncate">@fullName</span>
@@ -108,33 +104,6 @@
                     </div>
                 }
             </div>
-
-            @if (User.Identity?.IsAuthenticated == true)
-            {
-                <div id="mobile-menu" class="hidden xl:hidden pb-3 space-y-1">
-                    <a asp-controller="PhysicalDevices" asp-action="Index" onclick="showLoadingOverlay()" class="block px-3 py-2 rounded-md text-sm font-medium text-slate-600 hover:text-brand-700 hover:bg-brand-50">Physical Devices</a>
-                    <a asp-controller="Servers" asp-action="Index" onclick="showLoadingOverlay()" class="block px-3 py-2 rounded-md text-sm font-medium text-slate-600 hover:text-brand-700 hover:bg-brand-50">Servers</a>
-                    <a asp-controller="ServerEndpoints" asp-action="Index" onclick="showLoadingOverlay()" class="block px-3 py-2 rounded-md text-sm font-medium text-slate-600 hover:text-brand-700 hover:bg-brand-50">Server Endpoints</a>
-                    <a asp-controller="Applications" asp-action="Index" onclick="showLoadingOverlay()" class="block px-3 py-2 rounded-md text-sm font-medium text-slate-600 hover:text-brand-700 hover:bg-brand-50">Applications</a>
-                    <a asp-controller="Licenses" asp-action="Index" onclick="showLoadingOverlay()" class="block px-3 py-2 rounded-md text-sm font-medium text-slate-600 hover:text-brand-700 hover:bg-brand-50">Licenses</a>
-                    <a asp-controller="Circuits" asp-action="Index" onclick="showLoadingOverlay()" class="block px-3 py-2 rounded-md text-sm font-medium text-slate-600 hover:text-brand-700 hover:bg-brand-50">Circuits</a>
-                    <a asp-controller="Companies" asp-action="Index" onclick="showLoadingOverlay()" class="block px-3 py-2 rounded-md text-sm font-medium text-slate-600 hover:text-brand-700 hover:bg-brand-50">Companies</a>
-                    <a asp-controller="DevicePool" asp-action="Index" onclick="showLoadingOverlay()" class="block px-3 py-2 rounded-md text-sm font-medium text-slate-600 hover:text-brand-700 hover:bg-brand-50">Device Pool</a>
-                    <a asp-controller="CountryTopology" asp-action="Index" onclick="showLoadingOverlay()" class="block px-3 py-2 rounded-md text-sm font-medium text-slate-600 hover:text-brand-700 hover:bg-brand-50">Topology</a>
-                    @if (User.IsInRole("admin"))
-                    {
-                        <a asp-controller="AdminUsers" asp-action="Index" class="block px-3 py-2 rounded-md text-sm font-medium text-slate-600 hover:text-brand-700 hover:bg-brand-50">Users</a>
-                        <a asp-controller="AdminCountries" asp-action="Index" class="block px-3 py-2 rounded-md text-sm font-medium text-slate-600 hover:text-brand-700 hover:bg-brand-50">Countries</a>
-                        <a asp-controller="AdminDeviceProfiles" asp-action="Index" class="block px-3 py-2 rounded-md text-sm font-medium text-slate-600 hover:text-brand-700 hover:bg-brand-50">Device Profiles</a>
-                        <a asp-controller="AdminOriginCountries" asp-action="Index" class="block px-3 py-2 rounded-md text-sm font-medium text-slate-600 hover:text-brand-700 hover:bg-brand-50">Origin Countries</a>
-                        <a asp-controller="AdminLocations" asp-action="Index" class="block px-3 py-2 rounded-md text-sm font-medium text-slate-600 hover:text-brand-700 hover:bg-brand-50">Locations</a>
-                        <a asp-controller="AdminActivityLog" asp-action="Index" class="block px-3 py-2 rounded-md text-sm font-medium text-slate-600 hover:text-brand-700 hover:bg-brand-50">Activity Log</a>
-                    }
-                    <form asp-controller="Account" asp-action="Logout" method="post">
-                        <button type="submit" class="w-full text-left px-3 py-2 rounded-md text-sm font-medium text-slate-600 hover:text-brand-700 hover:bg-brand-50">Log Out</button>
-                    </form>
-                </div>
-            }
         </nav>
     </header>
 

@@ -263,14 +263,6 @@ function initColumnChooser(table) {
 }
 
 document.addEventListener('DOMContentLoaded', function () {
-    var toggle = document.getElementById('mobile-menu-toggle');
-    var menu = document.getElementById('mobile-menu');
-    if (toggle && menu) {
-        toggle.addEventListener('click', function () {
-            menu.classList.toggle('hidden');
-        });
-    }
-
     var modal = document.getElementById('confirm-modal');
     if (modal) {
         modal.addEventListener('click', function (e) {
