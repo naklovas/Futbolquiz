@@ -3,6 +3,7 @@ using ITInventory.Data;
 using ITInventory.Web.Models;
 using ITInventory.Web.Models.Home;
 using ITInventory.Web.Services;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -147,6 +148,7 @@ public class HomeController : Controller
 
     [ResponseCache(Duration = 0, Location = ResponseCacheLocation.None, NoStore = true)]
     [HttpGet]
+    [AllowAnonymous]
     public IActionResult Error()
     {
         return View(new ErrorViewModel { RequestId = Activity.Current?.Id ?? HttpContext.TraceIdentifier });
