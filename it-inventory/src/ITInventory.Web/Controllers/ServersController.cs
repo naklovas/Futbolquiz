@@ -126,6 +126,8 @@ public class ServersController : Controller
         if (fromPool && sourceId.HasValue)
         {
             var source = await _db.ZiraatYds.FindAsync(sourceId.Value);
+            if (source is not null && !_currentUser.IsAdmin && source.RepositoryName != _currentUser.Country)
+                source = null;
             if (source is not null)
             {
                 vm.SourceZiraatYdId = source.Id;
