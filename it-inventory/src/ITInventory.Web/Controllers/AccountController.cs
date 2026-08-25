@@ -12,6 +12,7 @@ using Microsoft.Extensions.Options;
 
 namespace ITInventory.Web.Controllers;
 
+[RequireHttps]
 public class AccountController : Controller
 {
     private readonly ILdapAuthenticationService _ldapAuth;
