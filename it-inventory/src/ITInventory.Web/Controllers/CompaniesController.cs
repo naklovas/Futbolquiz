@@ -111,10 +111,12 @@ public class CompaniesController : Controller
     {
         if (!_currentUser.CanEdit) return Forbid();
 
-        if (!_currentUser.IsAdmin)
-            vm.CountryId = _currentUser.CountryId ?? 0;
+        var effectiveCountryId = _currentUser.IsAdmin ? vm.CountryId : (_currentUser.CountryId ?? 0);
+        if (!await _db.Countries.AnyAsync(c => c.Id == effectiveCountryId))
+            ModelState.AddModelError(nameof(vm.CountryId), "Please select a valid country.");
+        vm.CountryId = effectiveCountryId;
 
-        if (await _db.Companies.AnyAsync(c => c.Name == vm.Name && c.CountryId == vm.CountryId))
+        if (await _db.Companies.AnyAsync(c => c.Name == vm.Name && c.CountryId == effectiveCountryId))
             ModelState.AddModelError(nameof(vm.Name), "A company with this name already exists for this country.");
 
         if (vm.CompanyType == CompanyType.Other && string.IsNullOrWhiteSpace(vm.OtherTypeDescription))
@@ -128,7 +130,7 @@ public class CompaniesController : Controller
 
         var entity = new Company
         {
-            CountryId = vm.CountryId,
+            CountryId = effectiveCountryId,
             Name = vm.Name,
             CompanyType = vm.CompanyType,
             OtherTypeDescription = vm.CompanyType == CompanyType.Other ? vm.OtherTypeDescription : null,
@@ -201,10 +203,12 @@ public class CompaniesController : Controller
         if (entity is null) return NotFound();
         if (!_currentUser.IsAdmin && entity.CountryId != _currentUser.CountryId) return Forbid();
 
-        if (!_currentUser.IsAdmin)
-            vm.CountryId = _currentUser.CountryId ?? 0;
+        var effectiveCountryId = _currentUser.IsAdmin ? vm.CountryId : (_currentUser.CountryId ?? 0);
+        if (!await _db.Countries.AnyAsync(c => c.Id == effectiveCountryId))
+            ModelState.AddModelError(nameof(vm.CountryId), "Please select a valid country.");
+        vm.CountryId = effectiveCountryId;
 
-        if (await _db.Companies.AnyAsync(c => c.Name == vm.Name && c.CountryId == vm.CountryId && c.Id != id))
+        if (await _db.Companies.AnyAsync(c => c.Name == vm.Name && c.CountryId == effectiveCountryId && c.Id != id))
             ModelState.AddModelError(nameof(vm.Name), "A company with this name already exists for this country.");
 
         if (vm.CompanyType == CompanyType.Other && string.IsNullOrWhiteSpace(vm.OtherTypeDescription))
@@ -216,7 +220,7 @@ public class CompaniesController : Controller
             return View(vm);
         }
 
-        entity.CountryId = vm.CountryId;
+        entity.CountryId = effectiveCountryId;
         entity.Name = vm.Name;
         entity.CompanyType = vm.CompanyType;
         entity.OtherTypeDescription = vm.CompanyType == CompanyType.Other ? vm.OtherTypeDescription : null;
