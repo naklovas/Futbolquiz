@@ -155,9 +155,8 @@ public class LicensesController : Controller
     {
         if (!_currentUser.CanEdit) return Forbid();
 
-        var entity = await _db.Licenses.FindAsync(id);
+        var entity = await _db.Licenses.FirstOrDefaultAsync(x => x.Id == id && (_currentUser.IsAdmin || x.CountryId == _currentUser.CountryId));
         if (entity is null) return NotFound();
-        if (!_currentUser.IsAdmin && entity.CountryId != _currentUser.CountryId) return Forbid();
 
         var vm = new LicenseFormViewModel
         {
@@ -185,9 +184,8 @@ public class LicensesController : Controller
         if (!_currentUser.CanEdit) return Forbid();
         if (id != vm.Id) return BadRequest();
 
-        var entity = await _db.Licenses.FindAsync(id);
+        var entity = await _db.Licenses.FirstOrDefaultAsync(x => x.Id == id && (_currentUser.IsAdmin || x.CountryId == _currentUser.CountryId));
         if (entity is null) return NotFound();
-        if (!_currentUser.IsAdmin && entity.CountryId != _currentUser.CountryId) return Forbid();
 
         if (!_currentUser.IsAdmin)
             vm.CountryId = _currentUser.CountryId ?? 0;
@@ -222,9 +220,8 @@ public class LicensesController : Controller
     {
         if (!_currentUser.CanEdit) return Forbid();
 
-        var entity = await _db.Licenses.FindAsync(id);
+        var entity = await _db.Licenses.FirstOrDefaultAsync(x => x.Id == id && (_currentUser.IsAdmin || x.CountryId == _currentUser.CountryId));
         if (entity is null) return NotFound();
-        if (!_currentUser.IsAdmin && entity.CountryId != _currentUser.CountryId) return Forbid();
 
         var licenseName = entity.LicenseName;
         _db.Licenses.Remove(entity);

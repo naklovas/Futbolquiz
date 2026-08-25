@@ -170,7 +170,8 @@ public class ServersController : Controller
         PhysicalDevice? hostDevice = null;
         if (vm.HostPhysicalDeviceId.HasValue)
         {
-            hostDevice = await _db.PhysicalDevices.FindAsync(vm.HostPhysicalDeviceId.Value);
+            hostDevice = await _db.PhysicalDevices.FirstOrDefaultAsync(d => d.Id == vm.HostPhysicalDeviceId.Value
+                && (_currentUser.IsAdmin || d.CountryId == _currentUser.CountryId));
             if (hostDevice is null)
                 ModelState.AddModelError(nameof(vm.HostPhysicalDeviceId), "Selected ESXi / Physical Server was not found.");
         }
@@ -238,9 +239,8 @@ public class ServersController : Controller
     {
         if (!_currentUser.CanEdit) return Forbid();
 
-        var entity = await _db.Servers.FindAsync(id);
+        var entity = await _db.Servers.FirstOrDefaultAsync(x => x.Id == id && (_currentUser.IsAdmin || x.CountryId == _currentUser.CountryId));
         if (entity is null) return NotFound();
-        if (!_currentUser.IsAdmin && entity.CountryId != _currentUser.CountryId) return Forbid();
 
         var vm = new ServerFormViewModel
         {
@@ -277,9 +277,8 @@ public class ServersController : Controller
         if (!_currentUser.CanEdit) return Forbid();
         if (id != vm.Id) return BadRequest();
 
-        var entity = await _db.Servers.FindAsync(id);
+        var entity = await _db.Servers.FirstOrDefaultAsync(x => x.Id == id && (_currentUser.IsAdmin || x.CountryId == _currentUser.CountryId));
         if (entity is null) return NotFound();
-        if (!_currentUser.IsAdmin && entity.CountryId != _currentUser.CountryId) return Forbid();
 
         if (!_currentUser.IsAdmin)
             vm.CountryId = _currentUser.CountryId ?? 0;
@@ -327,9 +326,8 @@ public class ServersController : Controller
     {
         if (!_currentUser.CanEdit) return Forbid();
 
-        var entity = await _db.Servers.FindAsync(id);
+        var entity = await _db.Servers.FirstOrDefaultAsync(x => x.Id == id && (_currentUser.IsAdmin || x.CountryId == _currentUser.CountryId));
         if (entity is null) return NotFound();
-        if (!_currentUser.IsAdmin && entity.CountryId != _currentUser.CountryId) return Forbid();
 
         var hostName = entity.HostName;
         _db.Servers.Remove(entity);

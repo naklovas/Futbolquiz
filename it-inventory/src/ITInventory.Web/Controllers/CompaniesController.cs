@@ -162,9 +162,9 @@ public class CompaniesController : Controller
     {
         if (!_currentUser.CanEdit) return Forbid();
 
-        var company = await _db.Companies.Include(c => c.Contacts).FirstOrDefaultAsync(c => c.Id == id);
+        var company = await _db.Companies.Include(c => c.Contacts).FirstOrDefaultAsync(c => c.Id == id
+            && (_currentUser.IsAdmin || c.CountryId == _currentUser.CountryId));
         if (company is null) return NotFound();
-        if (!_currentUser.IsAdmin && company.CountryId != _currentUser.CountryId) return Forbid();
 
         var vm = new CompanyFormViewModel
         {
@@ -199,9 +199,9 @@ public class CompaniesController : Controller
         if (!_currentUser.CanEdit) return Forbid();
         if (id != vm.Id) return BadRequest();
 
-        var entity = await _db.Companies.Include(c => c.Contacts).FirstOrDefaultAsync(c => c.Id == id);
+        var entity = await _db.Companies.Include(c => c.Contacts).FirstOrDefaultAsync(c => c.Id == id
+            && (_currentUser.IsAdmin || c.CountryId == _currentUser.CountryId));
         if (entity is null) return NotFound();
-        if (!_currentUser.IsAdmin && entity.CountryId != _currentUser.CountryId) return Forbid();
 
         var effectiveCountryId = _currentUser.IsAdmin ? vm.CountryId : (_currentUser.CountryId ?? 0);
         if (!await _db.Countries.AnyAsync(c => c.Id == effectiveCountryId))
@@ -271,9 +271,9 @@ public class CompaniesController : Controller
     {
         if (!_currentUser.CanEdit) return Forbid();
 
-        var company = await _db.Companies.FindAsync(id);
+        var company = await _db.Companies.FirstOrDefaultAsync(c => c.Id == id
+            && (_currentUser.IsAdmin || c.CountryId == _currentUser.CountryId));
         if (company is null) return NotFound();
-        if (!_currentUser.IsAdmin && company.CountryId != _currentUser.CountryId) return Forbid();
 
         var companyName = company.Name;
         _db.Companies.Remove(company);

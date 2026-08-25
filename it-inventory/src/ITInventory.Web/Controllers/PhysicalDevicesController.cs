@@ -218,9 +218,8 @@ public class PhysicalDevicesController : Controller
     {
         if (!_currentUser.CanEdit) return Forbid();
 
-        var entity = await _db.PhysicalDevices.FindAsync(id);
+        var entity = await _db.PhysicalDevices.FirstOrDefaultAsync(x => x.Id == id && (_currentUser.IsAdmin || x.CountryId == _currentUser.CountryId));
         if (entity is null) return NotFound();
-        if (!_currentUser.IsAdmin && entity.CountryId != _currentUser.CountryId) return Forbid();
 
         var vm = new PhysicalDeviceFormViewModel
         {
@@ -260,9 +259,8 @@ public class PhysicalDevicesController : Controller
         if (!_currentUser.CanEdit) return Forbid();
         if (id != vm.Id) return BadRequest();
 
-        var entity = await _db.PhysicalDevices.FindAsync(id);
+        var entity = await _db.PhysicalDevices.FirstOrDefaultAsync(x => x.Id == id && (_currentUser.IsAdmin || x.CountryId == _currentUser.CountryId));
         if (entity is null) return NotFound();
-        if (!_currentUser.IsAdmin && entity.CountryId != _currentUser.CountryId) return Forbid();
 
         if (!_currentUser.IsAdmin)
             vm.CountryId = _currentUser.CountryId ?? 0;
@@ -310,9 +308,8 @@ public class PhysicalDevicesController : Controller
     {
         if (!_currentUser.CanEdit) return Forbid();
 
-        var entity = await _db.PhysicalDevices.FindAsync(id);
+        var entity = await _db.PhysicalDevices.FirstOrDefaultAsync(x => x.Id == id && (_currentUser.IsAdmin || x.CountryId == _currentUser.CountryId));
         if (entity is null) return NotFound();
-        if (!_currentUser.IsAdmin && entity.CountryId != _currentUser.CountryId) return Forbid();
 
         var deviceName = entity.DeviceName;
         _db.PhysicalDevices.Remove(entity);

@@ -110,8 +110,9 @@ public class ServerEndpointsController : Controller
     {
         if (!_currentUser.CanEdit) return Forbid();
 
-        var server = await _db.Servers.FindAsync(vm.ServerId);
-        if (server is null || (!_currentUser.IsAdmin && server.CountryId != _currentUser.CountryId))
+        var server = await _db.Servers.FirstOrDefaultAsync(s => s.Id == vm.ServerId
+            && (_currentUser.IsAdmin || s.CountryId == _currentUser.CountryId));
+        if (server is null)
             ModelState.AddModelError(nameof(vm.ServerId), "Please select a valid server.");
 
         if (!ModelState.IsValid)
@@ -142,9 +143,9 @@ public class ServerEndpointsController : Controller
     {
         if (!_currentUser.CanEdit) return Forbid();
 
-        var entity = await _db.ServerEndpoints.Include(e => e.Server).FirstOrDefaultAsync(e => e.Id == id);
+        var entity = await _db.ServerEndpoints.Include(e => e.Server).FirstOrDefaultAsync(e => e.Id == id
+            && (_currentUser.IsAdmin || e.Server!.CountryId == _currentUser.CountryId));
         if (entity is null) return NotFound();
-        if (!_currentUser.IsAdmin && entity.Server!.CountryId != _currentUser.CountryId) return Forbid();
 
         var vm = new ServerEndpointFormViewModel
         {
@@ -167,12 +168,13 @@ public class ServerEndpointsController : Controller
         if (!_currentUser.CanEdit) return Forbid();
         if (id != vm.Id) return BadRequest();
 
-        var entity = await _db.ServerEndpoints.Include(e => e.Server).FirstOrDefaultAsync(e => e.Id == id);
+        var entity = await _db.ServerEndpoints.Include(e => e.Server).FirstOrDefaultAsync(e => e.Id == id
+            && (_currentUser.IsAdmin || e.Server!.CountryId == _currentUser.CountryId));
         if (entity is null) return NotFound();
-        if (!_currentUser.IsAdmin && entity.Server!.CountryId != _currentUser.CountryId) return Forbid();
 
-        var server = await _db.Servers.FindAsync(vm.ServerId);
-        if (server is null || (!_currentUser.IsAdmin && server.CountryId != _currentUser.CountryId))
+        var server = await _db.Servers.FirstOrDefaultAsync(s => s.Id == vm.ServerId
+            && (_currentUser.IsAdmin || s.CountryId == _currentUser.CountryId));
+        if (server is null)
             ModelState.AddModelError(nameof(vm.ServerId), "Please select a valid server.");
 
         if (!ModelState.IsValid)
@@ -200,9 +202,9 @@ public class ServerEndpointsController : Controller
     {
         if (!_currentUser.CanEdit) return Forbid();
 
-        var entity = await _db.ServerEndpoints.Include(e => e.Server).FirstOrDefaultAsync(e => e.Id == id);
+        var entity = await _db.ServerEndpoints.Include(e => e.Server).FirstOrDefaultAsync(e => e.Id == id
+            && (_currentUser.IsAdmin || e.Server!.CountryId == _currentUser.CountryId));
         if (entity is null) return NotFound();
-        if (!_currentUser.IsAdmin && entity.Server!.CountryId != _currentUser.CountryId) return Forbid();
 
         var label = $"{entity.IpAddress}:{entity.Port}";
         _db.ServerEndpoints.Remove(entity);
