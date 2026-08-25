@@ -123,7 +123,7 @@ public class ServerEndpointsController : Controller
 
         var entity = new ServerEndpoint
         {
-            ServerId = vm.ServerId,
+            ServerId = vm.ServerId!.Value,
             IpAddress = vm.IpAddress,
             Port = vm.Port,
             ApplicationId = vm.ApplicationId,
@@ -183,7 +183,7 @@ public class ServerEndpointsController : Controller
             return View(vm);
         }
 
-        entity.ServerId = vm.ServerId;
+        entity.ServerId = vm.ServerId!.Value;
         entity.IpAddress = vm.IpAddress;
         entity.Port = vm.Port;
         entity.ApplicationId = vm.ApplicationId;

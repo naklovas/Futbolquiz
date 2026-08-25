@@ -111,7 +111,7 @@ public class CompaniesController : Controller
     {
         if (!_currentUser.CanEdit) return Forbid();
 
-        var effectiveCountryId = _currentUser.IsAdmin ? vm.CountryId : (_currentUser.CountryId ?? 0);
+        var effectiveCountryId = _currentUser.IsAdmin ? (vm.CountryId ?? 0) : (_currentUser.CountryId ?? 0);
         if (!await _db.Countries.AnyAsync(c => c.Id == effectiveCountryId))
             ModelState.AddModelError(nameof(vm.CountryId), "Please select a valid country.");
         vm.CountryId = effectiveCountryId;
@@ -203,7 +203,7 @@ public class CompaniesController : Controller
             && (_currentUser.IsAdmin || c.CountryId == _currentUser.CountryId));
         if (entity is null) return NotFound();
 
-        var effectiveCountryId = _currentUser.IsAdmin ? vm.CountryId : (_currentUser.CountryId ?? 0);
+        var effectiveCountryId = _currentUser.IsAdmin ? (vm.CountryId ?? 0) : (_currentUser.CountryId ?? 0);
         if (!await _db.Countries.AnyAsync(c => c.Id == effectiveCountryId))
             ModelState.AddModelError(nameof(vm.CountryId), "Please select a valid country.");
         vm.CountryId = effectiveCountryId;

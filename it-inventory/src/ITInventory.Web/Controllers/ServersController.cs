@@ -184,7 +184,7 @@ public class ServersController : Controller
 
         var entity = new Server
         {
-            CountryId = vm.CountryId,
+            CountryId = vm.CountryId!.Value,
             DeviceProfileId = vm.DeviceProfileId,
             SourceZiraatYdId = vm.SourceZiraatYdId,
             HostName = vm.HostName,
@@ -295,7 +295,7 @@ public class ServersController : Controller
             return View(vm);
         }
 
-        entity.CountryId = vm.CountryId;
+        entity.CountryId = vm.CountryId!.Value;
         entity.HostName = vm.HostName;
         entity.ApplianceType = vm.ApplianceType;
         entity.LocationCategory = vm.LocationCategory;

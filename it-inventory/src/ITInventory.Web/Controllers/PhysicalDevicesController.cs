@@ -181,8 +181,8 @@ public class PhysicalDevicesController : Controller
 
         var entity = new PhysicalDevice
         {
-            CountryId = vm.CountryId,
-            CategoryId = vm.CategoryId,
+            CountryId = vm.CountryId!.Value,
+            CategoryId = vm.CategoryId!.Value,
             DeviceProfileId = vm.DeviceProfileId,
             SourceZiraatYdId = vm.SourceZiraatYdId,
             DeviceName = vm.DeviceName,
@@ -273,8 +273,8 @@ public class PhysicalDevicesController : Controller
             return View(vm);
         }
 
-        entity.CountryId = vm.CountryId;
-        entity.CategoryId = vm.CategoryId;
+        entity.CountryId = vm.CountryId!.Value;
+        entity.CategoryId = vm.CategoryId!.Value;
         entity.DeviceProfileId = vm.DeviceProfileId;
         entity.DeviceName = vm.DeviceName;
         entity.Brand = vm.Brand;

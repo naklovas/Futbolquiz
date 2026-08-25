@@ -130,7 +130,7 @@ public class LicensesController : Controller
 
         var entity = new License
         {
-            CountryId = vm.CountryId,
+            CountryId = vm.CountryId!.Value,
             LicenseName = vm.LicenseName,
             VendorSupplier = vm.VendorSupplier,
             CompanyId = vm.CompanyId,
@@ -196,7 +196,7 @@ public class LicensesController : Controller
             return View(vm);
         }
 
-        entity.CountryId = vm.CountryId;
+        entity.CountryId = vm.CountryId!.Value;
         entity.LicenseName = vm.LicenseName;
         entity.VendorSupplier = vm.VendorSupplier;
         entity.CompanyId = vm.CompanyId;

@@ -129,7 +129,7 @@ public class CircuitsController : Controller
 
         var entity = new Circuit
         {
-            CountryId = vm.CountryId,
+            CountryId = vm.CountryId!.Value,
             CircuitType = vm.CircuitType,
             CircuitCapacity = vm.CircuitCapacity,
             Provider = vm.Provider,
@@ -193,7 +193,7 @@ public class CircuitsController : Controller
             return View(vm);
         }
 
-        entity.CountryId = vm.CountryId;
+        entity.CountryId = vm.CountryId!.Value;
         entity.CircuitType = vm.CircuitType;
         entity.CircuitCapacity = vm.CircuitCapacity;
         entity.Provider = vm.Provider;

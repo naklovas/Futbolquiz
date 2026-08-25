@@ -134,7 +134,7 @@ public class ApplicationsController : Controller
 
         var entity = new Application
         {
-            CountryId = vm.CountryId,
+            CountryId = vm.CountryId!.Value,
             Name = vm.Name,
             CompanyId = vm.CompanyId,
             LicenseId = vm.LicenseId,
@@ -198,7 +198,7 @@ public class ApplicationsController : Controller
             return View(vm);
         }
 
-        entity.CountryId = vm.CountryId;
+        entity.CountryId = vm.CountryId!.Value;
         entity.Name = vm.Name;
         entity.CompanyId = vm.CompanyId;
         entity.LicenseId = vm.LicenseId;

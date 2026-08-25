@@ -9,7 +9,7 @@ public class ApplicationFormViewModel
 
     [Required(ErrorMessage = "Country is required.")]
     [Display(Name = "Country")]
-    public int CountryId { get; set; }
+    public int? CountryId { get; set; }
 
     [Required(ErrorMessage = "Application name is required.")]
     [StringLength(255)]

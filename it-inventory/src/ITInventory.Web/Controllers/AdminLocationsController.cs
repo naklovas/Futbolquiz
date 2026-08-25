@@ -56,7 +56,7 @@ public class AdminLocationsController : Controller
 
         _db.Locations.Add(new Location
         {
-            CountryId = vm.CountryId,
+            CountryId = vm.CountryId!.Value,
             Branch = vm.Branch,
             Class = vm.Class,
             IsActive = vm.IsActive,
@@ -103,7 +103,7 @@ public class AdminLocationsController : Controller
         var location = await _db.Locations.FindAsync(id);
         if (location is null) return NotFound();
 
-        location.CountryId = vm.CountryId;
+        location.CountryId = vm.CountryId!.Value;
         location.Branch = vm.Branch;
         location.Class = vm.Class;
         location.IsActive = vm.IsActive;

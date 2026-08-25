@@ -9,7 +9,7 @@ public class ServerEndpointFormViewModel
 
     [Required(ErrorMessage = "Server is required.")]
     [Display(Name = "Server")]
-    public int ServerId { get; set; }
+    public int? ServerId { get; set; }
 
     [Required(ErrorMessage = "IP address is required.")]
     [StringLength(50)]

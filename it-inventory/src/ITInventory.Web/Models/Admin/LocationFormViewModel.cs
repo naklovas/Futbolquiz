@@ -8,7 +8,7 @@ public class LocationFormViewModel
 
     [Required(ErrorMessage = "Country is required.")]
     [Display(Name = "Country")]
-    public int CountryId { get; set; }
+    public int? CountryId { get; set; }
 
     [Required(ErrorMessage = "Branch is required.")]
     [StringLength(200)]
