@@ -44,7 +44,7 @@ public class PhysicalDeviceFormViewModel
 
     [Required(ErrorMessage = "Site role is required.")]
     [Display(Name = "Site Role")]
-    public SiteRole? SiteRole { get; set; }
+    public SiteRole? SiteClassification { get; set; }
 
     [Required(ErrorMessage = "Software version is required.")]
     [StringLength(150)]

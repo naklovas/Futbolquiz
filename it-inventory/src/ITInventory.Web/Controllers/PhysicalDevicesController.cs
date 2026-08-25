@@ -190,7 +190,7 @@ public class PhysicalDevicesController : Controller
             Model = vm.Model,
             ApplianceType = vm.ApplianceType,
             LocationCategory = vm.LocationCategory!.Value,
-            SiteRole = vm.SiteRole!.Value,
+            SiteRole = vm.SiteClassification!.Value,
             SoftwareVersion = vm.SoftwareVersion,
             SerialNo = vm.SerialNo,
             IpAddress = vm.IpAddress,
@@ -233,7 +233,7 @@ public class PhysicalDevicesController : Controller
             Model = entity.Model,
             ApplianceType = entity.ApplianceType,
             LocationCategory = entity.LocationCategory,
-            SiteRole = entity.SiteRole,
+            SiteClassification = entity.SiteRole,
             SoftwareVersion = entity.SoftwareVersion,
             SerialNo = entity.SerialNo,
             IpAddress = entity.IpAddress,
@@ -281,7 +281,7 @@ public class PhysicalDevicesController : Controller
         entity.Model = vm.Model;
         entity.ApplianceType = vm.ApplianceType;
         entity.LocationCategory = vm.LocationCategory!.Value;
-        entity.SiteRole = vm.SiteRole!.Value;
+        entity.SiteRole = vm.SiteClassification!.Value;
         entity.SoftwareVersion = vm.SoftwareVersion;
         entity.SerialNo = vm.SerialNo;
         entity.IpAddress = vm.IpAddress;

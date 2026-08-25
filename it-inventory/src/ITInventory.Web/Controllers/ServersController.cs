@@ -251,7 +251,7 @@ public class ServersController : Controller
             HostName = entity.HostName,
             ApplianceType = entity.ApplianceType,
             LocationCategory = entity.LocationCategory,
-            SiteRole = entity.SiteRole,
+            SiteClassification = entity.SiteRole,
             HostPhysicalDeviceId = entity.HostPhysicalDeviceId,
             OperatingSystem = entity.OperatingSystem,
             Brand = entity.Brand,
@@ -299,7 +299,7 @@ public class ServersController : Controller
         entity.HostName = vm.HostName;
         entity.ApplianceType = vm.ApplianceType;
         entity.LocationCategory = vm.LocationCategory;
-        entity.SiteRole = vm.SiteRole;
+        entity.SiteRole = vm.SiteClassification;
         entity.HostPhysicalDeviceId = vm.HostPhysicalDeviceId;
         entity.OperatingSystem = vm.OperatingSystem;
         entity.Brand = vm.Brand;

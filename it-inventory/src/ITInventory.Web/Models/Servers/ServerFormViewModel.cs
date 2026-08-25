@@ -40,7 +40,7 @@ public class ServerFormViewModel
     public LocationCategory LocationCategory { get; set; }
 
     [Display(Name = "Site Role")]
-    public SiteRole SiteRole { get; set; }
+    public SiteRole SiteClassification { get; set; }
 
     [Display(Name = "ESXi / Physical Server")]
     public int? HostPhysicalDeviceId { get; set; }
