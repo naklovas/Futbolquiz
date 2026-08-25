@@ -52,6 +52,10 @@ public class AdminUsersController : Controller
         if (await _db.YdUsers.AnyAsync(u => u.Username == vm.Username))
             ModelState.AddModelError(nameof(vm.Username), "This username already exists.");
 
+        var validRoleIds = await _db.YdRoles.Select(r => r.Id).ToListAsync();
+        if (vm.SelectedRoleIds.Except(validRoleIds).Any())
+            ModelState.AddModelError(nameof(vm.SelectedRoleIds), "One or more selected roles are invalid.");
+
         if (!ModelState.IsValid)
         {
             await PopulateDropdowns();
@@ -116,6 +120,10 @@ public class AdminUsersController : Controller
 
         if (await _db.YdUsers.AnyAsync(u => u.Username == vm.Username && u.Id != id))
             ModelState.AddModelError(nameof(vm.Username), "This username already exists.");
+
+        var validRoleIds = await _db.YdRoles.Select(r => r.Id).ToListAsync();
+        if (vm.SelectedRoleIds.Except(validRoleIds).Any())
+            ModelState.AddModelError(nameof(vm.SelectedRoleIds), "One or more selected roles are invalid.");
 
         if (!ModelState.IsValid)
         {
