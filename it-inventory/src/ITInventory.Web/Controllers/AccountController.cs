@@ -12,7 +12,6 @@ using Microsoft.Extensions.Options;
 
 namespace ITInventory.Web.Controllers;
 
-[AllowAnonymous]
 public class AccountController : Controller
 {
     private readonly ILdapAuthenticationService _ldapAuth;
@@ -36,6 +35,7 @@ public class AccountController : Controller
     }
 
     [HttpGet]
+    [AllowAnonymous]
     public IActionResult Login(string? returnUrl = null)
     {
         return View(new LoginViewModel { ReturnUrl = returnUrl });
@@ -43,6 +43,7 @@ public class AccountController : Controller
 
     [HttpPost]
     [ValidateAntiForgeryToken]
+    [AllowAnonymous]
     public async Task<IActionResult> Login(LoginViewModel model)
     {
         if (!ModelState.IsValid)
@@ -156,6 +157,7 @@ public class AccountController : Controller
         return RedirectToAction(nameof(Login));
     }
 
+    [AllowAnonymous]
     public IActionResult AccessDenied()
     {
         return View();
