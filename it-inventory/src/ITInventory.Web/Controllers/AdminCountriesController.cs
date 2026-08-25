@@ -21,12 +21,14 @@ public class AdminCountriesController : Controller
         _activityLogger = activityLogger;
     }
 
+    [HttpGet]
     public async Task<IActionResult> Index()
     {
         var countries = await _db.Countries.OrderBy(c => c.Name).ToListAsync();
         return View(countries);
     }
 
+    [HttpGet]
     public IActionResult Create() => View(new CountryFormViewModel());
 
     [HttpPost]
@@ -53,6 +55,7 @@ public class AdminCountriesController : Controller
         return RedirectToAction(nameof(Index));
     }
 
+    [HttpGet]
     public async Task<IActionResult> Edit(int id)
     {
         var country = await _db.Countries.FindAsync(id);

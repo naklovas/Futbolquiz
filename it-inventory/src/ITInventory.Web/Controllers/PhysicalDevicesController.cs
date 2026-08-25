@@ -26,6 +26,7 @@ public class PhysicalDevicesController : Controller
         _activityLogger = activityLogger;
     }
 
+    [HttpGet]
     public async Task<IActionResult> Index(string? countryId, int? categoryId, int page = 1)
     {
         var isAdmin = _currentUser.IsAdmin;
@@ -70,6 +71,7 @@ public class PhysicalDevicesController : Controller
         return View(items);
     }
 
+    [HttpGet]
     public async Task<IActionResult> Export(string? countryId, int? categoryId)
     {
         if (!_currentUser.IsAdmin) return Forbid();
@@ -122,6 +124,7 @@ public class PhysicalDevicesController : Controller
         return File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", $"PhysicalDevices_Export_{DateTime.UtcNow:yyyyMMdd_HHmmss}.xlsx");
     }
 
+    [HttpGet]
     public async Task<IActionResult> Create(bool fromPool = false, int? sourceId = null, int? countryId = null, int? categoryId = null)
     {
         if (!_currentUser.CanEdit) return Forbid();
@@ -208,6 +211,7 @@ public class PhysicalDevicesController : Controller
         return RedirectToAction(nameof(Index));
     }
 
+    [HttpGet]
     public async Task<IActionResult> Edit(int id)
     {
         if (!_currentUser.CanEdit) return Forbid();
@@ -315,6 +319,7 @@ public class PhysicalDevicesController : Controller
         return RedirectToAction(nameof(Index));
     }
 
+    [HttpGet]
     public async Task<IActionResult> Import()
     {
         if (!_currentUser.IsAdmin) return Forbid();
@@ -323,6 +328,7 @@ public class PhysicalDevicesController : Controller
         return View("Import");
     }
 
+    [HttpGet]
     public IActionResult DownloadTemplate()
     {
         if (!_currentUser.IsAdmin) return Forbid();

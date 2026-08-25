@@ -35,6 +35,7 @@ public class AdminActivityLogController : Controller
     // from route data ("Index", the current action's own name) instead of the query string --
     // the filter dropdown's real value was silently discarded and replaced with "Index", which
     // never matches any ActivityLogs.Action value, so the filtered result was always empty.
+    [HttpGet]
     public async Task<IActionResult> Index(string? username, string? actionFilter, string? entityType, DateTime? fromDate, DateTime? toDate, int page = 1)
     {
         // Only the first filter/search submit (the hidden "searched" field) triggers a query --
@@ -63,6 +64,7 @@ public class AdminActivityLogController : Controller
         return View(items);
     }
 
+    [HttpGet]
     public async Task<IActionResult> Export(string? username, string? actionFilter, string? entityType, DateTime? fromDate, DateTime? toDate)
     {
         var query = BuildFilteredQuery(username, actionFilter, entityType, fromDate, toDate);

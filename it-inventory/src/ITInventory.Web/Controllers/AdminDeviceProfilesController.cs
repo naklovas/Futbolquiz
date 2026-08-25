@@ -19,6 +19,7 @@ public class AdminDeviceProfilesController : Controller
         _activityLogger = activityLogger;
     }
 
+    [HttpGet]
     public async Task<IActionResult> Index()
     {
         var profiles = await _db.DeviceProfileCatalogs

@@ -25,6 +25,7 @@ public class AdminLocationsController : Controller
         _activityLogger = activityLogger;
     }
 
+    [HttpGet]
     public async Task<IActionResult> Index()
     {
         var locations = await _db.Locations.Include(l => l.Country)
@@ -33,6 +34,7 @@ public class AdminLocationsController : Controller
         return View(locations);
     }
 
+    [HttpGet]
     public async Task<IActionResult> Create()
     {
         await PopulateDropdowns();
@@ -66,6 +68,7 @@ public class AdminLocationsController : Controller
         return RedirectToAction(nameof(Index));
     }
 
+    [HttpGet]
     public async Task<IActionResult> Edit(int id)
     {
         var location = await _db.Locations.FindAsync(id);
@@ -134,11 +137,13 @@ public class AdminLocationsController : Controller
         return RedirectToAction(nameof(Index));
     }
 
+    [HttpGet]
     public IActionResult Import()
     {
         return View();
     }
 
+    [HttpGet]
     public IActionResult DownloadTemplate()
     {
         var bytes = ExcelImportHelpers.CreateTemplateBytes("Locations", "Country", "Branch", "Class");

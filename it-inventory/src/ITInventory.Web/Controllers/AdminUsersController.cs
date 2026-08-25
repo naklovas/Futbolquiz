@@ -22,6 +22,7 @@ public class AdminUsersController : Controller
         _activityLogger = activityLogger;
     }
 
+    [HttpGet]
     public async Task<IActionResult> Index()
     {
         var users = await _db.YdUsers
@@ -37,6 +38,7 @@ public class AdminUsersController : Controller
         return View(users);
     }
 
+    [HttpGet]
     public async Task<IActionResult> Create()
     {
         await PopulateDropdowns();
@@ -78,6 +80,7 @@ public class AdminUsersController : Controller
         return RedirectToAction(nameof(Index));
     }
 
+    [HttpGet]
     public async Task<IActionResult> Edit(int id)
     {
         var user = await _db.YdUsers

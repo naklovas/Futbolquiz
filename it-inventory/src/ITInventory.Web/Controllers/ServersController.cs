@@ -26,6 +26,7 @@ public class ServersController : Controller
         _activityLogger = activityLogger;
     }
 
+    [HttpGet]
     public async Task<IActionResult> Index(string? countryId, int page = 1)
     {
         var isAdmin = _currentUser.IsAdmin;
@@ -60,6 +61,7 @@ public class ServersController : Controller
         return View(items);
     }
 
+    [HttpGet]
     public async Task<IActionResult> Export(string? countryId)
     {
         if (!_currentUser.IsAdmin) return Forbid();
@@ -110,6 +112,7 @@ public class ServersController : Controller
     // already a "Server" device category for that), so keeping a Physical option here only
     // duplicated that. Existing rows created before this change may still be Physical; Edit
     // leaves those alone and fully editable, this only affects new records.
+    [HttpGet]
     public async Task<IActionResult> Create(bool fromPool = false, int? sourceId = null, int? countryId = null)
     {
         if (!_currentUser.CanEdit) return Forbid();
@@ -228,6 +231,7 @@ public class ServersController : Controller
         return RedirectToAction(nameof(Index));
     }
 
+    [HttpGet]
     public async Task<IActionResult> Edit(int id)
     {
         if (!_currentUser.CanEdit) return Forbid();
@@ -341,6 +345,7 @@ public class ServersController : Controller
         return RedirectToAction(nameof(Index));
     }
 
+    [HttpGet]
     public async Task<IActionResult> Import()
     {
         if (!_currentUser.IsAdmin) return Forbid();
@@ -349,6 +354,7 @@ public class ServersController : Controller
         return View("Import");
     }
 
+    [HttpGet]
     public IActionResult DownloadTemplate()
     {
         if (!_currentUser.IsAdmin) return Forbid();

@@ -21,12 +21,14 @@ public class AdminOriginCountriesController : Controller
         _activityLogger = activityLogger;
     }
 
+    [HttpGet]
     public async Task<IActionResult> Index()
     {
         var originCountries = await _db.OriginCountries.OrderBy(c => c.Name).ToListAsync();
         return View(originCountries);
     }
 
+    [HttpGet]
     public IActionResult Create() => View(new OriginCountryFormViewModel());
 
     [HttpPost]
@@ -51,6 +53,7 @@ public class AdminOriginCountriesController : Controller
         return RedirectToAction(nameof(Index));
     }
 
+    [HttpGet]
     public async Task<IActionResult> Edit(int id)
     {
         var originCountry = await _db.OriginCountries.FindAsync(id);

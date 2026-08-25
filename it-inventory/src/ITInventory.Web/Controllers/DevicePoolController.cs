@@ -19,6 +19,7 @@ public class DevicePoolController : Controller
         _currentUser = currentUser;
     }
 
+    [HttpGet]
     public async Task<IActionResult> Index(string? country, int? categoryId, int page = 1)
     {
         ViewBag.Countries = await _db.ZiraatYds

@@ -63,6 +63,7 @@ public class CountryTopologyController : Controller
         _activityLogger = activityLogger;
     }
 
+    [HttpGet]
     public async Task<IActionResult> Index(int? countryId)
     {
         var isAdmin = _currentUser.IsAdmin;
@@ -148,6 +149,7 @@ public class CountryTopologyController : Controller
         return RedirectToAction(nameof(Index), new { countryId });
     }
 
+    [HttpGet]
     public async Task<IActionResult> Download(int countryId)
     {
         if (!_currentUser.IsAdmin && countryId != _currentUser.CountryId) return Forbid();
@@ -174,6 +176,7 @@ public class CountryTopologyController : Controller
     /// they're not offered a preview at all (and .drawio specifically is never sent to an
     /// external viewer service -- that would leak the diagram off-premises).
     /// </summary>
+    [HttpGet]
     public async Task<IActionResult> Preview(int countryId)
     {
         if (!_currentUser.IsAdmin && countryId != _currentUser.CountryId) return Forbid();
