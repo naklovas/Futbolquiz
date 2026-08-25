@@ -140,7 +140,7 @@ public class AccountController : Controller
         await _activityLogger.LogAsync("Login", "User", user.Username);
 
         if (!string.IsNullOrEmpty(model.ReturnUrl) && Url.IsLocalUrl(model.ReturnUrl))
-            return Redirect(model.ReturnUrl);
+            return LocalRedirect(model.ReturnUrl);
 
         return RedirectToAction("Index", "Home");
     }
