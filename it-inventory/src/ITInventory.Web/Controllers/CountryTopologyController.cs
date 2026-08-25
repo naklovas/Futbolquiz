@@ -52,6 +52,23 @@ public class CountryTopologyController : Controller
         };
     }
 
+    /// <summary>
+    /// The uploaded file's original name is attacker-controlled and gets persisted, then later
+    /// flows into the Content-Disposition header on Download and into markup (safely, since
+    /// Razor auto-encodes @Model.FileName) elsewhere. Stripping it down to a safe character set
+    /// once here, at the point it enters the system, means every later use -- however it's
+    /// rendered or sent -- is already working with a clean value.
+    /// </summary>
+    private static string SanitizeFileName(string fileName)
+    {
+        var name = Path.GetFileName(fileName);
+        var cleaned = new string(name.Select(c => char.IsLetterOrDigit(c) || c is '.' or '-' or '_' or ' ' or '(' or ')' ? c : '_').ToArray());
+        cleaned = cleaned.Trim();
+        if (cleaned.Length > 255)
+            cleaned = cleaned[^255..];
+        return string.IsNullOrEmpty(cleaned) ? "file" : cleaned;
+    }
+
     private readonly ITInventoryDbContext _db;
     private readonly ICurrentUserService _currentUser;
     private readonly IActivityLogger _activityLogger;
@@ -135,7 +152,7 @@ public class CountryTopologyController : Controller
             _db.CountryTopologyFiles.Add(existing);
         }
 
-        existing.FileName = file.FileName;
+        existing.FileName = SanitizeFileName(file.FileName);
         existing.ContentType = contentType;
         existing.FileData = bytes;
         existing.FileSize = file.Length;
