@@ -115,7 +115,13 @@ public class CountryTopologyController : Controller
     public async Task<IActionResult> Upload(int countryId, IFormFile file)
     {
         if (!_currentUser.CanEdit) return Forbid();
-        if (!_currentUser.IsAdmin && countryId != _currentUser.CountryId) return Forbid();
+
+        // countryId form alanindan geliyor. Sadece "benim ulkem mi" diye bakmak yetmez --
+        // gercekten var olan bir ulke oldugunu da ayni sorguda dogruluyoruz, boylece
+        // uydurma bir id ile kayit acilamaz.
+        var countryInScope = await _db.Countries.AnyAsync(c => c.Id == countryId
+            && (_currentUser.IsAdmin || c.Id == _currentUser.CountryId));
+        if (!countryInScope) return Forbid();
 
         if (file is null || file.Length == 0)
         {
@@ -146,7 +152,8 @@ public class CountryTopologyController : Controller
             return RedirectToAction(nameof(Index), new { countryId });
         }
 
-        var existing = await _db.CountryTopologyFiles.FirstOrDefaultAsync(f => f.CountryId == countryId);
+        var existing = await _db.CountryTopologyFiles.FirstOrDefaultAsync(f => f.CountryId == countryId
+            && (_currentUser.IsAdmin || f.CountryId == _currentUser.CountryId));
         if (existing is null)
         {
             existing = new CountryTopologyFile { CountryId = countryId };
@@ -170,9 +177,8 @@ public class CountryTopologyController : Controller
     [HttpGet]
     public async Task<IActionResult> Download(int countryId)
     {
-        if (!_currentUser.IsAdmin && countryId != _currentUser.CountryId) return Forbid();
-
-        var file = await _db.CountryTopologyFiles.FirstOrDefaultAsync(f => f.CountryId == countryId);
+        var file = await _db.CountryTopologyFiles.FirstOrDefaultAsync(f => f.CountryId == countryId
+            && (_currentUser.IsAdmin || f.CountryId == _currentUser.CountryId));
         if (file is null) return NotFound();
 
         // fileDownloadName forces Content-Disposition: attachment -- always a plain save,
@@ -197,9 +203,8 @@ public class CountryTopologyController : Controller
     [HttpGet]
     public async Task<IActionResult> Preview(int countryId)
     {
-        if (!_currentUser.IsAdmin && countryId != _currentUser.CountryId) return Forbid();
-
-        var file = await _db.CountryTopologyFiles.FirstOrDefaultAsync(f => f.CountryId == countryId);
+        var file = await _db.CountryTopologyFiles.FirstOrDefaultAsync(f => f.CountryId == countryId
+            && (_currentUser.IsAdmin || f.CountryId == _currentUser.CountryId));
         if (file is null || !InlinePreviewableContentTypes.Contains(file.ContentType)) return NotFound();
 
         return File(file.FileData, file.ContentType);
@@ -210,9 +215,9 @@ public class CountryTopologyController : Controller
     public async Task<IActionResult> Delete(int countryId)
     {
         if (!_currentUser.CanEdit) return Forbid();
-        if (!_currentUser.IsAdmin && countryId != _currentUser.CountryId) return Forbid();
 
-        var file = await _db.CountryTopologyFiles.FirstOrDefaultAsync(f => f.CountryId == countryId);
+        var file = await _db.CountryTopologyFiles.FirstOrDefaultAsync(f => f.CountryId == countryId
+            && (_currentUser.IsAdmin || f.CountryId == _currentUser.CountryId));
         if (file is not null)
         {
             _db.CountryTopologyFiles.Remove(file);
