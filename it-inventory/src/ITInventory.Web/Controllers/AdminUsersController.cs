@@ -49,18 +49,20 @@ public class AdminUsersController : Controller
 
     [HttpPost]
     [ValidateAntiForgeryToken]
-    public async Task<IActionResult> Create(UserFormViewModel vm)
+    public async Task<IActionResult> Create(UserFormViewModel vm, List<int>? selectedRoleIds)
     {
+        var requestedRoleIds = selectedRoleIds ?? new List<int>();
+
         if (await _db.YdUsers.AnyAsync(u => u.Username == vm.Username))
             ModelState.AddModelError(nameof(vm.Username), "This username already exists.");
 
         var validRoleIds = await _db.YdRoles.Select(r => r.Id).ToListAsync();
-        if (vm.SelectedRoleIds.Except(validRoleIds).Any())
-            ModelState.AddModelError(nameof(vm.SelectedRoleIds), "One or more selected roles are invalid.");
+        if (requestedRoleIds.Except(validRoleIds).Any())
+            ModelState.AddModelError(string.Empty, "One or more selected roles are invalid.");
 
         if (!ModelState.IsValid)
         {
-            await PopulateDropdowns();
+            await PopulateDropdowns(requestedRoleIds);
             return View(vm);
         }
 
@@ -77,7 +79,7 @@ public class AdminUsersController : Controller
             CreatedAt = DateTime.UtcNow
         };
 
-        foreach (var roleId in vm.SelectedRoleIds)
+        foreach (var roleId in requestedRoleIds)
             user.UserRoles.Add(new YdUserRole { RoleId = roleId });
 
         _db.YdUsers.Add(user);
@@ -106,30 +108,31 @@ public class AdminUsersController : Controller
             Email = user.Email,
             CountryId = country?.Id,
             IsActive = user.IsActive,
-            ReceiveExpirationNotifications = user.ReceiveExpirationNotifications,
-            SelectedRoleIds = user.UserRoles.Select(ur => ur.RoleId).ToList()
+            ReceiveExpirationNotifications = user.ReceiveExpirationNotifications
         };
 
-        await PopulateDropdowns();
+        await PopulateDropdowns(user.UserRoles.Select(ur => ur.RoleId));
         return View(vm);
     }
 
     [HttpPost]
     [ValidateAntiForgeryToken]
-    public async Task<IActionResult> Edit(int id, UserFormViewModel vm)
+    public async Task<IActionResult> Edit(int id, UserFormViewModel vm, List<int>? selectedRoleIds)
     {
         if (id != vm.Id) return BadRequest();
+
+        var requestedRoleIds = selectedRoleIds ?? new List<int>();
 
         if (await _db.YdUsers.AnyAsync(u => u.Username == vm.Username && u.Id != id))
             ModelState.AddModelError(nameof(vm.Username), "This username already exists.");
 
         var validRoleIds = await _db.YdRoles.Select(r => r.Id).ToListAsync();
-        if (vm.SelectedRoleIds.Except(validRoleIds).Any())
-            ModelState.AddModelError(nameof(vm.SelectedRoleIds), "One or more selected roles are invalid.");
+        if (requestedRoleIds.Except(validRoleIds).Any())
+            ModelState.AddModelError(string.Empty, "One or more selected roles are invalid.");
 
         if (!ModelState.IsValid)
         {
-            await PopulateDropdowns();
+            await PopulateDropdowns(requestedRoleIds);
             return View(vm);
         }
 
@@ -148,7 +151,7 @@ public class AdminUsersController : Controller
         user.ReceiveExpirationNotifications = vm.ReceiveExpirationNotifications;
 
         user.UserRoles.Clear();
-        foreach (var roleId in vm.SelectedRoleIds)
+        foreach (var roleId in requestedRoleIds)
             user.UserRoles.Add(new YdUserRole { UserId = user.Id, RoleId = roleId });
 
         await _db.SaveChangesAsync();
@@ -170,8 +173,9 @@ public class AdminUsersController : Controller
         return RedirectToAction(nameof(Index));
     }
 
-    private async Task PopulateDropdowns()
+    private async Task PopulateDropdowns(IEnumerable<int>? selectedRoleIds = null)
     {
+        ViewBag.SelectedRoleIds = (selectedRoleIds ?? Enumerable.Empty<int>()).ToHashSet();
         var countries = await _db.Countries.OrderBy(c => c.Name).Select(c => new { c.Id, Label = c.DisplayName ?? c.Name }).ToListAsync();
         ViewBag.CountryOptions = new SelectList(countries, "Id", "Label");
         ViewBag.Roles = await _db.YdRoles.OrderBy(r => r.RoleName).ToListAsync();

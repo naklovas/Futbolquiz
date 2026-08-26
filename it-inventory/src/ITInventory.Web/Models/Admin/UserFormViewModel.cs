@@ -30,6 +30,8 @@ public class UserFormViewModel
     [Display(Name = "Send Expiration Notifications")]
     public bool ReceiveExpirationNotifications { get; set; } = true;
 
-    [Display(Name = "Roles")]
-    public List<int> SelectedRoleIds { get; set; } = new();
+    // Role assignment is deliberately NOT a property here. Binding it as part of the model
+    // would make role membership just another field that arrives with the rest of the form;
+    // it is taken as an explicit parameter on the Create/Edit actions instead, and every id
+    // is checked against dbo.YDRoles before it is used (see AdminUsersController).
 }

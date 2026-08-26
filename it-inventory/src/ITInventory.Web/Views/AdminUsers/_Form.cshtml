@@ -2,6 +2,10 @@
 @{
     var countryOptions = (Microsoft.AspNetCore.Mvc.Rendering.SelectList)ViewBag.CountryOptions;
     var roles = (List<ITInventory.Data.Entities.YdRole>)ViewBag.Roles;
+    // Role membership isn't part of the bound model on purpose (see UserFormViewModel) -- the
+    // checkboxes post to the action's own selectedRoleIds parameter, and the current selection
+    // comes from the controller rather than from the model.
+    var selectedRoleIds = (HashSet<int>)ViewBag.SelectedRoleIds;
 }
 
 <div asp-validation-summary="ModelOnly" class="text-sm text-red-600 mb-3"></div>
@@ -49,8 +53,8 @@
         @foreach (var role in roles)
         {
             <label class="inline-flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-md px-3 py-1.5 text-sm cursor-pointer hover:bg-slate-100">
-                <input type="checkbox" class="rounded border-slate-300 text-brand-600 focus:ring-brand-500" name="SelectedRoleIds" value="@role.Id"
-                       checked="@Model.SelectedRoleIds.Contains(role.Id)" />
+                <input type="checkbox" class="rounded border-slate-300 text-brand-600 focus:ring-brand-500" name="selectedRoleIds" value="@role.Id"
+                       checked="@selectedRoleIds.Contains(role.Id)" />
                 @role.RoleName
             </label>
         }
