@@ -121,6 +121,14 @@ public class CircuitsController : Controller
         if (!_currentUser.IsAdmin)
             vm.CountryId = _currentUser.CountryId ?? 0;
 
+        // Every foreign key below arrives as a plain number from a form field, so it has to be
+        // checked against what the dropdown was actually allowed to offer -- otherwise a posted
+        // id could point at another country's row.
+        if (vm.CountryId.HasValue &&
+            !await _db.Countries.AnyAsync(c => c.Id == vm.CountryId.Value
+                && (_currentUser.IsAdmin || c.Id == _currentUser.CountryId)))
+            ModelState.AddModelError(nameof(vm.CountryId), "Please select a valid country.");
+
         if (!ModelState.IsValid)
         {
             await PopulateDropdowns();
@@ -186,6 +194,14 @@ public class CircuitsController : Controller
 
         if (!_currentUser.IsAdmin)
             vm.CountryId = _currentUser.CountryId ?? 0;
+
+        // Every foreign key below arrives as a plain number from a form field, so it has to be
+        // checked against what the dropdown was actually allowed to offer -- otherwise a posted
+        // id could point at another country's row.
+        if (vm.CountryId.HasValue &&
+            !await _db.Countries.AnyAsync(c => c.Id == vm.CountryId.Value
+                && (_currentUser.IsAdmin || c.Id == _currentUser.CountryId)))
+            ModelState.AddModelError(nameof(vm.CountryId), "Please select a valid country.");
 
         if (!ModelState.IsValid)
         {

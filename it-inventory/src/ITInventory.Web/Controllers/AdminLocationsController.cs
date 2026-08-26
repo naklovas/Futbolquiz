@@ -50,6 +50,13 @@ public class AdminLocationsController : Controller
         if (await _db.Locations.AnyAsync(l => l.CountryId == vm.CountryId && l.Branch == vm.Branch))
             ModelState.AddModelError(nameof(vm.Branch), "This branch already exists for the selected country.");
 
+        // Every foreign key below arrives as a plain number from a form field, so it has to be
+        // checked against what the dropdown was actually allowed to offer -- otherwise a posted
+        // id could point at another country's row.
+        if (vm.CountryId.HasValue &&
+            !await _db.Countries.AnyAsync(c => c.Id == vm.CountryId.Value))
+            ModelState.AddModelError(nameof(vm.CountryId), "Please select a valid country.");
+
         if (!ModelState.IsValid)
         {
             await PopulateDropdowns();
@@ -95,6 +102,13 @@ public class AdminLocationsController : Controller
 
         if (await _db.Locations.AnyAsync(l => l.CountryId == vm.CountryId && l.Branch == vm.Branch && l.Id != id))
             ModelState.AddModelError(nameof(vm.Branch), "This branch already exists for the selected country.");
+
+        // Every foreign key below arrives as a plain number from a form field, so it has to be
+        // checked against what the dropdown was actually allowed to offer -- otherwise a posted
+        // id could point at another country's row.
+        if (vm.CountryId.HasValue &&
+            !await _db.Countries.AnyAsync(c => c.Id == vm.CountryId.Value))
+            ModelState.AddModelError(nameof(vm.CountryId), "Please select a valid country.");
 
         if (!ModelState.IsValid)
         {

@@ -115,6 +115,14 @@ public class ServerEndpointsController : Controller
         if (server is null)
             ModelState.AddModelError(nameof(vm.ServerId), "Please select a valid server.");
 
+        // Every foreign key below arrives as a plain number from a form field, so it has to be
+        // checked against what the dropdown was actually allowed to offer -- otherwise a posted
+        // id could point at another country's row.
+        if (vm.ApplicationId.HasValue &&
+            !await _db.Applications.AnyAsync(a => a.Id == vm.ApplicationId.Value
+                && (_currentUser.IsAdmin || a.CountryId == _currentUser.CountryId)))
+            ModelState.AddModelError(nameof(vm.ApplicationId), "Please select a valid application.");
+
         if (!ModelState.IsValid)
         {
             await PopulateDropdowns();
@@ -176,6 +184,14 @@ public class ServerEndpointsController : Controller
             && (_currentUser.IsAdmin || s.CountryId == _currentUser.CountryId));
         if (server is null)
             ModelState.AddModelError(nameof(vm.ServerId), "Please select a valid server.");
+
+        // Every foreign key below arrives as a plain number from a form field, so it has to be
+        // checked against what the dropdown was actually allowed to offer -- otherwise a posted
+        // id could point at another country's row.
+        if (vm.ApplicationId.HasValue &&
+            !await _db.Applications.AnyAsync(a => a.Id == vm.ApplicationId.Value
+                && (_currentUser.IsAdmin || a.CountryId == _currentUser.CountryId)))
+            ModelState.AddModelError(nameof(vm.ApplicationId), "Please select a valid application.");
 
         if (!ModelState.IsValid)
         {

@@ -174,6 +174,22 @@ public class PhysicalDevicesController : Controller
 
         vm.ApplianceType = ApplianceType.Physical;
 
+        // Every foreign key below arrives as a plain number from a form field, so it has to be
+        // checked against what the dropdown was actually allowed to offer -- otherwise a posted
+        // id could point at another country's row.
+        if (vm.CountryId.HasValue &&
+            !await _db.Countries.AnyAsync(c => c.Id == vm.CountryId.Value
+                && (_currentUser.IsAdmin || c.Id == _currentUser.CountryId)))
+            ModelState.AddModelError(nameof(vm.CountryId), "Please select a valid country.");
+
+        if (vm.CategoryId.HasValue &&
+            !await _db.DeviceCategories.AnyAsync(c => c.Id == vm.CategoryId.Value))
+            ModelState.AddModelError(nameof(vm.CategoryId), "Please select a valid category.");
+
+        if (vm.DeviceProfileId.HasValue &&
+            !await _db.DeviceProfileCatalogs.AnyAsync(p => p.Id == vm.DeviceProfileId.Value))
+            ModelState.AddModelError(nameof(vm.DeviceProfileId), "Please select a valid device profile.");
+
         if (!ModelState.IsValid)
         {
             await PopulateDropdowns();
@@ -267,6 +283,22 @@ public class PhysicalDevicesController : Controller
             vm.CountryId = _currentUser.CountryId ?? 0;
 
         vm.ApplianceType = ApplianceType.Physical;
+
+        // Every foreign key below arrives as a plain number from a form field, so it has to be
+        // checked against what the dropdown was actually allowed to offer -- otherwise a posted
+        // id could point at another country's row.
+        if (vm.CountryId.HasValue &&
+            !await _db.Countries.AnyAsync(c => c.Id == vm.CountryId.Value
+                && (_currentUser.IsAdmin || c.Id == _currentUser.CountryId)))
+            ModelState.AddModelError(nameof(vm.CountryId), "Please select a valid country.");
+
+        if (vm.CategoryId.HasValue &&
+            !await _db.DeviceCategories.AnyAsync(c => c.Id == vm.CategoryId.Value))
+            ModelState.AddModelError(nameof(vm.CategoryId), "Please select a valid category.");
+
+        if (vm.DeviceProfileId.HasValue &&
+            !await _db.DeviceProfileCatalogs.AnyAsync(p => p.Id == vm.DeviceProfileId.Value))
+            ModelState.AddModelError(nameof(vm.DeviceProfileId), "Please select a valid device profile.");
 
         if (!ModelState.IsValid)
         {

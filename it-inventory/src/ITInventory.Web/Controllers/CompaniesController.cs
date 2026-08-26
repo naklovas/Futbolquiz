@@ -122,6 +122,13 @@ public class CompaniesController : Controller
         if (vm.CompanyType == CompanyType.Other && string.IsNullOrWhiteSpace(vm.OtherTypeDescription))
             ModelState.AddModelError(nameof(vm.OtherTypeDescription), "Please specify the type.");
 
+        // Every foreign key below arrives as a plain number from a form field, so it has to be
+        // checked against what the dropdown was actually allowed to offer -- otherwise a posted
+        // id could point at another country's row.
+        if (vm.OriginCountryId.HasValue &&
+            !await _db.OriginCountries.AnyAsync(o => o.Id == vm.OriginCountryId.Value && o.IsActive))
+            ModelState.AddModelError(nameof(vm.OriginCountryId), "Please select a valid country of origin.");
+
         if (!ModelState.IsValid)
         {
             await PopulateDropdowns();
@@ -213,6 +220,13 @@ public class CompaniesController : Controller
 
         if (vm.CompanyType == CompanyType.Other && string.IsNullOrWhiteSpace(vm.OtherTypeDescription))
             ModelState.AddModelError(nameof(vm.OtherTypeDescription), "Please specify the type.");
+
+        // Every foreign key below arrives as a plain number from a form field, so it has to be
+        // checked against what the dropdown was actually allowed to offer -- otherwise a posted
+        // id could point at another country's row.
+        if (vm.OriginCountryId.HasValue &&
+            !await _db.OriginCountries.AnyAsync(o => o.Id == vm.OriginCountryId.Value && o.IsActive))
+            ModelState.AddModelError(nameof(vm.OriginCountryId), "Please select a valid country of origin.");
 
         if (!ModelState.IsValid)
         {
