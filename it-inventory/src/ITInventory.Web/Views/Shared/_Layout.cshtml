@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="utf-8" />
@@ -25,7 +25,7 @@
 <body class="min-h-screen bg-slate-50 text-slate-800 flex flex-col">
     <header class="bg-white border-b border-slate-200 shadow-sm">
         <nav class="max-w-[96rem] mx-auto px-4">
-            <div class="flex items-center justify-between flex-wrap min-h-16 py-2 gap-3">
+            <div class="flex items-center justify-between flex-wrap min-h-16 py-2 gap-2">
                 <a asp-controller="Home" asp-action="Index" class="flex-shrink-0 flex items-center">
                     <img src="~/images/ziraat-bank-logo.png" alt="Ziraat Bank" class="h-7 w-auto" />
                 </a>
@@ -37,37 +37,37 @@
                        block keeps its full intrinsic width and the user menu is pushed onto a
                        second row instead. *@
                     <div class="flex flex-wrap items-center gap-0.5 flex-1 min-w-0">
-                        <a asp-controller="PhysicalDevices" asp-action="Index" onclick="showLoadingOverlay()" class="flex-shrink-0 whitespace-nowrap px-2 py-2 rounded-md text-sm font-medium text-slate-600 hover:text-brand-700 hover:bg-brand-50 transition">
+                        <a asp-controller="PhysicalDevices" asp-action="Index" onclick="showLoadingOverlay()" class="flex-shrink-0 whitespace-nowrap px-1.5 py-2 rounded-md text-xs font-medium text-slate-600 hover:text-brand-700 hover:bg-brand-50 transition">
                             <i class="fa-solid fa-desktop mr-1.5"></i>Physical Devices
                         </a>
-                        <a asp-controller="Servers" asp-action="Index" onclick="showLoadingOverlay()" class="flex-shrink-0 whitespace-nowrap px-2 py-2 rounded-md text-sm font-medium text-slate-600 hover:text-brand-700 hover:bg-brand-50 transition">
+                        <a asp-controller="Servers" asp-action="Index" onclick="showLoadingOverlay()" class="flex-shrink-0 whitespace-nowrap px-1.5 py-2 rounded-md text-xs font-medium text-slate-600 hover:text-brand-700 hover:bg-brand-50 transition">
                             <i class="fa-solid fa-database mr-1.5"></i>Servers
                         </a>
-                        <a asp-controller="ServerEndpoints" asp-action="Index" onclick="showLoadingOverlay()" class="flex-shrink-0 whitespace-nowrap px-2 py-2 rounded-md text-sm font-medium text-slate-600 hover:text-brand-700 hover:bg-brand-50 transition">
+                        <a asp-controller="ServerEndpoints" asp-action="Index" onclick="showLoadingOverlay()" class="flex-shrink-0 whitespace-nowrap px-1.5 py-2 rounded-md text-xs font-medium text-slate-600 hover:text-brand-700 hover:bg-brand-50 transition">
                             <i class="fa-solid fa-network-wired mr-1.5"></i>Server Endpoints
                         </a>
-                        <a asp-controller="Applications" asp-action="Index" onclick="showLoadingOverlay()" class="flex-shrink-0 whitespace-nowrap px-2 py-2 rounded-md text-sm font-medium text-slate-600 hover:text-brand-700 hover:bg-brand-50 transition">
+                        <a asp-controller="Applications" asp-action="Index" onclick="showLoadingOverlay()" class="flex-shrink-0 whitespace-nowrap px-1.5 py-2 rounded-md text-xs font-medium text-slate-600 hover:text-brand-700 hover:bg-brand-50 transition">
                             <i class="fa-solid fa-window-restore mr-1.5"></i>Applications
                         </a>
-                        <a asp-controller="Licenses" asp-action="Index" onclick="showLoadingOverlay()" class="flex-shrink-0 whitespace-nowrap px-2 py-2 rounded-md text-sm font-medium text-slate-600 hover:text-brand-700 hover:bg-brand-50 transition">
+                        <a asp-controller="Licenses" asp-action="Index" onclick="showLoadingOverlay()" class="flex-shrink-0 whitespace-nowrap px-1.5 py-2 rounded-md text-xs font-medium text-slate-600 hover:text-brand-700 hover:bg-brand-50 transition">
                             <i class="fa-solid fa-key mr-1.5"></i>Licenses
                         </a>
-                        <a asp-controller="Circuits" asp-action="Index" onclick="showLoadingOverlay()" class="flex-shrink-0 whitespace-nowrap px-2 py-2 rounded-md text-sm font-medium text-slate-600 hover:text-brand-700 hover:bg-brand-50 transition">
+                        <a asp-controller="Circuits" asp-action="Index" onclick="showLoadingOverlay()" class="flex-shrink-0 whitespace-nowrap px-1.5 py-2 rounded-md text-xs font-medium text-slate-600 hover:text-brand-700 hover:bg-brand-50 transition">
                             <i class="fa-solid fa-diagram-project mr-1.5"></i>Circuits
                         </a>
-                        <a asp-controller="Companies" asp-action="Index" onclick="showLoadingOverlay()" class="flex-shrink-0 whitespace-nowrap px-2 py-2 rounded-md text-sm font-medium text-slate-600 hover:text-brand-700 hover:bg-brand-50 transition">
+                        <a asp-controller="Companies" asp-action="Index" onclick="showLoadingOverlay()" class="flex-shrink-0 whitespace-nowrap px-1.5 py-2 rounded-md text-xs font-medium text-slate-600 hover:text-brand-700 hover:bg-brand-50 transition">
                             <i class="fa-solid fa-building mr-1.5"></i>Companies
                         </a>
-                        <a asp-controller="DevicePool" asp-action="Index" onclick="showLoadingOverlay()" class="flex-shrink-0 whitespace-nowrap px-2 py-2 rounded-md text-sm font-medium text-slate-600 hover:text-brand-700 hover:bg-brand-50 transition">
+                        <a asp-controller="DevicePool" asp-action="Index" onclick="showLoadingOverlay()" class="flex-shrink-0 whitespace-nowrap px-1.5 py-2 rounded-md text-xs font-medium text-slate-600 hover:text-brand-700 hover:bg-brand-50 transition">
                             <i class="fa-solid fa-magnifying-glass-chart mr-1.5"></i>Device Pool
                         </a>
-                        <a asp-controller="CountryTopology" asp-action="Index" onclick="showLoadingOverlay()" class="flex-shrink-0 whitespace-nowrap px-2 py-2 rounded-md text-sm font-medium text-slate-600 hover:text-brand-700 hover:bg-brand-50 transition">
+                        <a asp-controller="CountryTopology" asp-action="Index" onclick="showLoadingOverlay()" class="flex-shrink-0 whitespace-nowrap px-1.5 py-2 rounded-md text-xs font-medium text-slate-600 hover:text-brand-700 hover:bg-brand-50 transition">
                             <i class="fa-solid fa-sitemap mr-1.5"></i>Topology
                         </a>
                         @if (User.IsInRole("admin"))
                         {
                             <div class="relative group flex-shrink-0">
-                                <button class="whitespace-nowrap px-2 py-2 rounded-md text-sm font-medium text-slate-600 hover:text-brand-700 hover:bg-brand-50 transition">
+                                <button class="whitespace-nowrap px-1.5 py-2 rounded-md text-xs font-medium text-slate-600 hover:text-brand-700 hover:bg-brand-50 transition">
                                     <i class="fa-solid fa-gear mr-1.5"></i>Admin <i class="fa-solid fa-chevron-down text-xs ml-1"></i>
                                 </button>
                                 <div class="absolute right-0 hidden group-hover:block bg-white rounded-md shadow-lg border border-slate-200 py-1 w-48 z-20">
@@ -85,8 +85,8 @@
                     var fullName = User.FindFirst(ITInventory.Web.Services.AppClaimTypes.FullName)?.Value;
                     var country = User.FindFirst(ITInventory.Web.Services.AppClaimTypes.CountryDisplayName)?.Value
                         ?? User.FindFirst(ITInventory.Web.Services.AppClaimTypes.Country)?.Value;
-                    <div class="relative group flex-shrink-0 ml-2 pl-3 border-l border-slate-200">
-                        <button class="flex items-center gap-1.5 px-2 py-2 rounded-md text-sm font-medium text-slate-600 hover:text-brand-700 hover:bg-brand-50 transition max-w-[10rem]">
+                    <div class="relative group flex-shrink-0 ml-1 pl-2 border-l border-slate-200">
+                        <button class="flex items-center gap-1.5 px-1.5 py-2 rounded-md text-xs font-medium text-slate-600 hover:text-brand-700 hover:bg-brand-50 transition max-w-[8rem]">
                             <i class="fa-solid fa-user-circle"></i>
                             <span class="truncate">@fullName</span>
                             <i class="fa-solid fa-chevron-down text-xs"></i>
