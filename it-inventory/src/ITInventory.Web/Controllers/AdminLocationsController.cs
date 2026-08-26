@@ -50,12 +50,17 @@ public class AdminLocationsController : Controller
         if (await _db.Locations.AnyAsync(l => l.CountryId == vm.CountryId && l.Branch == vm.Branch))
             ModelState.AddModelError(nameof(vm.Branch), "This branch already exists for the selected country.");
 
-        // Every foreign key below arrives as a plain number from a form field, so it has to be
-        // checked against what the dropdown was actually allowed to offer -- otherwise a posted
-        // id could point at another country's row.
-        if (vm.CountryId.HasValue &&
-            !await _db.Countries.AnyAsync(c => c.Id == vm.CountryId.Value))
+        // The country arrives as a plain number from a form field. Checking that the number
+        // exists is not enough: the id written into the new row has to COME FROM the row the
+        // authorized lookup returned, never from the request. Otherwise the posted value still
+        // travels straight into the INSERT with only an existence test in the way.
+        var country = await _db.Countries.FirstOrDefaultAsync(c => c.Id == (vm.CountryId ?? 0) && _currentUser.IsAdmin);
+        if (country is null)
+        {
             ModelState.AddModelError(nameof(vm.CountryId), "Please select a valid country.");
+            await PopulateDropdowns();
+            return View(vm);
+        }
 
         if (!ModelState.IsValid)
         {
@@ -65,7 +70,7 @@ public class AdminLocationsController : Controller
 
         _db.Locations.Add(new Location
         {
-            CountryId = vm.CountryId!.Value,
+            CountryId = country.Id,
             Branch = vm.Branch,
             Class = vm.Class,
             IsActive = vm.IsActive,
@@ -103,12 +108,17 @@ public class AdminLocationsController : Controller
         if (await _db.Locations.AnyAsync(l => l.CountryId == vm.CountryId && l.Branch == vm.Branch && l.Id != id))
             ModelState.AddModelError(nameof(vm.Branch), "This branch already exists for the selected country.");
 
-        // Every foreign key below arrives as a plain number from a form field, so it has to be
-        // checked against what the dropdown was actually allowed to offer -- otherwise a posted
-        // id could point at another country's row.
-        if (vm.CountryId.HasValue &&
-            !await _db.Countries.AnyAsync(c => c.Id == vm.CountryId.Value))
+        // Every foreign key below arrives as a plain number from a form field. Checking that the
+        // number exists is not enough: the ids written onto the row have to COME FROM the rows
+        // the authorized lookups returned, never from the request. Otherwise the posted values
+        // still travel straight into the UPDATE with only an existence test in the way.
+        var country = await _db.Countries.FirstOrDefaultAsync(c => c.Id == (vm.CountryId ?? 0) && _currentUser.IsAdmin);
+        if (country is null)
+        {
             ModelState.AddModelError(nameof(vm.CountryId), "Please select a valid country.");
+            await PopulateDropdowns();
+            return View(vm);
+        }
 
         if (!ModelState.IsValid)
         {
@@ -119,7 +129,7 @@ public class AdminLocationsController : Controller
         var location = await _db.Locations.FirstOrDefaultAsync(l => l.Id == id && _currentUser.IsAdmin);
         if (location is null) return NotFound();
 
-        location.CountryId = vm.CountryId!.Value;
+        location.CountryId = country.Id;
         location.Branch = vm.Branch;
         location.Class = vm.Class;
         location.IsActive = vm.IsActive;

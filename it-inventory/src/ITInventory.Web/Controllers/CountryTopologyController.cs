@@ -117,12 +117,13 @@ public class CountryTopologyController : Controller
     {
         if (!_currentUser.CanEdit) return Forbid();
 
-        // countryId form alanindan geliyor. Sadece "benim ulkem mi" diye bakmak yetmez --
-        // gercekten var olan bir ulke oldugunu da ayni sorguda dogruluyoruz, boylece
-        // uydurma bir id ile kayit acilamaz.
-        var countryInScope = await _db.Countries.AnyAsync(c => c.Id == countryId
+        // countryId form alanindan geliyor. Var olan ve yazma yetkimizin bulundugu bir ulke
+        // oldugunu ayni sorguda dogruluyoruz; ASIL ONEMLISI asagida yeni kayda yazilan id bu
+        // sorgunun DONDURDUGU satirdan aliniyor, istekten gelen sayidan degil. Sadece "var mi"
+        // diye bakmak yetmez -- o durumda gonderilen deger dogrudan INSERT'e kadar gidiyor.
+        var country = await _db.Countries.FirstOrDefaultAsync(c => c.Id == countryId
             && (_currentUser.IsAdmin || c.Id == _currentUser.CountryId));
-        if (!countryInScope) return Forbid();
+        if (country is null) return Forbid();
 
         if (file is null || file.Length == 0)
         {
@@ -153,11 +154,11 @@ public class CountryTopologyController : Controller
             return RedirectToAction(nameof(Index), new { countryId });
         }
 
-        var existing = await _db.CountryTopologyFiles.FirstOrDefaultAsync(f => f.CountryId == countryId
+        var existing = await _db.CountryTopologyFiles.FirstOrDefaultAsync(f => f.CountryId == country.Id
             && (_currentUser.IsAdmin || f.CountryId == _currentUser.CountryId));
         if (existing is null)
         {
-            existing = new CountryTopologyFile { CountryId = countryId };
+            existing = new CountryTopologyFile { CountryId = country.Id };
             _db.CountryTopologyFiles.Add(existing);
         }
 

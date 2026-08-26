@@ -110,18 +110,31 @@ public class ServerEndpointsController : Controller
     {
         if (!_currentUser.CanEdit) return Forbid();
 
+        // Every foreign key below arrives as a plain number from a form field. Checking that the
+        // number exists is not enough: the ids written into the new row have to COME FROM the
+        // rows the authorized lookups returned, never from the request. Otherwise the posted
+        // values still travel straight into the INSERT with only an existence test in the way.
         var server = await _db.Servers.FirstOrDefaultAsync(s => s.Id == vm.ServerId
             && (_currentUser.IsAdmin || s.CountryId == _currentUser.CountryId));
         if (server is null)
+        {
             ModelState.AddModelError(nameof(vm.ServerId), "Please select a valid server.");
+            await PopulateDropdowns();
+            return View(vm);
+        }
 
-        // Every foreign key below arrives as a plain number from a form field, so it has to be
-        // checked against what the dropdown was actually allowed to offer -- otherwise a posted
-        // id could point at another country's row.
-        if (vm.ApplicationId.HasValue &&
-            !await _db.Applications.AnyAsync(a => a.Id == vm.ApplicationId.Value
-                && (_currentUser.IsAdmin || a.CountryId == _currentUser.CountryId)))
-            ModelState.AddModelError(nameof(vm.ApplicationId), "Please select a valid application.");
+        Application? application = null;
+        if (vm.ApplicationId.HasValue)
+        {
+            application = await _db.Applications.FirstOrDefaultAsync(a => a.Id == vm.ApplicationId.Value
+                && (_currentUser.IsAdmin || a.CountryId == _currentUser.CountryId));
+            if (application is null)
+            {
+                ModelState.AddModelError(nameof(vm.ApplicationId), "Please select a valid application.");
+                await PopulateDropdowns();
+                return View(vm);
+            }
+        }
 
         if (!ModelState.IsValid)
         {
@@ -131,10 +144,10 @@ public class ServerEndpointsController : Controller
 
         var entity = new ServerEndpoint
         {
-            ServerId = vm.ServerId!.Value,
+            ServerId = server.Id,
             IpAddress = vm.IpAddress,
             Port = vm.Port,
-            ApplicationId = vm.ApplicationId,
+            ApplicationId = application?.Id,
             Notes = vm.Notes,
             CreatedAt = DateTime.UtcNow,
             CreatedBy = _currentUser.Username
@@ -183,15 +196,28 @@ public class ServerEndpointsController : Controller
         var server = await _db.Servers.FirstOrDefaultAsync(s => s.Id == vm.ServerId
             && (_currentUser.IsAdmin || s.CountryId == _currentUser.CountryId));
         if (server is null)
+        {
             ModelState.AddModelError(nameof(vm.ServerId), "Please select a valid server.");
+            await PopulateDropdowns();
+            return View(vm);
+        }
 
-        // Every foreign key below arrives as a plain number from a form field, so it has to be
-        // checked against what the dropdown was actually allowed to offer -- otherwise a posted
-        // id could point at another country's row.
-        if (vm.ApplicationId.HasValue &&
-            !await _db.Applications.AnyAsync(a => a.Id == vm.ApplicationId.Value
-                && (_currentUser.IsAdmin || a.CountryId == _currentUser.CountryId)))
-            ModelState.AddModelError(nameof(vm.ApplicationId), "Please select a valid application.");
+        // Every foreign key below arrives as a plain number from a form field. Checking that the
+        // number exists is not enough: the ids written onto the row have to COME FROM the rows
+        // the authorized lookups returned, never from the request. Otherwise the posted values
+        // still travel straight into the UPDATE with only an existence test in the way.
+        Application? application = null;
+        if (vm.ApplicationId.HasValue)
+        {
+            application = await _db.Applications.FirstOrDefaultAsync(a => a.Id == vm.ApplicationId.Value
+                && (_currentUser.IsAdmin || a.CountryId == _currentUser.CountryId));
+            if (application is null)
+            {
+                ModelState.AddModelError(nameof(vm.ApplicationId), "Please select a valid application.");
+                await PopulateDropdowns();
+                return View(vm);
+            }
+        }
 
         if (!ModelState.IsValid)
         {
@@ -199,10 +225,10 @@ public class ServerEndpointsController : Controller
             return View(vm);
         }
 
-        entity.ServerId = vm.ServerId!.Value;
+        entity.ServerId = server.Id;
         entity.IpAddress = vm.IpAddress;
         entity.Port = vm.Port;
-        entity.ApplicationId = vm.ApplicationId;
+        entity.ApplicationId = application?.Id;
         entity.Notes = vm.Notes;
         entity.UpdatedAt = DateTime.UtcNow;
         entity.UpdatedBy = _currentUser.Username;

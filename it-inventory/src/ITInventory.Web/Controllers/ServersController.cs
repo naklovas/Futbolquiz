@@ -177,22 +177,43 @@ public class ServersController : Controller
                 ModelState.AddModelError(nameof(vm.HostPhysicalDeviceId), "Selected ESXi / Physical Server was not found.");
         }
 
-        // Every foreign key below arrives as a plain number from a form field, so it has to be
-        // checked against what the dropdown was actually allowed to offer -- otherwise a posted
-        // id could point at another country's row.
-        if (vm.CountryId.HasValue &&
-            !await _db.Countries.AnyAsync(c => c.Id == vm.CountryId.Value
-                && (_currentUser.IsAdmin || c.Id == _currentUser.CountryId)))
+        // Every foreign key below arrives as a plain number from a form field. Checking that the
+        // number exists is not enough: the ids written into the new row have to COME FROM the
+        // rows the authorized lookups returned, never from the request. Otherwise the posted
+        // values still travel straight into the INSERT with only an existence test in the way.
+        var country = await _db.Countries.FirstOrDefaultAsync(c => c.Id == (vm.CountryId ?? 0)
+            && (_currentUser.IsAdmin || c.Id == _currentUser.CountryId));
+        if (country is null)
+        {
             ModelState.AddModelError(nameof(vm.CountryId), "Please select a valid country.");
+            await PopulateDropdowns();
+            return View(vm);
+        }
 
-        if (vm.DeviceProfileId.HasValue &&
-            !await _db.DeviceProfileCatalogs.AnyAsync(p => p.Id == vm.DeviceProfileId.Value))
-            ModelState.AddModelError(nameof(vm.DeviceProfileId), "Please select a valid device profile.");
+        DeviceProfileCatalog? deviceProfile = null;
+        if (vm.DeviceProfileId.HasValue)
+        {
+            deviceProfile = await _db.DeviceProfileCatalogs.FirstOrDefaultAsync(p => p.Id == vm.DeviceProfileId.Value);
+            if (deviceProfile is null)
+            {
+                ModelState.AddModelError(nameof(vm.DeviceProfileId), "Please select a valid device profile.");
+                await PopulateDropdowns();
+                return View(vm);
+            }
+        }
 
-        if (vm.SourceZiraatYdId.HasValue &&
-            !await _db.ZiraatYds.AnyAsync(z => z.Id == vm.SourceZiraatYdId.Value
-                && (_currentUser.IsAdmin || z.RepositoryName == _currentUser.Country)))
-            ModelState.AddModelError(string.Empty, "The selected device pool record is not valid.");
+        ZiraatYd? poolRecord = null;
+        if (vm.SourceZiraatYdId.HasValue)
+        {
+            poolRecord = await _db.ZiraatYds.FirstOrDefaultAsync(z => z.Id == vm.SourceZiraatYdId.Value
+                && (_currentUser.IsAdmin || z.RepositoryName == _currentUser.Country));
+            if (poolRecord is null)
+            {
+                ModelState.AddModelError(string.Empty, "The selected device pool record is not valid.");
+                await PopulateDropdowns();
+                return View(vm);
+            }
+        }
 
         if (!ModelState.IsValid)
         {
@@ -202,9 +223,9 @@ public class ServersController : Controller
 
         var entity = new Server
         {
-            CountryId = vm.CountryId!.Value,
-            DeviceProfileId = vm.DeviceProfileId,
-            SourceZiraatYdId = vm.SourceZiraatYdId,
+            CountryId = country.Id,
+            DeviceProfileId = deviceProfile?.Id,
+            SourceZiraatYdId = poolRecord?.Id,
             HostName = vm.HostName,
             // Create's form no longer submits ApplianceType (it's gone from the "New Server"
             // view since new Servers are always virtual) -- forcing it here rather than trusting
@@ -212,7 +233,7 @@ public class ServersController : Controller
             ApplianceType = ApplianceType.Virtual,
             LocationCategory = hostDevice!.LocationCategory,
             SiteRole = hostDevice.SiteRole,
-            HostPhysicalDeviceId = vm.HostPhysicalDeviceId,
+            HostPhysicalDeviceId = hostDevice.Id,
             OperatingSystem = vm.OperatingSystem,
             Brand = vm.Brand,
             Model = vm.Model,
@@ -307,17 +328,46 @@ public class ServersController : Controller
         if (string.IsNullOrWhiteSpace(vm.Branch))
             ModelState.AddModelError(nameof(vm.Branch), "Branch is required.");
 
-        // Every foreign key below arrives as a plain number from a form field, so it has to be
-        // checked against what the dropdown was actually allowed to offer -- otherwise a posted
-        // id could point at another country's row.
-        if (vm.CountryId.HasValue &&
-            !await _db.Countries.AnyAsync(c => c.Id == vm.CountryId.Value
-                && (_currentUser.IsAdmin || c.Id == _currentUser.CountryId)))
+        // Every foreign key below arrives as a plain number from a form field. Checking that the
+        // number exists is not enough: the ids written onto the row have to COME FROM the rows
+        // the authorized lookups returned, never from the request. Otherwise the posted values
+        // still travel straight into the UPDATE with only an existence test in the way.
+        var country = await _db.Countries.FirstOrDefaultAsync(c => c.Id == (vm.CountryId ?? 0)
+            && (_currentUser.IsAdmin || c.Id == _currentUser.CountryId));
+        if (country is null)
+        {
             ModelState.AddModelError(nameof(vm.CountryId), "Please select a valid country.");
+            await PopulateDropdowns();
+            return View(vm);
+        }
 
-        if (vm.DeviceProfileId.HasValue &&
-            !await _db.DeviceProfileCatalogs.AnyAsync(p => p.Id == vm.DeviceProfileId.Value))
-            ModelState.AddModelError(nameof(vm.DeviceProfileId), "Please select a valid device profile.");
+        DeviceProfileCatalog? deviceProfile = null;
+        if (vm.DeviceProfileId.HasValue)
+        {
+            deviceProfile = await _db.DeviceProfileCatalogs.FirstOrDefaultAsync(p => p.Id == vm.DeviceProfileId.Value);
+            if (deviceProfile is null)
+            {
+                ModelState.AddModelError(nameof(vm.DeviceProfileId), "Please select a valid device profile.");
+                await PopulateDropdowns();
+                return View(vm);
+            }
+        }
+
+        // Edit never validated the ESXi/physical host at all: the posted id went straight onto
+        // the row, so a server could be re-parented to another country's host. Same rule as the
+        // rest -- look it up under the caller's scope and write back the id that lookup returned.
+        PhysicalDevice? hostDevice = null;
+        if (vm.HostPhysicalDeviceId.HasValue)
+        {
+            hostDevice = await _db.PhysicalDevices.FirstOrDefaultAsync(d => d.Id == vm.HostPhysicalDeviceId.Value
+                && (_currentUser.IsAdmin || d.CountryId == _currentUser.CountryId));
+            if (hostDevice is null)
+            {
+                ModelState.AddModelError(nameof(vm.HostPhysicalDeviceId), "Selected ESXi / Physical Server was not found.");
+                await PopulateDropdowns();
+                return View(vm);
+            }
+        }
 
         if (!ModelState.IsValid)
         {
@@ -325,12 +375,12 @@ public class ServersController : Controller
             return View(vm);
         }
 
-        entity.CountryId = vm.CountryId!.Value;
+        entity.CountryId = country.Id;
         entity.HostName = vm.HostName;
         entity.ApplianceType = vm.ApplianceType;
         entity.LocationCategory = vm.LocationCategory;
         entity.SiteRole = vm.SiteClassification;
-        entity.HostPhysicalDeviceId = vm.HostPhysicalDeviceId;
+        entity.HostPhysicalDeviceId = hostDevice?.Id;
         entity.OperatingSystem = vm.OperatingSystem;
         entity.Brand = vm.Brand;
         entity.Model = vm.Model;

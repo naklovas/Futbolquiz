@@ -121,13 +121,18 @@ public class CircuitsController : Controller
         if (!_currentUser.IsAdmin)
             vm.CountryId = _currentUser.CountryId ?? 0;
 
-        // Every foreign key below arrives as a plain number from a form field, so it has to be
-        // checked against what the dropdown was actually allowed to offer -- otherwise a posted
-        // id could point at another country's row.
-        if (vm.CountryId.HasValue &&
-            !await _db.Countries.AnyAsync(c => c.Id == vm.CountryId.Value
-                && (_currentUser.IsAdmin || c.Id == _currentUser.CountryId)))
+        // The country arrives as a plain number from a form field. Checking that the number
+        // exists is not enough: the id written into the new row has to COME FROM the row the
+        // authorized lookup returned, never from the request. Otherwise the posted value still
+        // travels straight into the INSERT and only an existence test stands in its way.
+        var country = await _db.Countries.FirstOrDefaultAsync(c => c.Id == (vm.CountryId ?? 0)
+            && (_currentUser.IsAdmin || c.Id == _currentUser.CountryId));
+        if (country is null)
+        {
             ModelState.AddModelError(nameof(vm.CountryId), "Please select a valid country.");
+            await PopulateDropdowns();
+            return View(vm);
+        }
 
         if (!ModelState.IsValid)
         {
@@ -137,7 +142,7 @@ public class CircuitsController : Controller
 
         var entity = new Circuit
         {
-            CountryId = vm.CountryId!.Value,
+            CountryId = country.Id,
             CircuitType = vm.CircuitType,
             CircuitCapacity = vm.CircuitCapacity,
             Provider = vm.Provider,
@@ -195,13 +200,18 @@ public class CircuitsController : Controller
         if (!_currentUser.IsAdmin)
             vm.CountryId = _currentUser.CountryId ?? 0;
 
-        // Every foreign key below arrives as a plain number from a form field, so it has to be
-        // checked against what the dropdown was actually allowed to offer -- otherwise a posted
-        // id could point at another country's row.
-        if (vm.CountryId.HasValue &&
-            !await _db.Countries.AnyAsync(c => c.Id == vm.CountryId.Value
-                && (_currentUser.IsAdmin || c.Id == _currentUser.CountryId)))
+        // Every foreign key below arrives as a plain number from a form field. Checking that the
+        // number exists is not enough: the ids written onto the row have to COME FROM the rows
+        // the authorized lookups returned, never from the request. Otherwise the posted values
+        // still travel straight into the UPDATE with only an existence test in the way.
+        var country = await _db.Countries.FirstOrDefaultAsync(c => c.Id == (vm.CountryId ?? 0)
+            && (_currentUser.IsAdmin || c.Id == _currentUser.CountryId));
+        if (country is null)
+        {
             ModelState.AddModelError(nameof(vm.CountryId), "Please select a valid country.");
+            await PopulateDropdowns();
+            return View(vm);
+        }
 
         if (!ModelState.IsValid)
         {
@@ -209,7 +219,7 @@ public class CircuitsController : Controller
             return View(vm);
         }
 
-        entity.CountryId = vm.CountryId!.Value;
+        entity.CountryId = country.Id;
         entity.CircuitType = vm.CircuitType;
         entity.CircuitCapacity = vm.CircuitCapacity;
         entity.Provider = vm.Provider;

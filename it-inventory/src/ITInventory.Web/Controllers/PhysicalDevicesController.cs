@@ -174,26 +174,51 @@ public class PhysicalDevicesController : Controller
 
         vm.ApplianceType = ApplianceType.Physical;
 
-        // Every foreign key below arrives as a plain number from a form field, so it has to be
-        // checked against what the dropdown was actually allowed to offer -- otherwise a posted
-        // id could point at another country's row.
-        if (vm.CountryId.HasValue &&
-            !await _db.Countries.AnyAsync(c => c.Id == vm.CountryId.Value
-                && (_currentUser.IsAdmin || c.Id == _currentUser.CountryId)))
+        // Every foreign key below arrives as a plain number from a form field. Checking that the
+        // number exists is not enough: the ids written into the new row have to COME FROM the
+        // rows the authorized lookups returned, never from the request. Otherwise the posted
+        // values still travel straight into the INSERT with only an existence test in the way.
+        var country = await _db.Countries.FirstOrDefaultAsync(c => c.Id == (vm.CountryId ?? 0)
+            && (_currentUser.IsAdmin || c.Id == _currentUser.CountryId));
+        if (country is null)
+        {
             ModelState.AddModelError(nameof(vm.CountryId), "Please select a valid country.");
+            await PopulateDropdowns();
+            return View(vm);
+        }
 
-        if (vm.CategoryId.HasValue &&
-            !await _db.DeviceCategories.AnyAsync(c => c.Id == vm.CategoryId.Value))
+        var category = await _db.DeviceCategories.FirstOrDefaultAsync(c => c.Id == (vm.CategoryId ?? 0));
+        if (category is null)
+        {
             ModelState.AddModelError(nameof(vm.CategoryId), "Please select a valid category.");
+            await PopulateDropdowns();
+            return View(vm);
+        }
 
-        if (vm.DeviceProfileId.HasValue &&
-            !await _db.DeviceProfileCatalogs.AnyAsync(p => p.Id == vm.DeviceProfileId.Value))
-            ModelState.AddModelError(nameof(vm.DeviceProfileId), "Please select a valid device profile.");
+        DeviceProfileCatalog? deviceProfile = null;
+        if (vm.DeviceProfileId.HasValue)
+        {
+            deviceProfile = await _db.DeviceProfileCatalogs.FirstOrDefaultAsync(p => p.Id == vm.DeviceProfileId.Value);
+            if (deviceProfile is null)
+            {
+                ModelState.AddModelError(nameof(vm.DeviceProfileId), "Please select a valid device profile.");
+                await PopulateDropdowns();
+                return View(vm);
+            }
+        }
 
-        if (vm.SourceZiraatYdId.HasValue &&
-            !await _db.ZiraatYds.AnyAsync(z => z.Id == vm.SourceZiraatYdId.Value
-                && (_currentUser.IsAdmin || z.RepositoryName == _currentUser.Country)))
-            ModelState.AddModelError(string.Empty, "The selected device pool record is not valid.");
+        ZiraatYd? poolRecord = null;
+        if (vm.SourceZiraatYdId.HasValue)
+        {
+            poolRecord = await _db.ZiraatYds.FirstOrDefaultAsync(z => z.Id == vm.SourceZiraatYdId.Value
+                && (_currentUser.IsAdmin || z.RepositoryName == _currentUser.Country));
+            if (poolRecord is null)
+            {
+                ModelState.AddModelError(string.Empty, "The selected device pool record is not valid.");
+                await PopulateDropdowns();
+                return View(vm);
+            }
+        }
 
         if (!ModelState.IsValid)
         {
@@ -203,10 +228,10 @@ public class PhysicalDevicesController : Controller
 
         var entity = new PhysicalDevice
         {
-            CountryId = vm.CountryId!.Value,
-            CategoryId = vm.CategoryId!.Value,
-            DeviceProfileId = vm.DeviceProfileId,
-            SourceZiraatYdId = vm.SourceZiraatYdId,
+            CountryId = country.Id,
+            CategoryId = category.Id,
+            DeviceProfileId = deviceProfile?.Id,
+            SourceZiraatYdId = poolRecord?.Id,
             DeviceName = vm.DeviceName,
             Brand = vm.Brand,
             Model = vm.Model,
@@ -289,21 +314,38 @@ public class PhysicalDevicesController : Controller
 
         vm.ApplianceType = ApplianceType.Physical;
 
-        // Every foreign key below arrives as a plain number from a form field, so it has to be
-        // checked against what the dropdown was actually allowed to offer -- otherwise a posted
-        // id could point at another country's row.
-        if (vm.CountryId.HasValue &&
-            !await _db.Countries.AnyAsync(c => c.Id == vm.CountryId.Value
-                && (_currentUser.IsAdmin || c.Id == _currentUser.CountryId)))
+        // Every foreign key below arrives as a plain number from a form field. Checking that the
+        // number exists is not enough: the ids written onto the row have to COME FROM the rows
+        // the authorized lookups returned, never from the request. Otherwise the posted values
+        // still travel straight into the UPDATE with only an existence test in the way.
+        var country = await _db.Countries.FirstOrDefaultAsync(c => c.Id == (vm.CountryId ?? 0)
+            && (_currentUser.IsAdmin || c.Id == _currentUser.CountryId));
+        if (country is null)
+        {
             ModelState.AddModelError(nameof(vm.CountryId), "Please select a valid country.");
+            await PopulateDropdowns();
+            return View(vm);
+        }
 
-        if (vm.CategoryId.HasValue &&
-            !await _db.DeviceCategories.AnyAsync(c => c.Id == vm.CategoryId.Value))
+        var category = await _db.DeviceCategories.FirstOrDefaultAsync(c => c.Id == (vm.CategoryId ?? 0));
+        if (category is null)
+        {
             ModelState.AddModelError(nameof(vm.CategoryId), "Please select a valid category.");
+            await PopulateDropdowns();
+            return View(vm);
+        }
 
-        if (vm.DeviceProfileId.HasValue &&
-            !await _db.DeviceProfileCatalogs.AnyAsync(p => p.Id == vm.DeviceProfileId.Value))
-            ModelState.AddModelError(nameof(vm.DeviceProfileId), "Please select a valid device profile.");
+        DeviceProfileCatalog? deviceProfile = null;
+        if (vm.DeviceProfileId.HasValue)
+        {
+            deviceProfile = await _db.DeviceProfileCatalogs.FirstOrDefaultAsync(p => p.Id == vm.DeviceProfileId.Value);
+            if (deviceProfile is null)
+            {
+                ModelState.AddModelError(nameof(vm.DeviceProfileId), "Please select a valid device profile.");
+                await PopulateDropdowns();
+                return View(vm);
+            }
+        }
 
         if (!ModelState.IsValid)
         {
@@ -311,9 +353,9 @@ public class PhysicalDevicesController : Controller
             return View(vm);
         }
 
-        entity.CountryId = vm.CountryId!.Value;
-        entity.CategoryId = vm.CategoryId!.Value;
-        entity.DeviceProfileId = vm.DeviceProfileId;
+        entity.CountryId = country.Id;
+        entity.CategoryId = category.Id;
+        entity.DeviceProfileId = deviceProfile?.Id;
         entity.DeviceName = vm.DeviceName;
         entity.Brand = vm.Brand;
         entity.Model = vm.Model;

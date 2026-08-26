@@ -122,18 +122,31 @@ public class LicensesController : Controller
         if (!_currentUser.IsAdmin)
             vm.CountryId = _currentUser.CountryId ?? 0;
 
-        // Every foreign key below arrives as a plain number from a form field, so it has to be
-        // checked against what the dropdown was actually allowed to offer -- otherwise a posted
-        // id could point at another country's row.
-        if (vm.CountryId.HasValue &&
-            !await _db.Countries.AnyAsync(c => c.Id == vm.CountryId.Value
-                && (_currentUser.IsAdmin || c.Id == _currentUser.CountryId)))
+        // Every foreign key below arrives as a plain number from a form field. Checking that the
+        // number exists is not enough: the ids written into the new row have to COME FROM the
+        // rows the authorized lookups returned, never from the request. Otherwise the posted
+        // values still travel straight into the INSERT with only an existence test in the way.
+        var country = await _db.Countries.FirstOrDefaultAsync(c => c.Id == (vm.CountryId ?? 0)
+            && (_currentUser.IsAdmin || c.Id == _currentUser.CountryId));
+        if (country is null)
+        {
             ModelState.AddModelError(nameof(vm.CountryId), "Please select a valid country.");
+            await PopulateDropdowns();
+            return View(vm);
+        }
 
-        if (vm.CompanyId.HasValue &&
-            !await _db.Companies.AnyAsync(c => c.Id == vm.CompanyId.Value && c.IsActive
-                && (_currentUser.IsAdmin || c.CountryId == _currentUser.CountryId)))
-            ModelState.AddModelError(nameof(vm.CompanyId), "Please select a valid company.");
+        Company? company = null;
+        if (vm.CompanyId.HasValue)
+        {
+            company = await _db.Companies.FirstOrDefaultAsync(c => c.Id == vm.CompanyId.Value && c.IsActive
+                && (_currentUser.IsAdmin || c.CountryId == _currentUser.CountryId));
+            if (company is null)
+            {
+                ModelState.AddModelError(nameof(vm.CompanyId), "Please select a valid company.");
+                await PopulateDropdowns();
+                return View(vm);
+            }
+        }
 
         if (!ModelState.IsValid)
         {
@@ -143,10 +156,10 @@ public class LicensesController : Controller
 
         var entity = new License
         {
-            CountryId = vm.CountryId!.Value,
+            CountryId = country.Id,
             LicenseName = vm.LicenseName,
             VendorSupplier = vm.VendorSupplier,
-            CompanyId = vm.CompanyId,
+            CompanyId = company?.Id,
             Branch = vm.Branch,
             Location = vm.Location ?? string.Empty,
             SupportStartDate = vm.SupportStartDate,
@@ -203,18 +216,31 @@ public class LicensesController : Controller
         if (!_currentUser.IsAdmin)
             vm.CountryId = _currentUser.CountryId ?? 0;
 
-        // Every foreign key below arrives as a plain number from a form field, so it has to be
-        // checked against what the dropdown was actually allowed to offer -- otherwise a posted
-        // id could point at another country's row.
-        if (vm.CountryId.HasValue &&
-            !await _db.Countries.AnyAsync(c => c.Id == vm.CountryId.Value
-                && (_currentUser.IsAdmin || c.Id == _currentUser.CountryId)))
+        // Every foreign key below arrives as a plain number from a form field. Checking that the
+        // number exists is not enough: the ids written onto the row have to COME FROM the rows
+        // the authorized lookups returned, never from the request. Otherwise the posted values
+        // still travel straight into the UPDATE with only an existence test in the way.
+        var country = await _db.Countries.FirstOrDefaultAsync(c => c.Id == (vm.CountryId ?? 0)
+            && (_currentUser.IsAdmin || c.Id == _currentUser.CountryId));
+        if (country is null)
+        {
             ModelState.AddModelError(nameof(vm.CountryId), "Please select a valid country.");
+            await PopulateDropdowns();
+            return View(vm);
+        }
 
-        if (vm.CompanyId.HasValue &&
-            !await _db.Companies.AnyAsync(c => c.Id == vm.CompanyId.Value && c.IsActive
-                && (_currentUser.IsAdmin || c.CountryId == _currentUser.CountryId)))
-            ModelState.AddModelError(nameof(vm.CompanyId), "Please select a valid company.");
+        Company? company = null;
+        if (vm.CompanyId.HasValue)
+        {
+            company = await _db.Companies.FirstOrDefaultAsync(c => c.Id == vm.CompanyId.Value && c.IsActive
+                && (_currentUser.IsAdmin || c.CountryId == _currentUser.CountryId));
+            if (company is null)
+            {
+                ModelState.AddModelError(nameof(vm.CompanyId), "Please select a valid company.");
+                await PopulateDropdowns();
+                return View(vm);
+            }
+        }
 
         if (!ModelState.IsValid)
         {
@@ -222,10 +248,10 @@ public class LicensesController : Controller
             return View(vm);
         }
 
-        entity.CountryId = vm.CountryId!.Value;
+        entity.CountryId = country.Id;
         entity.LicenseName = vm.LicenseName;
         entity.VendorSupplier = vm.VendorSupplier;
-        entity.CompanyId = vm.CompanyId;
+        entity.CompanyId = company?.Id;
         entity.Branch = vm.Branch;
         entity.Location = vm.Location ?? string.Empty;
         entity.SupportStartDate = vm.SupportStartDate;
