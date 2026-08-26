@@ -189,6 +189,11 @@ public class ServersController : Controller
             !await _db.DeviceProfileCatalogs.AnyAsync(p => p.Id == vm.DeviceProfileId.Value))
             ModelState.AddModelError(nameof(vm.DeviceProfileId), "Please select a valid device profile.");
 
+        if (vm.SourceZiraatYdId.HasValue &&
+            !await _db.ZiraatYds.AnyAsync(z => z.Id == vm.SourceZiraatYdId.Value
+                && (_currentUser.IsAdmin || z.RepositoryName == _currentUser.Country)))
+            ModelState.AddModelError(string.Empty, "The selected device pool record is not valid.");
+
         if (!ModelState.IsValid)
         {
             await PopulateDropdowns();
