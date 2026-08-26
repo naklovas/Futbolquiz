@@ -32,7 +32,11 @@
 
                 @if (User.Identity?.IsAuthenticated == true)
                 {
-                    <div class="flex flex-wrap items-center gap-0.5">
+                    @* flex-1 + min-w-0: the links take the space between the logo and the user
+                       menu and wrap among themselves when they run out of room. Without this the
+                       block keeps its full intrinsic width and the user menu is pushed onto a
+                       second row instead. *@
+                    <div class="flex flex-wrap items-center gap-0.5 flex-1 min-w-0">
                         <a asp-controller="PhysicalDevices" asp-action="Index" onclick="showLoadingOverlay()" class="flex-shrink-0 whitespace-nowrap px-2.5 py-2 rounded-md text-sm font-medium text-slate-600 hover:text-brand-700 hover:bg-brand-50 transition">
                             <i class="fa-solid fa-desktop mr-1.5"></i>Physical Devices
                         </a>
