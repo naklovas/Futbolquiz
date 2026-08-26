@@ -228,25 +228,25 @@ public class ServersController : Controller
             CreatedBy = _currentUser.Username
         };
 
-        _db.Servers.Add(entity);
-        await _db.SaveChangesAsync();
-
         // A Server's IP lives on a separate ServerEndpoint row, not on the Server itself, so the
         // IP Address field on Create (pre-filled from the pool row, or typed in manually) isn't
-        // saved as part of the entity above -- it creates the server's first ServerEndpoint here
-        // instead. Without this, "Add as Server" never used to create an endpoint at all (see
-        // the Device Pool "In Inventory" fix), so the pool row's IP just vanished.
+        // saved as part of the entity above -- it becomes the server's first ServerEndpoint.
+        // Without this, "Add as Server" never used to create an endpoint at all (see the Device
+        // Pool "In Inventory" fix), so the pool row's IP just vanished. Attaching it to the entity
+        // graph instead of inserting it after the first save keeps both rows in one transaction:
+        // a failure on the second save used to leave a server with no endpoint behind.
         if (!string.IsNullOrWhiteSpace(vm.IpAddress))
         {
-            _db.ServerEndpoints.Add(new ServerEndpoint
+            entity.Endpoints.Add(new ServerEndpoint
             {
-                ServerId = entity.Id,
                 IpAddress = vm.IpAddress,
                 CreatedAt = DateTime.UtcNow,
                 CreatedBy = _currentUser.Username
             });
-            await _db.SaveChangesAsync();
         }
+
+        _db.Servers.Add(entity);
+        await _db.SaveChangesAsync();
 
         await _activityLogger.LogAsync("Create", "Server", entity.HostName);
         return RedirectToAction(nameof(Index));
