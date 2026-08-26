@@ -266,7 +266,8 @@ public class CircuitsController : Controller
             return RedirectToAction(nameof(Import));
         }
 
-        var country = await _db.Countries.FindAsync(effectiveCountryId.Value);
+        var country = await _db.Countries.FirstOrDefaultAsync(c => c.Id == effectiveCountryId.Value
+            && (_currentUser.IsAdmin || c.Id == _currentUser.CountryId));
         if (country is null)
         {
             TempData["ImportError"] = "Selected country not found.";

@@ -12,11 +12,13 @@ public class AdminDeviceProfilesController : Controller
 {
     private readonly ITInventoryDbContext _db;
     private readonly IActivityLogger _activityLogger;
+    private readonly ICurrentUserService _currentUser;
 
-    public AdminDeviceProfilesController(ITInventoryDbContext db, IActivityLogger activityLogger)
+    public AdminDeviceProfilesController(ITInventoryDbContext db, IActivityLogger activityLogger, ICurrentUserService currentUser)
     {
         _db = db;
         _activityLogger = activityLogger;
+        _currentUser = currentUser;
     }
 
     [HttpGet]
@@ -35,7 +37,7 @@ public class AdminDeviceProfilesController : Controller
     [ValidateAntiForgeryToken]
     public async Task<IActionResult> UpdateCategory(int id, int? categoryId)
     {
-        var profile = await _db.DeviceProfileCatalogs.FindAsync(id);
+        var profile = await _db.DeviceProfileCatalogs.FirstOrDefaultAsync(p => p.Id == id && _currentUser.IsAdmin);
         if (profile is null) return NotFound();
 
         profile.CategoryId = categoryId;

@@ -102,7 +102,8 @@ public class CountryTopologyController : Controller
             return View((CountryTopologyFile?)null);
         }
 
-        var country = await _db.Countries.FindAsync(effectiveCountryId.Value);
+        var country = await _db.Countries.FirstOrDefaultAsync(c => c.Id == effectiveCountryId.Value
+            && (_currentUser.IsAdmin || c.Id == _currentUser.CountryId));
         ViewBag.CountryLabel = country?.DisplayName ?? country?.Name;
 
         var file = await _db.CountryTopologyFiles.FirstOrDefaultAsync(f => f.CountryId == effectiveCountryId.Value);

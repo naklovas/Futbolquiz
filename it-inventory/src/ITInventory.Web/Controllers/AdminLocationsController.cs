@@ -18,11 +18,13 @@ public class AdminLocationsController : Controller
 {
     private readonly ITInventoryDbContext _db;
     private readonly IActivityLogger _activityLogger;
+    private readonly ICurrentUserService _currentUser;
 
-    public AdminLocationsController(ITInventoryDbContext db, IActivityLogger activityLogger)
+    public AdminLocationsController(ITInventoryDbContext db, IActivityLogger activityLogger, ICurrentUserService currentUser)
     {
         _db = db;
         _activityLogger = activityLogger;
+        _currentUser = currentUser;
     }
 
     [HttpGet]
@@ -71,7 +73,7 @@ public class AdminLocationsController : Controller
     [HttpGet]
     public async Task<IActionResult> Edit(int id)
     {
-        var location = await _db.Locations.FindAsync(id);
+        var location = await _db.Locations.FirstOrDefaultAsync(l => l.Id == id && _currentUser.IsAdmin);
         if (location is null) return NotFound();
 
         await PopulateDropdowns();
@@ -100,7 +102,7 @@ public class AdminLocationsController : Controller
             return View(vm);
         }
 
-        var location = await _db.Locations.FindAsync(id);
+        var location = await _db.Locations.FirstOrDefaultAsync(l => l.Id == id && _currentUser.IsAdmin);
         if (location is null) return NotFound();
 
         location.CountryId = vm.CountryId!.Value;
@@ -118,7 +120,7 @@ public class AdminLocationsController : Controller
     [ValidateAntiForgeryToken]
     public async Task<IActionResult> Delete(int id)
     {
-        var location = await _db.Locations.FindAsync(id);
+        var location = await _db.Locations.FirstOrDefaultAsync(l => l.Id == id && _currentUser.IsAdmin);
         if (location is null) return NotFound();
 
         var branch = location.Branch;

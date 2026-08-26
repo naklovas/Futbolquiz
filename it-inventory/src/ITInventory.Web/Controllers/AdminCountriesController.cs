@@ -14,11 +14,13 @@ public class AdminCountriesController : Controller
 {
     private readonly ITInventoryDbContext _db;
     private readonly IActivityLogger _activityLogger;
+    private readonly ICurrentUserService _currentUser;
 
-    public AdminCountriesController(ITInventoryDbContext db, IActivityLogger activityLogger)
+    public AdminCountriesController(ITInventoryDbContext db, IActivityLogger activityLogger, ICurrentUserService currentUser)
     {
         _db = db;
         _activityLogger = activityLogger;
+        _currentUser = currentUser;
     }
 
     [HttpGet]
@@ -58,7 +60,7 @@ public class AdminCountriesController : Controller
     [HttpGet]
     public async Task<IActionResult> Edit(int id)
     {
-        var country = await _db.Countries.FindAsync(id);
+        var country = await _db.Countries.FirstOrDefaultAsync(c => c.Id == id && _currentUser.IsAdmin);
         if (country is null) return NotFound();
 
         return View(new CountryFormViewModel
@@ -83,7 +85,7 @@ public class AdminCountriesController : Controller
         if (!ModelState.IsValid)
             return View(vm);
 
-        var country = await _db.Countries.FindAsync(id);
+        var country = await _db.Countries.FirstOrDefaultAsync(c => c.Id == id && _currentUser.IsAdmin);
         if (country is null) return NotFound();
 
         country.Name = vm.Name;
@@ -101,7 +103,7 @@ public class AdminCountriesController : Controller
     [ValidateAntiForgeryToken]
     public async Task<IActionResult> Delete(int id)
     {
-        var country = await _db.Countries.FindAsync(id);
+        var country = await _db.Countries.FirstOrDefaultAsync(c => c.Id == id && _currentUser.IsAdmin);
         if (country is null) return NotFound();
 
         var countryLabel = country.DisplayName ?? country.Name;

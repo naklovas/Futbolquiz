@@ -14,11 +14,13 @@ public class AdminOriginCountriesController : Controller
 {
     private readonly ITInventoryDbContext _db;
     private readonly IActivityLogger _activityLogger;
+    private readonly ICurrentUserService _currentUser;
 
-    public AdminOriginCountriesController(ITInventoryDbContext db, IActivityLogger activityLogger)
+    public AdminOriginCountriesController(ITInventoryDbContext db, IActivityLogger activityLogger, ICurrentUserService currentUser)
     {
         _db = db;
         _activityLogger = activityLogger;
+        _currentUser = currentUser;
     }
 
     [HttpGet]
@@ -56,7 +58,7 @@ public class AdminOriginCountriesController : Controller
     [HttpGet]
     public async Task<IActionResult> Edit(int id)
     {
-        var originCountry = await _db.OriginCountries.FindAsync(id);
+        var originCountry = await _db.OriginCountries.FirstOrDefaultAsync(o => o.Id == id && _currentUser.IsAdmin);
         if (originCountry is null) return NotFound();
 
         return View(new OriginCountryFormViewModel
@@ -79,7 +81,7 @@ public class AdminOriginCountriesController : Controller
         if (!ModelState.IsValid)
             return View(vm);
 
-        var originCountry = await _db.OriginCountries.FindAsync(id);
+        var originCountry = await _db.OriginCountries.FirstOrDefaultAsync(o => o.Id == id && _currentUser.IsAdmin);
         if (originCountry is null) return NotFound();
 
         originCountry.Name = vm.Name;
@@ -95,7 +97,7 @@ public class AdminOriginCountriesController : Controller
     [ValidateAntiForgeryToken]
     public async Task<IActionResult> Delete(int id)
     {
-        var originCountry = await _db.OriginCountries.FindAsync(id);
+        var originCountry = await _db.OriginCountries.FirstOrDefaultAsync(o => o.Id == id && _currentUser.IsAdmin);
         if (originCountry is null) return NotFound();
 
         var name = originCountry.Name;

@@ -15,11 +15,13 @@ public class AdminUsersController : Controller
 {
     private readonly ITInventoryDbContext _db;
     private readonly IActivityLogger _activityLogger;
+    private readonly ICurrentUserService _currentUser;
 
-    public AdminUsersController(ITInventoryDbContext db, IActivityLogger activityLogger)
+    public AdminUsersController(ITInventoryDbContext db, IActivityLogger activityLogger, ICurrentUserService currentUser)
     {
         _db = db;
         _activityLogger = activityLogger;
+        _currentUser = currentUser;
     }
 
     [HttpGet]
@@ -62,7 +64,7 @@ public class AdminUsersController : Controller
             return View(vm);
         }
 
-        var country = vm.CountryId.HasValue ? await _db.Countries.FindAsync(vm.CountryId.Value) : null;
+        var country = vm.CountryId.HasValue ? await _db.Countries.FirstOrDefaultAsync(c => c.Id == vm.CountryId.Value && _currentUser.IsAdmin) : null;
 
         var user = new YdUser
         {
@@ -89,7 +91,7 @@ public class AdminUsersController : Controller
     {
         var user = await _db.YdUsers
             .Include(u => u.UserRoles)
-            .FirstOrDefaultAsync(u => u.Id == id);
+            .FirstOrDefaultAsync(u => u.Id == id && _currentUser.IsAdmin);
         if (user is null) return NotFound();
 
         var country = !string.IsNullOrEmpty(user.RepositoryName)
@@ -133,10 +135,10 @@ public class AdminUsersController : Controller
 
         var user = await _db.YdUsers
             .Include(u => u.UserRoles)
-            .FirstOrDefaultAsync(u => u.Id == id);
+            .FirstOrDefaultAsync(u => u.Id == id && _currentUser.IsAdmin);
         if (user is null) return NotFound();
 
-        var country = vm.CountryId.HasValue ? await _db.Countries.FindAsync(vm.CountryId.Value) : null;
+        var country = vm.CountryId.HasValue ? await _db.Countries.FirstOrDefaultAsync(c => c.Id == vm.CountryId.Value && _currentUser.IsAdmin) : null;
 
         user.Username = vm.Username;
         user.FullName = vm.FullName;
@@ -158,7 +160,7 @@ public class AdminUsersController : Controller
     [ValidateAntiForgeryToken]
     public async Task<IActionResult> Delete(int id)
     {
-        var user = await _db.YdUsers.FindAsync(id);
+        var user = await _db.YdUsers.FirstOrDefaultAsync(u => u.Id == id && _currentUser.IsAdmin);
         if (user is null) return NotFound();
 
         var username = user.Username;

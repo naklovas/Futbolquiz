@@ -137,9 +137,10 @@ public class PhysicalDevicesController : Controller
 
         if (fromPool && sourceId.HasValue)
         {
-            var source = await _db.ZiraatYds.FindAsync(sourceId.Value);
-            if (source is not null && !_currentUser.IsAdmin && source.RepositoryName != _currentUser.Country)
-                source = null;
+            // Country scoping belongs in the query, not in a check after it -- otherwise the
+            // row is still fetched before being discarded, which is what the scanner flags.
+            var source = await _db.ZiraatYds.FirstOrDefaultAsync(z => z.Id == sourceId.Value
+                && (_currentUser.IsAdmin || z.RepositoryName == _currentUser.Country));
             if (source is not null)
             {
                 vm.SourceZiraatYdId = source.Id;
@@ -360,7 +361,8 @@ public class PhysicalDevicesController : Controller
             return RedirectToAction(nameof(Import));
         }
 
-        var country = await _db.Countries.FindAsync(effectiveCountryId.Value);
+        var country = await _db.Countries.FirstOrDefaultAsync(c => c.Id == effectiveCountryId.Value
+            && (_currentUser.IsAdmin || c.Id == _currentUser.CountryId));
         if (country is null)
         {
             TempData["ImportError"] = "Selected country not found.";
