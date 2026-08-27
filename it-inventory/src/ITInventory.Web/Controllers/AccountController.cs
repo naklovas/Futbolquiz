@@ -18,20 +18,17 @@ public class AccountController : Controller
     private readonly ILdapAuthenticationService _ldapAuth;
     private readonly ITInventoryDbContext _db;
     private readonly ILogger<AccountController> _logger;
-    private readonly TestLoginSettings _testLoginSettings;
     private readonly IActivityLogger _activityLogger;
 
     public AccountController(
         ILdapAuthenticationService ldapAuth,
         ITInventoryDbContext db,
         ILogger<AccountController> logger,
-        IOptions<TestLoginSettings> testLoginSettings,
         IActivityLogger activityLogger)
     {
         _ldapAuth = ldapAuth;
         _db = db;
         _logger = logger;
-        _testLoginSettings = testLoginSettings.Value;
         _activityLogger = activityLogger;
     }
 
@@ -50,24 +47,10 @@ public class AccountController : Controller
         if (!ModelState.IsValid)
             return View(model);
 
-        var useTestLogin = model.LoginMode == "test";
-
-        if (useTestLogin)
-        {
-            if (!_testLoginSettings.Enabled)
-            {
-                ModelState.AddModelError(string.Empty, "Test login is disabled.");
-                return View(model);
-            }
-
-            var credential = await _db.TestLoginCredentials.FindAsync(1);
-            if (credential is null || !TestLoginPasswordHasher.Verify(model.Password, credential.PasswordHash))
-            {
-                ModelState.AddModelError(string.Empty, "Invalid test password.");
-                return View(model);
-            }
-        }
-        else if (!_ldapAuth.ValidateCredentials(model.Username, model.Password, out var ldapError))
+        // AD/LDAP is the only way in. The old "test user" mode is gone entirely: it carried a
+        // second credential store and a PBKDF2 verifier whose salt was read back out of the
+        // stored string, and none of it earned its keep once LDAP was working.
+        if (!_ldapAuth.ValidateCredentials(model.Username, model.Password, out var ldapError))
         {
             ModelState.AddModelError(string.Empty, ldapError ?? "Invalid username or password.");
             return View(model);
@@ -83,8 +66,8 @@ public class AccountController : Controller
         if (user is null || !user.IsActive)
         {
             _logger.LogWarning(
-                "Authentication succeeded but the user is not registered/active in the IT Inventory system: {Username} (mode: {Mode})",
-                bareUsername, useTestLogin ? "test" : "ldap");
+                "Authentication succeeded but the user is not registered/active in the IT Inventory system: {Username}",
+                bareUsername);
             ModelState.AddModelError(string.Empty,
                 "This user is not registered in the IT Inventory system. Please contact your system administrator.");
             return View(model);

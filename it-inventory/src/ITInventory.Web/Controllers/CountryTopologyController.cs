@@ -192,9 +192,21 @@ public class CountryTopologyController : Controller
             && (isAdmin || f.CountryId == scopedCountryId));
         if (file is null) return NotFound();
 
+        // Both of these end up in response headers -- the name in Content-Disposition, the type
+        // in Content-Type -- so neither is sent as stored. SanitizeFileName runs at upload, but
+        // a row written before it existed would flow straight into the header, and the header is
+        // where a stray CR/LF would actually do damage; sanitising again at the sink costs
+        // nothing and does not depend on how the row got there. The content type is not taken
+        // from the row at all: it is resolved from the sanitised name through the same
+        // allow-list the upload validated against.
+        var downloadName = SanitizeFileName(file.FileName);
+        var contentType = AllowedExtensions.TryGetValue(Path.GetExtension(downloadName), out var known)
+            ? known
+            : "application/octet-stream";
+
         // fileDownloadName forces Content-Disposition: attachment -- always a plain save,
         // never rendered by the browser, regardless of content type.
-        return File(file.FileData, file.ContentType, file.FileName);
+        return File(file.FileData, contentType, downloadName);
     }
 
     private static readonly HashSet<string> InlinePreviewableContentTypes = new(StringComparer.OrdinalIgnoreCase)
@@ -219,9 +231,15 @@ public class CountryTopologyController : Controller
 
         var file = await _db.CountryTopologyFiles.FirstOrDefaultAsync(f => f.CountryId == countryId
             && (isAdmin || f.CountryId == scopedCountryId));
-        if (file is null || !InlinePreviewableContentTypes.Contains(file.ContentType)) return NotFound();
+        if (file is null) return NotFound();
 
-        return File(file.FileData, file.ContentType);
+        // TryGetValue hands back the string held in the set, not the one that came out of the
+        // row. Same characters, but the value written into the Content-Type header is now one
+        // of ours -- the stored value only selects among them.
+        if (!InlinePreviewableContentTypes.TryGetValue(file.ContentType, out var previewContentType))
+            return NotFound();
+
+        return File(file.FileData, previewContentType);
     }
 
     [HttpPost]

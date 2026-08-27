@@ -8,8 +8,15 @@ public static class ExcelImportHelpers
     private const long MaxUploadBytes = 10 * 1024 * 1024; // 10 MB
 
     /// <summary>
-    /// Rejects missing/empty files, anything that isn't a .xlsx by extension, and anything
-    /// over 10 MB, before it ever reaches ClosedXML.
+    /// Rejects missing/empty files, anything that isn't a .xlsx by extension, anything over
+    /// 10 MB, and anything whose bytes don't actually start like an .xlsx, before it ever
+    /// reaches ClosedXML.
+    ///
+    /// The extension is the uploader's claim about the file; the signature is the file itself.
+    /// Renaming something.exe to sheet.xlsx used to get it as far as the parser -- which is
+    /// exactly the "the extension is not the content type" case the upload rules are about.
+    /// The country topology upload has checked signatures since it was written
+    /// (ContentMatchesExtension); this brings the Excel imports in line.
     /// </summary>
     public static bool IsValidUpload(IFormFile? file, out string error)
     {
@@ -31,8 +38,27 @@ public static class ExcelImportHelpers
             return false;
         }
 
+        if (!HasXlsxSignature(file))
+        {
+            error = "This file is not a valid .xlsx workbook.";
+            return false;
+        }
+
         error = string.Empty;
         return true;
+    }
+
+    /// <summary>
+    /// .xlsx is an OOXML package, i.e. a ZIP archive, so it starts with the ZIP local-file
+    /// header "PK\x03\x04" -- the same first four bytes as .docx/.pptx/.vsdx. The stream is
+    /// rewound afterwards so the caller can still read the whole file.
+    /// </summary>
+    private static bool HasXlsxSignature(IFormFile file)
+    {
+        Span<byte> head = stackalloc byte[4];
+        using var stream = file.OpenReadStream();
+        var read = stream.ReadAtLeast(head, head.Length, throwOnEndOfStream: false);
+        return read == 4 && head[0] == 0x50 && head[1] == 0x4B && head[2] == 0x03 && head[3] == 0x04;
     }
 
     public static Dictionary<string, int> ReadHeaders(IXLWorksheet ws)

@@ -27,7 +27,6 @@ public class ITInventoryDbContext : DbContext
     public DbSet<CompanyContact> CompanyContacts => Set<CompanyContact>();
     public DbSet<Application> Applications => Set<Application>();
     public DbSet<ActivityLog> ActivityLogs => Set<ActivityLog>();
-    public DbSet<TestLoginCredential> TestLoginCredentials => Set<TestLoginCredential>();
     public DbSet<CountryTopologyFile> CountryTopologyFiles => Set<CountryTopologyFile>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)

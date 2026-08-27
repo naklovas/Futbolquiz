@@ -13,8 +13,5 @@ public class LoginViewModel
     [Display(Name = "Password")]
     public string Password { get; set; } = string.Empty;
 
-    /// <summary>"ldap" (default) or "test" - set by which submit button was clicked.</summary>
-    public string LoginMode { get; set; } = "ldap";
-
     public string? ReturnUrl { get; set; }
 }
