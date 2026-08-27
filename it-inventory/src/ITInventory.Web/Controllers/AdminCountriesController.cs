@@ -1,6 +1,7 @@
 using ITInventory.Data;
 using ITInventory.Data.Common;
 using ITInventory.Data.Entities;
+using ITInventory.Web.Common;
 using ITInventory.Web.Models.Admin;
 using ITInventory.Web.Services;
 using Microsoft.AspNetCore.Authorization;
@@ -60,7 +61,9 @@ public class AdminCountriesController : Controller
     [HttpGet]
     public async Task<IActionResult> Edit(int id)
     {
-        var country = await _db.Countries.FirstOrDefaultAsync(c => c.Id == id && _currentUser.IsAdmin);
+        var isAdmin = User.IsAdministrator();
+
+        var country = await _db.Countries.FirstOrDefaultAsync(c => c.Id == id && isAdmin);
         if (country is null) return NotFound();
 
         return View(new CountryFormViewModel
@@ -77,6 +80,8 @@ public class AdminCountriesController : Controller
     [ValidateAntiForgeryToken]
     public async Task<IActionResult> Edit(int id, CountryFormViewModel vm)
     {
+        var isAdmin = User.IsAdministrator();
+
         if (id != vm.Id) return BadRequest();
 
         if (await _db.Countries.AnyAsync(c => c.Name == vm.Name && c.Id != id))
@@ -85,7 +90,7 @@ public class AdminCountriesController : Controller
         if (!ModelState.IsValid)
             return View(vm);
 
-        var country = await _db.Countries.FirstOrDefaultAsync(c => c.Id == id && _currentUser.IsAdmin);
+        var country = await _db.Countries.FirstOrDefaultAsync(c => c.Id == id && isAdmin);
         if (country is null) return NotFound();
 
         country.Name = vm.Name;
@@ -103,7 +108,9 @@ public class AdminCountriesController : Controller
     [ValidateAntiForgeryToken]
     public async Task<IActionResult> Delete(int id)
     {
-        var country = await _db.Countries.FirstOrDefaultAsync(c => c.Id == id && _currentUser.IsAdmin);
+        var isAdmin = User.IsAdministrator();
+
+        var country = await _db.Countries.FirstOrDefaultAsync(c => c.Id == id && isAdmin);
         if (country is null) return NotFound();
 
         var countryLabel = country.DisplayName ?? country.Name;

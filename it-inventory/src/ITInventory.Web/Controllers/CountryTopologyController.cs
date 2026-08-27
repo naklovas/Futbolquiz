@@ -1,5 +1,6 @@
 using ITInventory.Data;
 using ITInventory.Data.Entities;
+using ITInventory.Web.Common;
 using ITInventory.Web.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Rendering;
@@ -83,8 +84,10 @@ public class CountryTopologyController : Controller
     [HttpGet]
     public async Task<IActionResult> Index(int? countryId)
     {
-        var isAdmin = _currentUser.IsAdmin;
-        var effectiveCountryId = isAdmin ? countryId : _currentUser.CountryId;
+        var isAdmin = User.IsAdministrator();
+        var scopedCountryId = User.ScopedCountryId();
+
+        var effectiveCountryId = isAdmin ? countryId : scopedCountryId;
 
         if (isAdmin)
         {
@@ -103,11 +106,11 @@ public class CountryTopologyController : Controller
         }
 
         var country = await _db.Countries.FirstOrDefaultAsync(c => c.Id == effectiveCountryId.Value
-            && (_currentUser.IsAdmin || c.Id == _currentUser.CountryId));
+            && (isAdmin || c.Id == scopedCountryId));
         ViewBag.CountryLabel = country?.DisplayName ?? country?.Name;
 
         var file = await _db.CountryTopologyFiles.FirstOrDefaultAsync(f => f.CountryId == effectiveCountryId.Value
-            && (_currentUser.IsAdmin || f.CountryId == _currentUser.CountryId));
+            && (isAdmin || f.CountryId == scopedCountryId));
         return View(file);
     }
 
@@ -115,6 +118,9 @@ public class CountryTopologyController : Controller
     [ValidateAntiForgeryToken]
     public async Task<IActionResult> Upload(int countryId, IFormFile file)
     {
+        var isAdmin = User.IsAdministrator();
+        var scopedCountryId = User.ScopedCountryId();
+
         if (!_currentUser.CanEdit) return Forbid();
 
         // countryId form alanindan geliyor. Var olan ve yazma yetkimizin bulundugu bir ulke
@@ -122,7 +128,7 @@ public class CountryTopologyController : Controller
         // sorgunun DONDURDUGU satirdan aliniyor, istekten gelen sayidan degil. Sadece "var mi"
         // diye bakmak yetmez -- o durumda gonderilen deger dogrudan INSERT'e kadar gidiyor.
         var country = await _db.Countries.FirstOrDefaultAsync(c => c.Id == countryId
-            && (_currentUser.IsAdmin || c.Id == _currentUser.CountryId));
+            && (isAdmin || c.Id == scopedCountryId));
         if (country is null) return Forbid();
 
         if (file is null || file.Length == 0)
@@ -155,7 +161,7 @@ public class CountryTopologyController : Controller
         }
 
         var existing = await _db.CountryTopologyFiles.FirstOrDefaultAsync(f => f.CountryId == country.Id
-            && (_currentUser.IsAdmin || f.CountryId == _currentUser.CountryId));
+            && (isAdmin || f.CountryId == scopedCountryId));
         if (existing is null)
         {
             existing = new CountryTopologyFile { CountryId = country.Id };
@@ -179,8 +185,11 @@ public class CountryTopologyController : Controller
     [HttpGet]
     public async Task<IActionResult> Download(int countryId)
     {
+        var isAdmin = User.IsAdministrator();
+        var scopedCountryId = User.ScopedCountryId();
+
         var file = await _db.CountryTopologyFiles.FirstOrDefaultAsync(f => f.CountryId == countryId
-            && (_currentUser.IsAdmin || f.CountryId == _currentUser.CountryId));
+            && (isAdmin || f.CountryId == scopedCountryId));
         if (file is null) return NotFound();
 
         // fileDownloadName forces Content-Disposition: attachment -- always a plain save,
@@ -205,8 +214,11 @@ public class CountryTopologyController : Controller
     [HttpGet]
     public async Task<IActionResult> Preview(int countryId)
     {
+        var isAdmin = User.IsAdministrator();
+        var scopedCountryId = User.ScopedCountryId();
+
         var file = await _db.CountryTopologyFiles.FirstOrDefaultAsync(f => f.CountryId == countryId
-            && (_currentUser.IsAdmin || f.CountryId == _currentUser.CountryId));
+            && (isAdmin || f.CountryId == scopedCountryId));
         if (file is null || !InlinePreviewableContentTypes.Contains(file.ContentType)) return NotFound();
 
         return File(file.FileData, file.ContentType);
@@ -216,10 +228,13 @@ public class CountryTopologyController : Controller
     [ValidateAntiForgeryToken]
     public async Task<IActionResult> Delete(int countryId)
     {
+        var isAdmin = User.IsAdministrator();
+        var scopedCountryId = User.ScopedCountryId();
+
         if (!_currentUser.CanEdit) return Forbid();
 
         var file = await _db.CountryTopologyFiles.FirstOrDefaultAsync(f => f.CountryId == countryId
-            && (_currentUser.IsAdmin || f.CountryId == _currentUser.CountryId));
+            && (isAdmin || f.CountryId == scopedCountryId));
         if (file is not null)
         {
             _db.CountryTopologyFiles.Remove(file);

@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using ITInventory.Data;
+using ITInventory.Web.Common;
 using ITInventory.Web.Models;
 using ITInventory.Web.Models.Home;
 using ITInventory.Web.Services;
@@ -23,7 +24,9 @@ public class HomeController : Controller
     [HttpGet]
     public async Task<IActionResult> Index(string? countryId)
     {
-        var isAdmin = _currentUser.IsAdmin;
+        var isAdmin = User.IsAdministrator();
+        var scopedCountryId = User.ScopedCountryId();
+
         var viewAll = string.IsNullOrEmpty(countryId) || countryId == "all";
         int? selectedCountryId = !viewAll && int.TryParse(countryId, out var parsedCountryId) ? parsedCountryId : null;
 
@@ -34,10 +37,10 @@ public class HomeController : Controller
 
         if (!isAdmin)
         {
-            physicalDevices = physicalDevices.Where(d => d.CountryId == _currentUser.CountryId);
-            servers = servers.Where(s => s.CountryId == _currentUser.CountryId);
-            licenses = licenses.Where(l => l.CountryId == _currentUser.CountryId);
-            circuits = circuits.Where(c => c.CountryId == _currentUser.CountryId);
+            physicalDevices = physicalDevices.Where(d => d.CountryId == scopedCountryId);
+            servers = servers.Where(s => s.CountryId == scopedCountryId);
+            licenses = licenses.Where(l => l.CountryId == scopedCountryId);
+            circuits = circuits.Where(c => c.CountryId == scopedCountryId);
         }
         else if (selectedCountryId.HasValue)
         {
@@ -119,7 +122,7 @@ public class HomeController : Controller
 
         // Only makes sense for a single, specific country -- "All Countries" has no one
         // topology diagram to show.
-        var topologyCountryId = isAdmin ? selectedCountryId : _currentUser.CountryId;
+        var topologyCountryId = isAdmin ? selectedCountryId : scopedCountryId;
         if (topologyCountryId.HasValue)
         {
             var topology = await _db.CountryTopologyFiles

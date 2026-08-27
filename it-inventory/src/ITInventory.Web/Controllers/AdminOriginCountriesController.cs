@@ -1,6 +1,7 @@
 using ITInventory.Data;
 using ITInventory.Data.Common;
 using ITInventory.Data.Entities;
+using ITInventory.Web.Common;
 using ITInventory.Web.Models.Admin;
 using ITInventory.Web.Services;
 using Microsoft.AspNetCore.Authorization;
@@ -58,7 +59,9 @@ public class AdminOriginCountriesController : Controller
     [HttpGet]
     public async Task<IActionResult> Edit(int id)
     {
-        var originCountry = await _db.OriginCountries.FirstOrDefaultAsync(o => o.Id == id && _currentUser.IsAdmin);
+        var isAdmin = User.IsAdministrator();
+
+        var originCountry = await _db.OriginCountries.FirstOrDefaultAsync(o => o.Id == id && isAdmin);
         if (originCountry is null) return NotFound();
 
         return View(new OriginCountryFormViewModel
@@ -73,6 +76,8 @@ public class AdminOriginCountriesController : Controller
     [ValidateAntiForgeryToken]
     public async Task<IActionResult> Edit(int id, OriginCountryFormViewModel vm)
     {
+        var isAdmin = User.IsAdministrator();
+
         if (id != vm.Id) return BadRequest();
 
         if (await _db.OriginCountries.AnyAsync(c => c.Name == vm.Name && c.Id != id))
@@ -81,7 +86,7 @@ public class AdminOriginCountriesController : Controller
         if (!ModelState.IsValid)
             return View(vm);
 
-        var originCountry = await _db.OriginCountries.FirstOrDefaultAsync(o => o.Id == id && _currentUser.IsAdmin);
+        var originCountry = await _db.OriginCountries.FirstOrDefaultAsync(o => o.Id == id && isAdmin);
         if (originCountry is null) return NotFound();
 
         originCountry.Name = vm.Name;
@@ -97,7 +102,9 @@ public class AdminOriginCountriesController : Controller
     [ValidateAntiForgeryToken]
     public async Task<IActionResult> Delete(int id)
     {
-        var originCountry = await _db.OriginCountries.FirstOrDefaultAsync(o => o.Id == id && _currentUser.IsAdmin);
+        var isAdmin = User.IsAdministrator();
+
+        var originCountry = await _db.OriginCountries.FirstOrDefaultAsync(o => o.Id == id && isAdmin);
         if (originCountry is null) return NotFound();
 
         var name = originCountry.Name;

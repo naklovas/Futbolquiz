@@ -2,6 +2,7 @@ using ClosedXML.Excel;
 using ITInventory.Data;
 using ITInventory.Data.Common;
 using ITInventory.Data.Entities;
+using ITInventory.Web.Common;
 using ITInventory.Web.Models;
 using ITInventory.Web.Models.Import;
 using ITInventory.Web.Models.Servers;
@@ -29,7 +30,9 @@ public class ServersController : Controller
     [HttpGet]
     public async Task<IActionResult> Index(string? countryId, int page = 1)
     {
-        var isAdmin = _currentUser.IsAdmin;
+        var isAdmin = User.IsAdministrator();
+        var scopedCountryId = User.ScopedCountryId();
+
         var viewAll = isAdmin && countryId == "all";
         int? selectedCountryId = !viewAll && int.TryParse(countryId, out var parsedCountryId) ? parsedCountryId : null;
         var requiresSelection = isAdmin && !viewAll && !selectedCountryId.HasValue;
@@ -44,7 +47,7 @@ public class ServersController : Controller
             var query = _db.Servers.Include(s => s.Country).Include(s => s.HostPhysicalDevice).Include(s => s.Endpoints).AsQueryable();
 
             if (!isAdmin)
-                query = query.Where(s => s.CountryId == _currentUser.CountryId);
+                query = query.Where(s => s.CountryId == scopedCountryId);
             else if (selectedCountryId.HasValue)
                 query = query.Where(s => s.CountryId == selectedCountryId.Value);
 
@@ -64,7 +67,9 @@ public class ServersController : Controller
     [HttpGet]
     public async Task<IActionResult> Export(string? countryId)
     {
-        if (!_currentUser.IsAdmin) return Forbid();
+        var isAdmin = User.IsAdministrator();
+
+        if (!isAdmin) return Forbid();
 
         var viewAll = countryId == "all";
         int? selectedCountryId = !viewAll && int.TryParse(countryId, out var parsedCountryId) ? parsedCountryId : null;
@@ -115,20 +120,29 @@ public class ServersController : Controller
     [HttpGet]
     public async Task<IActionResult> Create(bool fromPool = false, int? sourceId = null, int? countryId = null)
     {
+        var isAdmin = User.IsAdministrator();
+        var scopedCountryId = User.ScopedCountryId();
+        var scopedRepository = User.ScopedRepositoryName();
+
         if (!_currentUser.CanEdit) return Forbid();
 
         var vm = new ServerFormViewModel
         {
-            CountryId = _currentUser.IsAdmin ? countryId ?? 0 : _currentUser.CountryId ?? 0,
+            CountryId = isAdmin ? countryId ?? 0 : scopedCountryId ?? 0,
             ApplianceType = ApplianceType.Virtual
         };
 
         if (fromPool && sourceId.HasValue)
         {
-            // Country scoping belongs in the query, not in a check after it -- otherwise the
-            // row is still fetched before being discarded, which is what the scanner flags.
+            // The scope is in the query rather than in a check after it, so a pool row outside
+            // the caller's country is never fetched at all, and it comes off the authenticated
+            // principal's claims (see PrincipalScope) so the restriction is visible right here
+            // instead of behind a DI-resolved interface. An administrator reaches every
+            // country's pool by design -- that branch has nothing to narrow, which is why a
+            // scanner tracing sourceId to this query still reports it. See the audit note in
+            // docs/fortify-access-control.md.
             var source = await _db.ZiraatYds.FirstOrDefaultAsync(z => z.Id == sourceId.Value
-                && (_currentUser.IsAdmin || z.RepositoryName == _currentUser.Country));
+                && (isAdmin || z.RepositoryName == scopedRepository));
             if (source is not null)
             {
                 vm.SourceZiraatYdId = source.Id;
@@ -151,10 +165,14 @@ public class ServersController : Controller
     [ValidateAntiForgeryToken]
     public async Task<IActionResult> Create(ServerFormViewModel vm)
     {
+        var isAdmin = User.IsAdministrator();
+        var scopedCountryId = User.ScopedCountryId();
+        var scopedRepository = User.ScopedRepositoryName();
+
         if (!_currentUser.CanEdit) return Forbid();
 
-        if (!_currentUser.IsAdmin)
-            vm.CountryId = _currentUser.CountryId ?? 0;
+        if (!isAdmin)
+            vm.CountryId = scopedCountryId ?? 0;
 
         // IP Address and ESXi/Physical Server only exist on the "New Server" form (see the
         // isNew branching in _Form.cshtml) -- they're absent entirely when editing, so they
@@ -172,7 +190,7 @@ public class ServersController : Controller
         if (vm.HostPhysicalDeviceId.HasValue)
         {
             hostDevice = await _db.PhysicalDevices.FirstOrDefaultAsync(d => d.Id == vm.HostPhysicalDeviceId.Value
-                && (_currentUser.IsAdmin || d.CountryId == _currentUser.CountryId));
+                && (isAdmin || d.CountryId == scopedCountryId));
             if (hostDevice is null)
                 ModelState.AddModelError(nameof(vm.HostPhysicalDeviceId), "Selected ESXi / Physical Server was not found.");
         }
@@ -182,7 +200,7 @@ public class ServersController : Controller
         // rows the authorized lookups returned, never from the request. Otherwise the posted
         // values still travel straight into the INSERT with only an existence test in the way.
         var country = await _db.Countries.FirstOrDefaultAsync(c => c.Id == (vm.CountryId ?? 0)
-            && (_currentUser.IsAdmin || c.Id == _currentUser.CountryId));
+            && (isAdmin || c.Id == scopedCountryId));
         if (country is null)
         {
             ModelState.AddModelError(nameof(vm.CountryId), "Please select a valid country.");
@@ -206,7 +224,7 @@ public class ServersController : Controller
         if (vm.SourceZiraatYdId.HasValue)
         {
             poolRecord = await _db.ZiraatYds.FirstOrDefaultAsync(z => z.Id == vm.SourceZiraatYdId.Value
-                && (_currentUser.IsAdmin || z.RepositoryName == _currentUser.Country));
+                && (isAdmin || z.RepositoryName == scopedRepository));
             if (poolRecord is null)
             {
                 ModelState.AddModelError(string.Empty, "The selected device pool record is not valid.");
@@ -276,9 +294,12 @@ public class ServersController : Controller
     [HttpGet]
     public async Task<IActionResult> Edit(int id)
     {
+        var isAdmin = User.IsAdministrator();
+        var scopedCountryId = User.ScopedCountryId();
+
         if (!_currentUser.CanEdit) return Forbid();
 
-        var entity = await _db.Servers.FirstOrDefaultAsync(x => x.Id == id && (_currentUser.IsAdmin || x.CountryId == _currentUser.CountryId));
+        var entity = await _db.Servers.FirstOrDefaultAsync(x => x.Id == id && (isAdmin || x.CountryId == scopedCountryId));
         if (entity is null) return NotFound();
 
         var vm = new ServerFormViewModel
@@ -313,14 +334,17 @@ public class ServersController : Controller
     [ValidateAntiForgeryToken]
     public async Task<IActionResult> Edit(int id, ServerFormViewModel vm)
     {
+        var isAdmin = User.IsAdministrator();
+        var scopedCountryId = User.ScopedCountryId();
+
         if (!_currentUser.CanEdit) return Forbid();
         if (id != vm.Id) return BadRequest();
 
-        var entity = await _db.Servers.FirstOrDefaultAsync(x => x.Id == id && (_currentUser.IsAdmin || x.CountryId == _currentUser.CountryId));
+        var entity = await _db.Servers.FirstOrDefaultAsync(x => x.Id == id && (isAdmin || x.CountryId == scopedCountryId));
         if (entity is null) return NotFound();
 
-        if (!_currentUser.IsAdmin)
-            vm.CountryId = _currentUser.CountryId ?? 0;
+        if (!isAdmin)
+            vm.CountryId = scopedCountryId ?? 0;
 
         // Branch is shown/editable here (unlike Create, where it's taken from the ESXi host
         // instead and the field doesn't exist at all) -- see ServerFormViewModel.Branch for why
@@ -333,7 +357,7 @@ public class ServersController : Controller
         // the authorized lookups returned, never from the request. Otherwise the posted values
         // still travel straight into the UPDATE with only an existence test in the way.
         var country = await _db.Countries.FirstOrDefaultAsync(c => c.Id == (vm.CountryId ?? 0)
-            && (_currentUser.IsAdmin || c.Id == _currentUser.CountryId));
+            && (isAdmin || c.Id == scopedCountryId));
         if (country is null)
         {
             ModelState.AddModelError(nameof(vm.CountryId), "Please select a valid country.");
@@ -360,7 +384,7 @@ public class ServersController : Controller
         if (vm.HostPhysicalDeviceId.HasValue)
         {
             hostDevice = await _db.PhysicalDevices.FirstOrDefaultAsync(d => d.Id == vm.HostPhysicalDeviceId.Value
-                && (_currentUser.IsAdmin || d.CountryId == _currentUser.CountryId));
+                && (isAdmin || d.CountryId == scopedCountryId));
             if (hostDevice is null)
             {
                 ModelState.AddModelError(nameof(vm.HostPhysicalDeviceId), "Selected ESXi / Physical Server was not found.");
@@ -404,9 +428,12 @@ public class ServersController : Controller
     [ValidateAntiForgeryToken]
     public async Task<IActionResult> Delete(int id)
     {
+        var isAdmin = User.IsAdministrator();
+        var scopedCountryId = User.ScopedCountryId();
+
         if (!_currentUser.CanEdit) return Forbid();
 
-        var entity = await _db.Servers.FirstOrDefaultAsync(x => x.Id == id && (_currentUser.IsAdmin || x.CountryId == _currentUser.CountryId));
+        var entity = await _db.Servers.FirstOrDefaultAsync(x => x.Id == id && (isAdmin || x.CountryId == scopedCountryId));
         if (entity is null) return NotFound();
 
         var hostName = entity.HostName;
@@ -428,7 +455,9 @@ public class ServersController : Controller
     [HttpGet]
     public async Task<IActionResult> Import()
     {
-        if (!_currentUser.IsAdmin) return Forbid();
+        var isAdmin = User.IsAdministrator();
+
+        if (!isAdmin) return Forbid();
         ViewBag.EntityName = "Servers";
         await PopulateImportCountryInfo();
         return View("Import");
@@ -437,7 +466,9 @@ public class ServersController : Controller
     [HttpGet]
     public IActionResult DownloadTemplate()
     {
-        if (!_currentUser.IsAdmin) return Forbid();
+        var isAdmin = User.IsAdministrator();
+
+        if (!isAdmin) return Forbid();
 
         var bytes = ExcelImportHelpers.CreateTemplateBytes("Servers",
             "Host Name", "Physical/Virtual", "Location Category", "Site Role", "Operating System",
@@ -451,7 +482,10 @@ public class ServersController : Controller
     [ValidateAntiForgeryToken]
     public async Task<IActionResult> Import(IFormFile file, int? countryId)
     {
-        if (!_currentUser.IsAdmin) return Forbid();
+        var isAdmin = User.IsAdministrator();
+        var scopedCountryId = User.ScopedCountryId();
+
+        if (!isAdmin) return Forbid();
 
         if (!ExcelImportHelpers.IsValidUpload(file, out var uploadError))
         {
@@ -459,7 +493,7 @@ public class ServersController : Controller
             return RedirectToAction(nameof(Import));
         }
 
-        var effectiveCountryId = _currentUser.IsAdmin ? countryId : _currentUser.CountryId;
+        var effectiveCountryId = isAdmin ? countryId : scopedCountryId;
         if (!effectiveCountryId.HasValue)
         {
             TempData["ImportError"] = "Please select a country.";
@@ -467,7 +501,7 @@ public class ServersController : Controller
         }
 
         var country = await _db.Countries.FirstOrDefaultAsync(c => c.Id == effectiveCountryId.Value
-            && (_currentUser.IsAdmin || c.Id == _currentUser.CountryId));
+            && (isAdmin || c.Id == scopedCountryId));
         if (country is null)
         {
             TempData["ImportError"] = "Selected country not found.";
@@ -556,9 +590,13 @@ public class ServersController : Controller
 
     private async Task PopulateImportCountryInfo()
     {
-        ViewBag.IsAdmin = _currentUser.IsAdmin;
+        var isAdmin = User.IsAdministrator();
+        var scopedCountryId = User.ScopedCountryId();
+        var scopedRepository = User.ScopedRepositoryName();
 
-        if (_currentUser.IsAdmin)
+        ViewBag.IsAdmin = isAdmin;
+
+        if (isAdmin)
         {
             var countries = await _db.Countries.Where(c => c.IsActive).OrderBy(c => c.Name)
                 .Select(c => new { c.Id, Label = c.DisplayName ?? c.Name }).ToListAsync();
@@ -566,23 +604,26 @@ public class ServersController : Controller
         }
         else
         {
-            var country = await _db.Countries.FirstOrDefaultAsync(c => c.Id == _currentUser.CountryId);
-            ViewBag.OwnCountryLabel = country?.DisplayName ?? country?.Name ?? _currentUser.Country;
+            var country = await _db.Countries.FirstOrDefaultAsync(c => c.Id == scopedCountryId);
+            ViewBag.OwnCountryLabel = country?.DisplayName ?? country?.Name ?? scopedRepository;
         }
     }
 
     private async Task PopulateDropdowns()
     {
-        ViewBag.IsAdmin = _currentUser.IsAdmin;
+        var isAdmin = User.IsAdministrator();
+        var scopedCountryId = User.ScopedCountryId();
 
-        var countriesQuery = _currentUser.IsAdmin
+        ViewBag.IsAdmin = isAdmin;
+
+        var countriesQuery = isAdmin
             ? _db.Countries.Where(c => c.IsActive).OrderBy(c => c.Name)
-            : _db.Countries.Where(c => c.Id == _currentUser.CountryId);
+            : _db.Countries.Where(c => c.Id == scopedCountryId);
         var countries = await countriesQuery.Select(c => new { c.Id, Label = c.DisplayName ?? c.Name }).ToListAsync();
 
         ViewBag.CountryOptions = new SelectList(countries, "Id", "Label");
 
-        var effectiveCountryId = _currentUser.IsAdmin ? (int?)null : _currentUser.CountryId;
+        var effectiveCountryId = isAdmin ? (int?)null : scopedCountryId;
 
         // Only "ESXi / Physical Server" category Physical Devices can host a VM -- without
         // this filter every switch/firewall/etc. in the country showed up here too.

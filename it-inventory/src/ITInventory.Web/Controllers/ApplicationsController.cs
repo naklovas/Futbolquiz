@@ -2,6 +2,7 @@ using ClosedXML.Excel;
 using ITInventory.Data;
 using ITInventory.Data.Common;
 using ITInventory.Data.Entities;
+using ITInventory.Web.Common;
 using ITInventory.Web.Models;
 using ITInventory.Web.Models.Applications;
 using ITInventory.Web.Models.Import;
@@ -29,7 +30,9 @@ public class ApplicationsController : Controller
     [HttpGet]
     public async Task<IActionResult> Index(string? countryId, int page = 1)
     {
-        var isAdmin = _currentUser.IsAdmin;
+        var isAdmin = User.IsAdministrator();
+        var scopedCountryId = User.ScopedCountryId();
+
         var viewAll = isAdmin && countryId == "all";
         int? selectedCountryId = !viewAll && int.TryParse(countryId, out var parsedCountryId) ? parsedCountryId : null;
         var requiresSelection = isAdmin && !viewAll && !selectedCountryId.HasValue;
@@ -48,7 +51,7 @@ public class ApplicationsController : Controller
                 .AsQueryable();
 
             if (!isAdmin)
-                query = query.Where(a => a.CountryId == _currentUser.CountryId);
+                query = query.Where(a => a.CountryId == scopedCountryId);
             else if (selectedCountryId.HasValue)
                 query = query.Where(a => a.CountryId == selectedCountryId.Value);
 
@@ -68,7 +71,9 @@ public class ApplicationsController : Controller
     [HttpGet]
     public async Task<IActionResult> Export(string? countryId)
     {
-        if (!_currentUser.IsAdmin) return Forbid();
+        var isAdmin = User.IsAdministrator();
+
+        if (!isAdmin) return Forbid();
 
         var viewAll = countryId == "all";
         int? selectedCountryId = !viewAll && int.TryParse(countryId, out var parsedCountryId) ? parsedCountryId : null;
@@ -106,11 +111,14 @@ public class ApplicationsController : Controller
     [HttpGet]
     public async Task<IActionResult> Create()
     {
+        var isAdmin = User.IsAdministrator();
+        var scopedCountryId = User.ScopedCountryId();
+
         if (!_currentUser.CanEdit) return Forbid();
 
         var vm = new ApplicationFormViewModel
         {
-            CountryId = _currentUser.IsAdmin ? 0 : _currentUser.CountryId ?? 0
+            CountryId = isAdmin ? 0 : scopedCountryId ?? 0
         };
 
         await PopulateDropdowns();
@@ -121,17 +129,20 @@ public class ApplicationsController : Controller
     [ValidateAntiForgeryToken]
     public async Task<IActionResult> Create(ApplicationFormViewModel vm)
     {
+        var isAdmin = User.IsAdministrator();
+        var scopedCountryId = User.ScopedCountryId();
+
         if (!_currentUser.CanEdit) return Forbid();
 
-        if (!_currentUser.IsAdmin)
-            vm.CountryId = _currentUser.CountryId ?? 0;
+        if (!isAdmin)
+            vm.CountryId = scopedCountryId ?? 0;
 
         // Every foreign key below arrives as a plain number from a form field. Checking that the
         // number exists is not enough: the ids written into the new row have to COME FROM the
         // rows the authorized lookups returned, never from the request. Otherwise the posted
         // values still travel straight into the INSERT with only an existence test in the way.
         var country = await _db.Countries.FirstOrDefaultAsync(c => c.Id == (vm.CountryId ?? 0)
-            && (_currentUser.IsAdmin || c.Id == _currentUser.CountryId));
+            && (isAdmin || c.Id == scopedCountryId));
         if (country is null)
         {
             ModelState.AddModelError(nameof(vm.CountryId), "Please select a valid country.");
@@ -143,7 +154,7 @@ public class ApplicationsController : Controller
         if (vm.CompanyId.HasValue)
         {
             company = await _db.Companies.FirstOrDefaultAsync(c => c.Id == vm.CompanyId.Value && c.IsActive
-                && (_currentUser.IsAdmin || c.CountryId == _currentUser.CountryId));
+                && (isAdmin || c.CountryId == scopedCountryId));
             if (company is null)
             {
                 ModelState.AddModelError(nameof(vm.CompanyId), "Please select a valid company.");
@@ -156,7 +167,7 @@ public class ApplicationsController : Controller
         if (vm.LicenseId.HasValue)
         {
             license = await _db.Licenses.FirstOrDefaultAsync(l => l.Id == vm.LicenseId.Value
-                && (_currentUser.IsAdmin || l.CountryId == _currentUser.CountryId));
+                && (isAdmin || l.CountryId == scopedCountryId));
             if (license is null)
             {
                 ModelState.AddModelError(nameof(vm.LicenseId), "Please select a valid license.");
@@ -195,9 +206,12 @@ public class ApplicationsController : Controller
     [HttpGet]
     public async Task<IActionResult> Edit(int id)
     {
+        var isAdmin = User.IsAdministrator();
+        var scopedCountryId = User.ScopedCountryId();
+
         if (!_currentUser.CanEdit) return Forbid();
 
-        var entity = await _db.Applications.FirstOrDefaultAsync(x => x.Id == id && (_currentUser.IsAdmin || x.CountryId == _currentUser.CountryId));
+        var entity = await _db.Applications.FirstOrDefaultAsync(x => x.Id == id && (isAdmin || x.CountryId == scopedCountryId));
         if (entity is null) return NotFound();
 
         var vm = new ApplicationFormViewModel
@@ -222,21 +236,24 @@ public class ApplicationsController : Controller
     [ValidateAntiForgeryToken]
     public async Task<IActionResult> Edit(int id, ApplicationFormViewModel vm)
     {
+        var isAdmin = User.IsAdministrator();
+        var scopedCountryId = User.ScopedCountryId();
+
         if (!_currentUser.CanEdit) return Forbid();
         if (id != vm.Id) return BadRequest();
 
-        var entity = await _db.Applications.FirstOrDefaultAsync(x => x.Id == id && (_currentUser.IsAdmin || x.CountryId == _currentUser.CountryId));
+        var entity = await _db.Applications.FirstOrDefaultAsync(x => x.Id == id && (isAdmin || x.CountryId == scopedCountryId));
         if (entity is null) return NotFound();
 
-        if (!_currentUser.IsAdmin)
-            vm.CountryId = _currentUser.CountryId ?? 0;
+        if (!isAdmin)
+            vm.CountryId = scopedCountryId ?? 0;
 
         // Every foreign key below arrives as a plain number from a form field. Checking that the
         // number exists is not enough: the ids written onto the row have to COME FROM the rows
         // the authorized lookups returned, never from the request. Otherwise the posted values
         // still travel straight into the UPDATE with only an existence test in the way.
         var country = await _db.Countries.FirstOrDefaultAsync(c => c.Id == (vm.CountryId ?? 0)
-            && (_currentUser.IsAdmin || c.Id == _currentUser.CountryId));
+            && (isAdmin || c.Id == scopedCountryId));
         if (country is null)
         {
             ModelState.AddModelError(nameof(vm.CountryId), "Please select a valid country.");
@@ -248,7 +265,7 @@ public class ApplicationsController : Controller
         if (vm.CompanyId.HasValue)
         {
             company = await _db.Companies.FirstOrDefaultAsync(c => c.Id == vm.CompanyId.Value && c.IsActive
-                && (_currentUser.IsAdmin || c.CountryId == _currentUser.CountryId));
+                && (isAdmin || c.CountryId == scopedCountryId));
             if (company is null)
             {
                 ModelState.AddModelError(nameof(vm.CompanyId), "Please select a valid company.");
@@ -261,7 +278,7 @@ public class ApplicationsController : Controller
         if (vm.LicenseId.HasValue)
         {
             license = await _db.Licenses.FirstOrDefaultAsync(l => l.Id == vm.LicenseId.Value
-                && (_currentUser.IsAdmin || l.CountryId == _currentUser.CountryId));
+                && (isAdmin || l.CountryId == scopedCountryId));
             if (license is null)
             {
                 ModelState.AddModelError(nameof(vm.LicenseId), "Please select a valid license.");
@@ -297,9 +314,12 @@ public class ApplicationsController : Controller
     [ValidateAntiForgeryToken]
     public async Task<IActionResult> Delete(int id)
     {
+        var isAdmin = User.IsAdministrator();
+        var scopedCountryId = User.ScopedCountryId();
+
         if (!_currentUser.CanEdit) return Forbid();
 
-        var entity = await _db.Applications.FirstOrDefaultAsync(x => x.Id == id && (_currentUser.IsAdmin || x.CountryId == _currentUser.CountryId));
+        var entity = await _db.Applications.FirstOrDefaultAsync(x => x.Id == id && (isAdmin || x.CountryId == scopedCountryId));
         if (entity is null) return NotFound();
 
         var appName = entity.Name;
@@ -321,7 +341,9 @@ public class ApplicationsController : Controller
     [HttpGet]
     public async Task<IActionResult> Import()
     {
-        if (!_currentUser.IsAdmin) return Forbid();
+        var isAdmin = User.IsAdministrator();
+
+        if (!isAdmin) return Forbid();
         ViewBag.EntityName = "Applications";
         await PopulateImportCountryInfo();
         return View("Import");
@@ -330,7 +352,9 @@ public class ApplicationsController : Controller
     [HttpGet]
     public IActionResult DownloadTemplate()
     {
-        if (!_currentUser.IsAdmin) return Forbid();
+        var isAdmin = User.IsAdministrator();
+
+        if (!isAdmin) return Forbid();
 
         var bytes = ExcelImportHelpers.CreateTemplateBytes("Applications",
             "Application Name", "Company", "License", "Application Type",
@@ -343,7 +367,10 @@ public class ApplicationsController : Controller
     [ValidateAntiForgeryToken]
     public async Task<IActionResult> Import(IFormFile file, int? countryId)
     {
-        if (!_currentUser.IsAdmin) return Forbid();
+        var isAdmin = User.IsAdministrator();
+        var scopedCountryId = User.ScopedCountryId();
+
+        if (!isAdmin) return Forbid();
 
         if (!ExcelImportHelpers.IsValidUpload(file, out var uploadError))
         {
@@ -351,7 +378,7 @@ public class ApplicationsController : Controller
             return RedirectToAction(nameof(Import));
         }
 
-        var effectiveCountryId = _currentUser.IsAdmin ? countryId : _currentUser.CountryId;
+        var effectiveCountryId = isAdmin ? countryId : scopedCountryId;
         if (!effectiveCountryId.HasValue)
         {
             TempData["ImportError"] = "Please select a country.";
@@ -359,7 +386,7 @@ public class ApplicationsController : Controller
         }
 
         var country = await _db.Countries.FirstOrDefaultAsync(c => c.Id == effectiveCountryId.Value
-            && (_currentUser.IsAdmin || c.Id == _currentUser.CountryId));
+            && (isAdmin || c.Id == scopedCountryId));
         if (country is null)
         {
             TempData["ImportError"] = "Selected country not found.";
@@ -474,9 +501,13 @@ public class ApplicationsController : Controller
 
     private async Task PopulateImportCountryInfo()
     {
-        ViewBag.IsAdmin = _currentUser.IsAdmin;
+        var isAdmin = User.IsAdministrator();
+        var scopedCountryId = User.ScopedCountryId();
+        var scopedRepository = User.ScopedRepositoryName();
 
-        if (_currentUser.IsAdmin)
+        ViewBag.IsAdmin = isAdmin;
+
+        if (isAdmin)
         {
             var countries = await _db.Countries.Where(c => c.IsActive).OrderBy(c => c.Name)
                 .Select(c => new { c.Id, Label = c.DisplayName ?? c.Name }).ToListAsync();
@@ -484,22 +515,25 @@ public class ApplicationsController : Controller
         }
         else
         {
-            var country = await _db.Countries.FirstOrDefaultAsync(c => c.Id == _currentUser.CountryId);
-            ViewBag.OwnCountryLabel = country?.DisplayName ?? country?.Name ?? _currentUser.Country;
+            var country = await _db.Countries.FirstOrDefaultAsync(c => c.Id == scopedCountryId);
+            ViewBag.OwnCountryLabel = country?.DisplayName ?? country?.Name ?? scopedRepository;
         }
     }
 
     private async Task PopulateDropdowns()
     {
-        ViewBag.IsAdmin = _currentUser.IsAdmin;
+        var isAdmin = User.IsAdministrator();
+        var scopedCountryId = User.ScopedCountryId();
 
-        var countriesQuery = _currentUser.IsAdmin
+        ViewBag.IsAdmin = isAdmin;
+
+        var countriesQuery = isAdmin
             ? _db.Countries.Where(c => c.IsActive).OrderBy(c => c.Name)
-            : _db.Countries.Where(c => c.Id == _currentUser.CountryId);
+            : _db.Countries.Where(c => c.Id == scopedCountryId);
         var countries = await countriesQuery.Select(c => new { c.Id, Label = c.DisplayName ?? c.Name }).ToListAsync();
         ViewBag.CountryOptions = new SelectList(countries, "Id", "Label");
 
-        var effectiveCountryId = _currentUser.IsAdmin ? (int?)null : _currentUser.CountryId;
+        var effectiveCountryId = isAdmin ? (int?)null : scopedCountryId;
 
         var companiesQuery = _db.Companies.Where(c => c.IsActive);
         if (effectiveCountryId.HasValue)

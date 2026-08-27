@@ -2,6 +2,7 @@ using ClosedXML.Excel;
 using ITInventory.Data;
 using ITInventory.Data.Common;
 using ITInventory.Data.Entities;
+using ITInventory.Web.Common;
 using ITInventory.Web.Models.Admin;
 using ITInventory.Web.Models.Import;
 using ITInventory.Web.Services;
@@ -47,6 +48,8 @@ public class AdminLocationsController : Controller
     [ValidateAntiForgeryToken]
     public async Task<IActionResult> Create(LocationFormViewModel vm)
     {
+        var isAdmin = User.IsAdministrator();
+
         if (await _db.Locations.AnyAsync(l => l.CountryId == vm.CountryId && l.Branch == vm.Branch))
             ModelState.AddModelError(nameof(vm.Branch), "This branch already exists for the selected country.");
 
@@ -54,7 +57,7 @@ public class AdminLocationsController : Controller
         // exists is not enough: the id written into the new row has to COME FROM the row the
         // authorized lookup returned, never from the request. Otherwise the posted value still
         // travels straight into the INSERT with only an existence test in the way.
-        var country = await _db.Countries.FirstOrDefaultAsync(c => c.Id == (vm.CountryId ?? 0) && _currentUser.IsAdmin);
+        var country = await _db.Countries.FirstOrDefaultAsync(c => c.Id == (vm.CountryId ?? 0) && isAdmin);
         if (country is null)
         {
             ModelState.AddModelError(nameof(vm.CountryId), "Please select a valid country.");
@@ -85,7 +88,9 @@ public class AdminLocationsController : Controller
     [HttpGet]
     public async Task<IActionResult> Edit(int id)
     {
-        var location = await _db.Locations.FirstOrDefaultAsync(l => l.Id == id && _currentUser.IsAdmin);
+        var isAdmin = User.IsAdministrator();
+
+        var location = await _db.Locations.FirstOrDefaultAsync(l => l.Id == id && isAdmin);
         if (location is null) return NotFound();
 
         await PopulateDropdowns();
@@ -103,6 +108,8 @@ public class AdminLocationsController : Controller
     [ValidateAntiForgeryToken]
     public async Task<IActionResult> Edit(int id, LocationFormViewModel vm)
     {
+        var isAdmin = User.IsAdministrator();
+
         if (id != vm.Id) return BadRequest();
 
         if (await _db.Locations.AnyAsync(l => l.CountryId == vm.CountryId && l.Branch == vm.Branch && l.Id != id))
@@ -112,7 +119,7 @@ public class AdminLocationsController : Controller
         // number exists is not enough: the ids written onto the row have to COME FROM the rows
         // the authorized lookups returned, never from the request. Otherwise the posted values
         // still travel straight into the UPDATE with only an existence test in the way.
-        var country = await _db.Countries.FirstOrDefaultAsync(c => c.Id == (vm.CountryId ?? 0) && _currentUser.IsAdmin);
+        var country = await _db.Countries.FirstOrDefaultAsync(c => c.Id == (vm.CountryId ?? 0) && isAdmin);
         if (country is null)
         {
             ModelState.AddModelError(nameof(vm.CountryId), "Please select a valid country.");
@@ -126,7 +133,7 @@ public class AdminLocationsController : Controller
             return View(vm);
         }
 
-        var location = await _db.Locations.FirstOrDefaultAsync(l => l.Id == id && _currentUser.IsAdmin);
+        var location = await _db.Locations.FirstOrDefaultAsync(l => l.Id == id && isAdmin);
         if (location is null) return NotFound();
 
         location.CountryId = country.Id;
@@ -144,7 +151,9 @@ public class AdminLocationsController : Controller
     [ValidateAntiForgeryToken]
     public async Task<IActionResult> Delete(int id)
     {
-        var location = await _db.Locations.FirstOrDefaultAsync(l => l.Id == id && _currentUser.IsAdmin);
+        var isAdmin = User.IsAdministrator();
+
+        var location = await _db.Locations.FirstOrDefaultAsync(l => l.Id == id && isAdmin);
         if (location is null) return NotFound();
 
         var branch = location.Branch;

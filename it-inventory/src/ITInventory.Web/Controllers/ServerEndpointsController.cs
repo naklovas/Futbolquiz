@@ -1,5 +1,6 @@
 using ITInventory.Data;
 using ITInventory.Data.Entities;
+using ITInventory.Web.Common;
 using ITInventory.Web.Models;
 using ITInventory.Web.Models.ServerEndpoints;
 using ITInventory.Web.Services;
@@ -26,7 +27,9 @@ public class ServerEndpointsController : Controller
     [HttpGet]
     public async Task<IActionResult> Index(string? countryId, int page = 1)
     {
-        var isAdmin = _currentUser.IsAdmin;
+        var isAdmin = User.IsAdministrator();
+        var scopedCountryId = User.ScopedCountryId();
+
         var viewAll = isAdmin && countryId == "all";
         int? selectedCountryId = !viewAll && int.TryParse(countryId, out var parsedCountryId) ? parsedCountryId : null;
         var requiresSelection = isAdmin && !viewAll && !selectedCountryId.HasValue;
@@ -44,7 +47,7 @@ public class ServerEndpointsController : Controller
                 .AsQueryable();
 
             if (!isAdmin)
-                query = query.Where(e => e.Server!.CountryId == _currentUser.CountryId);
+                query = query.Where(e => e.Server!.CountryId == scopedCountryId);
             else if (selectedCountryId.HasValue)
                 query = query.Where(e => e.Server!.CountryId == selectedCountryId.Value);
 
@@ -64,7 +67,9 @@ public class ServerEndpointsController : Controller
     [HttpGet]
     public async Task<IActionResult> Export(string? countryId)
     {
-        if (!_currentUser.IsAdmin) return Forbid();
+        var isAdmin = User.IsAdministrator();
+
+        if (!isAdmin) return Forbid();
 
         var viewAll = countryId == "all";
         int? selectedCountryId = !viewAll && int.TryParse(countryId, out var parsedCountryId) ? parsedCountryId : null;
@@ -108,6 +113,9 @@ public class ServerEndpointsController : Controller
     [ValidateAntiForgeryToken]
     public async Task<IActionResult> Create(ServerEndpointFormViewModel vm)
     {
+        var isAdmin = User.IsAdministrator();
+        var scopedCountryId = User.ScopedCountryId();
+
         if (!_currentUser.CanEdit) return Forbid();
 
         // Every foreign key below arrives as a plain number from a form field. Checking that the
@@ -115,7 +123,7 @@ public class ServerEndpointsController : Controller
         // rows the authorized lookups returned, never from the request. Otherwise the posted
         // values still travel straight into the INSERT with only an existence test in the way.
         var server = await _db.Servers.FirstOrDefaultAsync(s => s.Id == vm.ServerId
-            && (_currentUser.IsAdmin || s.CountryId == _currentUser.CountryId));
+            && (isAdmin || s.CountryId == scopedCountryId));
         if (server is null)
         {
             ModelState.AddModelError(nameof(vm.ServerId), "Please select a valid server.");
@@ -127,7 +135,7 @@ public class ServerEndpointsController : Controller
         if (vm.ApplicationId.HasValue)
         {
             application = await _db.Applications.FirstOrDefaultAsync(a => a.Id == vm.ApplicationId.Value
-                && (_currentUser.IsAdmin || a.CountryId == _currentUser.CountryId));
+                && (isAdmin || a.CountryId == scopedCountryId));
             if (application is null)
             {
                 ModelState.AddModelError(nameof(vm.ApplicationId), "Please select a valid application.");
@@ -162,10 +170,13 @@ public class ServerEndpointsController : Controller
     [HttpGet]
     public async Task<IActionResult> Edit(int id)
     {
+        var isAdmin = User.IsAdministrator();
+        var scopedCountryId = User.ScopedCountryId();
+
         if (!_currentUser.CanEdit) return Forbid();
 
         var entity = await _db.ServerEndpoints.Include(e => e.Server).FirstOrDefaultAsync(e => e.Id == id
-            && (_currentUser.IsAdmin || e.Server!.CountryId == _currentUser.CountryId));
+            && (isAdmin || e.Server!.CountryId == scopedCountryId));
         if (entity is null) return NotFound();
 
         var vm = new ServerEndpointFormViewModel
@@ -186,15 +197,18 @@ public class ServerEndpointsController : Controller
     [ValidateAntiForgeryToken]
     public async Task<IActionResult> Edit(int id, ServerEndpointFormViewModel vm)
     {
+        var isAdmin = User.IsAdministrator();
+        var scopedCountryId = User.ScopedCountryId();
+
         if (!_currentUser.CanEdit) return Forbid();
         if (id != vm.Id) return BadRequest();
 
         var entity = await _db.ServerEndpoints.Include(e => e.Server).FirstOrDefaultAsync(e => e.Id == id
-            && (_currentUser.IsAdmin || e.Server!.CountryId == _currentUser.CountryId));
+            && (isAdmin || e.Server!.CountryId == scopedCountryId));
         if (entity is null) return NotFound();
 
         var server = await _db.Servers.FirstOrDefaultAsync(s => s.Id == vm.ServerId
-            && (_currentUser.IsAdmin || s.CountryId == _currentUser.CountryId));
+            && (isAdmin || s.CountryId == scopedCountryId));
         if (server is null)
         {
             ModelState.AddModelError(nameof(vm.ServerId), "Please select a valid server.");
@@ -210,7 +224,7 @@ public class ServerEndpointsController : Controller
         if (vm.ApplicationId.HasValue)
         {
             application = await _db.Applications.FirstOrDefaultAsync(a => a.Id == vm.ApplicationId.Value
-                && (_currentUser.IsAdmin || a.CountryId == _currentUser.CountryId));
+                && (isAdmin || a.CountryId == scopedCountryId));
             if (application is null)
             {
                 ModelState.AddModelError(nameof(vm.ApplicationId), "Please select a valid application.");
@@ -242,10 +256,13 @@ public class ServerEndpointsController : Controller
     [ValidateAntiForgeryToken]
     public async Task<IActionResult> Delete(int id)
     {
+        var isAdmin = User.IsAdministrator();
+        var scopedCountryId = User.ScopedCountryId();
+
         if (!_currentUser.CanEdit) return Forbid();
 
         var entity = await _db.ServerEndpoints.Include(e => e.Server).FirstOrDefaultAsync(e => e.Id == id
-            && (_currentUser.IsAdmin || e.Server!.CountryId == _currentUser.CountryId));
+            && (isAdmin || e.Server!.CountryId == scopedCountryId));
         if (entity is null) return NotFound();
 
         var label = $"{entity.IpAddress}:{entity.Port}";
@@ -257,19 +274,22 @@ public class ServerEndpointsController : Controller
 
     private async Task PopulateDropdowns()
     {
-        ViewBag.IsAdmin = _currentUser.IsAdmin;
+        var isAdmin = User.IsAdministrator();
+        var scopedCountryId = User.ScopedCountryId();
 
-        var serversQuery = _currentUser.IsAdmin
+        ViewBag.IsAdmin = isAdmin;
+
+        var serversQuery = isAdmin
             ? _db.Servers.Include(s => s.Country).AsQueryable()
-            : _db.Servers.Include(s => s.Country).Where(s => s.CountryId == _currentUser.CountryId);
+            : _db.Servers.Include(s => s.Country).Where(s => s.CountryId == scopedCountryId);
         var servers = await serversQuery.OrderBy(s => s.Country!.Name).ThenBy(s => s.HostName)
             .Select(s => new { s.Id, Label = s.HostName + " (" + (s.Country!.DisplayName ?? s.Country.Name) + ")" })
             .ToListAsync();
         ViewBag.ServerOptions = new SelectList(servers, "Id", "Label");
 
-        var applicationsQuery = _currentUser.IsAdmin
+        var applicationsQuery = isAdmin
             ? _db.Applications.AsQueryable()
-            : _db.Applications.Where(a => a.CountryId == _currentUser.CountryId);
+            : _db.Applications.Where(a => a.CountryId == scopedCountryId);
         var applications = await applicationsQuery.OrderBy(a => a.Name).ToListAsync();
         ViewBag.ApplicationOptions = new SelectList(applications, "Id", "Name");
     }

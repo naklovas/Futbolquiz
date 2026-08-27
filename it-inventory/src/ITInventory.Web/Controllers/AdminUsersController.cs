@@ -1,6 +1,7 @@
 using ITInventory.Data;
 using ITInventory.Data.Common;
 using ITInventory.Data.Entities;
+using ITInventory.Web.Common;
 using ITInventory.Web.Models.Admin;
 using ITInventory.Web.Services;
 using Microsoft.AspNetCore.Authorization;
@@ -51,6 +52,8 @@ public class AdminUsersController : Controller
     [ValidateAntiForgeryToken]
     public async Task<IActionResult> Create(UserFormViewModel vm, List<int>? selectedRoleIds)
     {
+        var isAdmin = User.IsAdministrator();
+
         var requestedRoleIds = selectedRoleIds ?? new List<int>();
 
         if (await _db.YdUsers.AnyAsync(u => u.Username == vm.Username))
@@ -66,7 +69,7 @@ public class AdminUsersController : Controller
             return View(vm);
         }
 
-        var country = vm.CountryId.HasValue ? await _db.Countries.FirstOrDefaultAsync(c => c.Id == vm.CountryId.Value && _currentUser.IsAdmin) : null;
+        var country = vm.CountryId.HasValue ? await _db.Countries.FirstOrDefaultAsync(c => c.Id == vm.CountryId.Value && isAdmin) : null;
 
         var user = new YdUser
         {
@@ -91,9 +94,11 @@ public class AdminUsersController : Controller
     [HttpGet]
     public async Task<IActionResult> Edit(int id)
     {
+        var isAdmin = User.IsAdministrator();
+
         var user = await _db.YdUsers
             .Include(u => u.UserRoles)
-            .FirstOrDefaultAsync(u => u.Id == id && _currentUser.IsAdmin);
+            .FirstOrDefaultAsync(u => u.Id == id && isAdmin);
         if (user is null) return NotFound();
 
         var country = !string.IsNullOrEmpty(user.RepositoryName)
@@ -119,6 +124,8 @@ public class AdminUsersController : Controller
     [ValidateAntiForgeryToken]
     public async Task<IActionResult> Edit(int id, UserFormViewModel vm, List<int>? selectedRoleIds)
     {
+        var isAdmin = User.IsAdministrator();
+
         if (id != vm.Id) return BadRequest();
 
         var requestedRoleIds = selectedRoleIds ?? new List<int>();
@@ -138,10 +145,10 @@ public class AdminUsersController : Controller
 
         var user = await _db.YdUsers
             .Include(u => u.UserRoles)
-            .FirstOrDefaultAsync(u => u.Id == id && _currentUser.IsAdmin);
+            .FirstOrDefaultAsync(u => u.Id == id && isAdmin);
         if (user is null) return NotFound();
 
-        var country = vm.CountryId.HasValue ? await _db.Countries.FirstOrDefaultAsync(c => c.Id == vm.CountryId.Value && _currentUser.IsAdmin) : null;
+        var country = vm.CountryId.HasValue ? await _db.Countries.FirstOrDefaultAsync(c => c.Id == vm.CountryId.Value && isAdmin) : null;
 
         user.Username = vm.Username;
         user.FullName = vm.FullName;
@@ -163,7 +170,9 @@ public class AdminUsersController : Controller
     [ValidateAntiForgeryToken]
     public async Task<IActionResult> Delete(int id)
     {
-        var user = await _db.YdUsers.FirstOrDefaultAsync(u => u.Id == id && _currentUser.IsAdmin);
+        var isAdmin = User.IsAdministrator();
+
+        var user = await _db.YdUsers.FirstOrDefaultAsync(u => u.Id == id && isAdmin);
         if (user is null) return NotFound();
 
         var username = user.Username;

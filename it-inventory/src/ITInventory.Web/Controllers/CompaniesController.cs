@@ -1,6 +1,7 @@
 using ITInventory.Data;
 using ITInventory.Data.Common;
 using ITInventory.Data.Entities;
+using ITInventory.Web.Common;
 using ITInventory.Web.Models;
 using ITInventory.Web.Models.Companies;
 using ITInventory.Web.Services;
@@ -27,7 +28,9 @@ public class CompaniesController : Controller
     [HttpGet]
     public async Task<IActionResult> Index(string? countryId, int page = 1)
     {
-        var isAdmin = _currentUser.IsAdmin;
+        var isAdmin = User.IsAdministrator();
+        var scopedCountryId = User.ScopedCountryId();
+
         var viewAll = isAdmin && countryId == "all";
         int? selectedCountryId = !viewAll && int.TryParse(countryId, out var parsedCountryId) ? parsedCountryId : null;
         var requiresSelection = isAdmin && !viewAll && !selectedCountryId.HasValue;
@@ -42,7 +45,7 @@ public class CompaniesController : Controller
             var query = _db.Companies.Include(c => c.Country).Include(c => c.OriginCountry).Include(c => c.Contacts).AsQueryable();
 
             if (!isAdmin)
-                query = query.Where(c => c.CountryId == _currentUser.CountryId);
+                query = query.Where(c => c.CountryId == scopedCountryId);
             else if (selectedCountryId.HasValue)
                 query = query.Where(c => c.CountryId == selectedCountryId.Value);
 
@@ -62,7 +65,9 @@ public class CompaniesController : Controller
     [HttpGet]
     public async Task<IActionResult> Export(string? countryId)
     {
-        if (!_currentUser.IsAdmin) return Forbid();
+        var isAdmin = User.IsAdministrator();
+
+        if (!isAdmin) return Forbid();
 
         var viewAll = countryId == "all";
         int? selectedCountryId = !viewAll && int.TryParse(countryId, out var parsedCountryId) ? parsedCountryId : null;
@@ -93,11 +98,14 @@ public class CompaniesController : Controller
     [HttpGet]
     public async Task<IActionResult> Create()
     {
+        var isAdmin = User.IsAdministrator();
+        var scopedCountryId = User.ScopedCountryId();
+
         if (!_currentUser.CanEdit) return Forbid();
 
         var vm = new CompanyFormViewModel
         {
-            CountryId = _currentUser.IsAdmin ? 0 : _currentUser.CountryId ?? 0
+            CountryId = isAdmin ? 0 : scopedCountryId ?? 0
         };
         vm.Contacts.Add(new CompanyContactFormViewModel());
 
@@ -109,13 +117,16 @@ public class CompaniesController : Controller
     [ValidateAntiForgeryToken]
     public async Task<IActionResult> Create(CompanyFormViewModel vm)
     {
+        var isAdmin = User.IsAdministrator();
+        var scopedCountryId = User.ScopedCountryId();
+
         if (!_currentUser.CanEdit) return Forbid();
 
         // Every foreign key below arrives as a plain number from a form field. Checking that the
         // number exists is not enough: the id written into the new row has to COME FROM the row
         // the authorized lookup returned, never from the request. Otherwise the posted value
         // still travels straight into the INSERT and only an existence test stands in its way.
-        var requestedCountryId = _currentUser.IsAdmin ? (vm.CountryId ?? 0) : (_currentUser.CountryId ?? 0);
+        var requestedCountryId = isAdmin ? (vm.CountryId ?? 0) : (scopedCountryId ?? 0);
         var country = await _db.Countries.FirstOrDefaultAsync(c => c.Id == requestedCountryId);
         if (country is null)
         {
@@ -181,10 +192,13 @@ public class CompaniesController : Controller
     [HttpGet]
     public async Task<IActionResult> Edit(int id)
     {
+        var isAdmin = User.IsAdministrator();
+        var scopedCountryId = User.ScopedCountryId();
+
         if (!_currentUser.CanEdit) return Forbid();
 
         var company = await _db.Companies.Include(c => c.Contacts).FirstOrDefaultAsync(c => c.Id == id
-            && (_currentUser.IsAdmin || c.CountryId == _currentUser.CountryId));
+            && (isAdmin || c.CountryId == scopedCountryId));
         if (company is null) return NotFound();
 
         var vm = new CompanyFormViewModel
@@ -217,18 +231,21 @@ public class CompaniesController : Controller
     [ValidateAntiForgeryToken]
     public async Task<IActionResult> Edit(int id, CompanyFormViewModel vm)
     {
+        var isAdmin = User.IsAdministrator();
+        var scopedCountryId = User.ScopedCountryId();
+
         if (!_currentUser.CanEdit) return Forbid();
         if (id != vm.Id) return BadRequest();
 
         var entity = await _db.Companies.Include(c => c.Contacts).FirstOrDefaultAsync(c => c.Id == id
-            && (_currentUser.IsAdmin || c.CountryId == _currentUser.CountryId));
+            && (isAdmin || c.CountryId == scopedCountryId));
         if (entity is null) return NotFound();
 
         // Every foreign key below arrives as a plain number from a form field. Checking that the
         // number exists is not enough: the ids written onto the row have to COME FROM the rows
         // the authorized lookups returned, never from the request. Otherwise the posted values
         // still travel straight into the UPDATE with only an existence test in the way.
-        var requestedCountryId = _currentUser.IsAdmin ? (vm.CountryId ?? 0) : (_currentUser.CountryId ?? 0);
+        var requestedCountryId = isAdmin ? (vm.CountryId ?? 0) : (scopedCountryId ?? 0);
         var country = await _db.Countries.FirstOrDefaultAsync(c => c.Id == requestedCountryId);
         if (country is null)
         {
@@ -311,10 +328,13 @@ public class CompaniesController : Controller
     [ValidateAntiForgeryToken]
     public async Task<IActionResult> Delete(int id)
     {
+        var isAdmin = User.IsAdministrator();
+        var scopedCountryId = User.ScopedCountryId();
+
         if (!_currentUser.CanEdit) return Forbid();
 
         var company = await _db.Companies.FirstOrDefaultAsync(c => c.Id == id
-            && (_currentUser.IsAdmin || c.CountryId == _currentUser.CountryId));
+            && (isAdmin || c.CountryId == scopedCountryId));
         if (company is null) return NotFound();
 
         var companyName = company.Name;
@@ -339,11 +359,14 @@ public class CompaniesController : Controller
 
     private async Task PopulateDropdowns()
     {
-        ViewBag.IsAdmin = _currentUser.IsAdmin;
+        var isAdmin = User.IsAdministrator();
+        var scopedCountryId = User.ScopedCountryId();
 
-        var countriesQuery = _currentUser.IsAdmin
+        ViewBag.IsAdmin = isAdmin;
+
+        var countriesQuery = isAdmin
             ? _db.Countries.Where(c => c.IsActive).OrderBy(c => c.Name)
-            : _db.Countries.Where(c => c.Id == _currentUser.CountryId);
+            : _db.Countries.Where(c => c.Id == scopedCountryId);
         var countries = await countriesQuery.Select(c => new { c.Id, Label = c.DisplayName ?? c.Name }).ToListAsync();
 
         ViewBag.CountryOptions = new SelectList(countries, "Id", "Label");

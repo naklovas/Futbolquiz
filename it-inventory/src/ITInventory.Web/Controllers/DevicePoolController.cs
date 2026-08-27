@@ -1,4 +1,5 @@
 using ITInventory.Data;
+using ITInventory.Web.Common;
 using ITInventory.Web.Models;
 using ITInventory.Web.Services;
 using Microsoft.AspNetCore.Mvc;
@@ -22,6 +23,9 @@ public class DevicePoolController : Controller
     [HttpGet]
     public async Task<IActionResult> Index(string? country, int? categoryId, int page = 1)
     {
+        var isAdmin = User.IsAdministrator();
+        var scopedRepository = User.ScopedRepositoryName();
+
         ViewBag.Countries = await _db.ZiraatYds
             .Where(z => z.RepositoryName != null)
             .Select(z => z.RepositoryName!)
@@ -38,16 +42,16 @@ public class DevicePoolController : Controller
             .OrderBy(c => c.Name)
             .ToListAsync();
 
-        var effectiveCountry = _currentUser.IsAdmin ? country : _currentUser.Country;
+        var effectiveCountry = isAdmin ? country : scopedRepository;
 
         ViewBag.SelectedCountry = effectiveCountry;
         ViewBag.SelectedCategoryId = categoryId;
-        ViewBag.IsAdmin = _currentUser.IsAdmin;
+        ViewBag.IsAdmin = isAdmin;
         ViewBag.CanEdit = _currentUser.CanEdit;
 
         if (string.IsNullOrEmpty(effectiveCountry))
         {
-            ViewBag.NoCountryAssigned = !_currentUser.IsAdmin;
+            ViewBag.NoCountryAssigned = !isAdmin;
             return View(new List<Models.DevicePool.DiscoveredDeviceDto>());
         }
 

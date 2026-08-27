@@ -1,5 +1,6 @@
 using ITInventory.Data;
 using ITInventory.Data.Common;
+using ITInventory.Web.Common;
 using ITInventory.Web.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -37,7 +38,9 @@ public class AdminDeviceProfilesController : Controller
     [ValidateAntiForgeryToken]
     public async Task<IActionResult> UpdateCategory(int id, int? categoryId)
     {
-        var profile = await _db.DeviceProfileCatalogs.FirstOrDefaultAsync(p => p.Id == id && _currentUser.IsAdmin);
+        var isAdmin = User.IsAdministrator();
+
+        var profile = await _db.DeviceProfileCatalogs.FirstOrDefaultAsync(p => p.Id == id && isAdmin);
         if (profile is null) return NotFound();
 
         profile.CategoryId = categoryId;

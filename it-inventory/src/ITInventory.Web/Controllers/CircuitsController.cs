@@ -1,6 +1,7 @@
 using ClosedXML.Excel;
 using ITInventory.Data;
 using ITInventory.Data.Entities;
+using ITInventory.Web.Common;
 using ITInventory.Web.Models;
 using ITInventory.Web.Models.Circuits;
 using ITInventory.Web.Models.Import;
@@ -28,7 +29,9 @@ public class CircuitsController : Controller
     [HttpGet]
     public async Task<IActionResult> Index(string? countryId, int page = 1)
     {
-        var isAdmin = _currentUser.IsAdmin;
+        var isAdmin = User.IsAdministrator();
+        var scopedCountryId = User.ScopedCountryId();
+
         var viewAll = isAdmin && countryId == "all";
         int? selectedCountryId = !viewAll && int.TryParse(countryId, out var parsedCountryId) ? parsedCountryId : null;
         var requiresSelection = isAdmin && !viewAll && !selectedCountryId.HasValue;
@@ -43,7 +46,7 @@ public class CircuitsController : Controller
             var query = _db.Circuits.Include(c => c.Country).AsQueryable();
 
             if (!isAdmin)
-                query = query.Where(c => c.CountryId == _currentUser.CountryId);
+                query = query.Where(c => c.CountryId == scopedCountryId);
             else if (selectedCountryId.HasValue)
                 query = query.Where(c => c.CountryId == selectedCountryId.Value);
 
@@ -63,7 +66,9 @@ public class CircuitsController : Controller
     [HttpGet]
     public async Task<IActionResult> Export(string? countryId)
     {
-        if (!_currentUser.IsAdmin) return Forbid();
+        var isAdmin = User.IsAdministrator();
+
+        if (!isAdmin) return Forbid();
 
         var viewAll = countryId == "all";
         int? selectedCountryId = !viewAll && int.TryParse(countryId, out var parsedCountryId) ? parsedCountryId : null;
@@ -101,11 +106,14 @@ public class CircuitsController : Controller
     [HttpGet]
     public async Task<IActionResult> Create()
     {
+        var isAdmin = User.IsAdministrator();
+        var scopedCountryId = User.ScopedCountryId();
+
         if (!_currentUser.CanEdit) return Forbid();
 
         var vm = new CircuitFormViewModel
         {
-            CountryId = _currentUser.IsAdmin ? 0 : _currentUser.CountryId ?? 0
+            CountryId = isAdmin ? 0 : scopedCountryId ?? 0
         };
 
         await PopulateDropdowns();
@@ -116,17 +124,20 @@ public class CircuitsController : Controller
     [ValidateAntiForgeryToken]
     public async Task<IActionResult> Create(CircuitFormViewModel vm)
     {
+        var isAdmin = User.IsAdministrator();
+        var scopedCountryId = User.ScopedCountryId();
+
         if (!_currentUser.CanEdit) return Forbid();
 
-        if (!_currentUser.IsAdmin)
-            vm.CountryId = _currentUser.CountryId ?? 0;
+        if (!isAdmin)
+            vm.CountryId = scopedCountryId ?? 0;
 
         // The country arrives as a plain number from a form field. Checking that the number
         // exists is not enough: the id written into the new row has to COME FROM the row the
         // authorized lookup returned, never from the request. Otherwise the posted value still
         // travels straight into the INSERT and only an existence test stands in its way.
         var country = await _db.Countries.FirstOrDefaultAsync(c => c.Id == (vm.CountryId ?? 0)
-            && (_currentUser.IsAdmin || c.Id == _currentUser.CountryId));
+            && (isAdmin || c.Id == scopedCountryId));
         if (country is null)
         {
             ModelState.AddModelError(nameof(vm.CountryId), "Please select a valid country.");
@@ -164,9 +175,12 @@ public class CircuitsController : Controller
     [HttpGet]
     public async Task<IActionResult> Edit(int id)
     {
+        var isAdmin = User.IsAdministrator();
+        var scopedCountryId = User.ScopedCountryId();
+
         if (!_currentUser.CanEdit) return Forbid();
 
-        var entity = await _db.Circuits.FirstOrDefaultAsync(x => x.Id == id && (_currentUser.IsAdmin || x.CountryId == _currentUser.CountryId));
+        var entity = await _db.Circuits.FirstOrDefaultAsync(x => x.Id == id && (isAdmin || x.CountryId == scopedCountryId));
         if (entity is null) return NotFound();
 
         var vm = new CircuitFormViewModel
@@ -191,21 +205,24 @@ public class CircuitsController : Controller
     [ValidateAntiForgeryToken]
     public async Task<IActionResult> Edit(int id, CircuitFormViewModel vm)
     {
+        var isAdmin = User.IsAdministrator();
+        var scopedCountryId = User.ScopedCountryId();
+
         if (!_currentUser.CanEdit) return Forbid();
         if (id != vm.Id) return BadRequest();
 
-        var entity = await _db.Circuits.FirstOrDefaultAsync(x => x.Id == id && (_currentUser.IsAdmin || x.CountryId == _currentUser.CountryId));
+        var entity = await _db.Circuits.FirstOrDefaultAsync(x => x.Id == id && (isAdmin || x.CountryId == scopedCountryId));
         if (entity is null) return NotFound();
 
-        if (!_currentUser.IsAdmin)
-            vm.CountryId = _currentUser.CountryId ?? 0;
+        if (!isAdmin)
+            vm.CountryId = scopedCountryId ?? 0;
 
         // Every foreign key below arrives as a plain number from a form field. Checking that the
         // number exists is not enough: the ids written onto the row have to COME FROM the rows
         // the authorized lookups returned, never from the request. Otherwise the posted values
         // still travel straight into the UPDATE with only an existence test in the way.
         var country = await _db.Countries.FirstOrDefaultAsync(c => c.Id == (vm.CountryId ?? 0)
-            && (_currentUser.IsAdmin || c.Id == _currentUser.CountryId));
+            && (isAdmin || c.Id == scopedCountryId));
         if (country is null)
         {
             ModelState.AddModelError(nameof(vm.CountryId), "Please select a valid country.");
@@ -240,9 +257,12 @@ public class CircuitsController : Controller
     [ValidateAntiForgeryToken]
     public async Task<IActionResult> Delete(int id)
     {
+        var isAdmin = User.IsAdministrator();
+        var scopedCountryId = User.ScopedCountryId();
+
         if (!_currentUser.CanEdit) return Forbid();
 
-        var entity = await _db.Circuits.FirstOrDefaultAsync(x => x.Id == id && (_currentUser.IsAdmin || x.CountryId == _currentUser.CountryId));
+        var entity = await _db.Circuits.FirstOrDefaultAsync(x => x.Id == id && (isAdmin || x.CountryId == scopedCountryId));
         if (entity is null) return NotFound();
 
         var circuitType = entity.CircuitType;
@@ -255,7 +275,9 @@ public class CircuitsController : Controller
     [HttpGet]
     public async Task<IActionResult> Import()
     {
-        if (!_currentUser.IsAdmin) return Forbid();
+        var isAdmin = User.IsAdministrator();
+
+        if (!isAdmin) return Forbid();
         ViewBag.EntityName = "Circuits";
         await PopulateImportCountryInfo();
         return View("Import");
@@ -264,7 +286,9 @@ public class CircuitsController : Controller
     [HttpGet]
     public IActionResult DownloadTemplate()
     {
-        if (!_currentUser.IsAdmin) return Forbid();
+        var isAdmin = User.IsAdministrator();
+
+        if (!isAdmin) return Forbid();
 
         var bytes = ExcelImportHelpers.CreateTemplateBytes("Circuits",
             "Circuit Type", "Capacity", "Provider", "Branch", "Location",
@@ -277,7 +301,10 @@ public class CircuitsController : Controller
     [ValidateAntiForgeryToken]
     public async Task<IActionResult> Import(IFormFile file, int? countryId)
     {
-        if (!_currentUser.IsAdmin) return Forbid();
+        var isAdmin = User.IsAdministrator();
+        var scopedCountryId = User.ScopedCountryId();
+
+        if (!isAdmin) return Forbid();
 
         if (!ExcelImportHelpers.IsValidUpload(file, out var uploadError))
         {
@@ -285,7 +312,7 @@ public class CircuitsController : Controller
             return RedirectToAction(nameof(Import));
         }
 
-        var effectiveCountryId = _currentUser.IsAdmin ? countryId : _currentUser.CountryId;
+        var effectiveCountryId = isAdmin ? countryId : scopedCountryId;
         if (!effectiveCountryId.HasValue)
         {
             TempData["ImportError"] = "Please select a country.";
@@ -293,7 +320,7 @@ public class CircuitsController : Controller
         }
 
         var country = await _db.Countries.FirstOrDefaultAsync(c => c.Id == effectiveCountryId.Value
-            && (_currentUser.IsAdmin || c.Id == _currentUser.CountryId));
+            && (isAdmin || c.Id == scopedCountryId));
         if (country is null)
         {
             TempData["ImportError"] = "Selected country not found.";
@@ -361,9 +388,13 @@ public class CircuitsController : Controller
 
     private async Task PopulateImportCountryInfo()
     {
-        ViewBag.IsAdmin = _currentUser.IsAdmin;
+        var isAdmin = User.IsAdministrator();
+        var scopedCountryId = User.ScopedCountryId();
+        var scopedRepository = User.ScopedRepositoryName();
 
-        if (_currentUser.IsAdmin)
+        ViewBag.IsAdmin = isAdmin;
+
+        if (isAdmin)
         {
             var countries = await _db.Countries.Where(c => c.IsActive).OrderBy(c => c.Name)
                 .Select(c => new { c.Id, Label = c.DisplayName ?? c.Name }).ToListAsync();
@@ -371,18 +402,21 @@ public class CircuitsController : Controller
         }
         else
         {
-            var country = await _db.Countries.FirstOrDefaultAsync(c => c.Id == _currentUser.CountryId);
-            ViewBag.OwnCountryLabel = country?.DisplayName ?? country?.Name ?? _currentUser.Country;
+            var country = await _db.Countries.FirstOrDefaultAsync(c => c.Id == scopedCountryId);
+            ViewBag.OwnCountryLabel = country?.DisplayName ?? country?.Name ?? scopedRepository;
         }
     }
 
     private async Task PopulateDropdowns()
     {
-        ViewBag.IsAdmin = _currentUser.IsAdmin;
+        var isAdmin = User.IsAdministrator();
+        var scopedCountryId = User.ScopedCountryId();
 
-        var countriesQuery = _currentUser.IsAdmin
+        ViewBag.IsAdmin = isAdmin;
+
+        var countriesQuery = isAdmin
             ? _db.Countries.Where(c => c.IsActive).OrderBy(c => c.Name)
-            : _db.Countries.Where(c => c.Id == _currentUser.CountryId);
+            : _db.Countries.Where(c => c.Id == scopedCountryId);
         var countries = await countriesQuery.Select(c => new { c.Id, Label = c.DisplayName ?? c.Name }).ToListAsync();
 
         ViewBag.CountryOptions = new SelectList(countries, "Id", "Label");
