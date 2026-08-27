@@ -127,7 +127,8 @@ public class CompaniesController : Controller
         // the authorized lookup returned, never from the request. Otherwise the posted value
         // still travels straight into the INSERT and only an existence test stands in its way.
         var requestedCountryId = isAdmin ? (vm.CountryId ?? 0) : (scopedCountryId ?? 0);
-        var country = await _db.Countries.FirstOrDefaultAsync(c => c.Id == requestedCountryId);
+        var country = await _db.Countries.FirstOrDefaultAsync(c => c.Id == requestedCountryId
+            && (isAdmin || c.Id == scopedCountryId));
         if (country is null)
         {
             ModelState.AddModelError(nameof(vm.CountryId), "Please select a valid country.");
@@ -246,7 +247,8 @@ public class CompaniesController : Controller
         // the authorized lookups returned, never from the request. Otherwise the posted values
         // still travel straight into the UPDATE with only an existence test in the way.
         var requestedCountryId = isAdmin ? (vm.CountryId ?? 0) : (scopedCountryId ?? 0);
-        var country = await _db.Countries.FirstOrDefaultAsync(c => c.Id == requestedCountryId);
+        var country = await _db.Countries.FirstOrDefaultAsync(c => c.Id == requestedCountryId
+            && (isAdmin || c.Id == scopedCountryId));
         if (country is null)
         {
             ModelState.AddModelError(nameof(vm.CountryId), "Please select a valid country.");
