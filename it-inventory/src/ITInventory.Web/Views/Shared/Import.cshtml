@@ -1,0 +1,55 @@
+@{
+    ViewData["Title"] = "Import from Excel";
+    string entityName = ViewBag.EntityName;
+    bool isAdmin = ViewBag.IsAdmin ?? false;
+    string? ownCountryLabel = ViewBag.OwnCountryLabel;
+    Microsoft.AspNetCore.Mvc.Rendering.SelectList? countryOptions = isAdmin ? (Microsoft.AspNetCore.Mvc.Rendering.SelectList)ViewBag.CountryOptions : null;
+}
+
+<h2 class="text-xl font-semibold text-slate-900 mb-1">Import @entityName from Excel</h2>
+<p class="text-sm text-slate-500 mb-6">Upload an .xlsx file to add multiple records at once.</p>
+
+<div class="bg-white rounded-lg shadow-sm border border-slate-200 p-6 max-w-2xl">
+    <div class="bg-blue-50 border border-blue-200 text-blue-700 rounded-md px-4 py-3 text-sm mb-5">
+        <i class="fa-solid fa-circle-info mr-1.5"></i>
+        Don't have a file yet? <a asp-action="DownloadTemplate" class="underline font-medium">Download the Excel template</a> first,
+        fill in your rows below the header, then upload it here.
+    </div>
+
+    @if (TempData["ImportError"] is string error)
+    {
+        <div class="bg-red-50 border border-red-200 text-red-700 rounded-md px-4 py-3 text-sm mb-5">@error</div>
+    }
+
+    <form asp-action="Import" method="post" enctype="multipart/form-data" class="space-y-4">
+        <div>
+            <label class="block text-sm font-medium text-slate-700 mb-1">Country</label>
+            @if (isAdmin)
+            {
+                <select name="countryId" required class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
+                    <option value="">-- Select --</option>
+                    @foreach (Microsoft.AspNetCore.Mvc.Rendering.SelectListItem item in countryOptions!)
+                    {
+                        <option value="@item.Value">@item.Text</option>
+                    }
+                </select>
+                <p class="text-xs text-slate-400 mt-1">All rows in the file will be imported under this country.</p>
+            }
+            else
+            {
+                <input type="text" value="@ownCountryLabel" disabled class="w-full rounded-md border border-slate-200 bg-slate-100 px-3 py-2 text-sm" />
+            }
+        </div>
+        <div>
+            <label class="block text-sm font-medium text-slate-700 mb-1">Excel file (.xlsx)</label>
+            <input type="file" name="file" accept=".xlsx" required
+                   class="w-full text-sm text-slate-700 file:mr-3 file:py-2 file:px-4 file:rounded-md file:border-0 file:bg-brand-50 file:text-brand-700 file:text-sm file:font-medium hover:file:bg-brand-100" />
+        </div>
+        <div class="flex gap-2">
+            <button type="submit" class="bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium px-5 py-2.5 rounded-md">
+                <i class="fa-solid fa-upload mr-1.5"></i>Upload and Import
+            </button>
+            <a asp-action="Index" class="border border-slate-300 text-slate-700 hover:bg-slate-50 text-sm font-medium px-5 py-2.5 rounded-md">Cancel</a>
+        </div>
+    </form>
+</div>

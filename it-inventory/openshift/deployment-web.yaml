@@ -1,0 +1,69 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: itinventory-web
+  labels:
+    app: itinventory-web
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: itinventory-web
+  template:
+    metadata:
+      labels:
+        app: itinventory-web
+    spec:
+      containers:
+        - name: itinventory-web
+          # Replace with your pushed image, e.g. an ImageStream tag:
+          # image-registry.openshift-image-registry.svc:5000/<namespace>/itinventory-web:latest
+          image: CHANGE_ME/itinventory-web:latest
+          ports:
+            - containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: itinventory-web-config
+            - secretRef:
+                name: itinventory-secrets
+          volumeMounts:
+            - name: dataprotection-keys
+              mountPath: /app/keys
+          readinessProbe:
+            httpGet:
+              path: /healthz/ready
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /healthz/live
+              port: 8080
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          # No runAsUser/runAsGroup/fsGroup: OpenShift's restricted-v2 SCC assigns an
+          # arbitrary UID (always group 0) at admission time and rejects a fixed one anyway.
+          # The rest of this block is what restricted-v2 requires explicitly.
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            capabilities:
+              drop:
+                - ALL
+            seccompProfile:
+              type: RuntimeDefault
+      volumes:
+        - name: dataprotection-keys
+          persistentVolumeClaim:
+            claimName: itinventory-web-dataprotection-keys

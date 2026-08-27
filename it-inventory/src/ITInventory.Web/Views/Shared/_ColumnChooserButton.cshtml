@@ -1,0 +1,8 @@
+@model string
+<div class="relative">
+    <button type="button" id="col-chooser-btn-@Model" title="Choose columns"
+            class="inline-flex items-center justify-center w-9 h-9 border border-slate-300 rounded-md text-slate-500 hover:bg-slate-50 hover:text-slate-700 transition">
+        <i class="fa-solid fa-table-columns"></i>
+    </button>
+    <div id="col-chooser-panel-@Model" class="hidden absolute right-0 mt-1 bg-white rounded-md shadow-lg border border-slate-200 py-1 w-52 z-20"></div>
+</div>

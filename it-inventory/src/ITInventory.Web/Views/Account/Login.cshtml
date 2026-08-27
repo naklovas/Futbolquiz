@@ -1,0 +1,41 @@
+@model ITInventory.Web.Models.Account.LoginViewModel
+@{
+    ViewData["Title"] = "Log In";
+    Layout = "_LoginLayout";
+}
+
+<div class="bg-white rounded-xl shadow-lg w-full max-w-sm p-8">
+    <div class="text-center mb-6">
+        <img src="~/images/ziraat-bank-logo.png" alt="Ziraat Bank" class="h-10 w-auto mx-auto mb-3" />
+        <h3 class="text-lg font-semibold text-slate-900">IT Inventory System</h3>
+        <p class="text-sm text-slate-500 mt-1">Sign in with your fintek.local account</p>
+    </div>
+
+    <form asp-controller="Account" asp-action="Login" method="post" class="space-y-4">
+        <input type="hidden" asp-for="ReturnUrl" />
+        <div asp-validation-summary="ModelOnly" class="text-sm text-red-600"></div>
+
+        <div>
+            <label asp-for="Username" class="block text-sm font-medium text-slate-700 mb-1"></label>
+            <input asp-for="Username" autocomplete="username" autofocus
+                   class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500" />
+            <span asp-validation-for="Username" class="text-sm text-red-600"></span>
+        </div>
+
+        <div>
+            <label asp-for="Password" class="block text-sm font-medium text-slate-700 mb-1"></label>
+            <input asp-for="Password" autocomplete="current-password"
+                   class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500" />
+            <span asp-validation-for="Password" class="text-sm text-red-600"></span>
+        </div>
+
+        <button type="submit"
+                class="w-full bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium rounded-md py-2.5 transition">
+            <i class="fa-solid fa-lock mr-1.5"></i>Log In with AD (LDAP)
+        </button>
+    </form>
+</div>
+
+@section Scripts {
+    @{await Html.RenderPartialAsync("_ValidationScriptsPartial");}
+}

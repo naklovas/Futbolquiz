@@ -1,0 +1,54 @@
+@model List<ITInventory.Data.Entities.DeviceProfileCatalog>
+@{
+    ViewData["Title"] = "Device Profiles";
+    var categories = (List<ITInventory.Data.Entities.DeviceCategory>)ViewBag.Categories;
+}
+
+<h2 class="text-xl font-semibold text-slate-900 mb-1">Device Profiles (Nessus DeviceProfile Mapping)</h2>
+<p class="text-sm text-slate-500 mb-6">
+    Assign each DeviceProfile value seen in Nessus scans to an inventory category here.
+    The device pool uses this mapping.
+</p>
+
+<div class="mb-4 relative max-w-xs">
+    <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm"></i>
+    <input type="text" oninput="filterRows(this, 'profiles-table')" placeholder="Search profiles..."
+           class="w-full pl-9 pr-3 py-2 text-sm rounded-md border border-slate-300 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500" />
+</div>
+
+<div class="bg-white rounded-lg shadow-sm border border-slate-200 overflow-x-auto">
+    <table id="profiles-table" class="min-w-full divide-y divide-slate-200 text-sm">
+        <thead class="bg-slate-50">
+            <tr>
+                <th class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Device Profile (Nessus)</th>
+                <th class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Category</th>
+            </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-100">
+            @foreach (var p in Model)
+            {
+                <tr class="hover:bg-slate-50">
+                    <td class="px-4 py-3">
+                        <div class="text-slate-700 font-medium">@(p.DisplayName ?? p.ProfileName)</div>
+                        @if (!string.IsNullOrEmpty(p.DisplayName) && p.DisplayName != p.ProfileName)
+                        {
+                            <div class="text-xs text-slate-400 font-mono">@p.ProfileName</div>
+                        }
+                    </td>
+                    <td class="px-4 py-3">
+                        <form asp-action="UpdateCategory" asp-route-id="@p.Id" method="post" class="flex items-center gap-2">
+                            <select name="categoryId" class="rounded-md border border-slate-300 px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
+                                <option value="">-- No Category --</option>
+                                @foreach (var cat in categories)
+                                {
+                                    <option value="@cat.Id" selected="@(cat.Id == p.CategoryId)">@cat.Name</option>
+                                }
+                            </select>
+                            <button type="submit" class="text-brand-600 hover:text-brand-800 text-sm font-medium px-2 py-1"><i class="fa-solid fa-check mr-1"></i>Save</button>
+                        </form>
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+</div>

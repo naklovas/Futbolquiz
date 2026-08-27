@@ -1,0 +1,18 @@
+# Small persistent volume for the Data Protection key ring (see Program.cs /
+# DataProtection__KeysDirectory) so login cookies survive pod restarts/redeploys.
+# ReadWriteOnce is enough at replicas: 1. If you ever scale itinventory-web beyond one
+# replica, all replicas must share the SAME key ring or they won't be able to decrypt each
+# other's auth cookies -- switch the deployment's replica count only after also switching
+# this to a ReadWriteMany-capable storage class (or move keys to a different backing store).
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: itinventory-web-dataprotection-keys
+  labels:
+    app: itinventory-web
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 100Mi

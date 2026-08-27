@@ -1,0 +1,153 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>@ViewData["Title"] - IT Inventory</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        brand: {
+                            50: '#ecfdf5', 100: '#d1fae5', 500: '#10b981',
+                            600: '#059669', 700: '#047857'
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" />
+    <link rel="stylesheet" href="~/css/site.css" asp-append-version="true" />
+</head>
+<body class="min-h-screen bg-slate-50 text-slate-800 flex flex-col">
+    <header class="bg-white border-b border-slate-200 shadow-sm">
+        <nav class="max-w-[96rem] mx-auto px-4">
+            <div class="flex items-center justify-between flex-wrap min-h-16 py-2 gap-2">
+                <a asp-controller="Home" asp-action="Index" class="flex-shrink-0 flex items-center">
+                    <img src="~/images/ziraat-bank-logo.png" alt="Ziraat Bank" class="h-7 w-auto" />
+                </a>
+
+                @if (User.Identity?.IsAuthenticated == true)
+                {
+                    @* flex-1 + min-w-0: the links take the space between the logo and the user
+                       menu and wrap among themselves when they run out of room. Without this the
+                       block keeps its full intrinsic width and the user menu is pushed onto a
+                       second row instead. *@
+                    <div class="flex flex-wrap items-center gap-0.5 flex-1 min-w-0">
+                        <a asp-controller="PhysicalDevices" asp-action="Index" onclick="showLoadingOverlay()" class="flex-shrink-0 whitespace-nowrap px-1.5 py-2 rounded-md text-xs font-medium text-slate-600 hover:text-brand-700 hover:bg-brand-50 transition">
+                            <i class="fa-solid fa-desktop mr-1.5"></i>Physical Devices
+                        </a>
+                        <a asp-controller="Servers" asp-action="Index" onclick="showLoadingOverlay()" class="flex-shrink-0 whitespace-nowrap px-1.5 py-2 rounded-md text-xs font-medium text-slate-600 hover:text-brand-700 hover:bg-brand-50 transition">
+                            <i class="fa-solid fa-database mr-1.5"></i>Servers
+                        </a>
+                        <a asp-controller="ServerEndpoints" asp-action="Index" onclick="showLoadingOverlay()" class="flex-shrink-0 whitespace-nowrap px-1.5 py-2 rounded-md text-xs font-medium text-slate-600 hover:text-brand-700 hover:bg-brand-50 transition">
+                            <i class="fa-solid fa-network-wired mr-1.5"></i>Server Endpoints
+                        </a>
+                        <a asp-controller="Applications" asp-action="Index" onclick="showLoadingOverlay()" class="flex-shrink-0 whitespace-nowrap px-1.5 py-2 rounded-md text-xs font-medium text-slate-600 hover:text-brand-700 hover:bg-brand-50 transition">
+                            <i class="fa-solid fa-window-restore mr-1.5"></i>Applications
+                        </a>
+                        <a asp-controller="Licenses" asp-action="Index" onclick="showLoadingOverlay()" class="flex-shrink-0 whitespace-nowrap px-1.5 py-2 rounded-md text-xs font-medium text-slate-600 hover:text-brand-700 hover:bg-brand-50 transition">
+                            <i class="fa-solid fa-key mr-1.5"></i>Licenses
+                        </a>
+                        <a asp-controller="Circuits" asp-action="Index" onclick="showLoadingOverlay()" class="flex-shrink-0 whitespace-nowrap px-1.5 py-2 rounded-md text-xs font-medium text-slate-600 hover:text-brand-700 hover:bg-brand-50 transition">
+                            <i class="fa-solid fa-diagram-project mr-1.5"></i>Circuits
+                        </a>
+                        <a asp-controller="Companies" asp-action="Index" onclick="showLoadingOverlay()" class="flex-shrink-0 whitespace-nowrap px-1.5 py-2 rounded-md text-xs font-medium text-slate-600 hover:text-brand-700 hover:bg-brand-50 transition">
+                            <i class="fa-solid fa-building mr-1.5"></i>Companies
+                        </a>
+                        <a asp-controller="DevicePool" asp-action="Index" onclick="showLoadingOverlay()" class="flex-shrink-0 whitespace-nowrap px-1.5 py-2 rounded-md text-xs font-medium text-slate-600 hover:text-brand-700 hover:bg-brand-50 transition">
+                            <i class="fa-solid fa-magnifying-glass-chart mr-1.5"></i>Device Pool
+                        </a>
+                        <a asp-controller="CountryTopology" asp-action="Index" onclick="showLoadingOverlay()" class="flex-shrink-0 whitespace-nowrap px-1.5 py-2 rounded-md text-xs font-medium text-slate-600 hover:text-brand-700 hover:bg-brand-50 transition">
+                            <i class="fa-solid fa-sitemap mr-1.5"></i>Topology
+                        </a>
+                        @if (User.IsInRole("admin"))
+                        {
+                            <div class="relative group flex-shrink-0">
+                                <button class="whitespace-nowrap px-1.5 py-2 rounded-md text-xs font-medium text-slate-600 hover:text-brand-700 hover:bg-brand-50 transition">
+                                    <i class="fa-solid fa-gear mr-1.5"></i>Admin <i class="fa-solid fa-chevron-down text-xs ml-1"></i>
+                                </button>
+                                <div class="absolute right-0 hidden group-hover:block bg-white rounded-md shadow-lg border border-slate-200 py-1 w-48 z-20">
+                                    <a asp-controller="AdminUsers" asp-action="Index" class="block px-4 py-2 text-sm text-slate-700 hover:bg-slate-100">Users</a>
+                                    <a asp-controller="AdminCountries" asp-action="Index" class="block px-4 py-2 text-sm text-slate-700 hover:bg-slate-100">Countries</a>
+                                    <a asp-controller="AdminDeviceProfiles" asp-action="Index" class="block px-4 py-2 text-sm text-slate-700 hover:bg-slate-100">Device Profiles</a>
+                                    <a asp-controller="AdminOriginCountries" asp-action="Index" class="block px-4 py-2 text-sm text-slate-700 hover:bg-slate-100">Origin Countries</a>
+                                    <a asp-controller="AdminLocations" asp-action="Index" class="block px-4 py-2 text-sm text-slate-700 hover:bg-slate-100">Locations</a>
+                                    <a asp-controller="AdminActivityLog" asp-action="Index" class="block px-4 py-2 text-sm text-slate-700 hover:bg-slate-100">Activity Log</a>
+                                </div>
+                            </div>
+                        }
+                    </div>
+
+                    var fullName = User.FindFirst(ITInventory.Web.Services.AppClaimTypes.FullName)?.Value;
+                    var country = User.FindFirst(ITInventory.Web.Services.AppClaimTypes.CountryDisplayName)?.Value
+                        ?? User.FindFirst(ITInventory.Web.Services.AppClaimTypes.Country)?.Value;
+                    <div class="relative group flex-shrink-0 ml-1 pl-2 border-l border-slate-200">
+                        <button class="flex items-center gap-1.5 px-1.5 py-2 rounded-md text-xs font-medium text-slate-600 hover:text-brand-700 hover:bg-brand-50 transition max-w-[8rem]">
+                            <i class="fa-solid fa-user-circle"></i>
+                            <span class="truncate">@fullName</span>
+                            <i class="fa-solid fa-chevron-down text-xs"></i>
+                        </button>
+                        <div class="absolute right-0 hidden group-hover:block bg-white rounded-md shadow-lg border border-slate-200 py-1 w-56 z-20">
+                            <div class="px-4 py-2 text-xs text-slate-500 border-b border-slate-100">
+                                <div class="font-medium text-slate-700 truncate">@fullName</div>
+                                @if (!string.IsNullOrEmpty(country))
+                                {
+                                    <div class="truncate">@country</div>
+                                }
+                            </div>
+                            <form asp-controller="Account" asp-action="Logout" method="post">
+                                <button type="submit" class="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-100">
+                                    <i class="fa-solid fa-right-from-bracket mr-1.5"></i>Log Out
+                                </button>
+                            </form>
+                        </div>
+                    </div>
+                }
+            </div>
+        </nav>
+    </header>
+
+    <main class="flex-1 max-w-[96rem] w-full mx-auto px-4 py-6">
+        @RenderBody()
+    </main>
+
+    <footer class="border-t border-slate-200 py-4">
+        <div class="max-w-[96rem] mx-auto px-4 text-center text-sm text-slate-400">
+            &copy; @DateTime.Now.Year - IT Inventory System
+        </div>
+    </footer>
+
+    <div id="confirm-modal" class="hidden fixed inset-0 bg-slate-900/50 flex items-center justify-center z-50 p-4">
+        <div class="bg-white rounded-lg shadow-xl max-w-sm w-full p-6">
+            <div class="flex items-start gap-3">
+                <div class="flex-shrink-0 w-10 h-10 rounded-full bg-red-100 flex items-center justify-center">
+                    <i class="fa-solid fa-triangle-exclamation text-red-600"></i>
+                </div>
+                <div class="flex-1">
+                    <h3 class="font-semibold text-slate-900">Confirm</h3>
+                    <p id="confirm-modal-message" class="text-sm text-slate-500 mt-1">Are you sure?</p>
+                </div>
+            </div>
+            <div class="mt-5 flex justify-end gap-2">
+                <button type="button" onclick="closeConfirmModal()" class="px-4 py-2 text-sm font-medium rounded-md border border-slate-300 text-slate-700 hover:bg-slate-50">Cancel</button>
+                <button id="confirm-modal-confirm" type="button" class="px-4 py-2 text-sm font-medium rounded-md bg-red-600 text-white hover:bg-red-700">Delete</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="loading-overlay" class="hidden fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center z-50">
+        <div class="bg-white rounded-lg shadow-xl px-10 py-8 flex flex-col items-center gap-4">
+            <img src="~/images/ziraat-bank-logo.png" alt="Ziraat Bank" class="h-10 w-auto" />
+            <i class="fa-solid fa-circle-notch fa-spin text-2xl text-brand-600"></i>
+            <p class="text-sm font-medium text-slate-700">Loading data...</p>
+        </div>
+    </div>
+
+    <script src="~/js/site.js" asp-append-version="true"></script>
+    @await RenderSectionAsync("Scripts", required: false)
+</body>
+</html>

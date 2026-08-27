@@ -1,0 +1,25 @@
+# Edge TLS termination: the router holds the certificate and speaks plain HTTP to the pod
+# (matches ASPNETCORE_FORWARDEDHEADERS_ENABLED=true in the Dockerfile -- the app trusts the
+# router's X-Forwarded-Proto header to know the original request was https).
+# insecureEdgeTerminationPolicy: Redirect means the router itself bounces any plain http
+# request to https before it ever reaches the pod, so app.UseHttpsRedirection() in
+# Program.cs never actually has to fire for real traffic.
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: itinventory-web
+  labels:
+    app: itinventory-web
+spec:
+  # CHANGE_ME: pick the hostname branches/users will actually use, e.g.
+  # itinventory.CHANGE_ME.example.com. Omit `host` entirely to let OpenShift generate one
+  # from the Route name + namespace + cluster's default subdomain.
+  host: CHANGE_ME
+  to:
+    kind: Service
+    name: itinventory-web
+  port:
+    targetPort: http
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect

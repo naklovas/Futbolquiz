@@ -1,0 +1,48 @@
+@model ITInventory.Web.Models.PaginationInfo
+@{
+    var baseParams = Context.Request.Query
+        .Where(q => !string.Equals(q.Key, "page", StringComparison.OrdinalIgnoreCase))
+        .SelectMany(q => q.Value.Select(v => $"{Uri.EscapeDataString(q.Key)}={Uri.EscapeDataString(v ?? string.Empty)}"))
+        .ToList();
+
+    string PageUrl(int page)
+    {
+        var parts = new List<string>(baseParams) { $"page={page}" };
+        return "?" + string.Join("&", parts);
+    }
+
+    var from = Model.TotalCount == 0 ? 0 : (Model.PageNumber - 1) * Model.PageSize + 1;
+    var to = Math.Min(Model.PageNumber * Model.PageSize, Model.TotalCount);
+}
+@if (Model.TotalCount > 0)
+{
+    <div class="flex items-center justify-between px-4 py-3 border-t border-slate-200 text-sm text-slate-600">
+        <span>Showing @from&ndash;@to of @Model.TotalCount</span>
+        @if (Model.TotalPages > 1)
+        {
+            <div class="flex items-center gap-1">
+                @if (Model.HasPrevious)
+                {
+                    <a href="@PageUrl(Model.PageNumber - 1)" onclick="showLoadingOverlay()" class="px-3 py-1.5 rounded-md border border-slate-300 hover:bg-slate-50 text-slate-700">
+                        <i class="fa-solid fa-chevron-left"></i>
+                    </a>
+                }
+                else
+                {
+                    <span class="px-3 py-1.5 rounded-md border border-slate-200 text-slate-300"><i class="fa-solid fa-chevron-left"></i></span>
+                }
+                <span class="px-3 py-1.5 text-slate-700">Page @Model.PageNumber / @Model.TotalPages</span>
+                @if (Model.HasNext)
+                {
+                    <a href="@PageUrl(Model.PageNumber + 1)" onclick="showLoadingOverlay()" class="px-3 py-1.5 rounded-md border border-slate-300 hover:bg-slate-50 text-slate-700">
+                        <i class="fa-solid fa-chevron-right"></i>
+                    </a>
+                }
+                else
+                {
+                    <span class="px-3 py-1.5 rounded-md border border-slate-200 text-slate-300"><i class="fa-solid fa-chevron-right"></i></span>
+                }
+            </div>
+        }
+    </div>
+}

@@ -1,0 +1,17 @@
+# Non-secret settings for ITInventory.ExpirationNotifier.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: itinventory-notifier-config
+  labels:
+    app: itinventory-notifier
+data:
+  ExpirationNotifier__UpcomingWindowDays: "90"
+  ExpirationNotifier__RunAtHour: "8"
+  ExpirationNotifier__RunAtMinute: "0"
+  Smtp__Enabled: "true"
+  Smtp__Host: "CHANGE_ME"
+  Smtp__Port: "25"
+  Smtp__EnableSsl: "false"
+  Smtp__FromAddress: "itenvanter@ziraatbank.com.tr"
+  Smtp__FromDisplayName: "IT Envanter Sistemi"
