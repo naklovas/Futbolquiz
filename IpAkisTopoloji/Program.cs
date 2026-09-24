@@ -1,0 +1,583 @@
+using System.Diagnostics;
+using System.Globalization;
+using System.Net;
+using System.Net.Http.Headers;
+using System.Net.Sockets;
+using System.Text;
+using System.Text.Json;
+using System.Text.Json.Nodes;
+
+var builder = WebApplication.CreateBuilder(args);
+
+// AppResponse ayarları: mevcut DeltaFlow config.json dosyası olduğu gibi kullanılır
+// (Credentials, Servers, SourcePathType, SourceL4, SourceL7, VifgIds).
+string? deltaFlowConfig = new[]
+{
+    Path.Combine(AppContext.BaseDirectory, "config.json"),
+    @"C:\DeltaFlow\config.json"
+}.FirstOrDefault(File.Exists);
+
+if (deltaFlowConfig != null)
+    builder.Configuration.AddJsonFile(deltaFlowConfig, optional: true, reloadOnChange: true);
+
+builder.Services.AddHttpClient("splunk", c => c.Timeout = TimeSpan.FromMinutes(10))
+    .ConfigurePrimaryHttpMessageHandler(() => CreateHandler(builder.Configuration.GetValue("Splunk:IgnoreSslErrors", false)));
+
+builder.Services.AddHttpClient("appresponse", c => c.Timeout = TimeSpan.FromMinutes(3))
+    .ConfigurePrimaryHttpMessageHandler(() => CreateHandler(builder.Configuration.GetValue("AppResponseIgnoreSslErrors", true)));
+
+builder.Services.AddSingleton<EnvanterService>();
+
+var app = builder.Build();
+
+app.Logger.LogInformation("AppResponse config: {Path}", deltaFlowConfig ?? "bulunamadı (appsettings.json kullanılıyor)");
+
+app.Logger.LogInformation("Splunk BaseUrl: {Url}", app.Configuration["Splunk:BaseUrl"]);
+
+app.UseDefaultFiles();
+app.UseStaticFiles();
+
+app.MapGet("/api/appliances", (IConfiguration cfg) =>
+    cfg.GetSection("Servers").GetChildren()
+        .Select((s, i) => new { index = i, name = s["Name"] ?? $"Cihaz {i + 1}" }));
+
+app.MapGet("/api/splunk", async (string? ip, string? start, string? end,
+    IConfiguration cfg, IHttpClientFactory factory, CancellationToken ct) =>
+{
+    if (!LookupQuery.TryParse(ip, start, end, cfg.GetValue("MaxRangeHours", 24), out var q, out var error))
+        return Results.BadRequest(new { error });
+
+    try
+    {
+        return Results.Ok(await SplunkService.QueryAsync(q!, cfg, factory.CreateClient("splunk"), ct));
+    }
+    catch (OperationCanceledException) when (ct.IsCancellationRequested)
+    {
+        return Results.StatusCode(499);
+    }
+    catch (Exception ex)
+    {
+        return Results.Json(new { error = ex.Message }, statusCode: 502);
+    }
+});
+
+app.MapGet("/api/appresponse", async (string? ip, string? start, string? end, int? appliance,
+    IConfiguration cfg, IHttpClientFactory factory, CancellationToken ct) =>
+{
+    if (!LookupQuery.TryParse(ip, start, end, cfg.GetValue("MaxRangeHours", 24), out var q, out var error))
+        return Results.BadRequest(new { error });
+
+    try
+    {
+        return Results.Ok(await AppResponseService.QueryAsync(q!, appliance ?? 0, cfg, factory.CreateClient("appresponse"), ct));
+    }
+    catch (OperationCanceledException) when (ct.IsCancellationRequested)
+    {
+        return Results.StatusCode(499);
+    }
+    catch (Exception ex)
+    {
+        return Results.Json(new { error = ex.Message }, statusCode: 502);
+    }
+});
+
+// Tek IP akış + topoloji: Splunk ve AppResponse paralel sorgulanır, envanterle zenginleştirilir.
+// sources=splunk,appresponse ile kaynak seçilebilir (varsayılan: ikisi de).
+app.MapGet("/api/flow", async (string? ip, string? start, string? end, int? appliance, string? sources,
+    IConfiguration cfg, IHttpClientFactory factory, EnvanterService envanter, CancellationToken ct) =>
+{
+    if (!LookupQuery.TryParse(ip, start, end, cfg.GetValue("MaxRangeHours", 24), out var q, out var error))
+        return Results.BadRequest(new { error });
+
+    var wanted = (sources ?? "splunk,appresponse").ToLowerInvariant();
+    var sw = Stopwatch.StartNew();
+
+    var spTask = wanted.Contains("splunk")
+        ? Capture(() => SplunkService.QueryAsync(q!, cfg, factory.CreateClient("splunk"), ct), ct)
+        : Task.FromResult<(SplunkResult?, string?)>((null, null));
+    var arTask = wanted.Contains("appresponse")
+        ? Capture(() => AppResponseService.QueryAsync(q!, appliance ?? 0, cfg, factory.CreateClient("appresponse"), ct), ct)
+        : Task.FromResult<(AppResponseResult?, string?)>((null, null));
+    var envTask = Capture(() => envanter.GetAsync(false, ct), ct);
+
+    try
+    {
+        await Task.WhenAll(spTask, arTask, envTask);
+    }
+    catch (OperationCanceledException) when (ct.IsCancellationRequested)
+    {
+        return Results.StatusCode(499);
+    }
+    if (ct.IsCancellationRequested)
+        return Results.StatusCode(499);
+
+    var (sp, spErr) = spTask.Result;
+    var (ar, arErr) = arTask.Result;
+    var (env, envErr) = envTask.Result;
+
+    var (inbound, outbound) = FlowBuilder.Build(q!.Ip, sp, ar, env);
+
+    var target = new TargetInfo(q.Ip, env?.FindSegment(q.Ip), env?.AppsOnIp(q.Ip) ?? []);
+
+    SourceStatus Status(bool asked, string? err, List<string>? msgs, long? ms, int rows) =>
+        !asked ? SourceStatus.Skipped : new SourceStatus(err == null, err, msgs ?? [], ms, rows);
+
+    return Results.Ok(new FlowResponse(target, inbound, outbound,
+        Status(wanted.Contains("splunk"), spErr, sp?.Messages, sp?.ElapsedMs, sp?.Rows.Count ?? 0),
+        Status(wanted.Contains("appresponse"), arErr, ar?.Messages, ar?.ElapsedMs, (ar?.L4.Count ?? 0) + (ar?.L7.Count ?? 0)),
+        new SourceStatus(env != null, envErr,
+            env == null ? [] : [$"{env.SegmentCount} segment, {env.HostCount} host kaydı ({env.LoadedAt:HH:mm:ss} yüklendi)"],
+            null, env?.HostCount ?? 0),
+        sw.ElapsedMilliseconds));
+});
+
+app.MapGet("/api/envanter/durum", async (EnvanterService envanter, CancellationToken ct) =>
+{
+    try
+    {
+        var env = await envanter.GetAsync(false, ct);
+        return Results.Ok(new { loadedAt = env.LoadedAt, segments = env.SegmentCount, hosts = env.HostCount });
+    }
+    catch (Exception ex)
+    {
+        return Results.Json(new { error = ex.Message }, statusCode: 502);
+    }
+});
+
+app.MapPost("/api/envanter/yenile", async (EnvanterService envanter, CancellationToken ct) =>
+{
+    try
+    {
+        var env = await envanter.GetAsync(true, ct);
+        return Results.Ok(new { loadedAt = env.LoadedAt, segments = env.SegmentCount, hosts = env.HostCount });
+    }
+    catch (Exception ex)
+    {
+        return Results.Json(new { error = ex.Message }, statusCode: 502);
+    }
+});
+
+app.Run();
+
+// Bir kaynağın hatası diğerlerini durdurmasın: sonucu veya hata mesajını döndür.
+// Sadece kullanıcı isteği iptal ettiyse fırlat; HttpClient timeout'u hata mesajı olarak döner.
+static async Task<(T? result, string? error)> Capture<T>(Func<Task<T>> run, CancellationToken ct) where T : class
+{
+    try
+    {
+        return (await run(), null);
+    }
+    catch (OperationCanceledException) when (ct.IsCancellationRequested)
+    {
+        throw;
+    }
+    catch (TaskCanceledException)
+    {
+        return (null, "Zaman aşımı: kaynak belirlenen sürede yanıt vermedi.");
+    }
+    catch (Exception ex)
+    {
+        return (null, ex.Message);
+    }
+}
+
+static HttpMessageHandler CreateHandler(bool ignoreSslErrors)
+{
+    // Kurumsal proxy isteğe karışmasın: Splunk ve AppResponse iç adresler.
+    var handler = new HttpClientHandler { UseProxy = false };
+    if (ignoreSslErrors)
+        handler.ServerCertificateCustomValidationCallback = HttpClientHandler.DangerousAcceptAnyServerCertificateValidator;
+    return handler;
+}
+
+// ---------------------------------------------------------------------------
+// Ortak sorgu parametreleri
+// ---------------------------------------------------------------------------
+record LookupQuery(string Ip, DateTimeOffset Start, DateTimeOffset End)
+{
+    public long StartUnix => Start.ToUnixTimeSeconds();
+    public long EndUnix => End.ToUnixTimeSeconds();
+
+    public static bool TryParse(string? ipText, string? startText, string? endText, int maxRangeHours,
+        out LookupQuery? query, out string error)
+    {
+        query = null;
+        error = "";
+        ipText = ipText?.Trim();
+
+        // 4 oktet şartı: IPAddress.TryParse "10" gibi girdileri de kabul ettiği için.
+        // IP doğrulaması aynı zamanda SPL / STEELFILTER injection'ını engeller.
+        if (string.IsNullOrEmpty(ipText) || ipText.Split('.').Length != 4 ||
+            !IPAddress.TryParse(ipText, out var addr) || addr.AddressFamily != AddressFamily.InterNetwork)
+        {
+            error = "Geçerli bir IPv4 adresi girin, ör. 10.50.20.15.";
+            return false;
+        }
+
+        var end = ParseTime(endText) ?? DateTimeOffset.Now;
+        var start = ParseTime(startText) ?? end.AddHours(-1);
+
+        if (end <= start)
+        {
+            error = "Bitiş zamanı başlangıçtan sonra olmalı.";
+            return false;
+        }
+        if ((end - start).TotalHours > maxRangeHours)
+        {
+            error = $"Zaman aralığı en fazla {maxRangeHours} saat olabilir.";
+            return false;
+        }
+
+        query = new LookupQuery(addr.ToString(), start, end);
+        return true;
+    }
+
+    static DateTimeOffset? ParseTime(string? text) =>
+        DateTime.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.AssumeLocal, out var dt)
+            ? new DateTimeOffset(dt)
+            : null;
+}
+
+// ---------------------------------------------------------------------------
+// Splunk / Carbon Black
+// ---------------------------------------------------------------------------
+static class SplunkService
+{
+    public static async Task<SplunkResult> QueryAsync(LookupQuery q, IConfiguration cfg, HttpClient http, CancellationToken ct)
+    {
+        var s = cfg.GetSection("Splunk");
+        string baseUrl = (s["BaseUrl"] ?? throw new InvalidOperationException("Splunk:BaseUrl tanımlı değil.")).TrimEnd('/');
+        string exportPath = s["ExportPath"] ?? "/services/search/v2/jobs/export";
+        string index = s["Index"] ?? "carbonblack";
+        string sourcetype = s["Sourcetype"] ?? "bit9:carbonblack:json";
+
+        // TERM(): IP'nin geçmediği olaylar hiç okunmaz (hızın kaynağı).
+        string spl = $"""
+            search index={index} sourcetype="{sourcetype}" TERM({q.Ip})
+            | eval dir=lower(direction),
+                   client_ip   = if(dir=="outbound", local_ip, remote_ip),
+                   server_ip   = if(dir=="outbound", remote_ip, local_ip),
+                   server_port = if(dir=="outbound", remote_port, local_port),
+                   process     = replace(process_path, "^.*[\\\\/]", "")
+            | stats count min(_time) as first_seen max(_time) as last_seen
+                    values(computer_name) as computer_name values(process) as process
+                    by client_ip server_ip server_port Protocol
+            | sort 0 - count
+            | eval first_seen=strftime(first_seen, "%Y-%m-%d %H:%M:%S"), last_seen=strftime(last_seen, "%Y-%m-%d %H:%M:%S")
+            """;
+
+        using var req = new HttpRequestMessage(HttpMethod.Post, baseUrl + exportPath)
+        {
+            Content = new FormUrlEncodedContent(new Dictionary<string, string>
+            {
+                ["search"] = spl,
+                ["earliest_time"] = q.StartUnix.ToString(),
+                ["latest_time"] = q.EndUnix.ToString(),
+                ["output_mode"] = "json"
+            })
+        };
+
+        string? token = s["Token"];
+        if (!string.IsNullOrWhiteSpace(token))
+        {
+            req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        }
+        else
+        {
+            if (string.IsNullOrEmpty(s["Username"]))
+                throw new InvalidOperationException("Splunk:Token veya Splunk:Username/Password tanımlı değil.");
+            string basic = Convert.ToBase64String(Encoding.UTF8.GetBytes($"{s["Username"]}:{s["Password"]}"));
+            req.Headers.Authorization = new AuthenticationHeaderValue("Basic", basic);
+        }
+
+        var sw = Stopwatch.StartNew();
+        using var resp = await http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
+        if (!resp.IsSuccessStatusCode)
+        {
+            string body = await resp.Content.ReadAsStringAsync(ct);
+            throw new HttpRequestException($"Splunk HTTP {(int)resp.StatusCode}: {Truncate(body, 400)}");
+        }
+
+        var rows = new List<Dictionary<string, string>>();
+        var messages = new List<string>();
+
+        // Export endpoint'i her satırda ayrı bir JSON nesnesi döner.
+        using var reader = new StreamReader(await resp.Content.ReadAsStreamAsync(ct));
+        string? line;
+        while ((line = await reader.ReadLineAsync(ct)) != null)
+        {
+            if (string.IsNullOrWhiteSpace(line)) continue;
+
+            JsonNode? node;
+            try { node = JsonNode.Parse(line); }
+            catch (JsonException) { continue; }
+
+            if (node?["preview"] is JsonValue pv && pv.TryGetValue<bool>(out bool isPreview) && isPreview)
+                continue;
+
+            if (node?["result"] is JsonObject result)
+                rows.Add(result.ToDictionary(kv => kv.Key, kv => NodeToText(kv.Value)));
+
+            if (node?["messages"] is JsonArray msgs)
+            {
+                foreach (var m in msgs)
+                {
+                    string? type = m?["type"]?.ToString();
+                    if (type is "ERROR" or "FATAL" or "WARN")
+                        messages.Add($"{type}: {m?["text"]}");
+                }
+            }
+        }
+
+        return new SplunkResult(rows, messages, sw.ElapsedMilliseconds);
+    }
+
+    static string NodeToText(JsonNode? node) => node switch
+    {
+        null => "",
+        JsonArray arr => string.Join(", ", arr.Select(x => x?.ToString())),
+        _ => node.ToString()
+    };
+
+    static string Truncate(string text, int max) => text.Length <= max ? text : text[..max] + "…";
+}
+
+// ---------------------------------------------------------------------------
+// Riverbed AppResponse — mantık DeltaFlow Tek IP test aracından birebir alındı
+// ---------------------------------------------------------------------------
+static class AppResponseService
+{
+    public static async Task<AppResponseResult> QueryAsync(LookupQuery q, int applianceIndex, IConfiguration cfg, HttpClient http, CancellationToken ct)
+    {
+        string? username = cfg["Credentials:Username"];
+        string? password = cfg["Credentials:Password"];
+        if (string.IsNullOrEmpty(username) || string.IsNullOrEmpty(password))
+            throw new InvalidOperationException("Config'de Credentials.Username veya Credentials.Password eksik.");
+
+        var servers = cfg.GetSection("Servers").GetChildren().ToList();
+        if (servers.Count == 0)
+            throw new InvalidOperationException("Config'de 'Servers' listesi boş.");
+        if (applianceIndex < 0 || applianceIndex >= servers.Count)
+            applianceIndex = 0;
+
+        string applianceName = servers[applianceIndex]["Name"] ?? "Riverbed";
+        string applianceIp = servers[applianceIndex]["Ip"]
+            ?? throw new InvalidOperationException($"'{applianceName}' cihazının Ip değeri tanımlı değil.");
+        string baseUrl = $"https://{applianceIp}";
+
+        string sourcePathType = cfg["SourcePathType"] ?? "jobs";
+        string sourceL4Name = cfg["SourceL4"] ?? "flow_tcp";
+        string sourceL7Name = cfg["SourceL7"] ?? "wtapages";
+        bool deleteInstances = cfg.GetValue("DeleteReportInstances", true);
+
+        var vifgIds = cfg.GetSection("VifgIds").GetChildren()
+            .Select(c => (c.Value ?? "").Trim())
+            .ToList();
+        if (vifgIds.Count == 0) vifgIds.Add("");
+
+        var sw = Stopwatch.StartNew();
+        var messages = new List<string>();
+        var l4 = new List<L4Row>();
+        var l7 = new List<L7Row>();
+        int rawL4Total = 0, rawL7Total = 0;
+
+        // 1. Token
+        var tokenPayload = new { user_credentials = new { username, password }, generate_refresh_token = true };
+        using var tokenReq = new HttpRequestMessage(HttpMethod.Post, $"{baseUrl}/api/mgmt.aaa/1.0/token")
+        {
+            // Content-Type'a charset eklenmesin: bazı AppResponse sürümleri 415 döndürüyor.
+            Content = new StringContent(JsonSerializer.Serialize(tokenPayload), Encoding.UTF8)
+        };
+        tokenReq.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
+        tokenReq.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+
+        using var tokenResp = await http.SendAsync(tokenReq, ct);
+        if (!tokenResp.IsSuccessStatusCode)
+        {
+            string tokenBody = await tokenResp.Content.ReadAsStringAsync(ct);
+            throw new HttpRequestException(
+                $"AppResponse token alınamadı ({applianceName} / {applianceIp}, HTTP {(int)tokenResp.StatusCode}): {Truncate(tokenBody, 400)}");
+        }
+
+        string jwt = JsonNode.Parse(await tokenResp.Content.ReadAsStringAsync(ct))?["access_token"]?.ToString()
+            ?? throw new InvalidOperationException("AppResponse token yanıtında access_token yok.");
+
+        // 2. Tek IP filtresi: hem client hem server olarak geçen akışlar
+        string singleIpFilter = $"(cli_tcp.ip == {q.Ip} or srv_tcp.ip == {q.Ip})";
+        var steelFilters = new object[] { new { id = "traffic", type = "STEELFILTER", value = singleIpFilter } };
+
+        foreach (var vifg in vifgIds)
+        {
+            string label = string.IsNullOrWhiteSpace(vifg) ? "" : vifg;
+
+            object sourceL4Obj = string.IsNullOrWhiteSpace(vifg)
+                ? new { name = sourceL4Name }
+                : new { name = sourceL4Name, path = $"{sourcePathType}/{vifg}" };
+
+            object sourceL7Obj = string.IsNullOrWhiteSpace(vifg)
+                ? new { name = sourceL7Name }
+                : new { name = sourceL7Name, path = $"{sourcePathType}/{vifg}" };
+
+            var sorguPayload = new
+            {
+                info = new { name = "Tek IP Analiz Raporu", description = $"{q.Ip} | {q.Start:HH:mm}-{q.End:HH:mm}" },
+                data_defs = new object[]
+                {
+                    new
+                    {
+                        source = sourceL4Obj,
+                        columns = new[] { "start_time", "cli_tcp.ip", "srv_tcp.ip", "srv_tcp.port" },
+                        time = new { start = q.StartUnix.ToString(), end = q.EndUnix.ToString() },
+                        filters = steelFilters
+                    },
+                    new
+                    {
+                        source = sourceL7Obj,
+                        columns = new[] { "start_time", "web.client_ip", "web.server_ip", "web.url" },
+                        time = new { start = q.StartUnix.ToString(), end = q.EndUnix.ToString() },
+                        filters = steelFilters,
+                        topn = 50000
+                    }
+                }
+            };
+
+            // 3. Rapor instance oluştur
+            using var instancesResp = await http.SendAsync(
+                Req(HttpMethod.Post, $"{baseUrl}/api/npm.reports/1.0/instances", jwt, Json(sorguPayload)), ct);
+
+            if (!instancesResp.IsSuccessStatusCode)
+            {
+                string errBody = await instancesResp.Content.ReadAsStringAsync(ct);
+                messages.Add($"{Prefix(label)}Rapor oluşturulamadı (HTTP {(int)instancesResp.StatusCode}): {Truncate(errBody, 300)}");
+                continue;
+            }
+
+            string? raporId = JsonNode.Parse(await instancesResp.Content.ReadAsStringAsync(ct))?["id"]?.ToString();
+            if (string.IsNullOrEmpty(raporId))
+            {
+                messages.Add($"{Prefix(label)}Rapor ID dönmedi.");
+                continue;
+            }
+
+            try
+            {
+                // 4. Tamamlanana kadar bekle (30 x 2 sn)
+                bool completed = false, failed = false;
+                for (int bekle = 0; bekle < 30; bekle++)
+                {
+                    await Task.Delay(2000, ct);
+
+                    using var stResp = await http.SendAsync(
+                        Req(HttpMethod.Get, $"{baseUrl}/api/npm.reports/1.0/instances/items/{raporId}", jwt), ct);
+                    string stBody = await stResp.Content.ReadAsStringAsync(ct);
+                    string? durum = JsonNode.Parse(stBody)?["data_defs"]?.AsArray()?[0]?["status"]?["state"]?.ToString();
+
+                    if (durum == "completed") { completed = true; break; }
+                    if (durum == "error")
+                    {
+                        messages.Add($"{Prefix(label)}Rapor hata ile sonuçlandı: {Truncate(stBody, 300)}");
+                        failed = true;
+                        break;
+                    }
+                }
+
+                if (!completed)
+                {
+                    if (!failed)
+                        messages.Add($"{Prefix(label)}Rapor 60 saniyede tamamlanmadı.");
+                    continue;
+                }
+
+                // 5. Verileri çek
+                var verilerL4 = await GetDataAsync(http, baseUrl, raporId, 1, jwt, ct);
+                var verilerL7 = await GetDataAsync(http, baseUrl, raporId, 2, jwt, ct);
+                rawL4Total += verilerL4?.Count ?? 0;
+                rawL7Total += verilerL7?.Count ?? 0;
+
+                // 6. Gruplama (konsol uygulamasındaki ile aynı)
+                if (verilerL4 != null)
+                {
+                    l4.AddRange(verilerL4.Where(v => v != null)
+                        .Select(v => v!.AsArray())
+                        .Select(arr => new
+                        {
+                            CliIp = arr.Count > 1 ? arr[1]?.ToString() ?? "-" : "-",
+                            SrvIp = arr.Count > 2 ? arr[2]?.ToString() ?? "-" : "-",
+                            SrvPort = arr.Count > 3 ? arr[3]?.ToString() ?? "-" : "-"
+                        })
+                        .GroupBy(x => new { x.CliIp, x.SrvIp, x.SrvPort })
+                        .Select(g => new L4Row(label, g.Key.CliIp, g.Key.SrvIp, g.Key.SrvPort, g.Count())));
+                }
+
+                if (verilerL7 != null)
+                {
+                    l7.AddRange(verilerL7.Where(v => v != null)
+                        .Select(v => v!.AsArray())
+                        .Select(arr => new
+                        {
+                            CliIp = arr.Count > 1 ? arr[1]?.ToString() ?? "-" : "-",
+                            SrvIp = arr.Count > 2 ? arr[2]?.ToString() ?? "-" : "-",
+                            Url = arr.Count > 3 ? arr[3]?.ToString() ?? "-" : "-"
+                        })
+                        .GroupBy(x => new { x.CliIp, x.SrvIp, x.Url })
+                        .Select(g => new L7Row(label, g.Key.CliIp, g.Key.SrvIp, g.Key.Url, g.Count())));
+                }
+            }
+            finally
+            {
+                // Cihazda biriken rapor instance'larını temizle; hata olursa yok say.
+                if (deleteInstances)
+                {
+                    try
+                    {
+                        using var delResp = await http.SendAsync(
+                            Req(HttpMethod.Delete, $"{baseUrl}/api/npm.reports/1.0/instances/items/{raporId}", jwt),
+                            CancellationToken.None);
+                    }
+                    catch { /* yok say */ }
+                }
+            }
+        }
+
+        return new AppResponseResult(
+            applianceName,
+            vifgIds.Count(v => !string.IsNullOrWhiteSpace(v)),
+            rawL4Total,
+            rawL7Total,
+            l4.OrderByDescending(r => r.Hit).ToList(),
+            l7.OrderByDescending(r => r.Hit).ToList(),
+            messages,
+            sw.ElapsedMilliseconds);
+    }
+
+    static async Task<JsonArray?> GetDataAsync(HttpClient http, string baseUrl, string raporId, int dataDef, string jwt, CancellationToken ct)
+    {
+        using var resp = await http.SendAsync(Req(HttpMethod.Get,
+            $"{baseUrl}/api/npm.reports/1.0/instances/items/{raporId}/data_defs/items/{dataDef}/data?limit=1000000", jwt), ct);
+        string raw = await resp.Content.ReadAsStringAsync(ct);
+        return JsonNode.Parse(raw)?["data"]?.AsArray();
+    }
+
+    static HttpRequestMessage Req(HttpMethod method, string url, string jwt, HttpContent? content = null)
+    {
+        var r = new HttpRequestMessage(method, url) { Content = content };
+        r.Headers.Authorization = new AuthenticationHeaderValue("Bearer", jwt);
+        r.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+        return r;
+    }
+
+    static StringContent Json(object payload) =>
+        new(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
+
+    static string Prefix(string vifg) => string.IsNullOrEmpty(vifg) ? "" : $"[{vifg}] ";
+
+    static string Truncate(string text, int max) => text.Length <= max ? text : text[..max] + "…";
+}
+
+// JSON çıktısı (camelCase) önceki anonim nesnelerle birebir aynı: mevcut arayüz etkilenmez.
+record SplunkResult(List<Dictionary<string, string>> Rows, List<string> Messages, long ElapsedMs);
+record AppResponseResult(string Appliance, int VifgCount, int RawL4, int RawL7,
+    List<L4Row> L4, List<L7Row> L7, List<string> Messages, long ElapsedMs);
+
+record L4Row(string Vifg, string ClientIp, string ServerIp, string Port, int Hit);
+record L7Row(string Vifg, string ClientIp, string ServerIp, string Url, int Hit);

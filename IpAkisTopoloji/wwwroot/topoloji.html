@@ -1,0 +1,487 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>IP Akış Topolojisi</title>
+<style>
+  :root {
+    --bg: #f5f6f8; --panel: #ffffff; --text: #1d2330; --muted: #677084; --line: #dde1e8;
+    --in: #2f6fd6; --in-soft: #e5eefc; --out: #d9822b; --out-soft: #fcefe2;
+    --ok: #2e8b57; --err: #c8353a; --warn: #b7791f; --unknown: #9aa1ad;
+    --node: #ffffff; --target: #1d2330; --target-text: #ffffff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14171d; --panel: #1c2028; --text: #e4e7ec; --muted: #9098a8; --line: #2d333e;
+      --in: #6ea0f0; --in-soft: #1f2d45; --out: #eba35c; --out-soft: #3a2c1d;
+      --ok: #5cc28a; --err: #ef6b6f; --warn: #e0b050; --unknown: #6b7280;
+      --node: #232833; --target: #e4e7ec; --target-text: #14171d;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 "Segoe UI", system-ui, sans-serif; }
+  header { padding: 14px 20px; background: var(--panel); border-bottom: 1px solid var(--line); }
+  h1 { font-size: 18px; margin: 0 0 10px; }
+  h2 { font-size: 15px; margin: 0 0 10px; }
+  main { padding: 16px 20px 40px; display: grid; gap: 16px; }
+  form { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; }
+  label { display: grid; gap: 3px; font-size: 12px; color: var(--muted); }
+  input, select, button { font: inherit; color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 6px 9px; }
+  input[type=text] { width: 150px; }
+  button { cursor: pointer; }
+  button.primary { background: var(--in); border-color: var(--in); color: #fff; font-weight: 600; padding: 6px 18px; }
+  button:disabled { opacity: .6; cursor: default; }
+  .checks { display: flex; gap: 10px; font-size: 13px; color: var(--text); padding-bottom: 6px; }
+  .checks label { display: flex; align-items: center; gap: 4px; font-size: 13px; color: var(--text); }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; min-width: 0; }
+  .status { display: flex; flex-wrap: wrap; gap: 8px; font-size: 12.5px; }
+  .pill { border: 1px solid var(--line); border-radius: 999px; padding: 3px 10px; }
+  .pill.ok::before, .pill.err::before, .pill.skip::before { content: "●"; margin-right: 6px; }
+  .pill.ok::before { color: var(--ok); } .pill.err::before { color: var(--err); } .pill.skip::before { color: var(--unknown); }
+  .msgs { font-size: 12px; color: var(--warn); margin-top: 6px; white-space: pre-wrap; }
+  .target-grid { display: grid; grid-template-columns: minmax(220px, 340px) 1fr; gap: 16px; }
+  @media (max-width: 800px) { .target-grid { grid-template-columns: 1fr; } }
+  dl { display: grid; grid-template-columns: auto 1fr; gap: 3px 12px; margin: 0; font-size: 13px; }
+  dt { color: var(--muted); } dd { margin: 0; }
+  .bigip { font-size: 22px; font-weight: 700; margin-bottom: 6px; font-variant-numeric: tabular-nums; }
+  .kpis { display: flex; flex-wrap: wrap; gap: 10px; }
+  .kpi { border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; min-width: 120px; }
+  .kpi b { display: block; font-size: 20px; font-variant-numeric: tabular-nums; }
+  .kpi span { font-size: 12px; color: var(--muted); }
+  .toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+  .seg button { border: 0; border-radius: 0; padding: 5px 12px; }
+  .seg button.on { background: var(--text); color: var(--panel); }
+  .legend { font-size: 12px; color: var(--muted); display: flex; gap: 14px; }
+  .legend i { display: inline-block; width: 18px; height: 3px; vertical-align: middle; margin-right: 4px; border-radius: 2px; }
+  .topo-wrap { overflow-x: auto; }
+  svg.topo { display: block; width: 100%; min-width: 900px; height: auto; }
+  .node rect { fill: var(--node); stroke: var(--line); stroke-width: 1; }
+  .node { cursor: pointer; }
+  .node:hover rect, .node.sel rect { stroke-width: 2.5; }
+  .node.in rect { stroke: var(--in); } .node.out rect { stroke: var(--out); }
+  .node.unknown rect { stroke: var(--unknown); stroke-dasharray: 4 3; }
+  .node text { fill: var(--text); font-size: 12.5px; }
+  .node text.sub { fill: var(--muted); font-size: 11px; }
+  .edge { fill: none; opacity: .55; }
+  .edge.in { stroke: var(--in); } .edge.out { stroke: var(--out); }
+  .edge.dim { opacity: .12; }
+  .tnode rect { fill: var(--target); }
+  .tnode text { fill: var(--target-text); font-size: 13px; }
+  .colhead { fill: var(--muted); font-size: 12px; font-weight: 600; letter-spacing: .04em; }
+  .chip { display: inline-flex; align-items: center; gap: 6px; background: var(--in-soft); border-radius: 999px; padding: 2px 10px; font-size: 12.5px; }
+  .chip button { border: 0; background: transparent; padding: 0 2px; }
+  .tbl-wrap { overflow-x: auto; max-height: 560px; overflow-y: auto; border: 1px solid var(--line); border-radius: 6px; }
+  table { border-collapse: collapse; width: 100%; font-size: 12.5px; }
+  th, td { padding: 6px 8px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+  th { position: sticky; top: 0; background: var(--panel); color: var(--muted); font-weight: 600; white-space: nowrap; cursor: pointer; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  td.mono { font-family: Consolas, ui-monospace, monospace; white-space: nowrap; }
+  tr:hover td { background: color-mix(in srgb, var(--in-soft) 45%, transparent); }
+  .dir-in h2 { color: var(--in); } .dir-out h2 { color: var(--out); }
+  .muted { color: var(--muted); }
+  .unk { color: var(--unknown); font-style: italic; }
+  .badge { display: inline-block; font-size: 11px; border-radius: 4px; padding: 0 5px; border: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
+  .badge.strong { border-color: var(--ok); color: var(--ok); }
+  .badge.weak { border-color: var(--warn); color: var(--warn); }
+  details summary { cursor: pointer; color: var(--muted); }
+  .small { font-size: 11.5px; }
+  .empty { padding: 30px; text-align: center; color: var(--muted); }
+  .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--line); border-top-color: var(--in); border-radius: 50%; animation: spin 1s linear infinite; vertical-align: middle; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .grid2 { display: grid; gap: 16px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>IP Akış Topolojisi</h1>
+  <form id="f">
+    <label>IP adresi <input type="text" id="ip" placeholder="10.50.20.15" required></label>
+    <label>Başlangıç <input type="datetime-local" id="start"></label>
+    <label>Bitiş <input type="datetime-local" id="end"></label>
+    <label>AppResponse cihazı <select id="appliance"></select></label>
+    <div class="checks">
+      <label><input type="checkbox" id="srcSplunk" checked> Splunk</label>
+      <label><input type="checkbox" id="srcAr" checked> AppResponse</label>
+    </div>
+    <button class="primary" id="go" type="submit">Sorgula</button>
+    <button type="button" id="cancel" hidden>İptal</button>
+  </form>
+</header>
+
+<main id="main">
+  <div class="panel empty" id="placeholder">Bir IP adresi girip sorgulayın.</div>
+</main>
+
+<script>
+const $ = s => document.querySelector(s);
+const esc = v => String(v ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const fmt = n => (n ?? 0).toLocaleString("tr-TR");
+const pad = n => String(n).padStart(2, "0");
+const toLocalInput = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+
+const MAX_NODES = 20;
+const state = { data: null, mode: "segment", filter: null, search: { in: "", out: "" }, sort: { in: null, out: null } };
+let abort = null;
+
+// ---------- Envanter yardımcıları ----------
+const appName = a => a.appName || a.serviceName || a.unixName || a.website || "?";
+const appNames = m => m && m.apps && m.apps.length ? [...new Set(m.apps.map(appName))].sort() : [];
+const segLabel = s => s ? s.label : null;
+const MATCH = {
+  "ip-port": ["IP+Port", "strong"], "vip": ["VIP", "strong"],
+  "ip": ["Sadece IP", "weak"], "vip-ip": ["VIP IP", "weak"], "yok": ["Envanterde yok", ""]
+};
+const matchBadge = m => m ? `<span class="badge ${MATCH[m.kind]?.[1] ?? ""}" title="Eşleşme türü">${esc(MATCH[m.kind]?.[0] ?? m.kind)}</span>` : "";
+const portText = p => p === "" ? "web (L7)" : p;
+
+function groupKey(e) {
+  if (state.mode === "ip") return e.peerIp;
+  if (state.mode === "app") { const n = appNames(e.peerApps); return n.length ? n.join(" + ") : "Uygulama bilinmiyor"; }
+  return segLabel(e.peerSegment) ?? "Segment bilinmiyor";
+}
+const isUnknownKey = k => k === "Uygulama bilinmiyor" || k === "Segment bilinmiyor";
+
+// ---------- Form ----------
+async function loadAppliances() {
+  try {
+    const list = await (await fetch("api/appliances")).json();
+    $("#appliance").innerHTML = list.map(a => `<option value="${a.index}">${esc(a.name)}</option>`).join("") || `<option value="0">-</option>`;
+  } catch { $("#appliance").innerHTML = `<option value="0">-</option>`; }
+}
+
+function initForm() {
+  const p = new URLSearchParams(location.search);
+  const now = new Date();
+  $("#end").value = p.get("end") || toLocalInput(now);
+  $("#start").value = p.get("start") || toLocalInput(new Date(now - 3600e3));
+  if (p.get("ip")) $("#ip").value = p.get("ip");
+  if (p.get("mode")) state.mode = p.get("mode");
+  return !!p.get("ip");
+}
+
+$("#f").addEventListener("submit", ev => { ev.preventDefault(); run(); });
+$("#cancel").addEventListener("click", () => abort?.abort());
+
+async function run() {
+  const srcs = [$("#srcSplunk").checked && "splunk", $("#srcAr").checked && "appresponse"].filter(Boolean);
+  if (!srcs.length) { alert("En az bir kaynak seçin."); return; }
+  const params = new URLSearchParams({
+    ip: $("#ip").value.trim(), start: $("#start").value, end: $("#end").value,
+    appliance: $("#appliance").value || "0", sources: srcs.join(",")
+  });
+  history.replaceState(null, "", "?" + new URLSearchParams({ ip: params.get("ip"), start: params.get("start"), end: params.get("end"), mode: state.mode }));
+
+  abort?.abort();
+  abort = new AbortController();
+  $("#go").disabled = true; $("#cancel").hidden = false;
+  $("#main").innerHTML = `<div class="panel empty"><span class="spinner"></span> Sorgulanıyor… (AppResponse raporu 1 dakikaya kadar sürebilir)</div>`;
+  try {
+    const r = await fetch("api/flow?" + params, { signal: abort.signal });
+    const body = await r.json().catch(() => ({ error: `HTTP ${r.status}` }));
+    if (!r.ok) throw new Error(body.error || `HTTP ${r.status}`);
+    state.data = body; state.filter = null;
+    render();
+  } catch (e) {
+    const msg = e.name === "AbortError" ? "Sorgu iptal edildi." : e.message;
+    $("#main").innerHTML = `<div class="panel empty" style="color:var(--err)">${esc(msg)}</div>`;
+  } finally {
+    $("#go").disabled = false; $("#cancel").hidden = true;
+  }
+}
+
+// ---------- Render ----------
+function render() {
+  const d = state.data;
+  $("#main").innerHTML = `
+    <section class="panel">${renderStatus(d)}</section>
+    <section class="panel">${renderTarget(d)}</section>
+    <section class="panel">
+      <div class="toolbar">
+        <h2 style="margin:0">Topoloji</h2>
+        <div class="seg" id="modes">
+          ${[["segment", "Segment"], ["app", "Uygulama"], ["ip", "IP"]].map(([k, t]) =>
+            `<button type="button" data-mode="${k}" class="${state.mode === k ? "on" : ""}">${t}</button>`).join("")}
+        </div>
+        <div class="legend"><span><i style="background:var(--in)"></i>Gelen</span><span><i style="background:var(--out)"></i>Giden</span><span>Çizgi kalınlığı = hit</span></div>
+      </div>
+      <div id="filterbar"></div>
+      <div class="topo-wrap" id="topo"></div>
+    </section>
+    <div class="grid2">
+      <section class="panel dir-in" id="tbl-in"></section>
+      <section class="panel dir-out" id="tbl-out"></section>
+    </div>`;
+  $("#modes").addEventListener("click", ev => {
+    const m = ev.target.dataset.mode; if (!m) return;
+    state.mode = m; state.filter = null;
+    const u = new URLSearchParams(location.search); u.set("mode", m); history.replaceState(null, "", "?" + u);
+    render();
+  });
+  renderTopology();
+  renderTables();
+}
+
+function renderStatus(d) {
+  const pill = (name, s, extra) => {
+    const cls = s.ok ? "ok" : s.error === "Sorgulanmadı" ? "skip" : "err";
+    const info = s.ok ? `${fmt(s.rows)} satır${s.elapsedMs != null ? ` · ${(s.elapsedMs / 1000).toFixed(1)} sn` : ""}${extra ?? ""}` : esc(s.error);
+    return `<span class="pill ${cls}" title="${esc(s.error ?? "")}"><b>${name}</b> ${info}</span>`;
+  };
+  const msgs = [...d.splunk.messages.map(m => "Splunk: " + m), ...d.appResponse.messages.map(m => "AppResponse: " + m)];
+  return `<div class="status">
+      ${pill("Splunk", d.splunk)}
+      ${pill("AppResponse", d.appResponse)}
+      ${pill("Envanter", d.envanter, d.envanter.ok ? ` · ${esc(d.envanter.messages[0] ?? "")}` : "")}
+      <span class="pill">Toplam ${(d.elapsedMs / 1000).toFixed(1)} sn</span>
+    </div>${msgs.length ? `<div class="msgs">${esc(msgs.join("\n"))}</div>` : ""}`;
+}
+
+function renderTarget(d) {
+  const t = d.target, s = t.segment;
+  const segDl = s ? `<dl>
+      <dt>Segment</dt><dd><b>${esc(s.label)}</b></dd>
+      <dt>CIDR</dt><dd class="mono">${esc(s.cidr)}</dd>
+      ${[["VLAN", s.vlan], ["Tenant", s.tenant], ["App Profile", s.applicationProfile], ["EPG", s.epgName], ["BD", s.bd], ["GW", s.gw], ["Domain", s.domain], ["Açıklama", s.description]]
+        .filter(x => x[1]).map(([k, v]) => `<dt>${k}</dt><dd>${esc(v)}</dd>`).join("")}
+    </dl>` : `<div class="unk">Segment envanterinde bulunamadı.</div>`;
+
+  const inPeers = new Set(d.inbound.map(e => e.peerIp)).size;
+  const outPeers = new Set(d.outbound.map(e => e.peerIp)).size;
+  const inSegs = new Set(d.inbound.map(e => segLabel(e.peerSegment) ?? "?")).size;
+  const outSegs = new Set(d.outbound.map(e => segLabel(e.peerSegment) ?? "?")).size;
+  const unknown = new Set([...d.inbound, ...d.outbound].filter(e => !e.peerSegment || !appNames(e.peerApps).length).map(e => e.peerIp)).size;
+
+  const apps = t.apps.length ? `<div class="tbl-wrap" style="max-height:220px"><table>
+      <thead><tr><th>Port</th><th>Uygulama</th><th>Servis</th><th>Unix/Host</th><th>Varlık muhafızı</th><th>İşleten birim</th><th>Varlık sahibi</th></tr></thead>
+      <tbody>${[...t.apps].sort((a, b) => (+a.port || 0) - (+b.port || 0)).map(a => `<tr>
+        <td class="mono">${esc(a.port ?? "")}${a.vipIp ? `<div class="small muted">VIP ${esc(a.vipIp)}:${esc(a.vipPort ?? "")}</div>` : ""}</td>
+        <td><b>${esc(a.appName ?? "")}</b>${a.website ? `<div class="small muted">${esc(a.website)}</div>` : ""}</td>
+        <td>${esc(a.serviceName ?? "")}</td><td>${esc(a.unixName ?? "")}</td>
+        <td>${esc(a.varlikMuhafizi ?? "")}</td><td>${esc(a.sunucuIsletenBirim ?? "")}</td><td>${esc(a.uygulamaVarlikSahibi ?? "")}</td>
+      </tr>`).join("")}</tbody></table></div>`
+    : `<div class="unk">Bu IP için uygulama envanterinde kayıt yok.</div>`;
+
+  return `<div class="target-grid">
+      <div><div class="bigip">${esc(t.ip)}</div>${segDl}</div>
+      <div>
+        <div class="kpis" style="margin-bottom:12px">
+          <div class="kpi"><b style="color:var(--in)">${fmt(inPeers)}</b><span>gelen IP · ${fmt(inSegs)} segment</span></div>
+          <div class="kpi"><b style="color:var(--out)">${fmt(outPeers)}</b><span>gidilen IP · ${fmt(outSegs)} segment</span></div>
+          <div class="kpi"><b style="color:var(--warn)">${fmt(unknown)}</b><span title="Segment veya uygulama envanterinde kaydı olmayan karşı IP sayısı">segment/uygulama kaydı eksik IP</span></div>
+        </div>
+        <h2>Bu makinedeki uygulamalar</h2>${apps}
+      </div>
+    </div>`;
+}
+
+function groupsFor(edges) {
+  const map = new Map();
+  for (const e of edges) {
+    const k = groupKey(e);
+    let g = map.get(k);
+    if (!g) map.set(k, g = { key: k, hits: 0, peers: new Set(), ports: new Set(), seg: e.peerSegment, edges: 0 });
+    g.hits += e.hits; g.peers.add(e.peerIp); if (e.port !== "") g.ports.add(e.port); g.edges++;
+  }
+  let list = [...map.values()].sort((a, b) => b.hits - a.hits);
+  if (list.length > MAX_NODES) {
+    const rest = list.slice(MAX_NODES - 1);
+    const other = { key: `__other`, label: `Diğer (${rest.length} grup)`, hits: 0, peers: new Set(), ports: new Set(), other: rest.map(r => r.key) };
+    rest.forEach(r => { other.hits += r.hits; r.peers.forEach(p => other.peers.add(p)); r.ports.forEach(p => other.ports.add(p)); });
+    list = [...list.slice(0, MAX_NODES - 1), other];
+  }
+  return list;
+}
+
+function nodeSub(g) {
+  const ports = [...g.ports].sort((a, b) => a - b);
+  const portTxt = ports.length ? `port ${ports.slice(0, 5).join(",")}${ports.length > 5 ? "…" : ""}` : "";
+  if (state.mode === "ip") return [segLabel(g.seg) ?? "segment ?", portTxt].filter(Boolean).join(" · ");
+  if (state.mode === "segment" && g.seg) return [g.seg.label !== g.seg.cidr && g.seg.cidr, g.seg.vlan && "VLAN " + g.seg.vlan, `${g.peers.size} IP`].filter(Boolean).join(" · ");
+  return `${g.peers.size} IP${portTxt ? " · " + portTxt : ""}`;
+}
+
+const trunc = (s, n) => s.length > n ? s.slice(0, n - 1) + "…" : s;
+
+function renderTopology() {
+  const d = state.data;
+  const L = groupsFor(d.inbound), R = groupsFor(d.outbound);
+  const NH = 42, GAP = 10, TOP = 34, W = 1100, NW = 330, TW = 220;
+  const rows = Math.max(L.length, R.length, 1);
+  const H = TOP + rows * (NH + GAP) + 10;
+  const tx = (W - TW) / 2, th = 96, ty = Math.max(TOP, (H - th) / 2);
+  const cy = ty + th / 2;
+  const maxHit = Math.max(1, ...L.map(g => g.hits), ...R.map(g => g.hits));
+  const sw = h => 1.5 + 9 * Math.log(1 + h) / Math.log(1 + maxHit);
+
+  const colY = list => { const total = list.length * (NH + GAP) - GAP; const off = TOP + Math.max(0, (rows * (NH + GAP) - GAP - total) / 2); return i => off + i * (NH + GAP); };
+  const yl = colY(L), yr = colY(R);
+  const sel = state.filter;
+
+  let edges = "", nodes = "";
+  const draw = (list, dir, x, yOf) => list.forEach((g, i) => {
+    const y = yOf(i), my = y + NH / 2;
+    const selected = sel && sel.dir === dir && sel.key === g.key;
+    const dim = sel && !selected ? " dim" : "";
+    const [x1, x2] = dir === "in" ? [x + NW, tx] : [tx + TW, x];
+    const mx = (x1 + x2) / 2;
+    edges += `<path class="edge ${dir}${dim}" stroke-width="${sw(g.hits).toFixed(1)}" d="M${x1},${my} C${mx},${my} ${mx},${cy} ${x2},${cy}"><title>${esc(g.label ?? g.key)}: ${fmt(g.hits)} hit</title></path>`;
+    const unknown = isUnknownKey(g.key) ? " unknown" : "";
+    nodes += `<g class="node ${dir}${unknown}${selected ? " sel" : ""}" data-dir="${dir}" data-key="${esc(g.key)}" transform="translate(${x},${y})">
+      <title>${esc(g.label ?? g.key)}\n${fmt(g.peers.size)} IP · ${fmt(g.hits)} hit</title>
+      <rect width="${NW}" height="${NH}" rx="6"></rect>
+      <text x="10" y="17">${esc(trunc(g.label ?? g.key, 40))}</text>
+      <text class="sub" x="10" y="33">${esc(trunc(nodeSub(g), 44))}</text>
+      <text class="sub" x="${NW - 10}" y="17" text-anchor="end">${fmt(g.hits)}</text>
+    </g>`;
+  });
+  draw(L, "in", 10, yl);
+  draw(R, "out", W - NW - 10, yr);
+
+  const t = d.target;
+  const tApps = [...new Set(t.apps.map(appName))];
+  const svg = `<svg class="topo" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
+    <text class="colhead" x="10" y="18">GELEN (${fmt(new Set(d.inbound.map(e => e.peerIp)).size)} IP)</text>
+    <text class="colhead" x="${W - 10}" y="18" text-anchor="end">GİDEN (${fmt(new Set(d.outbound.map(e => e.peerIp)).size)} IP)</text>
+    ${edges}
+    <g class="tnode" transform="translate(${tx},${ty})">
+      <rect width="${TW}" height="${th}" rx="10"></rect>
+      <text x="${TW / 2}" y="30" text-anchor="middle" style="font-size:16px;font-weight:700">${esc(t.ip)}</text>
+      <text x="${TW / 2}" y="52" text-anchor="middle">${esc(trunc(t.segment ? t.segment.label : "segment ?", 30))}</text>
+      <text x="${TW / 2}" y="72" text-anchor="middle" style="font-size:11.5px">${esc(trunc(tApps.join(", ") || "uygulama kaydı yok", 34))}</text>
+    </g>
+    ${nodes}
+  </svg>`;
+  $("#topo").innerHTML = (L.length || R.length) ? svg : `<div class="empty">Bu aralıkta akış bulunamadı.</div>`;
+
+  $("#topo").querySelectorAll(".node").forEach(n => n.addEventListener("click", () => {
+    const dir = n.dataset.dir, key = n.dataset.key;
+    const g = (dir === "in" ? L : R).find(x => x.key === key);
+    state.filter = sel && sel.dir === dir && sel.key === key ? null : { dir, key, keys: g.other ?? [key], label: g.label ?? key };
+    renderTopology(); renderTables();
+  }));
+
+  $("#filterbar").innerHTML = state.filter
+    ? `<div style="margin-bottom:8px"><span class="chip">${state.filter.dir === "in" ? "Gelen" : "Giden"}: ${esc(state.filter.label)} <button type="button" id="clr" title="Filtreyi kaldır">✕</button></span></div>` : "";
+  $("#clr")?.addEventListener("click", () => { state.filter = null; renderTopology(); renderTables(); });
+}
+
+// ---------- Tablolar ----------
+const COLS = {
+  in: [
+    { h: "Kaynak IP", v: e => e.peerIp, c: "mono" },
+    { h: "Kaynak segment", v: e => segLabel(e.peerSegment) ?? "", html: e => segCell(e.peerSegment) },
+    { h: "Kaynak uygulama", v: e => appNames(e.peerApps).join(", "), html: e => appsCell(e.peerApps, false) },
+    { h: "Port", v: e => portText(e.port), c: "mono" },
+    { h: "Bizdeki uygulama", v: e => appNames(e.localApp).join(", "), html: e => appsCell(e.localApp, true) },
+    ...commonCols()
+  ],
+  out: [
+    { h: "Hedef IP", v: e => e.peerIp, c: "mono" },
+    { h: "Hedef segment", v: e => segLabel(e.peerSegment) ?? "", html: e => segCell(e.peerSegment) },
+    { h: "Port", v: e => portText(e.port), c: "mono" },
+    { h: "Hedef uygulama", v: e => appNames(e.peerApps).join(", "), html: e => appsCell(e.peerApps, true) },
+    ...commonCols()
+  ]
+};
+
+function commonCols() {
+  return [
+    { h: "Hit", v: e => e.hits, c: "num", html: e => fmt(e.hits) },
+    { h: "Splunk", v: e => e.splunkHits, c: "num", html: e => e.splunkHits ? fmt(e.splunkHits) : "" },
+    { h: "AppResp.", v: e => e.appResponseHits, c: "num", html: e => e.appResponseHits ? fmt(e.appResponseHits) : "" },
+    { h: "Son görülme", v: e => e.lastSeen ?? "", c: "mono" },
+    { h: "Detay", v: e => [...e.computers, ...e.processes, ...e.urls].join(" "), html: detailCell }
+  ];
+}
+
+function segCell(s) {
+  return s ? `${esc(s.label)}<div class="small muted mono">${esc(s.cidr)}${s.vlan ? " · VLAN " + esc(s.vlan) : ""}</div>` : `<span class="unk">bilinmiyor</span>`;
+}
+function appsCell(m, showBadge) {
+  const n = appNames(m);
+  if (!n.length) return `<span class="unk">bilinmiyor</span>`;
+  const owner = [...new Set(m.apps.map(a => a.varlikMuhafizi).filter(Boolean))][0];
+  return `${n.map(x => `<div>${esc(x)}</div>`).join("")}${owner ? `<div class="small muted">${esc(owner)}</div>` : ""}${showBadge ? matchBadge(m) : ""}`;
+}
+function detailCell(e) {
+  const parts = [];
+  if (e.protocols.length) parts.push(`<span class="badge">${esc(e.protocols.join("/"))}</span>`);
+  if (e.computers.length) parts.push(`<div class="small">💻 ${esc(e.computers.slice(0, 3).join(", "))}${e.computers.length > 3 ? "…" : ""}</div>`);
+  if (e.processes.length) parts.push(`<div class="small">⚙ ${esc(e.processes.slice(0, 3).join(", "))}${e.processes.length > 3 ? "…" : ""}</div>`);
+  if (e.urls.length) parts.push(`<details class="small"><summary>${e.urls.length} URL</summary>${e.urls.map(u => `<div class="mono">${esc(u)}</div>`).join("")}</details>`);
+  return parts.join("");
+}
+
+function visibleEdges(dir) {
+  let list = dir === "in" ? state.data.inbound : state.data.outbound;
+  const f = state.filter;
+  if (f) list = f.dir === dir ? list.filter(e => f.keys.includes(groupKey(e))) : list;
+  const q = state.search[dir].toLowerCase();
+  if (q) list = list.filter(e => COLS[dir].some(c => String(c.v(e)).toLowerCase().includes(q)));
+  const s = state.sort[dir];
+  if (s) {
+    const col = COLS[dir][s.i];
+    list = [...list].sort((a, b) => {
+      const x = col.v(a), y = col.v(b);
+      const r = typeof x === "number" ? x - y : String(x).localeCompare(String(y), "tr", { numeric: true });
+      return s.desc ? -r : r;
+    });
+  }
+  return list;
+}
+
+function renderTables() {
+  for (const dir of ["in", "out"]) {
+    const el = $("#tbl-" + dir);
+    const rows = visibleEdges(dir);
+    const total = (dir === "in" ? state.data.inbound : state.data.outbound).length;
+    const cols = COLS[dir];
+    const s = state.sort[dir];
+    el.innerHTML = `
+      <div class="toolbar">
+        <h2 style="margin:0">${dir === "in" ? "Gelen trafik — bu makineye kim geliyor" : "Giden trafik — bu makine nereye gidiyor"}
+          <span class="muted" style="font-weight:400">(${fmt(rows.length)}${rows.length !== total ? " / " + fmt(total) : ""})</span></h2>
+        <div style="display:flex;gap:8px">
+          <input type="search" placeholder="Tabloda ara…" value="${esc(state.search[dir])}" data-search="${dir}">
+          <button type="button" data-csv="${dir}">CSV</button>
+        </div>
+      </div>
+      ${rows.length ? `<div class="tbl-wrap"><table>
+        <thead><tr>${cols.map((c, i) => `<th class="${c.c === "num" ? "num" : ""}" data-sort="${i}">${c.h}${s && s.i === i ? (s.desc ? " ▼" : " ▲") : ""}</th>`).join("")}</tr></thead>
+        <tbody>${rows.map(e => `<tr>${cols.map(c => `<td class="${c.c ?? ""}">${c.html ? c.html(e) : esc(c.v(e))}</td>`).join("")}</tr>`).join("")}</tbody>
+      </table></div>` : `<div class="empty">Kayıt yok.</div>`}`;
+
+    const inp = el.querySelector("[data-search]");
+    inp.addEventListener("input", () => {
+      state.search[dir] = inp.value;
+      const pos = inp.selectionStart;
+      renderTables();
+      const again = $(`#tbl-${dir} [data-search]`); again.focus(); again.setSelectionRange(pos, pos);
+    });
+    el.querySelector("[data-csv]").addEventListener("click", () => exportCsv(dir));
+    el.querySelectorAll("th[data-sort]").forEach(th => th.addEventListener("click", () => {
+      const i = +th.dataset.sort, cur = state.sort[dir];
+      state.sort[dir] = cur && cur.i === i ? (cur.desc ? null : { i, desc: true }) : { i, desc: cols[i].c === "num" };
+      renderTables();
+    }));
+  }
+}
+
+function exportCsv(dir) {
+  const cols = COLS[dir];
+  const q = v => `"${String(v ?? "").replace(/"/g, '""')}"`;
+  const lines = [cols.map(c => q(c.h)).join(";"), ...visibleEdges(dir).map(e => cols.map(c => q(c.v(e))).join(";"))];
+  const blob = new Blob(["﻿" + lines.join("\r\n")], { type: "text/csv;charset=utf-8" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `${state.data.target.ip}_${dir === "in" ? "gelen" : "giden"}.csv`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
+loadAppliances().then(() => { if (initForm()) run(); });
+</script>
+</body>
+</html>
