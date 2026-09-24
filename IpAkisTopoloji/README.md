@@ -6,8 +6,14 @@ o IP'nin akışlarını çeker, iki SQL Server envanteriyle zenginleştirir ve �
 - **Gelen trafik**: bu makineye hangi IP'ler, hangi segmentlerden, hangi uygulamalardan geliyor;
   bizim tarafta hangi porta, hangi uygulamaya geliyorlar.
 - **Giden trafik**: bu makine hangi IP:port'a gidiyor; hedef hangi segmentte ve hangi uygulama.
-- **Topoloji**: solda gelenler, ortada hedef, sağda gidilenler. Segment, Uygulama ya da IP bazında
-  gruplanır. Bir düğüme tıklayınca tablo o gruba göre filtrelenir.
+- **Topoloji**: segmentler kutu, IP'ler kutuların içinde satır olarak çizilir.
+  - Solda gelen segmentler. Bağlantılar IP → bizim port/uygulama (orta sütun) → hedef şeklinde akar.
+  - Sağda giden segmentler. Her IP satırında hedef port ve uygulama yazar.
+  - Hedefle aynı segmentteki kutular kalın çerçeveli ve "AYNI SEGMENT" işaretli.
+  - Kalabalık kutularda ilk 6 IP gösterilir ("+ n IP daha" ile açılır); başlığa tıklamak kutuyu açar/kapar.
+  - Üzerine gelince yol vurgulanır. IP'ye tıklayınca detay açılır; "Bu IP'nin topolojisini aç" ile o IP'ye geçilir.
+  - Kutular segment yerine uygulamaya göre de gruplanabilir. Yakınlaştırma, SVG/PNG indirme var.
+- **Segment özeti**: gelen trafik hangi segmentlerden, giden trafik hangi segmentlere; IP sayısı, port, uygulama, hit.
 
 Sayfa: `/topoloji.html?ip=10.210.10.63` (adres çubuğundaki link paylaşılabilir).
 

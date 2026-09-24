@@ -55,21 +55,47 @@
   .seg button.on { background: var(--text); color: var(--panel); }
   .legend { font-size: 12px; color: var(--muted); display: flex; gap: 14px; }
   .legend i { display: inline-block; width: 18px; height: 3px; vertical-align: middle; margin-right: 4px; border-radius: 2px; }
-  .topo-wrap { overflow-x: auto; }
-  svg.topo { display: block; width: 100%; min-width: 900px; height: auto; }
-  .node rect { fill: var(--node); stroke: var(--line); stroke-width: 1; }
-  .node { cursor: pointer; }
-  .node:hover rect, .node.sel rect { stroke-width: 2.5; }
-  .node.in rect { stroke: var(--in); } .node.out rect { stroke: var(--out); }
-  .node.unknown rect { stroke: var(--unknown); stroke-dasharray: 4 3; }
-  .node text { fill: var(--text); font-size: 12.5px; }
-  .node text.sub { fill: var(--muted); font-size: 11px; }
-  .edge { fill: none; opacity: .55; }
+  .topo-wrap { overflow: auto; max-height: 80vh; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); }
+  svg.topo { display: block; height: auto; }
+  svg.topo text { font-family: "Segoe UI", system-ui, sans-serif; }
+  .zone > rect.box { fill: var(--panel); stroke-width: 1.4; }
+  .zone.in > rect.box { stroke: var(--in); } .zone.out > rect.box { stroke: var(--out); }
+  .zone.unknown > rect.box { stroke: var(--unknown); stroke-dasharray: 5 4; }
+  .zone.same > rect.box { stroke-width: 2.6; }
+  .zone rect.head { stroke: none; }
+  .zone.in rect.head { fill: var(--in-soft); } .zone.out rect.head { fill: var(--out-soft); }
+  .zone.unknown rect.head { fill: color-mix(in srgb, var(--unknown) 18%, transparent); }
+  .zone .title { fill: var(--text); font-size: 13px; font-weight: 700; }
+  .zone .sub { fill: var(--muted); font-size: 11px; }
+  .zone .num { fill: var(--muted); font-size: 11.5px; }
+  .hdr { cursor: pointer; }
+  .row { cursor: pointer; }
+  .row rect { fill: transparent; }
+  .row:hover rect, .row.sel rect, .row.on rect { fill: color-mix(in srgb, var(--text) 8%, transparent); }
+  .row .ip { fill: var(--text); font-size: 12px; font-family: Consolas, ui-monospace, monospace; }
+  .row .app { fill: var(--muted); font-size: 11.5px; }
+  .row .num { fill: var(--muted); font-size: 11px; }
+  .row.more .ip { fill: var(--muted); font-style: italic; font-family: inherit; }
+  .badge-same { fill: var(--ok); font-size: 10.5px; font-weight: 700; }
+  .port rect { fill: var(--panel); stroke: var(--in); stroke-width: 1.4; }
+  .port { cursor: pointer; }
+  .port.sel rect, .port.on rect { stroke-width: 2.8; }
+  .port .title { fill: var(--text); font-size: 12.5px; font-weight: 700; font-family: Consolas, ui-monospace, monospace; }
+  .port .sub { fill: var(--muted); font-size: 11px; }
+  .edge { fill: none; opacity: .5; transition: opacity .12s; }
   .edge.in { stroke: var(--in); } .edge.out { stroke: var(--out); }
-  .edge.dim { opacity: .12; }
+  svg.hl .edge { opacity: .07; } svg.hl .edge.on { opacity: .95; }
   .tnode rect { fill: var(--target); }
-  .tnode text { fill: var(--target-text); font-size: 13px; }
-  .colhead { fill: var(--muted); font-size: 12px; font-weight: 600; letter-spacing: .04em; }
+  .tnode text { fill: var(--target-text); font-size: 12.5px; }
+  .colhead { fill: var(--muted); font-size: 12px; font-weight: 700; letter-spacing: .05em; }
+  .zoom { display: inline-flex; gap: 4px; }
+  .zoom button { padding: 4px 10px; }
+  .detail { margin-top: 10px; }
+  .detail:empty { display: none; }
+  .detail .panel { background: var(--bg); }
+  .sumgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 1100px) { .sumgrid { grid-template-columns: 1fr; } }
+  tr.click { cursor: pointer; }
   .chip { display: inline-flex; align-items: center; gap: 6px; background: var(--in-soft); border-radius: 999px; padding: 2px 10px; font-size: 12.5px; }
   .chip button { border: 0; background: transparent; padding: 0 2px; }
   .tbl-wrap { overflow-x: auto; max-height: 560px; overflow-y: auto; border: 1px solid var(--line); border-radius: 6px; }
@@ -121,8 +147,12 @@ const fmt = n => (n ?? 0).toLocaleString("tr-TR");
 const pad = n => String(n).padStart(2, "0");
 const toLocalInput = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 
-const MAX_NODES = 20;
-const state = { data: null, mode: "segment", filter: null, search: { in: "", out: "" }, sort: { in: null, out: null } };
+const TOP_IPS = 6;          // kalabalık kutularda başta gösterilen IP sayısı
+const AUTO_EXPAND_IPS = 40;  // bir taraftaki toplam IP bu sayıdan azsa tüm kutular açık gelir
+const state = {
+  data: null, mode: "segment", filter: null, zoom: 1, expand: new Map(), selected: null,
+  search: { in: "", out: "" }, sort: { in: null, out: null }
+};
 let abort = null;
 
 // ---------- Envanter yardımcıları ----------
@@ -136,12 +166,13 @@ const MATCH = {
 const matchBadge = m => m ? `<span class="badge ${MATCH[m.kind]?.[1] ?? ""}" title="Eşleşme türü">${esc(MATCH[m.kind]?.[0] ?? m.kind)}</span>` : "";
 const portText = p => p === "" ? "web (L7)" : p;
 
-function groupKey(e) {
-  if (state.mode === "ip") return e.peerIp;
-  if (state.mode === "app") { const n = appNames(e.peerApps); return n.length ? n.join(" + ") : "Uygulama bilinmiyor"; }
-  return segLabel(e.peerSegment) ?? "Segment bilinmiyor";
+const UNK = "__unk";
+// Kutu (zone) anahtarı: segment modunda CIDR, uygulama modunda uygulama adları.
+function zoneKey(e, mode = state.mode) {
+  if (mode === "app") { const n = appNames(e.peerApps); return n.length ? n.join(" + ") : UNK; }
+  return e.peerSegment ? e.peerSegment.cidr : UNK;
 }
-const isUnknownKey = k => k === "Uygulama bilinmiyor" || k === "Segment bilinmiyor";
+const sameSegment = e => !!(e.peerSegment && state.data.target.segment && e.peerSegment.cidr === state.data.target.segment.cidr);
 
 // ---------- Form ----------
 async function loadAppliances() {
@@ -157,7 +188,7 @@ function initForm() {
   $("#end").value = p.get("end") || toLocalInput(now);
   $("#start").value = p.get("start") || toLocalInput(new Date(now - 3600e3));
   if (p.get("ip")) $("#ip").value = p.get("ip");
-  if (p.get("mode")) state.mode = p.get("mode");
+  if (p.get("mode") === "app") state.mode = "app";
   return !!p.get("ip");
 }
 
@@ -181,7 +212,7 @@ async function run() {
     const r = await fetch("api/flow?" + params, { signal: abort.signal });
     const body = await r.json().catch(() => ({ error: `HTTP ${r.status}` }));
     if (!r.ok) throw new Error(body.error || `HTTP ${r.status}`);
-    state.data = body; state.filter = null;
+    state.data = body; state.filter = null; state.selected = null; state.expand = new Map(); state.zoom = 1;
     render();
   } catch (e) {
     const msg = e.name === "AbortError" ? "Sorgu iptal edildi." : e.message;
@@ -201,25 +232,54 @@ function render() {
       <div class="toolbar">
         <h2 style="margin:0">Topoloji</h2>
         <div class="seg" id="modes">
-          ${[["segment", "Segment"], ["app", "Uygulama"], ["ip", "IP"]].map(([k, t]) =>
+          ${[["segment", "Segmente göre"], ["app", "Uygulamaya göre"]].map(([k, t]) =>
             `<button type="button" data-mode="${k}" class="${state.mode === k ? "on" : ""}">${t}</button>`).join("")}
         </div>
-        <div class="legend"><span><i style="background:var(--in)"></i>Gelen</span><span><i style="background:var(--out)"></i>Giden</span><span>Çizgi kalınlığı = hit</span></div>
+        <div class="legend">
+          <span><i style="background:var(--in)"></i>Gelen</span><span><i style="background:var(--out)"></i>Giden</span>
+          <span>Kalın çerçeve = hedefle aynı segment</span><span>Çizgi kalınlığı = hit</span>
+        </div>
+        <div class="zoom">
+          <button type="button" data-zoom="-" title="Uzaklaş">−</button>
+          <button type="button" data-zoom="0" title="Ekrana sığdır">Sığdır</button>
+          <button type="button" data-zoom="+" title="Yakınlaş">+</button>
+          <button type="button" data-zoom="all" title="Tüm kutuları aç / kapat">Tümünü aç</button>
+          <button type="button" id="dlSvg">SVG</button>
+          <button type="button" id="dlPng">PNG</button>
+        </div>
       </div>
       <div id="filterbar"></div>
       <div class="topo-wrap" id="topo"></div>
+      <div class="detail" id="detail"></div>
+    </section>
+    <section class="panel">
+      <h2>Segment özeti</h2>
+      <div class="sumgrid"><div id="sum-in"></div><div id="sum-out"></div></div>
     </section>
     <div class="grid2">
       <section class="panel dir-in" id="tbl-in"></section>
       <section class="panel dir-out" id="tbl-out"></section>
     </div>`;
   $("#modes").addEventListener("click", ev => {
-    const m = ev.target.dataset.mode; if (!m) return;
-    state.mode = m; state.filter = null;
+    const m = ev.target.dataset.mode; if (!m || m === state.mode) return;
+    state.mode = m; state.filter = null; state.selected = null; state.expand = new Map();
     const u = new URLSearchParams(location.search); u.set("mode", m); history.replaceState(null, "", "?" + u);
     render();
   });
+  document.querySelectorAll("[data-zoom]").forEach(bt => bt.addEventListener("click", () => {
+    const z = bt.dataset.zoom;
+    if (z === "all") {
+      const anyClosed = [...buildZones("in"), ...buildZones("out")].some(zn => zn.mode !== "all");
+      for (const dir of ["in", "out"]) for (const zn of buildZones(dir)) state.expand.set(dir + "|" + zn.key, anyClosed ? "all" : "none");
+      renderTopology(); return;
+    }
+    state.zoom = z === "0" ? 1 : Math.min(4, Math.max(0.4, state.zoom * (z === "+" ? 1.25 : 0.8)));
+    applyZoom();
+  }));
+  $("#dlSvg").addEventListener("click", () => exportImage("svg"));
+  $("#dlPng").addEventListener("click", () => exportImage("png"));
   renderTopology();
+  renderSummary();
   renderTables();
 }
 
@@ -276,95 +336,353 @@ function renderTarget(d) {
     </div>`;
 }
 
-function groupsFor(edges) {
-  const map = new Map();
+// ---------- Topoloji modeli ----------
+// Her yön için kutular (segment/uygulama), kutuların içinde karşı IP'ler.
+function buildZones(dir) {
+  const edges = dir === "in" ? state.data.inbound : state.data.outbound;
+  const zones = new Map();
   for (const e of edges) {
-    const k = groupKey(e);
-    let g = map.get(k);
-    if (!g) map.set(k, g = { key: k, hits: 0, peers: new Set(), ports: new Set(), seg: e.peerSegment, edges: 0 });
-    g.hits += e.hits; g.peers.add(e.peerIp); if (e.port !== "") g.ports.add(e.port); g.edges++;
+    const k = zoneKey(e);
+    let z = zones.get(k);
+    if (!z) zones.set(k, z = {
+      key: k, dir, unknown: k === UNK, seg: state.mode === "segment" ? e.peerSegment : null,
+      same: state.mode === "segment" && sameSegment(e), hits: 0, ips: new Map()
+    });
+    z.hits += e.hits;
+    let ip = z.ips.get(e.peerIp);
+    if (!ip) z.ips.set(e.peerIp, ip = { ip: e.peerIp, hits: 0, ports: new Map(), edges: [], seg: e.peerSegment, apps: appNames(e.peerApps) });
+    ip.hits += e.hits; ip.edges.push(e);
+    ip.ports.set(e.port, (ip.ports.get(e.port) ?? 0) + e.hits);
   }
-  let list = [...map.values()].sort((a, b) => b.hits - a.hits);
-  if (list.length > MAX_NODES) {
-    const rest = list.slice(MAX_NODES - 1);
-    const other = { key: `__other`, label: `Diğer (${rest.length} grup)`, hits: 0, peers: new Set(), ports: new Set(), other: rest.map(r => r.key) };
-    rest.forEach(r => { other.hits += r.hits; r.peers.forEach(p => other.peers.add(p)); r.ports.forEach(p => other.ports.add(p)); });
-    list = [...list.slice(0, MAX_NODES - 1), other];
-  }
+  const list = [...zones.values()]
+    .map(z => ({ ...z, ips: [...z.ips.values()].sort((a, b) => b.hits - a.hits) }))
+    .sort((a, b) => (a.unknown - b.unknown) || (b.hits - a.hits));
+  const totalIps = list.reduce((n, z) => n + z.ips.length, 0);
+  list.forEach((z, i) => {
+    const def = totalIps <= AUTO_EXPAND_IPS ? "all" : i < 8 ? "top" : "none";
+    z.mode = state.expand.get(dir + "|" + z.key) ?? def;
+    if (z.mode === "top" && z.ips.length <= TOP_IPS + 1) z.mode = "all";
+  });
   return list;
 }
 
-function nodeSub(g) {
-  const ports = [...g.ports].sort((a, b) => a - b);
-  const portTxt = ports.length ? `port ${ports.slice(0, 5).join(",")}${ports.length > 5 ? "…" : ""}` : "";
-  if (state.mode === "ip") return [segLabel(g.seg) ?? "segment ?", portTxt].filter(Boolean).join(" · ");
-  if (state.mode === "segment" && g.seg) return [g.seg.label !== g.seg.cidr && g.seg.cidr, g.seg.vlan && "VLAN " + g.seg.vlan, `${g.peers.size} IP`].filter(Boolean).join(" · ");
-  return `${g.peers.size} IP${portTxt ? " · " + portTxt : ""}`;
+function zoneTitle(z) {
+  if (z.unknown) return state.mode === "segment" ? "Segment envanterinde yok" : "Uygulama envanterinde yok";
+  return state.mode === "segment" ? z.seg.label : z.key;
+}
+function zoneSub(z) {
+  if (state.mode !== "segment" || !z.seg) {
+    const segs = new Set(z.ips.map(i => segLabel(i.seg) ?? "?"));
+    return z.unknown ? "" : `${segs.size} segment: ${[...segs].slice(0, 3).join(", ")}${segs.size > 3 ? "…" : ""}`;
+  }
+  const s = z.seg;
+  return [s.label !== s.cidr && s.cidr, s.vlan && "VLAN " + s.vlan, s.tenant, s.applicationProfile && s.applicationProfile !== s.label && s.applicationProfile]
+    .filter(Boolean).join(" · ");
 }
 
-const trunc = (s, n) => s.length > n ? s.slice(0, n - 1) + "…" : s;
+const trunc = (s, n) => (s = String(s ?? "")).length > n ? s.slice(0, n - 1) + "…" : s;
+const portSort = (a, b) => (a === "" ? 1e9 : +a || 0) - (b === "" ? 1e9 : +b || 0);
 
+// Hedefin gelen trafikte dinlediği portlar (ortadaki sütun).
+function buildPorts() {
+  const m = new Map();
+  for (const e of state.data.inbound) {
+    let p = m.get(e.port);
+    if (!p) m.set(e.port, p = { port: e.port, hits: 0, peers: new Set(), apps: appNames(e.localApp), match: e.localApp });
+    p.hits += e.hits; p.peers.add(e.peerIp);
+  }
+  return [...m.values()].sort((a, b) => portSort(a.port, b.port));
+}
+
+// ---------- Topoloji çizimi ----------
 function renderTopology() {
   const d = state.data;
-  const L = groupsFor(d.inbound), R = groupsFor(d.outbound);
-  const NH = 42, GAP = 10, TOP = 34, W = 1100, NW = 330, TW = 220;
-  const rows = Math.max(L.length, R.length, 1);
-  const H = TOP + rows * (NH + GAP) + 10;
-  const tx = (W - TW) / 2, th = 96, ty = Math.max(TOP, (H - th) / 2);
-  const cy = ty + th / 2;
-  const maxHit = Math.max(1, ...L.map(g => g.hits), ...R.map(g => g.hits));
-  const sw = h => 1.5 + 9 * Math.log(1 + h) / Math.log(1 + maxHit);
+  if (!d.inbound.length && !d.outbound.length) {
+    $("#topo").innerHTML = `<div class="empty">Bu aralıkta akış bulunamadı.</div>`;
+    renderFilterbar(); return;
+  }
+  const IN = buildZones("in"), OUT = buildZones("out"), PORTS = buildPorts();
 
-  const colY = list => { const total = list.length * (NH + GAP) - GAP; const off = TOP + Math.max(0, (rows * (NH + GAP) - GAP - total) / 2); return i => off + i * (NH + GAP); };
-  const yl = colY(L), yr = colY(R);
-  const sel = state.filter;
+  // Geometri
+  const TOP = 40, HH = 46, RH = 24, ZG = 14, PH = 44, PG = 10;
+  const LX = 12, LW = 370, PX = 470, PW = 210, TX = 760, TW = 220, RX = 1060, RW = 390, W = RX + RW + 12;
 
-  let edges = "", nodes = "";
-  const draw = (list, dir, x, yOf) => list.forEach((g, i) => {
-    const y = yOf(i), my = y + NH / 2;
-    const selected = sel && sel.dir === dir && sel.key === g.key;
-    const dim = sel && !selected ? " dim" : "";
-    const [x1, x2] = dir === "in" ? [x + NW, tx] : [tx + TW, x];
-    const mx = (x1 + x2) / 2;
-    edges += `<path class="edge ${dir}${dim}" stroke-width="${sw(g.hits).toFixed(1)}" d="M${x1},${my} C${mx},${my} ${mx},${cy} ${x2},${cy}"><title>${esc(g.label ?? g.key)}: ${fmt(g.hits)} hit</title></path>`;
-    const unknown = isUnknownKey(g.key) ? " unknown" : "";
-    nodes += `<g class="node ${dir}${unknown}${selected ? " sel" : ""}" data-dir="${dir}" data-key="${esc(g.key)}" transform="translate(${x},${y})">
-      <title>${esc(g.label ?? g.key)}\n${fmt(g.peers.size)} IP · ${fmt(g.hits)} hit</title>
-      <rect width="${NW}" height="${NH}" rx="6"></rect>
-      <text x="10" y="17">${esc(trunc(g.label ?? g.key, 40))}</text>
-      <text class="sub" x="10" y="33">${esc(trunc(nodeSub(g), 44))}</text>
-      <text class="sub" x="${NW - 10}" y="17" text-anchor="end">${fmt(g.hits)}</text>
+  const rowsOf = z => {
+    if (z.mode === "none") return [];
+    const shown = z.mode === "all" ? z.ips : z.ips.slice(0, TOP_IPS);
+    const rows = shown.map(ip => ({ ...ip, kind: "ip" }));
+    const hidden = z.ips.slice(shown.length);
+    if (hidden.length) {
+      const ports = new Map();
+      hidden.forEach(h => h.ports.forEach((v, k) => ports.set(k, (ports.get(k) ?? 0) + v)));
+      rows.push({ kind: "more", ip: `+ ${hidden.length} IP daha`, hits: hidden.reduce((n, h) => n + h.hits, 0), ports, ips: hidden });
+    }
+    return rows;
+  };
+  const zoneH = z => HH + (z.rows.length ? z.rows.length * RH + 6 : 0);
+  [...IN, ...OUT].forEach(z => { z.rows = rowsOf(z); z.h = zoneH(z); });
+
+  const colH = list => list.reduce((n, z) => n + z.h + ZG, 0) - (list.length ? ZG : 0);
+  const portsH = PORTS.length * (PH + PG) - (PORTS.length ? PG : 0);
+  const TH = 120;
+  const inner = Math.max(colH(IN), colH(OUT), portsH, TH);
+  const H = TOP + inner + 16;
+  const center = TOP + inner / 2;
+
+  const place = (list, x) => { let y = TOP + (inner - colH(list)) / 2; list.forEach(z => { z.x = x; z.y = y; y += z.h + ZG; }); };
+  place(IN, LX); place(OUT, RX);
+  let py = TOP + (inner - portsH) / 2;
+  PORTS.forEach(p => { p.y = py; py += PH + PG; });
+  const ty = center - TH / 2;
+
+  // Kalınlık ölçeği
+  const allHits = [...IN, ...OUT].flatMap(z => z.rows.map(r => r.hits)).concat(PORTS.map(p => p.hits), [1]);
+  const maxHit = Math.max(...allHits);
+  const sw = h => (1 + 8 * Math.log(1 + h) / Math.log(1 + maxHit)).toFixed(1);
+  const curve = (x1, y1, x2, y2) => { const mx = (x1 + x2) / 2; return `M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}`; };
+
+  const portIdx = new Map(PORTS.map((p, i) => [p.port, i]));
+  const portY = port => PORTS[portIdx.get(port)].y + PH / 2;
+  const portRel = new Map(PORTS.map((p, i) => [p.port, new Set(["p" + i])]));
+
+  let edges = "", zones = "", ports = "";
+  const sel = state.selected;
+
+  // Kutular ve satırlar
+  for (const [list, dir] of [[IN, "in"], [OUT, "out"]]) {
+    list.forEach((z, zi) => {
+      const zid = `${dir}${zi}`;
+      const hdrId = "h" + zid;
+      const cls = `zone ${dir}${z.unknown ? " unknown" : ""}${z.same ? " same" : ""}`;
+      const arrow = z.mode === "none" ? "▸" : "▾";
+      const ipCount = `${fmt(z.ips.length)} IP · ${fmt(z.hits)} hit`;
+      let g = `<g class="${cls}" transform="translate(${z.x},${z.y})">
+        <rect class="box" width="${dir === "in" ? LW : RW}" height="${z.h}" rx="8"></rect>
+        <g class="hdr" data-id="${hdrId}" data-zone="${dir}|${esc(z.key)}">
+          <title>${esc(zoneTitle(z))}\n${esc(zoneSub(z))}\n${ipCount}\nTıkla: aç / kapat</title>
+          <rect class="head" x="1" y="1" width="${(dir === "in" ? LW : RW) - 2}" height="${HH - 2}" rx="7"></rect>
+          <text class="title" x="12" y="19">${arrow} ${esc(trunc(zoneTitle(z), dir === "in" ? 34 : 36))}</text>
+          <text class="sub" x="12" y="36">${esc(trunc(zoneSub(z), dir === "in" ? 44 : 48))}</text>
+          <text class="num" x="${(dir === "in" ? LW : RW) - 10}" y="19" text-anchor="end">${ipCount}</text>
+          ${z.same ? `<text class="badge-same" x="${(dir === "in" ? LW : RW) - 10}" y="36" text-anchor="end">AYNI SEGMENT</text>` : ""}
+        </g>`;
+      const w = dir === "in" ? LW : RW;
+
+      // Kapalı kutu: bağlantılar başlıktan çıkar
+      const sources = z.rows.length ? z.rows.map((r, ri) => ({ r, id: `${r.kind === "more" ? "m" : "r"}${zid}_${ri}`, y: z.y + HH + ri * RH + RH / 2 + 2 }))
+        : [{ r: { ports: z.ips.reduce((m, ip) => { ip.ports.forEach((v, k) => m.set(k, (m.get(k) ?? 0) + v)); return m; }, new Map()), hits: z.hits }, id: hdrId, y: z.y + HH / 2 }];
+
+      z.rows.forEach((r, ri) => {
+        const id = `${r.kind === "more" ? "m" : "r"}${zid}_${ri}`;
+        const ry = HH + ri * RH + 2;
+        const portsTxt = [...r.ports.keys()].sort(portSort).map(p => p === "" ? "web" : ":" + p);
+        const info = r.kind === "more" ? "tıkla: hepsini göster"
+          : dir === "in" ? (r.apps.join(", ") || "—")
+          : `${portsTxt.slice(0, 3).join(" ")}${portsTxt.length > 3 ? "…" : ""}  ${r.apps.join(", ") || "—"}`;
+        const isSel = sel && sel.dir === dir && sel.ip === r.ip;
+        g += `<g class="row${r.kind === "more" ? " more" : ""}${isSel ? " sel" : ""}" data-id="${id}" data-dir="${dir}" data-ip="${esc(r.ip)}" data-zone="${dir}|${esc(z.key)}" transform="translate(0,${ry})">
+          <title>${esc(r.ip)}\n${esc(r.kind === "more" ? r.ips.map(i => i.ip).slice(0, 30).join(", ") : [segLabel(r.seg), r.apps.join(", ")].filter(Boolean).join("\n"))}\nPort: ${esc(portsTxt.join(" "))}\n${fmt(r.hits)} hit</title>
+          <rect x="4" width="${w - 8}" height="${RH}" rx="4"></rect>
+          <text class="ip" x="12" y="16">${esc(r.ip)}</text>
+          <text class="app" x="${r.kind === "more" ? 130 : 120}" y="16">${esc(trunc(info, dir === "in" ? 30 : 34))}</text>
+          <text class="num" x="${w - 10}" y="16" text-anchor="end">${fmt(r.hits)}</text>
+        </g>`;
+      });
+      zones += g + "</g>";
+
+      // Bağlantılar
+      for (const s of sources) {
+        if (dir === "in") {
+          for (const [port, h] of s.r.ports) {
+            if (!portIdx.has(port)) continue;
+            edges += `<path class="edge in" data-rel="${s.id} p${portIdx.get(port)}" stroke-width="${sw(h)}" d="${curve(LX + LW, s.y, PX, portY(port))}"><title>${esc(s.r.ip ?? zoneTitle(z))} → ${esc(portText(port))}: ${fmt(h)} hit</title></path>`;
+            portRel.get(port).add(s.id);
+          }
+        } else {
+          edges += `<path class="edge out" data-rel="${s.id}" stroke-width="${sw(s.r.hits)}" d="${curve(TX + TW, center, RX, s.y)}"><title>${esc(d.target.ip)} → ${esc(s.r.ip ?? zoneTitle(z))}: ${fmt(s.r.hits)} hit</title></path>`;
+        }
+      }
+    });
+  }
+
+  // Ortadaki port düğümleri + hedefe bağlantılar
+  PORTS.forEach((p, i) => {
+    const my = p.y + PH / 2;
+    const tyIn = ty + 20 + (TH - 40) * (PORTS.length > 1 ? i / (PORTS.length - 1) : 0.5);
+    edges += `<path class="edge in" data-rel="${[...portRel.get(p.port)].join(" ")}" stroke-width="${sw(p.hits)}" d="${curve(PX + PW, my, TX, tyIn)}"><title>:${esc(portText(p.port))} → ${esc(d.target.ip)}: ${fmt(p.hits)} hit</title></path>`;
+    const isSel = state.filter && state.filter.port === p.port;
+    ports += `<g class="port${isSel ? " sel" : ""}" data-id="p${i}" data-port="${esc(p.port)}" transform="translate(${PX},${p.y})">
+      <title>Port ${esc(portText(p.port))}\n${esc(p.apps.join(", ") || "Uygulama envanterinde yok")}\n${fmt(p.peers.size)} kaynak IP · ${fmt(p.hits)} hit</title>
+      <rect width="${PW}" height="${PH}" rx="8"></rect>
+      <text class="title" x="10" y="18">${p.port === "" ? "web (L7)" : ":" + esc(p.port)}</text>
+      <text class="sub" x="${PW - 10}" y="18" text-anchor="end">${fmt(p.peers.size)} IP</text>
+      <text class="sub" x="10" y="35">${esc(trunc(p.apps.join(", ") || "uygulama ?", 30))}</text>
     </g>`;
   });
-  draw(L, "in", 10, yl);
-  draw(R, "out", W - NW - 10, yr);
 
   const t = d.target;
   const tApps = [...new Set(t.apps.map(appName))];
-  const svg = `<svg class="topo" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
-    <text class="colhead" x="10" y="18">GELEN (${fmt(new Set(d.inbound.map(e => e.peerIp)).size)} IP)</text>
-    <text class="colhead" x="${W - 10}" y="18" text-anchor="end">GİDEN (${fmt(new Set(d.outbound.map(e => e.peerIp)).size)} IP)</text>
+  const inIps = new Set(d.inbound.map(e => e.peerIp)).size, outIps = new Set(d.outbound.map(e => e.peerIp)).size;
+  const svg = `<svg class="topo" id="topoSvg" viewBox="0 0 ${W} ${H}" data-w="${W}" xmlns="http://www.w3.org/2000/svg">
+    <text class="colhead" x="${LX}" y="22">GELEN · ${fmt(IN.length)} ${state.mode === "segment" ? "SEGMENT" : "UYGULAMA"} · ${fmt(inIps)} IP</text>
+    ${PORTS.length ? `<text class="colhead" x="${PX}" y="22">BİZDEKİ PORT / UYGULAMA</text>` : ""}
+    <text class="colhead" x="${RX + RW}" y="22" text-anchor="end">GİDEN · ${fmt(OUT.length)} ${state.mode === "segment" ? "SEGMENT" : "UYGULAMA"} · ${fmt(outIps)} IP</text>
     ${edges}
-    <g class="tnode" transform="translate(${tx},${ty})">
-      <rect width="${TW}" height="${th}" rx="10"></rect>
-      <text x="${TW / 2}" y="30" text-anchor="middle" style="font-size:16px;font-weight:700">${esc(t.ip)}</text>
-      <text x="${TW / 2}" y="52" text-anchor="middle">${esc(trunc(t.segment ? t.segment.label : "segment ?", 30))}</text>
-      <text x="${TW / 2}" y="72" text-anchor="middle" style="font-size:11.5px">${esc(trunc(tApps.join(", ") || "uygulama kaydı yok", 34))}</text>
+    ${zones}
+    ${ports}
+    <g class="tnode" transform="translate(${TX},${ty})">
+      <title>${esc(t.ip)}\n${esc(t.segment ? `${t.segment.label} (${t.segment.cidr})` : "segment ?")}\n${esc(tApps.join(", "))}</title>
+      <rect width="${TW}" height="${TH}" rx="12"></rect>
+      <text x="${TW / 2}" y="30" text-anchor="middle" style="font-size:17px;font-weight:700">${esc(t.ip)}</text>
+      <text x="${TW / 2}" y="52" text-anchor="middle" style="font-weight:600">${esc(trunc(t.segment ? t.segment.label : "segment ?", 28))}</text>
+      <text x="${TW / 2}" y="70" text-anchor="middle" style="font-size:11px">${esc(t.segment ? [t.segment.cidr, t.segment.vlan && "VLAN " + t.segment.vlan].filter(Boolean).join(" · ") : "")}</text>
+      <text x="${TW / 2}" y="94" text-anchor="middle" style="font-size:11.5px">${esc(trunc(tApps.join(", ") || "uygulama kaydı yok", 32))}</text>
     </g>
-    ${nodes}
   </svg>`;
-  $("#topo").innerHTML = (L.length || R.length) ? svg : `<div class="empty">Bu aralıkta akış bulunamadı.</div>`;
+  $("#topo").innerHTML = svg;
+  applyZoom();
+  wireTopology();
+  renderFilterbar();
+}
 
-  $("#topo").querySelectorAll(".node").forEach(n => n.addEventListener("click", () => {
-    const dir = n.dataset.dir, key = n.dataset.key;
-    const g = (dir === "in" ? L : R).find(x => x.key === key);
-    state.filter = sel && sel.dir === dir && sel.key === key ? null : { dir, key, keys: g.other ?? [key], label: g.label ?? key };
-    renderTopology(); renderTables();
+function applyZoom() {
+  const svg = $("#topoSvg"); if (!svg) return;
+  const base = Math.max($("#topo").clientWidth - 2, 1100);
+  svg.style.width = Math.round(base * state.zoom) + "px";
+}
+
+function wireTopology() {
+  const svg = $("#topoSvg");
+  const edgesOf = id => Array.from(svg.querySelectorAll(".edge")).filter(p => p.dataset.rel.split(" ").includes(id));
+  svg.querySelectorAll("[data-id]").forEach(n => {
+    n.addEventListener("mouseenter", () => {
+      svg.classList.add("hl");
+      for (const p of edgesOf(n.dataset.id)) p.classList.add("on");
+      n.classList.add("on");
+    });
+    n.addEventListener("mouseleave", () => {
+      svg.classList.remove("hl");
+      svg.querySelectorAll(".on").forEach(x => x.classList.remove("on"));
+    });
+  });
+  svg.querySelectorAll(".hdr").forEach(h => h.addEventListener("click", () => {
+    const k = h.dataset.zone, [dir] = k.split("|");
+    const z = buildZones(dir).find(z => dir + "|" + z.key === k);
+    state.expand.set(k, z.mode === "none" ? (z.ips.length > TOP_IPS + 1 ? "top" : "all") : "none");
+    renderTopology();
   }));
+  svg.querySelectorAll(".row").forEach(r => r.addEventListener("click", () => {
+    if (r.classList.contains("more")) { state.expand.set(r.dataset.zone, "all"); renderTopology(); return; }
+    const dir = r.dataset.dir, ip = r.dataset.ip;
+    const same = state.selected && state.selected.dir === dir && state.selected.ip === ip;
+    state.selected = same ? null : { dir, ip };
+    state.filter = same ? null : { dir, label: ip, test: e => e.peerIp === ip };
+    renderTopology(); renderDetail(); renderTables();
+  }));
+  svg.querySelectorAll(".port").forEach(p => p.addEventListener("click", () => {
+    const port = p.dataset.port;
+    const same = state.filter && state.filter.port === port;
+    state.selected = null;
+    state.filter = same ? null : { dir: "in", port, label: "port " + portText(port), test: e => e.port === port };
+    renderTopology(); renderDetail(); renderTables();
+  }));
+}
 
+function renderFilterbar() {
   $("#filterbar").innerHTML = state.filter
     ? `<div style="margin-bottom:8px"><span class="chip">${state.filter.dir === "in" ? "Gelen" : "Giden"}: ${esc(state.filter.label)} <button type="button" id="clr" title="Filtreyi kaldır">✕</button></span></div>` : "";
-  $("#clr")?.addEventListener("click", () => { state.filter = null; renderTopology(); renderTables(); });
+  $("#clr")?.addEventListener("click", clearFilter);
+}
+function clearFilter() { state.filter = null; state.selected = null; renderTopology(); renderDetail(); renderTables(); }
+
+// Seçili IP'nin detay kartı + "bu IP'yi sorgula" (topolojide bir adım ileri git)
+function renderDetail() {
+  const el = $("#detail"); const s = state.selected;
+  if (!s) { el.innerHTML = ""; return; }
+  const edges = (s.dir === "in" ? state.data.inbound : state.data.outbound).filter(e => e.peerIp === s.ip);
+  const seg = edges[0]?.peerSegment;
+  const apps = edges.flatMap(e => e.peerApps?.apps ?? []);
+  el.innerHTML = `<div class="panel">
+    <div class="toolbar">
+      <h2 style="margin:0">${esc(s.ip)} <span class="muted" style="font-weight:400">${s.dir === "in" ? "→ bu makineye geliyor" : "← bu makine buraya gidiyor"}</span></h2>
+      <div style="display:flex;gap:8px">
+        <button type="button" id="drill" class="primary">Bu IP'nin topolojisini aç</button>
+        <button type="button" id="closeDetail">Kapat</button>
+      </div>
+    </div>
+    <div class="target-grid">
+      <div>${seg ? `<dl><dt>Segment</dt><dd><b>${esc(seg.label)}</b></dd><dt>CIDR</dt><dd>${esc(seg.cidr)}</dd>
+        ${[["VLAN", seg.vlan], ["Tenant", seg.tenant], ["App Profile", seg.applicationProfile], ["EPG", seg.epgName], ["BD", seg.bd], ["Domain", seg.domain]]
+          .filter(x => x[1]).map(([k, v]) => `<dt>${k}</dt><dd>${esc(v)}</dd>`).join("")}</dl>` : `<div class="unk">Segment envanterinde yok.</div>`}
+        ${apps.length ? `<div style="margin-top:8px"><b>Uygulama:</b> ${esc([...new Set(apps.map(appName))].join(", "))}
+          <div class="small muted">${esc([...new Set(apps.map(a => a.varlikMuhafizi).filter(Boolean))].join(", "))}</div></div>` : ""}
+      </div>
+      <div class="tbl-wrap" style="max-height:260px"><table>
+        <thead><tr><th>Port</th><th>${s.dir === "in" ? "Bizdeki uygulama" : "Hedef uygulama"}</th><th class="num">Hit</th><th>Son görülme</th><th>Detay</th></tr></thead>
+        <tbody>${edges.map(e => `<tr><td class="mono">${esc(portText(e.port))}</td>
+          <td>${appsCell(s.dir === "in" ? e.localApp : e.peerApps, true)}</td><td class="num">${fmt(e.hits)}</td>
+          <td class="mono">${esc(e.lastSeen ?? "")}</td><td>${detailCell(e)}</td></tr>`).join("")}</tbody>
+      </table></div>
+    </div></div>`;
+  $("#closeDetail").addEventListener("click", clearFilter);
+  $("#drill").addEventListener("click", () => { $("#ip").value = s.ip; window.scrollTo({ top: 0, behavior: "smooth" }); run(); });
+}
+
+// ---------- Segment özeti ----------
+function renderSummary() {
+  for (const dir of ["in", "out"]) {
+    const edges = dir === "in" ? state.data.inbound : state.data.outbound;
+    const m = new Map();
+    for (const e of edges) {
+      const k = zoneKey(e, "segment");
+      let r = m.get(k);
+      if (!r) m.set(k, r = { key: k, seg: e.peerSegment, same: sameSegment(e), ips: new Set(), ports: new Set(), apps: new Set(), hits: 0 });
+      r.ips.add(e.peerIp); r.ports.add(e.port); r.hits += e.hits;
+      appNames(dir === "in" ? e.localApp : e.peerApps).forEach(a => r.apps.add(a));
+    }
+    const rows = [...m.values()].sort((a, b) => b.hits - a.hits);
+    $("#sum-" + dir).innerHTML = `
+      <h2 style="color:var(--${dir})">${dir === "in" ? `Gelen: ${fmt(rows.length)} segmentten geliniyor` : `Giden: ${fmt(rows.length)} segmente gidiliyor`}</h2>
+      ${rows.length ? `<div class="tbl-wrap" style="max-height:340px"><table>
+        <thead><tr><th>Segment</th><th>VLAN</th><th class="num">IP</th><th>Port</th><th>${dir === "in" ? "Bizdeki uygulama" : "Hedef uygulama"}</th><th class="num">Hit</th></tr></thead>
+        <tbody>${rows.map(r => `<tr class="click" data-dir="${dir}" data-key="${esc(r.key)}">
+          <td>${r.seg ? `<b>${esc(r.seg.label)}</b>${r.same ? ' <span class="badge strong">aynı segment</span>' : ""}<div class="small muted mono">${esc(r.seg.cidr)}${r.seg.tenant ? " · " + esc(r.seg.tenant) : ""}</div>` : `<span class="unk">Segment envanterinde yok</span>`}</td>
+          <td class="mono">${esc(r.seg?.vlan ?? "")}</td>
+          <td class="num">${fmt(r.ips.size)}</td>
+          <td class="mono">${esc([...r.ports].sort(portSort).map(portText).slice(0, 8).join(", "))}${r.ports.size > 8 ? "…" : ""}</td>
+          <td>${esc([...r.apps].slice(0, 4).join(", "))}${r.apps.size > 4 ? "…" : ""}</td>
+          <td class="num">${fmt(r.hits)}</td></tr>`).join("")}</tbody></table></div>` : `<div class="empty">Kayıt yok.</div>`}`;
+    $("#sum-" + dir).querySelectorAll("tr.click").forEach(tr => tr.addEventListener("click", () => {
+      const k = tr.dataset.key, row = rows.find(r => r.key === k);
+      state.selected = null;
+      state.filter = { dir, label: row.seg ? row.seg.label : "segment bilinmiyor", test: e => zoneKey(e, "segment") === k };
+      renderTopology(); renderDetail(); renderTables();
+      document.getElementById("tbl-" + dir).scrollIntoView({ behavior: "smooth" });
+    }));
+  }
+}
+
+// ---------- Görüntü indirme ----------
+function exportImage(kind) {
+  const src = $("#topoSvg"); if (!src) return;
+  const clone = src.cloneNode(true);
+  const props = ["fill", "stroke", "stroke-width", "stroke-dasharray", "opacity", "font-size", "font-weight", "font-family", "font-style"];
+  const a = [src, ...src.querySelectorAll("*")], b = [clone, ...clone.querySelectorAll("*")];
+  a.forEach((el, i) => { const cs = getComputedStyle(el); b[i].setAttribute("style", props.map(p => `${p}:${cs.getPropertyValue(p)}`).join(";")); });
+  const [, , w, h] = src.getAttribute("viewBox").split(" ").map(Number);
+  clone.setAttribute("width", w); clone.setAttribute("height", h);
+  clone.querySelector("*") && clone.insertAdjacentHTML("afterbegin", `<rect width="${w}" height="${h}" fill="${getComputedStyle(document.body).backgroundColor}"></rect>`);
+  const xml = new XMLSerializer().serializeToString(clone);
+  const name = `${state.data.target.ip}_topoloji`;
+  const save = (blob, ext) => { const l = document.createElement("a"); l.href = URL.createObjectURL(blob); l.download = `${name}.${ext}`; l.click(); setTimeout(() => URL.revokeObjectURL(l.href), 1000); };
+  if (kind === "svg") { save(new Blob([xml], { type: "image/svg+xml" }), "svg"); return; }
+  const img = new Image();
+  img.onload = () => {
+    const c = document.createElement("canvas"); c.width = w * 2; c.height = h * 2;
+    const ctx = c.getContext("2d"); ctx.scale(2, 2); ctx.drawImage(img, 0, 0);
+    c.toBlob(bl => save(bl, "png"));
+  };
+  img.src = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(xml);
 }
 
 // ---------- Tablolar ----------
@@ -417,7 +735,7 @@ function detailCell(e) {
 function visibleEdges(dir) {
   let list = dir === "in" ? state.data.inbound : state.data.outbound;
   const f = state.filter;
-  if (f) list = f.dir === dir ? list.filter(e => f.keys.includes(groupKey(e))) : list;
+  if (f && f.dir === dir) list = list.filter(f.test);
   const q = state.search[dir].toLowerCase();
   if (q) list = list.filter(e => COLS[dir].some(c => String(c.v(e)).toLowerCase().includes(q)));
   const s = state.sort[dir];
@@ -481,6 +799,7 @@ function exportCsv(dir) {
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
 
+window.addEventListener("resize", applyZoom);
 loadAppliances().then(() => { if (initForm()) run(); });
 </script>
 </body>
