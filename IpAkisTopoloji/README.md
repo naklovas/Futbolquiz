@@ -6,14 +6,22 @@ o IP'nin akışlarını çeker, iki SQL Server envanteriyle zenginleştirir ve �
 - **Gelen trafik**: bu makineye hangi IP'ler, hangi segmentlerden, hangi uygulamalardan geliyor;
   bizim tarafta hangi porta, hangi uygulamaya geliyorlar.
 - **Giden trafik**: bu makine hangi IP:port'a gidiyor; hedef hangi segmentte ve hangi uygulama.
-- **Topoloji**: segmentler kutu, IP'ler kutuların içinde satır olarak çizilir.
-  - Solda gelen segmentler. Bağlantılar IP → bizim port/uygulama (orta sütun) → hedef şeklinde akar.
-  - Sağda giden segmentler. Her IP satırında hedef port ve uygulama yazar.
-  - Hedefle aynı segmentteki kutular kalın çerçeveli ve "AYNI SEGMENT" işaretli.
-  - Kalabalık kutularda ilk 6 IP gösterilir ("+ n IP daha" ile açılır); başlığa tıklamak kutuyu açar/kapar.
-  - Üzerine gelince yol vurgulanır. IP'ye tıklayınca detay açılır; "Bu IP'nin topolojisini aç" ile o IP'ye geçilir.
-  - Kutular segment yerine uygulamaya göre de gruplanabilir. Yakınlaştırma, SVG/PNG indirme var.
-- **Segment özeti**: gelen trafik hangi segmentlerden, giden trafik hangi segmentlere; IP sayısı, port, uygulama, hit.
+- **Topoloji** (iki seviyeli zincir):
+
+  ```
+  [Segment] ──> [Bize gelen sunucu] ──> [BİZİM IP] ──> [Gittiğimiz sunucu] ──> [Segment]
+  ```
+
+  - 1. seviye: bizim IP'ye gelen ve bizim IP'nin gittiği sunucular (Splunk + AppResponse).
+  - 2. seviye: bu sunucuların kendi trafiği tek sorguda çekilir (`POST /api/hop2`).
+    Solda sunuculara **gelen** segmentler, sağda sunucuların **gittiği** segmentler gösterilir;
+    iki taraf da açılır listeden ters çevrilebilir.
+  - Taraf başına ilk 15 sunucu çizilir (10/15/25/40 seçilebilir), kalanı "+ n sunucu" kutusunda.
+  - Bizim segmentimiz kalın çerçeve ve "BİZİM SEGMENT" ile işaretlenir.
+  - Üzerine gelince yol vurgulanır. Sunucuya tıklayınca detay (port, uygulama, 2. seviye segmentleri)
+    açılır; "Bu IP'nin topolojisini aç" ile o sunucuya geçilir. Segmente tıklayınca bağlı sunucular listelenir.
+  - Yakınlaştırma, SVG/PNG indirme var.
+- **Sunucuların kendi segmentleri**: 1. seviye sunucuların segment özeti; IP sayısı, port, uygulama, hit.
 
 Sayfa: `/topoloji.html?ip=10.210.10.63` (adres çubuğundaki link paylaşılabilir).
 
@@ -48,6 +56,7 @@ SQL kullanıcısıyla bağlanılacaksa: `User Id=dokuuser;Password=...` (şifrey
 | Endpoint | Açıklama |
 |---|---|
 | `GET /api/flow?ip=&start=&end=&appliance=&sources=splunk,appresponse` | Birleşik ve zenginleştirilmiş akış. Bir kaynak hata verirse diğerinin sonucu yine döner. |
+| `POST /api/hop2` `{target, ips[], start, end, appliance, sources}` | Verilen sunucuların trafiği, sunucu başına gelen/giden segment özeti. En fazla `Hop2MaxPeers` (varsayılan 80) IP. |
 | `GET /api/splunk`, `GET /api/appresponse`, `GET /api/appliances` | Önceki endpoint'ler; çıktıları değişmedi. |
 
 ## Mevcut projeye taşıma

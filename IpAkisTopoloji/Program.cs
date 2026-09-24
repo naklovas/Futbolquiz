@@ -119,16 +119,60 @@ app.MapGet("/api/flow", async (string? ip, string? start, string? end, int? appl
 
     var target = new TargetInfo(q.Ip, env?.FindSegment(q.Ip), env?.AppsOnIp(q.Ip) ?? []);
 
-    SourceStatus Status(bool asked, string? err, List<string>? msgs, long? ms, int rows) =>
-        !asked ? SourceStatus.Skipped : new SourceStatus(err == null, err, msgs ?? [], ms, rows);
+    var (spSt, arSt, envSt) = Statuses(wanted, sp, spErr, ar, arErr, env, envErr);
+    return Results.Ok(new FlowResponse(target, inbound, outbound, spSt, arSt, envSt, sw.ElapsedMilliseconds));
+});
 
-    return Results.Ok(new FlowResponse(target, inbound, outbound,
-        Status(wanted.Contains("splunk"), spErr, sp?.Messages, sp?.ElapsedMs, sp?.Rows.Count ?? 0),
-        Status(wanted.Contains("appresponse"), arErr, ar?.Messages, ar?.ElapsedMs, (ar?.L4.Count ?? 0) + (ar?.L7.Count ?? 0)),
-        new SourceStatus(env != null, envErr,
-            env == null ? [] : [$"{env.SegmentCount} segment, {env.HostCount} host kaydı ({env.LoadedAt:HH:mm:ss} yüklendi)"],
-            null, env?.HostCount ?? 0),
-        sw.ElapsedMilliseconds));
+// 2. seviye: bizim IP'nin karşısındaki sunucuların kendi trafiği (tek sorguda, tüm sunucular için).
+// Her sunucu için gelen/giden trafik segment bazında özetlenir; bizim IP özetten çıkarılır.
+app.MapPost("/api/hop2", async (Hop2Request req, IConfiguration cfg, IHttpClientFactory factory,
+    EnvanterService envanter, CancellationToken ct) =>
+{
+    if (!LookupQuery.TryParse(req.Target, req.Start, req.End, cfg.GetValue("MaxRangeHours", 24), out var q, out var error))
+        return Results.BadRequest(new { error });
+
+    int maxPeers = cfg.GetValue("Hop2MaxPeers", 80);
+    var ips = new List<string>();
+    foreach (var raw in req.Ips ?? [])
+    {
+        if (!LookupQuery.TryParseIpv4(raw, out var ip))
+            return Results.BadRequest(new { error = $"Geçersiz IP: {raw}" });
+        if (ip != q!.Ip && !ips.Contains(ip)) ips.Add(ip);
+    }
+    int requested = ips.Count;
+    if (ips.Count > maxPeers) ips = ips.Take(maxPeers).ToList();
+    if (ips.Count == 0)
+        return Results.BadRequest(new { error = "Sorgulanacak sunucu IP'si yok." });
+
+    var wanted = (req.Sources ?? "splunk,appresponse").ToLowerInvariant();
+    var sw = Stopwatch.StartNew();
+
+    var spTask = wanted.Contains("splunk")
+        ? Capture(() => SplunkService.QueryAsync(q!, cfg, factory.CreateClient("splunk"), ct, ips), ct)
+        : Task.FromResult<(SplunkResult?, string?)>((null, null));
+    var arTask = wanted.Contains("appresponse")
+        ? Capture(() => AppResponseService.QueryAsync(q!, req.Appliance ?? 0, cfg, factory.CreateClient("appresponse"), ct, ips), ct)
+        : Task.FromResult<(AppResponseResult?, string?)>((null, null));
+    var envTask = Capture(() => envanter.GetAsync(false, ct), ct);
+
+    try
+    {
+        await Task.WhenAll(spTask, arTask, envTask);
+    }
+    catch (OperationCanceledException) when (ct.IsCancellationRequested)
+    {
+        return Results.StatusCode(499);
+    }
+    if (ct.IsCancellationRequested)
+        return Results.StatusCode(499);
+
+    var (sp, spErr) = spTask.Result;
+    var (ar, arErr) = arTask.Result;
+    var (env, envErr) = envTask.Result;
+
+    var peers = ips.Select(ip => Hop2Builder.Build(ip, q!.Ip, sp, ar, env)).ToList();
+    var (spSt, arSt, envSt) = Statuses(wanted, sp, spErr, ar, arErr, env, envErr);
+    return Results.Ok(new Hop2Response(peers, requested, ips.Count, spSt, arSt, envSt, sw.ElapsedMilliseconds));
 });
 
 app.MapGet("/api/envanter/durum", async (EnvanterService envanter, CancellationToken ct) =>
@@ -158,6 +202,20 @@ app.MapPost("/api/envanter/yenile", async (EnvanterService envanter, Cancellatio
 });
 
 app.Run();
+
+static (SourceStatus sp, SourceStatus ar, SourceStatus env) Statuses(string wanted,
+    SplunkResult? sp, string? spErr, AppResponseResult? ar, string? arErr, EnvanterSnapshot? env, string? envErr)
+{
+    SourceStatus Status(bool asked, string? err, List<string>? msgs, long? ms, int rows) =>
+        !asked ? SourceStatus.Skipped : new SourceStatus(err == null, err, msgs ?? [], ms, rows);
+
+    return (
+        Status(wanted.Contains("splunk"), spErr, sp?.Messages, sp?.ElapsedMs, sp?.Rows.Count ?? 0),
+        Status(wanted.Contains("appresponse"), arErr, ar?.Messages, ar?.ElapsedMs, (ar?.L4.Count ?? 0) + (ar?.L7.Count ?? 0)),
+        new SourceStatus(env != null, envErr,
+            env == null ? [] : [$"{env.SegmentCount} segment, {env.HostCount} host kaydı ({env.LoadedAt:HH:mm:ss} yüklendi)"],
+            null, env?.HostCount ?? 0));
+}
 
 // Bir kaynağın hatası diğerlerini durdurmasın: sonucu veya hata mesajını döndür.
 // Sadece kullanıcı isteği iptal ettiyse fırlat; HttpClient timeout'u hata mesajı olarak döner.
@@ -203,12 +261,8 @@ record LookupQuery(string Ip, DateTimeOffset Start, DateTimeOffset End)
     {
         query = null;
         error = "";
-        ipText = ipText?.Trim();
 
-        // 4 oktet şartı: IPAddress.TryParse "10" gibi girdileri de kabul ettiği için.
-        // IP doğrulaması aynı zamanda SPL / STEELFILTER injection'ını engeller.
-        if (string.IsNullOrEmpty(ipText) || ipText.Split('.').Length != 4 ||
-            !IPAddress.TryParse(ipText, out var addr) || addr.AddressFamily != AddressFamily.InterNetwork)
+        if (!TryParseIpv4(ipText, out string ip))
         {
             error = "Geçerli bir IPv4 adresi girin, ör. 10.50.20.15.";
             return false;
@@ -228,7 +282,20 @@ record LookupQuery(string Ip, DateTimeOffset Start, DateTimeOffset End)
             return false;
         }
 
-        query = new LookupQuery(addr.ToString(), start, end);
+        query = new LookupQuery(ip, start, end);
+        return true;
+    }
+
+    // 4 oktet şartı: IPAddress.TryParse "10" gibi girdileri de kabul ettiği için.
+    // IP doğrulaması aynı zamanda SPL / STEELFILTER injection'ını engeller.
+    public static bool TryParseIpv4(string? text, out string ip)
+    {
+        ip = "";
+        text = text?.Trim();
+        if (string.IsNullOrEmpty(text) || text.Split('.').Length != 4 ||
+            !IPAddress.TryParse(text, out var addr) || addr.AddressFamily != AddressFamily.InterNetwork)
+            return false;
+        ip = addr.ToString();
         return true;
     }
 
@@ -243,8 +310,12 @@ record LookupQuery(string Ip, DateTimeOffset Start, DateTimeOffset End)
 // ---------------------------------------------------------------------------
 static class SplunkService
 {
-    public static async Task<SplunkResult> QueryAsync(LookupQuery q, IConfiguration cfg, HttpClient http, CancellationToken ct)
+    // ips verilirse tek sorguda birden fazla IP aranır (2. seviye); verilmezse q.Ip.
+    public static async Task<SplunkResult> QueryAsync(LookupQuery q, IConfiguration cfg, HttpClient http, CancellationToken ct,
+        IReadOnlyList<string>? ips = null)
     {
+        ips ??= [q.Ip];
+        string terms = ips.Count == 1 ? $"TERM({ips[0]})" : "(" + string.Join(" OR ", ips.Select(ip => $"TERM({ip})")) + ")";
         var s = cfg.GetSection("Splunk");
         string baseUrl = (s["BaseUrl"] ?? throw new InvalidOperationException("Splunk:BaseUrl tanımlı değil.")).TrimEnd('/');
         string exportPath = s["ExportPath"] ?? "/services/search/v2/jobs/export";
@@ -253,7 +324,7 @@ static class SplunkService
 
         // TERM(): IP'nin geçmediği olaylar hiç okunmaz (hızın kaynağı).
         string spl = $"""
-            search index={index} sourcetype="{sourcetype}" TERM({q.Ip})
+            search index={index} sourcetype="{sourcetype}" {terms}
             | eval dir=lower(direction),
                    client_ip   = if(dir=="outbound", local_ip, remote_ip),
                    server_ip   = if(dir=="outbound", remote_ip, local_ip),
@@ -347,8 +418,11 @@ static class SplunkService
 // ---------------------------------------------------------------------------
 static class AppResponseService
 {
-    public static async Task<AppResponseResult> QueryAsync(LookupQuery q, int applianceIndex, IConfiguration cfg, HttpClient http, CancellationToken ct)
+    // ips verilirse tek raporda birden fazla IP aranır (2. seviye); verilmezse q.Ip.
+    public static async Task<AppResponseResult> QueryAsync(LookupQuery q, int applianceIndex, IConfiguration cfg, HttpClient http, CancellationToken ct,
+        IReadOnlyList<string>? ips = null)
     {
+        ips ??= [q.Ip];
         string? username = cfg["Credentials:Username"];
         string? password = cfg["Credentials:Password"];
         if (string.IsNullOrEmpty(username) || string.IsNullOrEmpty(password))
@@ -402,9 +476,9 @@ static class AppResponseService
         string jwt = JsonNode.Parse(await tokenResp.Content.ReadAsStringAsync(ct))?["access_token"]?.ToString()
             ?? throw new InvalidOperationException("AppResponse token yanıtında access_token yok.");
 
-        // 2. Tek IP filtresi: hem client hem server olarak geçen akışlar
-        string singleIpFilter = $"(cli_tcp.ip == {q.Ip} or srv_tcp.ip == {q.Ip})";
-        var steelFilters = new object[] { new { id = "traffic", type = "STEELFILTER", value = singleIpFilter } };
+        // 2. IP filtresi: hem client hem server olarak geçen akışlar
+        string ipFilter = "(" + string.Join(" or ", ips.Select(ip => $"cli_tcp.ip == {ip} or srv_tcp.ip == {ip}")) + ")";
+        var steelFilters = new object[] { new { id = "traffic", type = "STEELFILTER", value = ipFilter } };
 
         foreach (var vifg in vifgIds)
         {
@@ -420,7 +494,7 @@ static class AppResponseService
 
             var sorguPayload = new
             {
-                info = new { name = "Tek IP Analiz Raporu", description = $"{q.Ip} | {q.Start:HH:mm}-{q.End:HH:mm}" },
+                info = new { name = "Tek IP Analiz Raporu", description = $"{(ips.Count == 1 ? ips[0] : $"{ips.Count} IP")} | {q.Start:HH:mm}-{q.End:HH:mm}" },
                 data_defs = new object[]
                 {
                     new

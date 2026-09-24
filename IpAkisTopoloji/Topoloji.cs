@@ -351,3 +351,41 @@ static class FlowBuilder
     static IEnumerable<string> Split(string? v) =>
         v == null ? [] : v.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 }
+
+// ---------------------------------------------------------------------------
+// 2. seviye: karşı sunucuların kendi gelen/giden trafiği, segment bazında özet.
+// ---------------------------------------------------------------------------
+record Hop2Request(string? Target, List<string>? Ips, string? Start, string? End, int? Appliance, string? Sources);
+
+record SegmentAgg(SegmentInfo? Segment, int IpCount, long Hits, List<string> Ports, List<string> TopIps, List<string> Apps);
+
+// Inbound: bu sunucuya gelenlerin segmentleri, Outbound: bu sunucunun gittiği segmentler
+record PeerHop(string Ip, SegmentInfo? Segment, List<SegmentAgg> Inbound, List<SegmentAgg> Outbound);
+
+record Hop2Response(List<PeerHop> Peers, int Requested, int Queried,
+    SourceStatus Splunk, SourceStatus AppResponse, SourceStatus Envanter, long ElapsedMs);
+
+static class Hop2Builder
+{
+    const int TopIps = 10, MaxPorts = 12, MaxApps = 6;
+
+    public static PeerHop Build(string peer, string mainTarget, SplunkResult? sp, AppResponseResult? ar, EnvanterSnapshot? env)
+    {
+        var (inbound, outbound) = FlowBuilder.Build(peer, sp, ar, env);
+        return new PeerHop(peer, env?.FindSegment(peer), Summarize(inbound, mainTarget), Summarize(outbound, mainTarget));
+    }
+
+    static List<SegmentAgg> Summarize(List<FlowEdge> edges, string mainTarget) =>
+        edges.Where(e => e.PeerIp != mainTarget)
+            .GroupBy(e => e.PeerSegment?.Cidr ?? "")
+            .Select(g => new SegmentAgg(
+                g.First().PeerSegment,
+                g.Select(e => e.PeerIp).Distinct().Count(),
+                g.Sum(e => e.Hits),
+                g.Select(e => e.Port).Where(p => p != "").Distinct().Take(MaxPorts).ToList(),
+                g.GroupBy(e => e.PeerIp).OrderByDescending(x => x.Sum(e => e.Hits)).Take(TopIps).Select(x => x.Key).ToList(),
+                g.SelectMany(e => e.PeerApps?.Apps ?? []).Select(a => a.AppName ?? a.ServiceName ?? a.UnixName)
+                    .OfType<string>().Distinct().Take(MaxApps).ToList()))
+            .OrderByDescending(a => a.Hits)
+            .ToList();
+}
