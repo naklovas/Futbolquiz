@@ -4,20 +4,20 @@ Bir IPv4 adresi ve zaman aralığı girersin. Araç Splunk (Carbon Black) ve Riv
 o IP'nin akışlarını çeker, iki SQL Server envanteriyle zenginleştirir ve şunları gösterir:
 
 - **Gelen trafik**: bu makineye hangi IP'ler, hangi segmentlerden, hangi uygulamalardan geliyor;
-  bizim tarafta hangi porta, hangi uygulamaya geliyorlar.
+  sorgulanan IP'de hangi porta, hangi uygulamaya geliyorlar.
 - **Giden trafik**: bu makine hangi IP:port'a gidiyor; hedef hangi segmentte ve hangi uygulama.
 - **Topoloji** (iki seviyeli zincir):
 
   ```
-  [Segment] ──> [Bize gelen sunucu] ──> [BİZİM IP] ──> [Gittiğimiz sunucu] ──> [Segment]
+  [Segment] ──> [Gelen sunucu] ──> [SORGULANAN IP] ──> [Gidilen sunucu] ──> [Segment]
   ```
 
-  - 1. seviye: bizim IP'ye gelen ve bizim IP'nin gittiği sunucular (Splunk + AppResponse).
+  - 1. seviye: sorgulanan IP'ye gelen ve sorgulanan IP'nin gittiği sunucular (Splunk + AppResponse).
   - 2. seviye: bu sunucuların kendi trafiği tek sorguda çekilir (`POST /api/hop2`).
     Solda sunuculara **gelen** segmentler, sağda sunucuların **gittiği** segmentler gösterilir;
     iki taraf da açılır listeden ters çevrilebilir.
   - Taraf başına ilk 15 sunucu çizilir (10/15/25/40 seçilebilir), kalanı "+ n sunucu" kutusunda.
-  - Bizim segmentimiz kalın çerçeve ve "BİZİM SEGMENT" ile işaretlenir.
+  - Sorgulanan IP ile aynı segment kalın çerçeve ve "AYNI SEGMENT" ile işaretlenir.
   - Üzerine gelince yol vurgulanır. Sunucuya tıklayınca detay (port, uygulama, 2. seviye segmentleri)
     açılır; "Bu IP'nin topolojisini aç" ile o sunucuya geçilir. Segmente tıklayınca bağlı sunucular listelenir.
   - Yakınlaştırma, SVG/PNG indirme var.
@@ -33,7 +33,7 @@ Sayfa: `/topoloji.html?ip=10.210.10.63` (adres çubuğundaki link paylaşılabil
 | `dbo.ERT_HOSTIPADDRESS` | IP:port → uygulama. Eşleşme sırası: `IPADDRESS+PORT` → `VIP_IP+VIP_PORT` → sadece `IPADDRESS` → sadece `VIP_IP`. Hangisiyle eşleştiği tabloda rozet olarak görünür. |
 
 Gelen trafikte karşı tarafın kaynak portu geçici (ephemeral) olduğu için karşı hostun uygulaması
-sadece IP ile bulunur. Bizim taraftaki uygulama ise IP+port ile bulunur.
+sadece IP ile bulunur. Sorgulanan IP tarafındaki uygulama ise IP+port ile bulunur.
 
 Tablolar bellekte tutulur (`Envanter:CacheMinutes`, varsayılan 30 dk).
 Hemen yenilemek için: `POST /api/envanter/yenile`. Durum: `GET /api/envanter/durum`.
@@ -59,6 +59,9 @@ SQL kullanıcısıyla bağlanılacaksa: `User Id=dokuuser;Password=...` (şifrey
 | Endpoint | Açıklama |
 |---|---|
 | `GET /api/flow?ip=&start=&end=&appliance=&sources=splunk,appresponse` | Birleşik ve zenginleştirilmiş akış. Bir kaynak hata verirse diğerinin sonucu yine döner. |
+
+`appliance=-1` (arayüzde "Tüm cihazlar"): `Servers` listesindeki tüm AppResponse cihazları paralel sorgulanır, sonuçlar birleştirilir. Aynı akışı birden fazla cihaz görüyorsa hit sayısı toplanır. Tek cihazın hatası diğerlerini durdurmaz.
+
 | `POST /api/hop2` `{target, ips[], start, end, appliance, sources}` | Verilen sunucuların trafiği, sunucu başına gelen/giden segment özeti. En fazla `Hop2MaxPeers` (varsayılan 80) IP. |
 | `GET /api/splunk`, `GET /api/appresponse`, `GET /api/appliances` | Önceki endpoint'ler; çıktıları değişmedi. |
 

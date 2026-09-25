@@ -59,7 +59,7 @@ app.MapGet("/api/appresponse", async (string? ip, string? start, string? end, in
 
     try
     {
-        return Results.Ok(await AppResponseService.QueryAsync(q!, appliance ?? 0, cfg, factory.CreateClient("appresponse"), ct));
+        return Results.Ok(await AppResponseService.QueryAnyAsync(q!, appliance ?? 0, cfg, factory.CreateClient("appresponse"), ct));
     }
     catch (OperationCanceledException) when (ct.IsCancellationRequested)
     {
@@ -86,7 +86,7 @@ app.MapGet("/api/flow", async (string? ip, string? start, string? end, int? appl
         ? Capture(() => SplunkService.QueryAsync(q!, cfg, factory.CreateClient("splunk"), ct), ct)
         : Task.FromResult<(SplunkResult?, string?)>((null, null));
     var arTask = wanted.Contains("appresponse")
-        ? Capture(() => AppResponseService.QueryAsync(q!, appliance ?? 0, cfg, factory.CreateClient("appresponse"), ct), ct)
+        ? Capture(() => AppResponseService.QueryAnyAsync(q!, appliance ?? 0, cfg, factory.CreateClient("appresponse"), ct), ct)
         : Task.FromResult<(AppResponseResult?, string?)>((null, null));
     var envTask = Capture(() => envanter.GetAsync(false, ct), ct);
 
@@ -113,8 +113,8 @@ app.MapGet("/api/flow", async (string? ip, string? start, string? end, int? appl
     return Results.Ok(new FlowResponse(target, inbound, outbound, spSt, arSt, envSt, sw.ElapsedMilliseconds));
 });
 
-// 2. seviye: bizim IP'nin karşısındaki sunucuların kendi trafiği (tek sorguda, tüm sunucular için).
-// Her sunucu için gelen/giden trafik segment bazında özetlenir; bizim IP özetten çıkarılır.
+// 2. seviye: sorgulanan IP'nin karşısındaki sunucuların kendi trafiği (tek sorguda, tüm sunucular için).
+// Her sunucu için gelen/giden trafik segment bazında özetlenir; sorgulanan IP özetten çıkarılır.
 app.MapPost("/api/hop2", async (Hop2Request req, IConfiguration cfg, IHttpClientFactory factory,
     EnvanterService envanter, CancellationToken ct) =>
 {
@@ -141,7 +141,7 @@ app.MapPost("/api/hop2", async (Hop2Request req, IConfiguration cfg, IHttpClient
         ? Capture(() => SplunkService.QueryAsync(q!, cfg, factory.CreateClient("splunk"), ct, ips), ct)
         : Task.FromResult<(SplunkResult?, string?)>((null, null));
     var arTask = wanted.Contains("appresponse")
-        ? Capture(() => AppResponseService.QueryAsync(q!, req.Appliance ?? 0, cfg, factory.CreateClient("appresponse"), ct, ips), ct)
+        ? Capture(() => AppResponseService.QueryAnyAsync(q!, req.Appliance ?? 0, cfg, factory.CreateClient("appresponse"), ct, ips), ct)
         : Task.FromResult<(AppResponseResult?, string?)>((null, null));
     var envTask = Capture(() => envanter.GetAsync(false, ct), ct);
 
@@ -408,6 +408,57 @@ static class SplunkService
 // ---------------------------------------------------------------------------
 static class AppResponseService
 {
+    public const int AllAppliances = -1;
+
+    // applianceIndex = -1: config'deki tüm cihazlar paralel sorgulanır, sonuçlar birleştirilir.
+    // Bir cihaz hata verirse diğerleri devam eder; hata mesajlara eklenir.
+    public static async Task<AppResponseResult> QueryAnyAsync(LookupQuery q, int applianceIndex, IConfiguration cfg, HttpClient http,
+        CancellationToken ct, IReadOnlyList<string>? ips = null)
+    {
+        if (applianceIndex != AllAppliances)
+            return await QueryAsync(q, applianceIndex, cfg, http, ct, ips);
+
+        var names = cfg.GetSection("Servers").GetChildren().Select((s, i) => s["Name"] ?? $"Cihaz {i + 1}").ToList();
+        if (names.Count == 0)
+            throw new InvalidOperationException("Config'de 'Servers' listesi boş.");
+
+        var results = await Task.WhenAll(names.Select(async (name, i) =>
+        {
+            try
+            {
+                return (name, result: await QueryAsync(q, i, cfg, http, ct, ips), error: (string?)null);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                return (name, result: (AppResponseResult?)null, error: ex is TaskCanceledException ? "Zaman aşımı" : ex.Message);
+            }
+        }));
+
+        var ok = results.Where(r => r.result != null).ToList();
+        if (ok.Count == 0)
+            throw new InvalidOperationException("Hiçbir AppResponse cihazından sonuç alınamadı: " +
+                string.Join(" | ", results.Select(r => $"{r.name}: {r.error}")));
+
+        string Label(string name, string vifg) => string.IsNullOrEmpty(vifg) ? name : $"{name}/{vifg}";
+        var messages = results.Where(r => r.error != null).Select(r => $"[{r.name}] {r.error}")
+            .Concat(ok.SelectMany(r => r.result!.Messages.Select(m => $"[{r.name}] {m}")))
+            .ToList();
+
+        return new AppResponseResult(
+            $"Tüm cihazlar ({ok.Count}/{names.Count})",
+            ok.Sum(r => r.result!.VifgCount),
+            ok.Sum(r => r.result!.RawL4),
+            ok.Sum(r => r.result!.RawL7),
+            ok.SelectMany(r => r.result!.L4.Select(x => x with { Vifg = Label(r.name, x.Vifg) })).OrderByDescending(x => x.Hit).ToList(),
+            ok.SelectMany(r => r.result!.L7.Select(x => x with { Vifg = Label(r.name, x.Vifg) })).OrderByDescending(x => x.Hit).ToList(),
+            messages,
+            ok.Max(r => r.result!.ElapsedMs));
+    }
+
     // ips verilirse tek raporda birden fazla IP aranır (2. seviye); verilmezse q.Ip.
     public static async Task<AppResponseResult> QueryAsync(LookupQuery q, int applianceIndex, IConfiguration cfg, HttpClient http, CancellationToken ct,
         IReadOnlyList<string>? ips = null)

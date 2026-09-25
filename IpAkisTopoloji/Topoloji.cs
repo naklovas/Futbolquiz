@@ -220,14 +220,14 @@ record TargetInfo(string Ip, SegmentInfo? Segment, List<HostApp> Apps);
 record FlowEdge(
     string Direction,          // "in" | "out"
     string PeerIp,
-    string Port,               // gelen: bizim port, giden: karşının portu; "" = sadece L7 (URL) kaydı
+    string Port,               // gelen: sorgulanan IP'nin portu, giden: karşının portu; "" = sadece L7 (URL) kaydı
     List<string> Protocols,
     long Hits, long SplunkHits, long AppResponseHits,
     string? FirstSeen, string? LastSeen,
     List<string> Computers, List<string> Processes, List<string> Urls,
     SegmentInfo? PeerSegment,
     AppMatch? PeerApps,        // gelen: karşı hostta kayıtlı uygulamalar (IP), giden: hedef IP:port uygulaması
-    AppMatch? LocalApp);       // sadece gelen: bizim IP:port'ta çalışan uygulama
+    AppMatch? LocalApp);       // sadece gelen: sorgulanan IP:port'ta çalışan uygulama
 
 record FlowResponse(TargetInfo Target, List<FlowEdge> Inbound, List<FlowEdge> Outbound,
     SourceStatus Splunk, SourceStatus AppResponse, SourceStatus Envanter, long ElapsedMs);

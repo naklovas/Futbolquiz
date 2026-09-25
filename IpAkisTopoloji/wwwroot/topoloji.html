@@ -123,7 +123,7 @@
     <div class="checks">
       <label><input type="checkbox" id="srcSplunk" checked> Splunk</label>
       <label><input type="checkbox" id="srcAr" checked> AppResponse</label>
-      <label title="Bulunan sunucuların kendi trafiğini de sorgular (segment → sunucu → bizim IP → sunucu → segment)"><input type="checkbox" id="hop2On" checked> 2. seviye</label>
+      <label title="Bulunan sunucuların kendi trafiğini de sorgular (segment → sunucu → sorgulanan IP → sunucu → segment)"><input type="checkbox" id="hop2On" checked> 2. seviye</label>
     </div>
     <button class="primary" id="go" type="submit">Sorgula</button>
     <button type="button" id="cancel" hidden>İptal</button>
@@ -174,7 +174,8 @@ const sameSegment = e => isTargetSeg(e.peerSegment);
 async function loadAppliances() {
   try {
     const list = await (await fetch("api/appliances")).json();
-    $("#appliance").innerHTML = list.map(a => `<option value="${a.index}">${esc(a.name)}</option>`).join("") || `<option value="0">-</option>`;
+    $("#appliance").innerHTML = list.map(a => `<option value="${a.index}">${esc(a.name)}</option>`).join("")
+      + (list.length > 1 ? `<option value="-1">Tüm cihazlar (${list.length})</option>` : "") || `<option value="0">-</option>`;
   } catch { $("#appliance").innerHTML = `<option value="0">-</option>`; }
 }
 
@@ -261,7 +262,7 @@ function render() {
           <select id="hopOut"><option value="out">sunucuların gittikleri</option><option value="in">sunuculara gelenler</option></select></label>
         <div class="legend">
           <span><i style="background:var(--in)"></i>Gelen</span><span><i style="background:var(--out)"></i>Giden</span>
-          <span>Kalın çerçeve = bizim segment</span><span>Çizgi kalınlığı = hit</span>
+          <span>Kalın çerçeve = sorgulanan IP ile aynı segment</span><span>Çizgi kalınlığı = hit</span>
         </div>
         <div class="zoom">
           <button type="button" data-zoom="-" title="Uzaklaş">−</button>
@@ -362,7 +363,7 @@ function renderTarget(d) {
 }
 
 // ---------- Topoloji modeli ----------
-// Bizim IP'nin karşısındaki sunucular (1. seviye), hit'e göre sıralı.
+// Sorgulanan IP'nin karşısındaki sunucular (1. seviye), hit'e göre sıralı.
 function sideServers(dir) {
   const edges = dir === "in" ? state.data.inbound : state.data.outbound;
   const m = new Map();
@@ -421,7 +422,7 @@ const segSub = g => {
 };
 
 // ---------- Topoloji çizimi ----------
-// Sütunlar: [segment] → [bize gelen sunucu] → [BİZİM IP] → [gittiğimiz sunucu] → [segment]
+// Sütunlar: [segment] → [gelen sunucu] → [SORGULANAN IP] → [gidilen sunucu] → [segment]
 function renderTopology() {
   const d = state.data;
   if (!d.inbound.length && !d.outbound.length) {
@@ -481,7 +482,7 @@ function renderTopology() {
       }
     });
 
-    // sunucu ↔ bizim IP
+    // sunucu ↔ sorgulanan IP
     srv.forEach((s, i) => {
       const sy = s.y + SH / 2;
       const tyy = ty + 24 + (TH - 48) * (srv.length > 1 ? i / (srv.length - 1) : 0.5);
@@ -514,7 +515,7 @@ function renderTopology() {
         <text class="t1" x="10" y="19">${esc(trunc(segTitle(g), 24))}</text>
         <text class="num" x="${SW - 10}" y="19" text-anchor="end">${fmt(g.hits)}</text>
         <text class="t3" x="10" y="38">${esc(trunc(segSub(g) || `${fmt(g.links.size)} sunucu`, same ? 17 : 24))}</text>
-        ${same ? `<text class="badge-same" x="${SW - 10}" y="38" text-anchor="end">BİZİM SEGMENT</text>` : `<text class="num" x="${SW - 10}" y="38" text-anchor="end">${g.key === "__other" || !segSub(g) ? "" : fmt(g.links.size) + " sunucu"}</text>`}
+        ${same ? `<text class="badge-same" x="${SW - 10}" y="38" text-anchor="end">AYNI SEGMENT</text>` : `<text class="num" x="${SW - 10}" y="38" text-anchor="end">${g.key === "__other" || !segSub(g) ? "" : fmt(g.links.size) + " sunucu"}</text>`}
       </g>`;
     });
   }
@@ -536,9 +537,9 @@ function renderTopology() {
       ${["in", "out"].map(c => `<marker id="arr-${c}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,1 L9,5 L0,9 z" style="fill:var(--${c})"></path></marker>`).join("")}
     </defs>
     <text class="colhead" x="${X.segIn}" y="22">${lbl[state.hopDir.in]} · ${fmt(cols.in.seg.length)}</text>
-    <text class="colhead" x="${X.srvIn}" y="22">BİZE GELEN SUNUCULAR · ${fmt(sideServers("in").length)}</text>
-    <text class="colhead" x="${X.tgt + TW / 2}" y="22" text-anchor="middle">BİZİM IP</text>
-    <text class="colhead" x="${X.srvOut}" y="22">GİTTİĞİMİZ SUNUCULAR · ${fmt(sideServers("out").length)}</text>
+    <text class="colhead" x="${X.srvIn}" y="22">GELEN SUNUCULAR · ${fmt(sideServers("in").length)}</text>
+    <text class="colhead" x="${X.tgt + TW / 2}" y="22" text-anchor="middle">SORGULANAN IP</text>
+    <text class="colhead" x="${X.srvOut}" y="22">GİDİLEN SUNUCULAR · ${fmt(sideServers("out").length)}</text>
     <text class="colhead" x="${X.segOut + SW}" y="22" text-anchor="end">${lbl[state.hopDir.out]} · ${fmt(cols.out.seg.length)}</text>
     ${hopWarn}
     ${hop2Pending ? hopHint(X.segIn) + hopHint(X.segOut) : ""}
@@ -547,7 +548,7 @@ function renderTopology() {
     <g class="tnode" transform="translate(${X.tgt},${ty})">
       <title>${esc(t.ip)}\n${esc(t.segment ? `${t.segment.label} (${t.segment.cidr})` : "segment ?")}\n${esc(tApps.join(", "))}</title>
       <rect width="${TW}" height="${TH}" rx="12"></rect>
-      <text x="${TW / 2}" y="30" text-anchor="middle" style="font-size:12px;font-weight:700;letter-spacing:.06em">BİZİM IP</text>
+      <text x="${TW / 2}" y="30" text-anchor="middle" style="font-size:12px;font-weight:700;letter-spacing:.06em">SORGULANAN IP</text>
       <text x="${TW / 2}" y="55" text-anchor="middle" style="font-size:17px;font-weight:700">${esc(t.ip)}</text>
       <text x="${TW / 2}" y="78" text-anchor="middle" style="font-weight:600">${esc(trunc(t.segment ? t.segment.label : "segment ?", 28))}</text>
       <text x="${TW / 2}" y="96" text-anchor="middle" style="font-size:11px">${esc(t.segment ? [t.segment.cidr, t.segment.vlan && "VLAN " + t.segment.vlan].filter(Boolean).join(" · ") : "")}</text>
@@ -571,7 +572,7 @@ function wireTopology() {
   const svg = $("#topoSvg");
   const edgesOf = id => Array.from(svg.querySelectorAll(".edge")).filter(p => p.dataset.rel.split(" ").includes(id));
   svg.querySelectorAll("[data-id]").forEach(n => {
-    // Vurgu: düğümün kendi bağlantıları + segment için bağlı sunucuların bizim IP'ye giden yolu.
+    // Vurgu: düğümün kendi bağlantıları + segment için bağlı sunucuların sorgulanan IP'ye giden yolu.
     n.addEventListener("mouseenter", () => {
       svg.classList.add("hl");
       const id = n.dataset.id;
@@ -665,7 +666,7 @@ function renderDetail() {
   const hop = state.hop2?.peers?.get(s.ip);
   el.innerHTML = `<div class="panel">
     <div class="toolbar">
-      <h2 style="margin:0">${esc(s.ip)} <span class="muted" style="font-weight:400">${s.dir === "in" ? "→ bizim IP'ye geliyor" : "← bizim IP buraya gidiyor"}</span></h2>
+      <h2 style="margin:0">${esc(s.ip)} <span class="muted" style="font-weight:400">${s.dir === "in" ? "→ sorgulanan IP'ye geliyor" : "← sorgulanan IP buraya gidiyor"}</span></h2>
       <div style="display:flex;gap:8px">
         <button type="button" id="drill" class="primary">Bu IP'nin topolojisini aç</button>
         <button type="button" id="closeDetail">Kapat</button>
@@ -678,7 +679,7 @@ function renderDetail() {
       </div>
       <div>
         <div class="tbl-wrap" style="max-height:220px"><table>
-          <thead><tr><th>Port</th><th>${s.dir === "in" ? "Bizdeki uygulama" : "Hedef uygulama"}</th><th class="num">Hit</th><th>Son görülme</th><th>Detay</th></tr></thead>
+          <thead><tr><th>Port</th><th>${s.dir === "in" ? "Karşılayan uygulama" : "Hedef uygulama"}</th><th class="num">Hit</th><th>Son görülme</th><th>Detay</th></tr></thead>
           <tbody>${edges.map(e => `<tr><td class="mono">${esc(portText(e.port))}</td>
             <td>${appsCell(s.dir === "in" ? e.localApp : e.peerApps, true)}</td><td class="num">${fmt(e.hits)}</td>
             <td class="mono">${esc(e.lastSeen ?? "")}</td><td>${detailCell(e)}</td></tr>`).join("")}</tbody>
@@ -708,7 +709,7 @@ function renderSummary() {
     $("#sum-" + dir).innerHTML = `
       <h2 style="color:var(--${dir})">${dir === "in" ? `Gelen: ${fmt(rows.length)} segmentten geliniyor` : `Giden: ${fmt(rows.length)} segmente gidiliyor`}</h2>
       ${rows.length ? `<div class="tbl-wrap" style="max-height:340px"><table>
-        <thead><tr><th>Segment</th><th>VLAN</th><th class="num">IP</th><th>Port</th><th>${dir === "in" ? "Bizdeki uygulama" : "Hedef uygulama"}</th><th class="num">Hit</th></tr></thead>
+        <thead><tr><th>Segment</th><th>VLAN</th><th class="num">IP</th><th>Port</th><th>${dir === "in" ? "Karşılayan uygulama" : "Hedef uygulama"}</th><th class="num">Hit</th></tr></thead>
         <tbody>${rows.map(r => `<tr class="click" data-dir="${dir}" data-key="${esc(r.key)}">
           <td>${r.seg ? `<b>${esc(r.seg.label)}</b>${r.same ? ' <span class="badge strong">aynı segment</span>' : ""}<div class="small muted mono" title="${esc([...r.cidrs].join(", "))}">${esc([...r.cidrs].slice(0, 3).join(", "))}${r.cidrs.size > 3 ? ` +${r.cidrs.size - 3}` : ""}${r.seg.tenant ? " · " + esc(r.seg.tenant) : ""}</div>` : `<span class="unk">Segment envanterinde yok</span>`}</td>
           <td class="mono">${esc([...r.vlans].join(", "))}</td>
@@ -756,7 +757,7 @@ const COLS = {
     { h: "Kaynak segment", v: e => segLabel(e.peerSegment) ?? "", html: e => segCell(e.peerSegment) },
     { h: "Kaynak uygulama", v: e => appNames(e.peerApps).join(", "), html: e => appsCell(e.peerApps, false) },
     { h: "Port", v: e => portText(e.port), c: "mono" },
-    { h: "Bizdeki uygulama", v: e => appNames(e.localApp).join(", "), html: e => appsCell(e.localApp, true) },
+    { h: "Karşılayan uygulama", v: e => appNames(e.localApp).join(", "), html: e => appsCell(e.localApp, true) },
     ...commonCols()
   ],
   out: [
