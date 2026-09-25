@@ -36,6 +36,26 @@ Sayfa: `/` ya da `/topoloji.html?ip=10.210.10.63` (adres çubuğundaki link payl
   AI yalnızca bu tabloyu yorumlar, tablo dışına çıkmaması ve her maddede uygulama/IP/port yazması istenir.
   2. seviye (sunucuların kendi trafiği) AI'a gönderilmez. Soru metni değiştirilebilir; gönderilen metin sayfada görülebilir.
 
+## Kimlik doğrulama ve yetki
+
+Sayfaya Windows Authentication ile girilir; yetki DokuPanel'den `AuthHelper.YetkiKontrol` ile alınır.
+Kontrol bütün isteklere (sayfa, statik dosyalar, API) uygulanır; sonuç kullanıcı başına
+`Auth:CacheMinutes` (varsayılan 5 dk) önbellekte tutulur, hata 30 sn tutulur. Yetkisiz kullanıcı
+sayfada "Erişim Reddedildi" ekranını, API'de `403` JSON hatasını görür. API çağrıları kullanıcı adıyla loglanır.
+
+```json
+"Auth": { "Enabled": true, "CacheMinutes": 5 },
+"AppSettings": {
+  "CurrentSiteName": "DeltaFlow",
+  "DokuPanelApiUrl": "http://.../DokuPanel/api/config/get-groups-by-name?siteName=",
+  "DokuPanelKey": "<DokuPanel anahtarı - repoya koymayın>"
+}
+```
+
+- IIS: sitede **Windows Authentication açık, Anonymous kapalı** olmalı (IIS Manager > Authentication).
+- Kestrel (`dotnet run`): Negotiate kullanılır; tarayıcı sunucuyu intranet sitesi olarak tanımalı.
+- Yerelde denemek için `"Auth": { "Enabled": false }`.
+
 ## AI servisi
 
 OpenAI uyumlu `/chat/completions` servisi kullanılır (`Authorization: Bearer <ApiKey>`,

@@ -29,6 +29,8 @@
   .brand-name { font-size: 24px; font-weight: 800; letter-spacing: -.02em; line-height: 1.1; margin: 0; }
   .brand-name .d { color: var(--text); }
   .brand-name .f { background: linear-gradient(90deg, #2563eb, #0d9488 60%, #f97316); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .brand-user { margin-left: auto; font-size: 12.5px; color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 4px 12px; }
+  .brand-user:empty { display: none; }
   .brand-tag { font-size: 12.5px; color: var(--muted); margin-top: 2px; letter-spacing: .01em; }
   h1 { font-size: 18px; margin: 0 0 10px; }
   h2 { font-size: 15px; margin: 0 0 10px; }
@@ -140,6 +142,7 @@
       <h1 class="brand-name"><span class="d">Delta</span><span class="f">Flow</span></h1>
       <div class="brand-tag">Ağ akışı · segment · uygulama topolojisi ve etki analizi</div>
     </div>
+    <div class="brand-user" id="me" title="Giriş yapan kullanıcı"></div>
   </div>
   <form id="f">
     <label>IP adresi <input type="text" id="ip" placeholder="10.50.20.15" required></label>
@@ -1035,6 +1038,7 @@ function exportCsv(dir) {
 }
 
 window.addEventListener("resize", applyZoom);
+fetch("api/me").then(r => r.ok ? r.json() : null).then(me => { if (me?.name) $("#me").textContent = "👤 " + me.name; }).catch(() => {});
 loadAppliances().then(() => { if (initForm()) run(); });
 </script>
 </body>

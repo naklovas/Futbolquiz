@@ -6,6 +6,10 @@ using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using AppRel;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authentication.Negotiate;
+using Microsoft.Extensions.Caching.Memory;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -21,11 +25,61 @@ builder.Services.AddHttpClient("ai", c => c.Timeout = TimeSpan.FromMinutes(build
     .ConfigurePrimaryHttpMessageHandler(() => CreateHandler(builder.Configuration.GetValue("Ai:IgnoreSslErrors", true)));
 
 builder.Services.AddSingleton<EnvanterService>();
+builder.Services.AddMemoryCache();
+
+// Windows Authentication: IIS'te IIS'in Windows Auth'u, Kestrel'de Negotiate kullanılır.
+bool authEnabled = builder.Configuration.GetValue("Auth:Enabled", true);
+if (authEnabled)
+    builder.Services.AddAuthentication(NegotiateDefaults.AuthenticationScheme).AddNegotiate();
 
 var app = builder.Build();
 
 app.Logger.LogInformation("AppResponse cihaz sayısı: {Count}", app.Configuration.GetSection("Servers").GetChildren().Count());
 app.Logger.LogInformation("Splunk BaseUrl: {Url}", app.Configuration["Splunk:BaseUrl"]);
+
+if (authEnabled)
+{
+    app.UseAuthentication();
+
+    // Her istek (sayfa, statik dosyalar, API) DokuPanel yetki kontrolünden geçer.
+    // Sonuç kullanıcı başına Auth:CacheMinutes (varsayılan 5 dk) önbellekte tutulur.
+    app.Use(async (context, next) =>
+    {
+        if (context.User?.Identity?.IsAuthenticated != true)
+        {
+            await context.ChallengeAsync(NegotiateDefaults.AuthenticationScheme);
+            return;
+        }
+
+        var cache = context.RequestServices.GetRequiredService<IMemoryCache>();
+        var cfg = context.RequestServices.GetRequiredService<IConfiguration>();
+        string user = context.User.Identity.Name ?? "?";
+        string key = "yetki:" + user.ToLowerInvariant();
+
+        if (!cache.TryGetValue(key, out (bool ok, string? hata) yetki))
+        {
+            bool ok = await AuthHelper.YetkiKontrol(context, cfg);
+            yetki = (ok, context.Items["AuthHata"] as string);
+            // Başarılı sonuç daha uzun, hata kısa süre tutulur (DokuPanel düzelince hemen açılsın).
+            cache.Set(key, yetki, ok ? TimeSpan.FromMinutes(cfg.GetValue("Auth:CacheMinutes", 5)) : TimeSpan.FromSeconds(30));
+            if (!ok) app.Logger.LogWarning("Yetkisiz erişim: {User} {Path} - {Hata}", user, context.Request.Path, yetki.hata);
+        }
+
+        if (!yetki.ok)
+        {
+            context.Response.StatusCode = StatusCodes.Status403Forbidden;
+            if (context.Request.Path.StartsWithSegments("/api"))
+                await context.Response.WriteAsJsonAsync(new { error = $"Yetkiniz yok ({user})." });
+            else
+                await AuthHelper.YetkisizErisimSayfasi(user, yetki.hata ?? "").ExecuteAsync(context);
+            return;
+        }
+
+        if (context.Request.Path.StartsWithSegments("/api"))
+            app.Logger.LogInformation("{User} {Method} {Path}{Query}", user, context.Request.Method, context.Request.Path, context.Request.QueryString);
+        await next();
+    });
+}
 
 // Kök adres (/) doğrudan DeltaFlow sayfasını açar.
 var defaultFiles = new DefaultFilesOptions();
@@ -33,6 +87,9 @@ defaultFiles.DefaultFileNames.Clear();
 defaultFiles.DefaultFileNames.Add("topoloji.html");
 app.UseDefaultFiles(defaultFiles);
 app.UseStaticFiles();
+
+// Giriş yapan kullanıcı (başlıkta gösterilir)
+app.MapGet("/api/me", (HttpContext ctx) => new { name = ctx.User?.Identity?.Name });
 
 app.MapGet("/api/appliances", (IConfiguration cfg) =>
     cfg.GetSection("Servers").GetChildren()
