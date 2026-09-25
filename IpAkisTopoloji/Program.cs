@@ -27,7 +27,11 @@ var app = builder.Build();
 app.Logger.LogInformation("AppResponse cihaz sayısı: {Count}", app.Configuration.GetSection("Servers").GetChildren().Count());
 app.Logger.LogInformation("Splunk BaseUrl: {Url}", app.Configuration["Splunk:BaseUrl"]);
 
-app.UseDefaultFiles();
+// Kök adres (/) doğrudan DeltaFlow sayfasını açar.
+var defaultFiles = new DefaultFilesOptions();
+defaultFiles.DefaultFileNames.Clear();
+defaultFiles.DefaultFileNames.Add("topoloji.html");
+app.UseDefaultFiles(defaultFiles);
 app.UseStaticFiles();
 
 app.MapGet("/api/appliances", (IConfiguration cfg) =>

@@ -1,4 +1,8 @@
-# IP Akış Topolojisi
+# DeltaFlow
+
+<img src="wwwroot/deltaflow.svg" width="56" alt="DeltaFlow">
+
+Ağ akışı, segment ve uygulama topolojisi ve etki analizi.
 
 Bir IPv4 adresi ve zaman aralığı girersin. Araç Splunk (Carbon Black) ve Riverbed AppResponse'tan
 o IP'nin akışlarını çeker, iki SQL Server envanteriyle zenginleştirir ve şunları gösterir:
@@ -23,7 +27,7 @@ o IP'nin akışlarını çeker, iki SQL Server envanteriyle zenginleştirir ve �
   - Yakınlaştırma, SVG/PNG indirme var.
 - **Sunucuların kendi segmentleri**: 1. seviye sunucuların segment özeti; IP sayısı, port, uygulama, hit.
 
-Sayfa: `/topoloji.html?ip=10.210.10.63` (adres çubuğundaki link paylaşılabilir).
+Sayfa: `/` ya da `/topoloji.html?ip=10.210.10.63` (adres çubuğundaki link paylaşılabilir).
 
 - **AI etki analizi**: sorgu bittikten sonra "AI'a yorumlat" ile şirket içi AI servisine bir etki tablosu gönderilir.
   Tablo kodda hesaplanır:

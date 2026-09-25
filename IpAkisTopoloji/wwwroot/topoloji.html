@@ -3,7 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>IP Akış Topolojisi</title>
+<title>DeltaFlow · Akış Topolojisi</title>
+<link rel="icon" type="image/svg+xml" href="deltaflow.svg">
 <style>
   :root {
     --bg: #f5f6f8; --panel: #ffffff; --text: #1d2330; --muted: #677084; --line: #dde1e8;
@@ -21,7 +22,14 @@
   }
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 "Segoe UI", system-ui, sans-serif; }
-  header { padding: 14px 20px; background: var(--panel); border-bottom: 1px solid var(--line); }
+  header { padding: 14px 20px 16px; background: var(--panel); border-bottom: 1px solid var(--line); position: relative; }
+  header::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 3px; background: linear-gradient(90deg, #1e3a8a, #2563eb 45%, #0d9488 75%, #f97316); }
+  .brand { display: flex; align-items: center; gap: 12px; margin: 2px 0 14px; }
+  .brand img { width: 42px; height: 42px; display: block; filter: drop-shadow(0 2px 6px rgba(37, 99, 235, .25)); }
+  .brand-name { font-size: 24px; font-weight: 800; letter-spacing: -.02em; line-height: 1.1; margin: 0; }
+  .brand-name .d { color: var(--text); }
+  .brand-name .f { background: linear-gradient(90deg, #2563eb, #0d9488 60%, #f97316); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .brand-tag { font-size: 12.5px; color: var(--muted); margin-top: 2px; letter-spacing: .01em; }
   h1 { font-size: 18px; margin: 0 0 10px; }
   h2 { font-size: 15px; margin: 0 0 10px; }
   main { padding: 16px 20px 40px; display: grid; gap: 16px; }
@@ -121,7 +129,13 @@
 </head>
 <body>
 <header>
-  <h1>IP Akış Topolojisi</h1>
+  <div class="brand">
+    <img src="deltaflow.svg" alt="DeltaFlow logosu">
+    <div>
+      <h1 class="brand-name"><span class="d">Delta</span><span class="f">Flow</span></h1>
+      <div class="brand-tag">Ağ akışı · segment · uygulama topolojisi ve etki analizi</div>
+    </div>
+  </div>
   <form id="f">
     <label>IP adresi <input type="text" id="ip" placeholder="10.50.20.15" required></label>
     <label>Başlangıç <input type="datetime-local" id="start"></label>
@@ -831,7 +845,7 @@ function exportImage(kind) {
   clone.setAttribute("width", w); clone.setAttribute("height", h);
   clone.querySelector("*") && clone.insertAdjacentHTML("afterbegin", `<rect width="${w}" height="${h}" fill="${getComputedStyle(document.body).backgroundColor}"></rect>`);
   const xml = new XMLSerializer().serializeToString(clone);
-  const name = `${state.data.target.ip}_topoloji`;
+  const name = `DeltaFlow_${state.data.target.ip}_topoloji`;
   const save = (blob, ext) => { const l = document.createElement("a"); l.href = URL.createObjectURL(blob); l.download = `${name}.${ext}`; l.click(); setTimeout(() => URL.revokeObjectURL(l.href), 1000); };
   if (kind === "svg") { save(new Blob([xml], { type: "image/svg+xml" }), "svg"); return; }
   const img = new Image();
@@ -952,7 +966,7 @@ function exportCsv(dir) {
   const blob = new Blob(["﻿" + lines.join("\r\n")], { type: "text/csv;charset=utf-8" });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
-  a.download = `${state.data.target.ip}_${dir === "in" ? "gelen" : "giden"}.csv`;
+  a.download = `DeltaFlow_${state.data.target.ip}_${dir === "in" ? "gelen" : "giden"}.csv`;
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
