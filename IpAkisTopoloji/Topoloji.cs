@@ -87,6 +87,11 @@ sealed class EnvanterService(IConfiguration cfg, ILogger<EnvanterService> log)
             }
         }
 
+        // "Sistem Portudur" kayıtlarına portun kullanım şekli eklenir (ör. "Sistem Portudur: RDP").
+        var systemPorts = SystemPorts.Build(cfg);
+        string marker = cfg["Envanter:SistemPortuEtiketi"] ?? SystemPorts.DefaultMarker;
+        hosts = hosts.Select(h => SystemPorts.Label(h, marker, systemPorts)).ToList();
+
         // VIP tabloları opsiyonel: okunamazsa diğer envanterle devam edilir.
         string vipTable = cfg["Envanter:VipTablosu"] ?? "dbo.vip_envanteri";
         string vipGwTable = cfg["Envanter:VipGwTablosu"] ?? "dbo.vipgw";
@@ -540,4 +545,51 @@ static class VipResolver
         }
         return (members, edges);
     }
+}
+
+// ---------------------------------------------------------------------------
+// Sistem portları: envanterde uygulama adı "Sistem Portudur" olan kayıtlara
+// portun bilinen kullanım şekli eklenir. Config'deki Envanter:SistemPortlari
+// ({"3389": "RDP", ...}) varsayılanların üzerine yazar / yenilerini ekler.
+// ---------------------------------------------------------------------------
+static class SystemPorts
+{
+    public const string DefaultMarker = "Sistem Portudur";
+    static readonly System.Globalization.CultureInfo Tr = new("tr-TR");
+
+    static readonly Dictionary<string, string> Defaults = new()
+    {
+        ["20"] = "FTP (veri)", ["21"] = "FTP", ["22"] = "SSH", ["23"] = "Telnet", ["25"] = "SMTP",
+        ["53"] = "DNS", ["67"] = "DHCP", ["68"] = "DHCP", ["69"] = "TFTP", ["80"] = "HTTP",
+        ["88"] = "Kerberos", ["110"] = "POP3", ["111"] = "RPCbind", ["123"] = "NTP", ["135"] = "MS-RPC",
+        ["137"] = "NetBIOS", ["138"] = "NetBIOS", ["139"] = "NetBIOS/SMB", ["143"] = "IMAP",
+        ["161"] = "SNMP", ["162"] = "SNMP Trap", ["389"] = "LDAP", ["443"] = "HTTPS", ["445"] = "SMB",
+        ["464"] = "Kerberos (şifre)", ["465"] = "SMTPS", ["514"] = "Syslog", ["587"] = "SMTP (submission)",
+        ["636"] = "LDAPS", ["873"] = "rsync", ["902"] = "VMware", ["993"] = "IMAPS", ["995"] = "POP3S",
+        ["1433"] = "MS SQL", ["1434"] = "MS SQL Browser", ["1521"] = "Oracle", ["2049"] = "NFS",
+        ["3268"] = "AD Global Catalog", ["3269"] = "AD Global Catalog (SSL)", ["3306"] = "MySQL",
+        ["3389"] = "RDP", ["5432"] = "PostgreSQL", ["5666"] = "Nagios NRPE", ["5985"] = "WinRM",
+        ["5986"] = "WinRM (HTTPS)", ["6379"] = "Redis", ["8080"] = "HTTP (alternatif)",
+        ["8443"] = "HTTPS (alternatif)", ["9389"] = "AD Web Services", ["10050"] = "Zabbix Agent",
+        ["10051"] = "Zabbix Server"
+    };
+
+    public static Dictionary<string, string> Build(IConfiguration cfg)
+    {
+        var map = new Dictionary<string, string>(Defaults);
+        foreach (var c in cfg.GetSection("Envanter:SistemPortlari").GetChildren())
+            if (!string.IsNullOrWhiteSpace(c.Value)) map[c.Key.Trim()] = c.Value.Trim();
+        return map;
+    }
+
+    public static HostApp Label(HostApp h, string marker, Dictionary<string, string> map)
+    {
+        if (h.AppName == null || !IsMarker(h.AppName, marker)) return h;
+        string use = h.Port != null && map.TryGetValue(h.Port, out var name) ? name : $"port {h.Port ?? "?"}";
+        return h with { AppName = $"{marker}: {use}" };
+    }
+
+    // Büyük/küçük harf ve Türkçe İ/ı farkı gözetmeden; sonundaki nokta vb. yok sayılır.
+    static bool IsMarker(string value, string marker) =>
+        string.Compare(value.Trim().TrimEnd('.', ':', ' '), marker, Tr, System.Globalization.CompareOptions.IgnoreCase) == 0;
 }

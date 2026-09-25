@@ -58,6 +58,16 @@ Her yönde en yoğun 80 bağlantı gönderilir. Endpoint: `POST /api/ai/etki`.
 | `dbo.vip_envanteri` | VIP (load balancer) → havuz üyeleri: `loadbalancer_ip:loadbalancer_port` → `hostname, server_ip:server_port, loadbalancer_pool`. |
 | `dbo.vipgw` | Her segmentte LB'nin üyelere gittiği GW IP'si: `GWIP, FW, Segment (CIDR)`. |
 
+**Sistem portları:** `ERT_HOSTIPADDRESS.APPNAME` değeri "Sistem Portudur" olan kayıtlara portun kullanım
+şekli eklenir: `Sistem Portudur: RDP` (3389), `Sistem Portudur: SSH` (22), `Sistem Portudur: FTP` (21) …
+Bilinen portların listesi kodda (`SystemPorts`); kuruma özel portlar `appsettings.json`'dan eklenir ya da değiştirilir:
+
+```json
+"Envanter": { "SistemPortuEtiketi": "Sistem Portudur", "SistemPortlari": { "7001": "WebLogic", "3389": "RDP" } }
+```
+
+Listede olmayan port `Sistem Portudur: port 12345` olarak gösterilir.
+
 **VIP'ler:** LB havuz üyelerine VIP adresinden değil üyenin segmentindeki GW IP'sinden gider; bu yüzden
 VIP'in arkası Carbon Black ya da AppResponse'ta VIP IP'siyle görünmez.
 - Sorgulanan IP bir VIP ise üyeler ve GW IP'leri aynı sorguya eklenir. Üyeler topolojide
