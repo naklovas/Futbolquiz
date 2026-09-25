@@ -83,7 +83,7 @@ SQL kullanıcısıyla bağlanılacaksa: `User Id=dokuuser;Password=...` (şifrey
 |---|---|
 | `GET /api/flow?ip=&start=&end=&appliance=&sources=splunk,appresponse` | Birleşik ve zenginleştirilmiş akış. Bir kaynak hata verirse diğerinin sonucu yine döner. |
 
-`appliance=-1` (arayüzde "Tüm cihazlar"): `Servers` listesindeki tüm AppResponse cihazları paralel sorgulanır, sonuçlar birleştirilir. Aynı akışı birden fazla cihaz görüyorsa hit sayısı toplanır. Tek cihazın hatası diğerlerini durdurmaz.
+`appliance=-1` (arayüzde "Tüm kutular", varsayılan seçim): `Servers` listesindeki tüm AppResponse cihazları paralel sorgulanır, sonuçlar birleştirilir. Aynı akışı birden fazla cihaz görüyorsa hit sayısı toplanır. Tek cihazın hatası diğerlerini durdurmaz.
 
 | `POST /api/hop2` `{target, ips[], start, end, appliance, sources}` | Verilen sunucuların trafiği, sunucu başına gelen/giden segment özeti. En fazla `Hop2MaxPeers` (varsayılan 80) IP. |
 | `GET /api/splunk`, `GET /api/appresponse`, `GET /api/appliances` | Önceki endpoint'ler; çıktıları değişmedi. |

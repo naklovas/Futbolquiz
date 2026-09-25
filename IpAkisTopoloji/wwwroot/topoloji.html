@@ -140,7 +140,7 @@
     <label>IP adresi <input type="text" id="ip" placeholder="10.50.20.15" required></label>
     <label>Başlangıç <input type="datetime-local" id="start"></label>
     <label>Bitiş <input type="datetime-local" id="end"></label>
-    <label>AppResponse cihazı <select id="appliance"></select></label>
+    <label>AppResponse kutusu <select id="appliance"></select></label>
     <div class="checks">
       <label><input type="checkbox" id="srcSplunk" checked> Splunk</label>
       <label><input type="checkbox" id="srcAr" checked> AppResponse</label>
@@ -195,8 +195,9 @@ const sameSegment = e => isTargetSeg(e.peerSegment);
 async function loadAppliances() {
   try {
     const list = await (await fetch("api/appliances")).json();
-    $("#appliance").innerHTML = list.map(a => `<option value="${a.index}">${esc(a.name)}</option>`).join("")
-      + (list.length > 1 ? `<option value="-1">Tüm cihazlar (${list.length})</option>` : "") || `<option value="0">-</option>`;
+    // Varsayılan: tüm kutular birlikte sorgulanır; tek kutu seçmek de mümkün.
+    $("#appliance").innerHTML = (list.length > 1 ? `<option value="-1" selected>Tüm kutular (${list.length})</option>` : "")
+      + list.map(a => `<option value="${a.index}">${esc(a.name)}</option>`).join("") || `<option value="0">-</option>`;
   } catch { $("#appliance").innerHTML = `<option value="0">-</option>`; }
 }
 
