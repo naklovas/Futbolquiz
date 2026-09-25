@@ -1,4 +1,3 @@
 bin/
 obj/
-config.json
 appsettings.*.json

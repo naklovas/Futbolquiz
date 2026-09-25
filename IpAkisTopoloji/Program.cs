@@ -9,16 +9,7 @@ using System.Text.Json.Nodes;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// AppResponse ayarları: mevcut DeltaFlow config.json dosyası olduğu gibi kullanılır
-// (Credentials, Servers, SourcePathType, SourceL4, SourceL7, VifgIds).
-string? deltaFlowConfig = new[]
-{
-    Path.Combine(AppContext.BaseDirectory, "config.json"),
-    @"C:\DeltaFlow\config.json"
-}.FirstOrDefault(File.Exists);
-
-if (deltaFlowConfig != null)
-    builder.Configuration.AddJsonFile(deltaFlowConfig, optional: true, reloadOnChange: true);
+// Tüm ayarlar (Splunk, AppResponse, envanter) appsettings.json'dan okunur.
 
 builder.Services.AddHttpClient("splunk", c => c.Timeout = TimeSpan.FromMinutes(10))
     .ConfigurePrimaryHttpMessageHandler(() => CreateHandler(builder.Configuration.GetValue("Splunk:IgnoreSslErrors", false)));
@@ -30,8 +21,7 @@ builder.Services.AddSingleton<EnvanterService>();
 
 var app = builder.Build();
 
-app.Logger.LogInformation("AppResponse config: {Path}", deltaFlowConfig ?? "bulunamadı (appsettings.json kullanılıyor)");
-
+app.Logger.LogInformation("AppResponse cihaz sayısı: {Count}", app.Configuration.GetSection("Servers").GetChildren().Count());
 app.Logger.LogInformation("Splunk BaseUrl: {Url}", app.Configuration["Splunk:BaseUrl"]);
 
 app.UseDefaultFiles();
