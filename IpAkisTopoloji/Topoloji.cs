@@ -28,8 +28,8 @@ sealed class EnvanterService(IConfiguration cfg, ILogger<EnvanterService> log)
             try
             {
                 _snap = await LoadAsync(ct);
-                log.LogInformation("Envanter yüklendi: {Seg} segment, {Host} host kaydı",
-                    _snap.SegmentCount, _snap.HostCount);
+                log.LogInformation("Envanter yüklendi: {Seg} segment, {Host} host, {Vip} VIP üyesi, {Gw} VIP GW",
+                    _snap.SegmentCount, _snap.HostCount, _snap.VipMemberCount, _snap.VipGwCount);
                 return _snap;
             }
             catch (Exception ex) when (current != null && !force && !ct.IsCancellationRequested)
@@ -87,7 +87,33 @@ sealed class EnvanterService(IConfiguration cfg, ILogger<EnvanterService> log)
             }
         }
 
-        return new EnvanterSnapshot(segments, hosts);
+        // VIP tabloları opsiyonel: okunamazsa diğer envanterle devam edilir.
+        string vipTable = cfg["Envanter:VipTablosu"] ?? "dbo.vip_envanteri";
+        string vipGwTable = cfg["Envanter:VipGwTablosu"] ?? "dbo.vipgw";
+        var vips = new List<VipRow>();
+        var vipGws = new List<VipGwRow>();
+        try
+        {
+            await using (var cmd = new SqlCommand(
+                $"SELECT hostname, server_ip, server_port, server_type, loadbalancer_ip, loadbalancer_port, loadbalancer_pool FROM {vipTable}", conn))
+            await using (var r = await cmd.ExecuteReaderAsync(ct))
+            {
+                while (await r.ReadAsync(ct))
+                    vips.Add(new VipRow(Clean(r, 0), Clean(r, 1), Clean(r, 2), Clean(r, 3), Clean(r, 4), Clean(r, 5), Clean(r, 6)));
+            }
+            await using (var cmd = new SqlCommand($"SELECT GWIP, FW, Segment FROM {vipGwTable}", conn))
+            await using (var r = await cmd.ExecuteReaderAsync(ct))
+            {
+                while (await r.ReadAsync(ct))
+                    vipGws.Add(new VipGwRow(Clean(r, 0), Clean(r, 1), Clean(r, 2)));
+            }
+        }
+        catch (SqlException ex)
+        {
+            log.LogWarning(ex, "VIP tabloları okunamadı ({Vip}, {Gw}); VIP çözümlemesi kapalı.", vipTable, vipGwTable);
+        }
+
+        return new EnvanterSnapshot(segments, hosts, vips, vipGws);
     }
 
     static string? Clean(SqlDataReader r, int i) => r.IsDBNull(i) ? null : EnvanterSnapshot.Clean(Convert.ToString(r.GetValue(i)));
@@ -103,6 +129,20 @@ record SegmentInfo(string Cidr, string? Vlan, string? Tenant, string? Applicatio
 record HostApp(string? Ip, string? Port, string? VipIp, string? VipPort, string? AppName, string? Website,
     string? UnixName, string? ServiceName, string? VarlikMuhafizi, string? SunucuIsletenBirim, string? UygulamaVarlikSahibi);
 
+// vip_envanteri satırı ve vipgw satırı (ham)
+record VipRow(string? Hostname, string? ServerIp, string? ServerPort, string? ServerType,
+    string? LbIp, string? LbPort, string? Pool);
+record VipGwRow(string? GwIp, string? Fw, string? Segment);
+
+// VIP (load balancer) havuz üyesi: LB, üyeye kendi segmentindeki GW IP'si üzerinden gider.
+record VipMember(string? Hostname, string Ip, string? Port, string? Type, string LbIp, string? LbPort, string? Pool,
+    List<string> GwIps, string? Fw, SegmentInfo? Segment)
+{
+    public long Hits { get; init; }        // üyenin bu portuna gelen trafik
+    public long GwHits { get; init; }      // bunun LB GW IP'lerinden gelen kısmı
+    public bool Verified => GwHits > 0;    // GW → üye:port akışı görüldü mü
+}
+
 // Kind: "ip-port" (birebir), "vip" (VIP_IP+VIP_PORT), "ip" (sadece IP), "vip-ip" (sadece VIP_IP), "yok"
 record AppMatch(string Kind, List<HostApp> Apps);
 
@@ -111,13 +151,20 @@ sealed class EnvanterSnapshot
     public DateTimeOffset LoadedAt { get; } = DateTimeOffset.Now;
     public int SegmentCount { get; }
     public int HostCount { get; }
+    public int VipMemberCount { get; }
+    public int VipGwCount { get; }
 
     // Prefix uzunluğuna göre (0..32) network adresi -> segment; en uzun prefix kazanır.
     readonly Dictionary<uint, SegmentInfo>?[] _segByPrefix = new Dictionary<uint, SegmentInfo>?[33];
     readonly Dictionary<string, List<HostApp>> _byIp = new();
     readonly Dictionary<string, List<HostApp>> _byVip = new();
+    readonly Dictionary<string, List<VipMember>> _vipByLb = new();
+    readonly Dictionary<string, List<VipMember>> _vipByMember = new();
+    readonly Dictionary<string, string?> _gwFw = new();
+    readonly Dictionary<uint, List<VipGwRow>>?[] _gwByPrefix = new Dictionary<uint, List<VipGwRow>>?[33];
 
-    public EnvanterSnapshot(List<SegmentInfo> segments, List<HostApp> hosts)
+    public EnvanterSnapshot(List<SegmentInfo> segments, List<HostApp> hosts,
+        List<VipRow>? vips = null, List<VipGwRow>? vipGws = null)
     {
         foreach (var s in segments)
         {
@@ -133,6 +180,57 @@ sealed class EnvanterSnapshot
             if (h.VipIp != null) Add(_byVip, h.VipIp, h);
             HostCount++;
         }
+
+        foreach (var g in vipGws ?? [])
+        {
+            if (g.GwIp == null || g.Segment == null || !TryParseCidr(g.Segment, out uint net, out int prefix)) continue;
+            var map = _gwByPrefix[prefix] ??= new();
+            if (!map.TryGetValue(net, out var list)) map[net] = list = [];
+            list.Add(g);
+            _gwFw.TryAdd(g.GwIp, g.Fw);
+            VipGwCount++;
+        }
+
+        // Aynı üye birden fazla satırda olabilir: (LB IP, LB port, üye IP, üye port) tekilleştirilir.
+        foreach (var v in (vips ?? []).Where(v => v.LbIp != null && v.ServerIp != null)
+                     .DistinctBy(v => (v.LbIp, v.LbPort, v.ServerIp, v.ServerPort)))
+        {
+            var gws = FindGws(v.ServerIp!);
+            var m = new VipMember(v.Hostname, v.ServerIp!, v.ServerPort, v.ServerType, v.LbIp!, v.LbPort, v.Pool,
+                gws.Select(g => g.GwIp!).Distinct().ToList(), gws.FirstOrDefault()?.Fw, FindSegment(v.ServerIp!));
+            if (!_vipByLb.TryGetValue(m.LbIp, out var l1)) _vipByLb[m.LbIp] = l1 = [];
+            l1.Add(m);
+            if (!_vipByMember.TryGetValue(m.Ip, out var l2)) _vipByMember[m.Ip] = l2 = [];
+            l2.Add(m);
+            VipMemberCount++;
+        }
+    }
+
+    // IP bir VIP ise havuz üyeleri (port verilirse o LB portundakiler; yoksa hepsi).
+    public List<VipMember> VipMembers(string lbIp, string? lbPort = null)
+    {
+        if (!_vipByLb.TryGetValue(lbIp, out var all)) return [];
+        if (lbPort == null) return all;
+        var onPort = all.Where(m => m.LbPort == lbPort).ToList();
+        return onPort.Count > 0 ? onPort : all;
+    }
+
+    // IP hangi VIP'lerin havuz üyesi?
+    public List<VipMember> MemberOf(string ip) => _vipByMember.TryGetValue(ip, out var l) ? l : [];
+
+    // IP bir LB GW IP'si mi? (FW adıyla)
+    public bool IsVipGw(string ip, out string? fw) => _gwFw.TryGetValue(ip, out fw);
+
+    // Üyenin segmentindeki VIP GW'leri (en uzun prefix; bir segmentte birden fazla GW olabilir)
+    List<VipGwRow> FindGws(string ip)
+    {
+        if (!TryToUInt(ip, out uint addr)) return [];
+        for (int p = 32; p >= 0; p--)
+        {
+            var map = _gwByPrefix[p];
+            if (map != null && map.TryGetValue(addr & Mask(p), out var list)) return list;
+        }
+        return [];
     }
 
     public SegmentInfo? FindSegment(string ip)
@@ -215,7 +313,11 @@ record SourceStatus(bool Ok, string? Error, List<string> Messages, long? Elapsed
     public static SourceStatus Skipped => new(false, "Sorgulanmadı", [], null, 0);
 }
 
-record TargetInfo(string Ip, SegmentInfo? Segment, List<HostApp> Apps);
+record TargetInfo(string Ip, SegmentInfo? Segment, List<HostApp> Apps)
+{
+    public List<VipMember>? Vip { get; init; }       // sorgulanan IP bir VIP ise havuz üyeleri (trafikle)
+    public List<VipMember>? MemberOf { get; init; }  // sorgulanan IP hangi VIP'lerin üyesi
+}
 
 record FlowEdge(
     string Direction,          // "in" | "out"
@@ -227,7 +329,12 @@ record FlowEdge(
     List<string> Computers, List<string> Processes, List<string> Urls,
     SegmentInfo? PeerSegment,
     AppMatch? PeerApps,        // gelen: karşı hostta kayıtlı uygulamalar (IP), giden: hedef IP:port uygulaması
-    AppMatch? LocalApp);       // sadece gelen: sorgulanan IP:port'ta çalışan uygulama
+    AppMatch? LocalApp)        // sadece gelen: sorgulanan IP:port'ta çalışan uygulama
+{
+    public VipMember? ViaVip { get; init; }          // bu kenar VIP → havuz üyesi (sorgulanan IP bir VIP)
+    public List<VipMember>? PeerVip { get; init; }   // karşı IP bir VIP: arkasındaki üyeler
+    public string? PeerVipGw { get; init; }          // karşı IP bir LB GW'si: FW adı
+}
 
 record FlowResponse(TargetInfo Target, List<FlowEdge> Inbound, List<FlowEdge> Outbound,
     SourceStatus Splunk, SourceStatus AppResponse, SourceStatus Envanter, long ElapsedMs);
@@ -388,4 +495,49 @@ static class Hop2Builder
                     .OfType<string>().Distinct().Take(MaxApps).ToList()))
             .OrderByDescending(a => a.Hits)
             .ToList();
+}
+
+// ---------------------------------------------------------------------------
+// VIP (load balancer) çözümlemesi: VIP'in arkasındaki havuz üyeleri ve GW üzerinden trafik.
+// ---------------------------------------------------------------------------
+static class VipResolver
+{
+    // Karşı IP bir VIP ise üyelerini, bir LB GW'si ise FW adını kenara ekler.
+    public static List<FlowEdge> Annotate(List<FlowEdge> edges, EnvanterSnapshot env) =>
+        edges.Select(e =>
+        {
+            var members = env.VipMembers(e.PeerIp, e.Port == "" ? null : e.Port);
+            string? gwFw = env.IsVipGw(e.PeerIp, out var fw) ? (fw ?? "LB GW") : null;
+            return members.Count == 0 && gwFw == null ? e : e with { PeerVip = members.Count > 0 ? members : null, PeerVipGw = gwFw };
+        }).ToList();
+
+    // Sorgulanan IP bir VIP: her üye için "VIP → üye:port" kenarı. Trafik, üyenin o portuna gelen
+    // akışlardan; GW'den gelen kısım doğrulama olarak ayrıca tutulur.
+    public static (List<VipMember> members, List<FlowEdge> edges) MemberEdges(
+        List<VipMember> vipMembers, SplunkResult? sp, AppResponseResult? ar, EnvanterSnapshot env)
+    {
+        var members = new List<VipMember>();
+        var edges = new List<FlowEdge>();
+        var inboundCache = new Dictionary<string, List<FlowEdge>>();
+
+        foreach (var m in vipMembers.DistinctBy(m => (m.Ip, m.Port)))
+        {
+            if (!inboundCache.TryGetValue(m.Ip, out var mIn))
+                inboundCache[m.Ip] = mIn = FlowBuilder.Build(m.Ip, sp, ar, env).inbound;
+            var onPort = mIn.Where(e => m.Port == null || e.Port == m.Port).ToList();
+            long gwHits = onPort.Where(e => env.IsVipGw(e.PeerIp, out _)).Sum(e => e.Hits);
+            var mm = m with { Hits = onPort.Sum(e => e.Hits), GwHits = gwHits };
+            members.Add(mm);
+
+            edges.Add(new FlowEdge("out", m.Ip, m.Port ?? "",
+                onPort.SelectMany(e => e.Protocols).Distinct().ToList(),
+                mm.Hits, onPort.Sum(e => e.SplunkHits), onPort.Sum(e => e.AppResponseHits),
+                onPort.Select(e => e.FirstSeen).OfType<string>().DefaultIfEmpty().Min(),
+                onPort.Select(e => e.LastSeen).OfType<string>().DefaultIfEmpty().Max(),
+                onPort.SelectMany(e => e.Computers).Distinct().ToList(),
+                onPort.SelectMany(e => e.Processes).Distinct().ToList(),
+                [], m.Segment ?? env.FindSegment(m.Ip), env.Match(m.Ip, m.Port), null) { ViaVip = mm });
+        }
+        return (members, edges);
+    }
 }

@@ -10,14 +10,14 @@
     --bg: #f5f6f8; --panel: #ffffff; --text: #1d2330; --muted: #677084; --line: #dde1e8;
     --in: #2f6fd6; --in-soft: #e5eefc; --out: #d9822b; --out-soft: #fcefe2;
     --ok: #2e8b57; --err: #c8353a; --warn: #b7791f; --unknown: #9aa1ad;
-    --node: #ffffff; --target: #1d2330; --target-text: #ffffff;
+    --node: #ffffff; --target: #1d2330; --target-text: #ffffff; --vip: #7c3aed;
   }
   @media (prefers-color-scheme: dark) {
     :root {
       --bg: #14171d; --panel: #1c2028; --text: #e4e7ec; --muted: #9098a8; --line: #2d333e;
       --in: #6ea0f0; --in-soft: #1f2d45; --out: #eba35c; --out-soft: #3a2c1d;
       --ok: #5cc28a; --err: #ef6b6f; --warn: #e0b050; --unknown: #6b7280;
-      --node: #232833; --target: #e4e7ec; --target-text: #14171d;
+      --node: #232833; --target: #e4e7ec; --target-text: #14171d; --vip: #a78bfa;
     }
   }
   * { box-sizing: border-box; }
@@ -74,7 +74,12 @@
   .sgn.unknown rect { fill: color-mix(in srgb, var(--unknown) 15%, transparent); stroke: var(--unknown); stroke-dasharray: 5 4; }
   .sgn.same rect { stroke-width: 3; }
   .srv.sel rect, .sgn.sel rect, .srv.on rect, .sgn.on rect { stroke-width: 3; }
-  .srv.more rect, .sgn.more rect { stroke-dasharray: 4 3; }
+  .srv.more rect, .sgn.more rect, .srv.nohit rect { stroke-dasharray: 4 3; }
+  .srv.vip rect { stroke: var(--vip); stroke-width: 2; }
+  .srv .vipt { fill: var(--vip); font-size: 10.5px; font-weight: 700; }
+  .vipbox { margin-top: 14px; border: 1px solid var(--vip); border-radius: 8px; padding: 10px 12px; background: color-mix(in srgb, var(--vip) 7%, transparent); }
+  .vipbox h2 { color: var(--vip); }
+  .badge.vip { border-color: var(--vip); color: var(--vip); }
   .srv .t1, .sgn .t1 { fill: var(--text); font-size: 13px; font-weight: 700; }
   .srv .t1 { font-family: Consolas, ui-monospace, monospace; }
   .srv .t2, .sgn .t2 { fill: var(--text); font-size: 11.5px; }
@@ -392,8 +397,34 @@ function renderTarget(d) {
           <div class="kpi"><b style="color:var(--warn)">${fmt(unknown)}</b><span title="Segment veya uygulama envanterinde kaydı olmayan karşı IP sayısı">segment/uygulama kaydı eksik IP</span></div>
         </div>
         <h2>Bu makinedeki uygulamalar</h2>${apps}
+        ${vipCard(t)}
       </div>
     </div>`;
+}
+
+// VIP kartı: sorgulanan IP bir VIP ise havuz üyeleri; bir havuzun üyesiyse hangi VIP'ler.
+function vipCard(t) {
+  let html = "";
+  if (t.vip?.length) {
+    const pools = [...new Set(t.vip.map(m => m.pool).filter(Boolean))];
+    html += `<div class="vipbox"><h2>Bu IP bir VIP (load balancer) · ${fmt(t.vip.length)} havuz üyesi</h2>
+      <div class="small muted" style="margin-bottom:6px">${esc(pools.join(", "))} — LB üyelere segmentlerindeki GW IP'si üzerinden gider; "doğrulandı" GW → üye trafiğinin görüldüğünü gösterir.</div>
+      <div class="tbl-wrap" style="max-height:240px"><table>
+        <thead><tr><th>Üye</th><th>IP:port</th><th>LB port</th><th>Segment</th><th>GW (FW)</th><th class="num">Trafik</th><th>Durum</th></tr></thead>
+        <tbody>${t.vip.map(m => `<tr><td><b>${esc(m.hostname ?? "")}</b><div class="small muted">${esc(m.type ?? "")}</div></td>
+          <td class="mono">${esc(m.ip)}:${esc(m.port ?? "")}</td><td class="mono">${esc(m.lbPort ?? "")}</td>
+          <td>${segCell(m.segment)}</td><td class="mono">${esc(m.gwIps.join(", ") || "—")}<div class="small muted">${esc(m.fw ?? "")}</div></td>
+          <td class="num">${fmt(m.hits)}</td>
+          <td>${m.verified ? '<span class="badge strong">doğrulandı</span>' : m.hits ? '<span class="badge weak">GW görülmedi</span>' : '<span class="badge">trafik yok</span>'}</td></tr>`).join("")}</tbody>
+      </table></div></div>`;
+  }
+  if (t.memberOf?.length) {
+    html += `<div class="vipbox"><h2>Bu sunucu bir VIP havuzunda</h2>
+      ${t.memberOf.map(m => `<div>VIP <a href="?ip=${encodeURIComponent(m.lbIp)}" class="mono">${esc(m.lbIp)}:${esc(m.lbPort ?? "")}</a>
+        <span class="muted small">${esc(m.pool ?? "")} · bu sunucuda port ${esc(m.port ?? "")}</span></div>`).join("")}
+      <div class="small muted" style="margin-top:4px">İstemciler bu sunucuya VIP üzerinden gelir; gelen trafikte LB GW IP'si görünür. VIP'e tıklayarak istemcileri görebilirsiniz.</div></div>`;
+  }
+  return html;
 }
 
 // ---------- Topoloji modeli ----------
@@ -403,8 +434,10 @@ function sideServers(dir) {
   const m = new Map();
   for (const e of edges) {
     let s = m.get(e.peerIp);
-    if (!s) m.set(e.peerIp, s = { ip: e.peerIp, dir, hits: 0, ports: new Set(), seg: e.peerSegment, apps: appNames(e.peerApps), localApps: new Set() });
+    if (!s) m.set(e.peerIp, s = { ip: e.peerIp, dir, hits: 0, ports: new Set(), seg: e.peerSegment, apps: appNames(e.peerApps), localApps: new Set(),
+      viaVip: e.viaVip ?? null, peerVip: e.peerVip ?? null, peerVipGw: e.peerVipGw ?? null });
     s.hits += e.hits; s.ports.add(e.port);
+    if (e.peerVip && !s.peerVip) s.peerVip = e.peerVip;
     if (dir === "in") appNames(e.localApp).forEach(a => s.localApps.add(a));
   }
   return [...m.values()].sort((a, b) => b.hits - a.hits);
@@ -525,17 +558,32 @@ function renderTopology() {
       edges += `<path class="edge ${dir}" data-rel="${rel}" marker-end="url(#arr-${dir})" stroke-width="${sw(s.hits)}" d="${path}"><title>${esc(dir === "in" ? `${s.ip} → ${d.target.ip}` : `${d.target.ip} → ${s.ip}`)} ${esc(portsLabel(s.ports))}: ${fmt(s.hits)} hit</title></path>`;
 
       const isSel = sel && sel.type === "srv" && sel.dir === dir && sel.ip === s.ip;
-      const appTxt = dir === "in"
+      let appTxt = dir === "in"
         ? (s.apps.join(", ") || "uygulama ?") + (s.localApps.size ? `  →  ${[...s.localApps].join(", ")}` : "")
         : (s.apps.join(", ") || "uygulama ?");
-      nodes += `<g class="srv ${dir}${s.more ? " more" : ""}${isSel ? " sel" : ""}" data-id="${srvId(dir, i)}" data-dir="${dir}" data-ip="${esc(s.ip)}" transform="translate(${srvX},${s.y})">
+      // VIP işaretleri: üye (VIP → üye), karşı IP VIP, karşı IP LB GW
+      let vipTag = "", line3 = [segLabel(s.seg) ?? "segment ?", portsLabel(s.ports)].join(" · ");
+      if (s.viaVip) {
+        vipTag = s.viaVip.verified ? "VIP ÜYESİ ✓" : "VIP ÜYESİ";
+        appTxt = `${s.viaVip.hostname ?? ""} ${s.apps.length ? "· " + s.apps.join(", ") : ""}`.trim() || appTxt;
+        const gws = s.viaVip.gwIps;
+        line3 = s.hits ? `${segLabel(s.seg) ?? "segment ?"} · GW ${gws[0] ?? "?"}${gws.length > 1 ? " +" + (gws.length - 1) : ""}` : "trafik görülmedi (envanter)";
+      } else if (s.peerVip) {
+        vipTag = `VIP → ${s.peerVip.length} ÜYE`;
+        appTxt = [...new Set(s.peerVip.map(m => m.hostname ?? m.ip))].join(", ");
+      } else if (s.peerVipGw) {
+        vipTag = "LB GW";
+        appTxt = `Load balancer GW · ${s.peerVipGw}`;
+      }
+      nodes += `<g class="srv ${dir}${s.more ? " more" : ""}${isSel ? " sel" : ""}${vipTag ? " vip" : ""}${s.viaVip && !s.hits ? " nohit" : ""}" data-id="${srvId(dir, i)}" data-dir="${dir}" data-ip="${esc(s.ip)}" transform="translate(${srvX},${s.y})">
         <title>${esc(s.ip)}\n${esc(s.more ? s.list.slice(0, 30).map(x => x.ip).join(", ") : [segLabel(s.seg) ?? "segment ?", s.apps.join(", "), "Port: " + portsLabel(s.ports)].join("\n"))}\n${fmt(s.hits)} hit</title>
         <rect width="${VW}" height="${SH}" rx="8"></rect>
         <text class="t1" x="10" y="19">${esc(s.ip)}</text>
         <text class="num" x="${VW - 10}" y="19" text-anchor="end">${fmt(s.hits)}</text>
+        ${vipTag ? `<text class="vipt" x="${VW - 60}" y="19" text-anchor="end">${esc(vipTag)}</text>` : ""}
         ${s.more ? `<text class="t3" x="10" y="38">2. seviyede sorgulanmadı</text>` : `
         <text class="t2" x="10" y="35">${esc(trunc(appTxt, 38))}</text>
-        <text class="t3" x="10" y="50">${esc(trunc([segLabel(s.seg) ?? "segment ?", portsLabel(s.ports)].join(" · "), 42))}</text>`}
+        <text class="t3" x="10" y="50">${esc(trunc(line3, 42))}</text>`}
       </g>`;
     });
 
@@ -586,7 +634,7 @@ function renderTopology() {
       <text x="${TW / 2}" y="55" text-anchor="middle" style="font-size:17px;font-weight:700">${esc(t.ip)}</text>
       <text x="${TW / 2}" y="78" text-anchor="middle" style="font-weight:600">${esc(trunc(t.segment ? t.segment.label : "segment ?", 28))}</text>
       <text x="${TW / 2}" y="96" text-anchor="middle" style="font-size:11px">${esc(t.segment ? [t.segment.cidr, t.segment.vlan && "VLAN " + t.segment.vlan].filter(Boolean).join(" · ") : "")}</text>
-      <text x="${TW / 2}" y="120" text-anchor="middle" style="font-size:11.5px">${esc(trunc(tApps.join(", ") || "uygulama kaydı yok", 32))}</text>
+      <text x="${TW / 2}" y="120" text-anchor="middle" style="font-size:11.5px">${esc(trunc(t.vip?.length ? `VIP · ${[...new Set(t.vip.map(m => (m.pool ?? "").split("/").pop()))].join(", ")}` : tApps.join(", ") || "uygulama kaydı yok", 32))}</text>
     </g>
   </svg>`;
   $("#topo").innerHTML = svg;
@@ -698,6 +746,13 @@ function renderDetail() {
   const seg = edges[0]?.peerSegment;
   const apps = edges.flatMap(e => e.peerApps?.apps ?? []);
   const hop = state.hop2?.peers?.get(s.ip);
+  const pv = edges.find(e => e.peerVip)?.peerVip, via = edges.find(e => e.viaVip)?.viaVip, gw = edges.find(e => e.peerVipGw)?.peerVipGw;
+  const vipHtml = pv ? `<div class="vipbox"><h2>Bu IP bir VIP · ${fmt(pv.length)} havuz üyesi</h2>
+      ${pv.map(m => `<div class="mono small">${esc(m.hostname ?? "")} · ${esc(m.ip)}:${esc(m.port ?? "")} <span class="muted">${esc(m.pool ?? "")}</span></div>`).join("")}
+      <div class="small muted" style="margin-top:4px">Arkasını görmek için "Bu IP'nin topolojisini aç".</div></div>`
+    : via ? `<div class="vipbox"><h2>VIP havuz üyesi</h2><div class="small">${esc(via.hostname ?? "")} · VIP ${esc(via.lbIp)}:${esc(via.lbPort ?? "")} · ${esc(via.pool ?? "")}
+      <br>GW: ${esc(via.gwIps.join(", ") || "?")} (${esc(via.fw ?? "")}) · ${via.verified ? "GW → üye trafiği görüldü" : "GW → üye trafiği görülmedi"}</div></div>`
+    : gw ? `<div class="vipbox"><h2>Load balancer GW</h2><div class="small">Bu IP bir LB GW'si (${esc(gw)}); istemciler buraya bir VIP üzerinden geliyor.</div></div>` : "";
   el.innerHTML = `<div class="panel">
     <div class="toolbar">
       <h2 style="margin:0">${esc(s.ip)} <span class="muted" style="font-weight:400">${s.dir === "in" ? "→ sorgulanan IP'ye geliyor" : "← sorgulanan IP buraya gidiyor"}</span></h2>
@@ -710,6 +765,7 @@ function renderDetail() {
       <div>${segDl(seg)}
         ${apps.length ? `<div style="margin-top:8px"><b>Uygulama:</b> ${esc([...new Set(apps.map(appName))].join(", "))}
           <div class="small muted">${esc([...new Set(apps.map(a => a.varlikMuhafizi).filter(Boolean))].join(", "))}</div></div>` : ""}
+        ${vipHtml}
       </div>
       <div>
         <div class="tbl-wrap" style="max-height:220px"><table>
@@ -743,7 +799,7 @@ function buildAiRequest() {
       return {
         ip: e.peerIp,
         segment: e.peerSegment ? `${e.peerSegment.label}${e.peerSegment.label !== e.peerSegment.cidr ? " " + e.peerSegment.cidr : ""}` : null,
-        apps: appNames(e.peerApps),
+        apps: [...appNames(e.peerApps), ...(vipText(e) ? [vipText(e)] : [])],
         owners: [...new Set(apps.flatMap(a => [a.varlikMuhafizi, a.uygulamaVarlikSahibi]).filter(Boolean))],
         port: e.port === "" ? "web" : e.port,
         hits: e.hits,
@@ -756,7 +812,9 @@ function buildAiRequest() {
     question: $("#aiQ").value.trim(),
     ip: t.ip,
     segment: t.segment ? `${t.segment.label} (${t.segment.cidr}${t.segment.vlan ? ", VLAN " + t.segment.vlan : ""})` : null,
-    apps: [...new Set(t.apps.map(a => `${appName(a)}${a.port ? " :" + a.port : ""}`))],
+    apps: [...new Set(t.apps.map(a => `${appName(a)}${a.port ? " :" + a.port : ""}`)),
+      ...(t.vip?.length ? [`VIP (load balancer), havuz: ${[...new Set(t.vip.map(m => m.pool).filter(Boolean))].join(", ")}; üyeler: ${t.vip.map(m => `${m.hostname ?? ""} ${m.ip}:${m.port ?? ""}`).join(", ")}`] : []),
+      ...(t.memberOf?.length ? [`VIP havuz üyesi: ${t.memberOf.map(m => `${m.lbIp}:${m.lbPort ?? ""} (${m.pool ?? ""})`).join(", ")}`] : [])],
     period: state.lastParams ? `${state.lastParams.get("start").replace("T", " ")} - ${state.lastParams.get("end").replace("T", " ")}` : null,
     inbound: edgesOf("in"), outbound: edgesOf("out"),
     inboundTotal: sideServers("in").length, outboundTotal: sideServers("out").length
@@ -863,7 +921,7 @@ const COLS = {
   in: [
     { h: "Kaynak IP", v: e => e.peerIp, c: "mono" },
     { h: "Kaynak segment", v: e => segLabel(e.peerSegment) ?? "", html: e => segCell(e.peerSegment) },
-    { h: "Kaynak uygulama", v: e => appNames(e.peerApps).join(", "), html: e => appsCell(e.peerApps, false) },
+    { h: "Kaynak uygulama", v: e => [appNames(e.peerApps).join(", "), vipText(e)].filter(Boolean).join(" · "), html: e => appsCell(e.peerApps, false) + vipBadge(e) },
     { h: "Port", v: e => portText(e.port), c: "mono" },
     { h: "Karşılayan uygulama", v: e => appNames(e.localApp).join(", "), html: e => appsCell(e.localApp, true) },
     ...commonCols()
@@ -872,7 +930,7 @@ const COLS = {
     { h: "Hedef IP", v: e => e.peerIp, c: "mono" },
     { h: "Hedef segment", v: e => segLabel(e.peerSegment) ?? "", html: e => segCell(e.peerSegment) },
     { h: "Port", v: e => portText(e.port), c: "mono" },
-    { h: "Hedef uygulama", v: e => appNames(e.peerApps).join(", "), html: e => appsCell(e.peerApps, true) },
+    { h: "Hedef uygulama", v: e => [appNames(e.peerApps).join(", "), vipText(e)].filter(Boolean).join(" · "), html: e => appsCell(e.peerApps, true) + vipBadge(e) },
     ...commonCols()
   ]
 };
@@ -886,6 +944,10 @@ function commonCols() {
     { h: "Detay", v: e => [...e.computers, ...e.processes, ...e.urls].join(" "), html: detailCell }
   ];
 }
+
+const vipText = e => e.peerVip ? `VIP → ${[...new Set(e.peerVip.map(m => m.hostname ?? m.ip))].join(", ")}`
+  : e.viaVip ? `VIP üyesi (${e.viaVip.lbIp}:${e.viaVip.lbPort ?? ""})` : e.peerVipGw ? `LB GW (${e.peerVipGw})` : "";
+const vipBadge = e => vipText(e) ? `<div><span class="badge vip">${esc(vipText(e))}</span></div>` : "";
 
 function segCell(s) {
   return s ? `${esc(s.label)}<div class="small muted mono">${esc(s.cidr)}${s.vlan ? " · VLAN " + esc(s.vlan) : ""}</div>` : `<span class="unk">bilinmiyor</span>`;

@@ -55,6 +55,18 @@ Her yönde en yoğun 80 bağlantı gönderilir. Endpoint: `POST /api/ai/etki`.
 | `dbo.KonsolideSegmentler4` | `SEGMENT` (CIDR) en uzun prefix eşleşmesiyle IP'ye segment bulur. `#N/A`, `NULL` boş sayılır. Ekrandaki ad: EPGName → ApplicationProfile → Description → CIDR. |
 | `dbo.ERT_HOSTIPADDRESS` | IP:port → uygulama. Eşleşme sırası: `IPADDRESS+PORT` → `VIP_IP+VIP_PORT` → sadece `IPADDRESS` → sadece `VIP_IP`. Hangisiyle eşleştiği tabloda rozet olarak görünür. |
 
+| `dbo.vip_envanteri` | VIP (load balancer) → havuz üyeleri: `loadbalancer_ip:loadbalancer_port` → `hostname, server_ip:server_port, loadbalancer_pool`. |
+| `dbo.vipgw` | Her segmentte LB'nin üyelere gittiği GW IP'si: `GWIP, FW, Segment (CIDR)`. |
+
+**VIP'ler:** LB havuz üyelerine VIP adresinden değil üyenin segmentindeki GW IP'sinden gider; bu yüzden
+VIP'in arkası Carbon Black ya da AppResponse'ta VIP IP'siyle görünmez.
+- Sorgulanan IP bir VIP ise üyeler ve GW IP'leri aynı sorguya eklenir. Üyeler topolojide
+  "gidilen" tarafta **VIP ÜYESİ** olarak çizilir (2. seviye böylece üyelerin arkasını da gösterir).
+  GW → üye:port trafiği görülen üye "doğrulandı" olarak işaretlenir.
+- Gidilen bir IP VIP ise kutusunda **VIP → n ÜYE** yazar; "Bu IP'nin topolojisini aç" ile arkasına geçilir.
+- Sorgulanan sunucu bir havuzun üyesiyse hangi VIP'in arkasında olduğu gösterilir; gelen trafikteki GW IP'leri **LB GW** olarak işaretlenir.
+- VIP tabloları okunamazsa uygulama VIP çözümlemesi olmadan çalışmaya devam eder.
+
 Gelen trafikte karşı tarafın kaynak portu geçici (ephemeral) olduğu için karşı hostun uygulaması
 sadece IP ile bulunur. Sorgulanan IP tarafındaki uygulama ise IP+port ile bulunur.
 

@@ -89,17 +89,25 @@ app.MapGet("/api/flow", async (string? ip, string? start, string? end, int? appl
     var wanted = (sources ?? "splunk,appresponse").ToLowerInvariant();
     var sw = Stopwatch.StartNew();
 
+    // Envanter önce: sorgulanan IP bir VIP ise havuz üyeleri ve GW'leri de aynı sorguya eklenir,
+    // çünkü LB üyelere VIP adresinden değil kendi GW IP'sinden gider.
+    var (env, envErr) = await Capture(() => envanter.GetAsync(false, ct), ct);
+    var vipMembers = env?.VipMembers(q!.Ip) ?? [];
+    var queryIps = new List<string> { q!.Ip };
+    queryIps.AddRange(vipMembers.SelectMany(m => m.GwIps.Prepend(m.Ip))
+        .Where(x => LookupQuery.TryParseIpv4(x, out _)).Distinct().Where(x => x != q.Ip)
+        .Take(cfg.GetValue("Hop2MaxPeers", 80)));
+
     var spTask = wanted.Contains("splunk")
-        ? Capture(() => SplunkService.QueryAsync(q!, cfg, factory.CreateClient("splunk"), ct), ct)
+        ? Capture(() => SplunkService.QueryAsync(q, cfg, factory.CreateClient("splunk"), ct, queryIps), ct)
         : Task.FromResult<(SplunkResult?, string?)>((null, null));
     var arTask = wanted.Contains("appresponse")
-        ? Capture(() => AppResponseService.QueryAnyAsync(q!, appliance ?? 0, cfg, factory.CreateClient("appresponse"), ct), ct)
+        ? Capture(() => AppResponseService.QueryAnyAsync(q, appliance ?? 0, cfg, factory.CreateClient("appresponse"), ct, queryIps), ct)
         : Task.FromResult<(AppResponseResult?, string?)>((null, null));
-    var envTask = Capture(() => envanter.GetAsync(false, ct), ct);
 
     try
     {
-        await Task.WhenAll(spTask, arTask, envTask);
+        await Task.WhenAll(spTask, arTask);
     }
     catch (OperationCanceledException) when (ct.IsCancellationRequested)
     {
@@ -110,11 +118,28 @@ app.MapGet("/api/flow", async (string? ip, string? start, string? end, int? appl
 
     var (sp, spErr) = spTask.Result;
     var (ar, arErr) = arTask.Result;
-    var (env, envErr) = envTask.Result;
 
-    var (inbound, outbound) = FlowBuilder.Build(q!.Ip, sp, ar, env);
-
+    var (inbound, outbound) = FlowBuilder.Build(q.Ip, sp, ar, env);
     var target = new TargetInfo(q.Ip, env?.FindSegment(q.Ip), env?.AppsOnIp(q.Ip) ?? []);
+
+    if (env != null)
+    {
+        inbound = VipResolver.Annotate(inbound, env);
+        outbound = VipResolver.Annotate(outbound, env);
+        var memberOf = env.MemberOf(q.Ip);
+        if (vipMembers.Count > 0)
+        {
+            // VIP → üyeler "giden" tarafa eklenir; böylece 2. seviye de üyelerin arkasını gösterir.
+            var (members, memberEdges) = VipResolver.MemberEdges(vipMembers, sp, ar, env);
+            outbound = outbound.Where(e => !memberEdges.Any(m => m.PeerIp == e.PeerIp && m.Port == e.Port))
+                .Concat(memberEdges).OrderByDescending(e => e.Hits).ToList();
+            target = target with { Vip = members, MemberOf = memberOf.Count > 0 ? memberOf : null };
+        }
+        else if (memberOf.Count > 0)
+        {
+            target = target with { MemberOf = memberOf };
+        }
+    }
 
     var (spSt, arSt, envSt) = Statuses(wanted, sp, spErr, ar, arErr, env, envErr);
     return Results.Ok(new FlowResponse(target, inbound, outbound, spSt, arSt, envSt, sw.ElapsedMilliseconds));
