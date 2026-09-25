@@ -435,8 +435,9 @@ static class AppResponseService
             applianceIndex = 0;
 
         string applianceName = servers[applianceIndex]["Name"] ?? "Riverbed";
-        string applianceIp = servers[applianceIndex]["Ip"]
-            ?? throw new InvalidOperationException($"'{applianceName}' cihazının Ip değeri tanımlı değil.");
+        string applianceIp = servers[applianceIndex]["Ip"] is { Length: > 0 } sip && !string.IsNullOrWhiteSpace(sip)
+            ? sip.Trim()
+            : throw new InvalidOperationException($"'{applianceName}' cihazının Ip değeri tanımlı değil.");
         string baseUrl = $"https://{applianceIp}";
 
         string sourcePathType = cfg["SourcePathType"] ?? "jobs";

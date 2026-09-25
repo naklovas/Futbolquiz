@@ -49,6 +49,10 @@ Hemen yenilemek için: `POST /api/envanter/yenile`. Durum: `GET /api/envanter/du
 "Envanter": { "SegmentTablosu": "dbo.KonsolideSegmentler4", "HostTablosu": "dbo.ERT_HOSTIPADDRESS", "CacheMinutes": 30 }
 ```
 
+AppResponse ayarları (`Credentials`, `Servers`, `SourcePathType`, `SourceL4`, `SourceL7`, `VifgIds`)
+`appsettings.json` içinde boş şablon olarak durur. `C:\DeltaFlow\config.json` (ya da uygulama klasöründe
+`config.json`) varsa oradaki değerler bunların üzerine yazar; yoksa `appsettings.json`'daki değerler kullanılır.
+
 SQL kullanıcısıyla bağlanılacaksa: `User Id=dokuuser;Password=...` (şifreyi repoya koyma).
 
 ## API
