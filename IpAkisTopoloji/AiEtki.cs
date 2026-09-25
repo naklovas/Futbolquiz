@@ -7,8 +7,12 @@ using System.Text.Json;
 // Şirket içi AI servisi (OpenAI uyumlu /chat/completions) ile etki analizi.
 // Arayüz sorgu sonucunun özetini gönderir; burada prompt kurulur ve servise iletilir.
 // ---------------------------------------------------------------------------
+// Apps: karşı sunucudaki uygulama(lar); LocalApps: gelen trafikte sorgulanan sunucuda karşılayan uygulama;
+// Processes: giden trafikte bağlantıyı açan süreç(ler) (Splunk); Hop2: karşı sunucunun 2. seviye segmentleri ve uygulamaları.
 record AiPeer(string Ip, string? Segment, List<string>? Apps, List<string>? Owners, List<string>? Ports,
-    long Hits, List<string>? LocalApps, List<string>? Hop2Segments);
+    long Hits, List<string>? LocalApps, List<string>? Processes, List<AiHop>? Hop2);
+
+record AiHop(string? Segment, List<string>? Apps, int IpCount);
 
 record AiRequest(string? Question, string? Ip, string? Segment, List<string>? Apps, string? Period,
     List<AiPeer>? Inbound, List<AiPeer>? Outbound, int? InboundTotal, int? OutboundTotal);
@@ -86,10 +90,11 @@ static class AiEtkiService
         if (Clean(r.Period) is { } period) sb.AppendLine($"- İncelenen zaman aralığı: {period}");
         sb.AppendLine();
 
+        string targetApps = JoinOr(r.Apps, "envanterde yok");
         AppendPeers(sb, "GELEN BAĞLANTILAR (bu sunucuyu kullanan sunucular; değişiklikten DOĞRUDAN etkilenirler)",
-            r.Inbound, r.InboundTotal, inbound: true);
+            r.Inbound, r.InboundTotal, inbound: true, targetApps);
         AppendPeers(sb, "GİDEN BAĞLANTILAR (bu sunucunun bağımlı olduğu servisler; değişiklik sonrası bu bağlantılar kontrol edilmeli)",
-            r.Outbound, r.OutboundTotal, inbound: false);
+            r.Outbound, r.OutboundTotal, inbound: false, targetApps);
 
         sb.AppendLine("YANITI TÜRKÇE, KISA VE MADDE MADDE, AŞAĞIDAKİ BAŞLIKLARLA VER:");
         sb.AppendLine("## Özet");
@@ -107,7 +112,8 @@ static class AiEtkiService
         return sb.ToString();
     }
 
-    static void AppendPeers(StringBuilder sb, string title, List<AiPeer>? peers, int? total, bool inbound)
+    // Her bağlantı iki ucundaki uygulamalarla, kaynak → hedef yönünde yazılır.
+    static void AppendPeers(StringBuilder sb, string title, List<AiPeer>? peers, int? total, bool inbound, string targetApps)
     {
         peers ??= [];
         int shown = Math.Min(peers.Count, MaxPeers);
@@ -117,19 +123,30 @@ static class AiEtkiService
 
         foreach (var p in peers.Take(MaxPeers))
         {
-            var parts = new List<string>
+            string ip = Clean(p.Ip) ?? "?";
+            string ports = JoinOr(p.Ports, "?");
+            string peerApps = JoinOr(p.Apps, "envanterde yok");
+
+            sb.AppendLine($"- {ip} | segment: {Clean(p.Segment) ?? "bilinmiyor"} | trafik: {p.Hits} bağlantı");
+            if (inbound)
             {
-                Clean(p.Ip) ?? "?",
-                $"segment: {Clean(p.Segment) ?? "bilinmiyor"}",
-                $"uygulama: {JoinOr(p.Apps, "bilinmiyor")}"
-            };
-            if (p.Owners is { Count: > 0 }) parts.Add($"sahip/muhafız: {JoinOr(p.Owners, "")}");
-            parts.Add($"port: {JoinOr(p.Ports, "-")}");
-            if (inbound && p.LocalApps is { Count: > 0 }) parts.Add($"kullandığı uygulama: {JoinOr(p.LocalApps, "")}");
-            parts.Add($"trafik: {p.Hits} bağlantı");
-            if (p.Hop2Segments is { Count: > 0 })
-                parts.Add($"{(inbound ? "bu sunucuya gelen segmentler" : "bu sunucunun gittiği segmentler")}: {JoinOr(p.Hop2Segments, "")}");
-            sb.AppendLine("- " + string.Join(" | ", parts));
+                string local = p.LocalApps is { Count: > 0 } ? JoinOr(p.LocalApps, "") : targetApps;
+                sb.AppendLine($"  bağlantı: {ip} (uygulama: {peerApps}) → SORGULANAN SUNUCU port {ports} (karşılayan uygulama: {local})");
+            }
+            else
+            {
+                string proc = p.Processes is { Count: > 0 } ? $"süreç: {JoinOr(p.Processes, "")}; " : "";
+                sb.AppendLine($"  bağlantı: SORGULANAN SUNUCU ({proc}sunucudaki uygulamalar: {targetApps}) → {ip} port {ports} (hedef uygulama: {peerApps})");
+            }
+            if (p.Owners is { Count: > 0 }) sb.AppendLine($"  {ip} sahip/muhafız: {JoinOr(p.Owners, "")}");
+            if (p.Hop2 is { Count: > 0 })
+            {
+                var hops = p.Hop2.Take(MaxList).Select(h =>
+                    $"{Clean(h.Segment) ?? "segment envanterde yok"} ({h.IpCount} IP; uygulama: {JoinOr(h.Apps, "bilinmiyor")})");
+                sb.AppendLine(inbound
+                    ? $"  {ip} sunucusuna gelen segmentler (dolaylı etki): {string.Join("; ", hops)}"
+                    : $"  {ip} sunucusunun gittiği segmentler: {string.Join("; ", hops)}");
+            }
         }
         sb.AppendLine();
     }
