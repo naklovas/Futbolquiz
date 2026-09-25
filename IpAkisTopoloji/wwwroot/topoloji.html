@@ -142,9 +142,9 @@ const pad = n => String(n).padStart(2, "0");
 const toLocalInput = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 
 const SERVER_CHOICES = [10, 15, 25, 40];  // her tarafta çizilen (ve 2. seviyede sorgulanan) sunucu sayısı
-const MAX_SEGS = 25;     // her tarafta çizilen 2. seviye segment sayısı
+const SEG_CHOICES = [8, 12, 25, 50];  // her tarafta çizilen 2. seviye segment sayısı
 const state = {
-  data: null, hop2: null, filter: null, zoom: 1, selected: null, maxServers: 15, lastParams: null,
+  data: null, hop2: null, filter: null, zoom: 1, selected: null, maxServers: 15, maxSegs: 12, lastParams: null,
   // Sol: sunuculara GELEN segmentler (in), sağ: sunucuların GİTTİĞİ segmentler (out). Değiştirilebilir.
   hopDir: { in: "in", out: "out" },
   search: { in: "", out: "" }, sort: { in: null, out: null }
@@ -164,9 +164,10 @@ const matchBadge = m => m ? `<span class="badge ${MATCH[m.kind]?.[1] ?? ""}" tit
 const portText = p => p === "" ? "web (L7)" : p;
 
 const UNK = "__unk";
-const segKey = seg => seg ? seg.cidr : UNK;
+// Segment kimliği = segment adı (EPG > AppProfile > Description > CIDR); aynı adlı CIDR'lar tek segment.
+const segKey = seg => seg ? seg.label : UNK;
 const zoneKey = e => segKey(e.peerSegment);
-const isTargetSeg = seg => !!(seg && state.data.target.segment && seg.cidr === state.data.target.segment.cidr);
+const isTargetSeg = seg => !!(seg && state.data.target.segment && seg.label === state.data.target.segment.label);
 const sameSegment = e => isTargetSeg(e.peerSegment);
 
 // ---------- Form ----------
@@ -252,6 +253,8 @@ function render() {
         <h2 style="margin:0">Topoloji</h2>
         <label style="flex-direction:row;align-items:center;gap:6px">Sunucu sayısı
           <select id="maxSrv">${SERVER_CHOICES.map(n => `<option value="${n}"${n === state.maxServers ? " selected" : ""}>ilk ${n}</option>`).join("")}</select></label>
+        <label style="flex-direction:row;align-items:center;gap:6px">Segment sayısı
+          <select id="maxSeg">${SEG_CHOICES.map(n => `<option value="${n}"${n === state.maxSegs ? " selected" : ""}>ilk ${n}</option>`).join("")}</select></label>
         <label style="flex-direction:row;align-items:center;gap:6px">Sol segmentler
           <select id="hopIn"><option value="in">sunuculara gelenler</option><option value="out">sunucuların gittikleri</option></select></label>
         <label style="flex-direction:row;align-items:center;gap:6px">Sağ segmentler
@@ -289,6 +292,7 @@ function render() {
       ["in", "out"].some(d => sideServers(d).slice(0, state.maxServers).some(x => !peers?.has(x.ip)));
     if ($("#hop2On").checked && state.hop2?.status !== "loading" && missing) runHop2(state.lastParams);
   });
+  $("#maxSeg").addEventListener("change", ev => { state.maxSegs = +ev.target.value; state.selected = null; renderTopology(); renderDetail(); });
   $("#hopIn").value = state.hopDir.in; $("#hopOut").value = state.hopDir.out;
   $("#hopIn").addEventListener("change", ev => { state.hopDir.in = ev.target.value; state.selected = null; renderTopology(); renderDetail(); });
   $("#hopOut").addEventListener("change", ev => { state.hopDir.out = ev.target.value; state.selected = null; renderTopology(); renderDetail(); });
@@ -381,21 +385,26 @@ function sideSegments(dir, servers) {
     for (const a of (state.hopDir[dir] === "in" ? hop.inbound : hop.outbound)) {
       const k = segKey(a.segment);
       let g = m.get(k);
-      if (!g) m.set(k, g = { key: k, seg: a.segment, hits: 0, ips: new Set(), ports: new Set(), apps: new Set(), links: new Map() });
+      if (!g) m.set(k, g = { key: k, seg: a.segment, cidrs: new Set(), vlans: new Set(), hits: 0, ips: new Set(), ports: new Set(), apps: new Set(), links: new Map() });
+      if (a.segment) { g.cidrs.add(a.segment.cidr); if (a.segment.vlan) g.vlans.add(a.segment.vlan); }
       g.hits += a.hits; a.topIps.forEach(ip => g.ips.add(ip)); a.ports.forEach(p => g.ports.add(p)); a.apps.forEach(x => g.apps.add(x));
       g.ipCount = (g.ipCount ?? 0) + a.ipCount;
-      g.links.set(srv.ip, { hits: a.hits, agg: a });
+      // Aynı sunucunun aynı adlı birden fazla CIDR'ı tek bağlantıda toplanır.
+      const l = g.links.get(srv.ip) ?? { hits: 0, agg: { ports: [], apps: [], topIps: [] } };
+      l.hits += a.hits;
+      l.agg = { ports: [...new Set([...l.agg.ports, ...a.ports])], apps: [...new Set([...l.agg.apps, ...a.apps])], topIps: [...new Set([...l.agg.topIps, ...a.topIps])].slice(0, 10) };
+      g.links.set(srv.ip, l);
     }
   }
   let list = [...m.values()].sort((a, b) => (a.key === UNK) - (b.key === UNK) || b.hits - a.hits);
-  if (list.length > MAX_SEGS) {
-    const rest = list.slice(MAX_SEGS - 1);
+  if (list.length > state.maxSegs) {
+    const rest = list.slice(state.maxSegs - 1);
     const other = { key: "__other", other: rest, hits: 0, ipCount: 0, ips: new Set(), ports: new Set(), apps: new Set(), links: new Map() };
     for (const r of rest) {
       other.hits += r.hits; other.ipCount += r.ipCount;
       r.links.forEach((v, k) => other.links.set(k, { hits: (other.links.get(k)?.hits ?? 0) + v.hits }));
     }
-    list = [...list.slice(0, MAX_SEGS - 1), other];
+    list = [...list.slice(0, state.maxSegs - 1), other];
   }
   return list;
 }
@@ -404,7 +413,12 @@ const trunc = (s, n) => (s = String(s ?? "")).length > n ? s.slice(0, n - 1) + "
 const portSort = (a, b) => (a === "" ? 1e9 : +a || 0) - (b === "" ? 1e9 : +b || 0);
 const portsLabel = set => { const p = [...set].sort(portSort).map(x => x === "" ? "web" : ":" + x); return p.slice(0, 4).join(" ") + (p.length > 4 ? "…" : ""); };
 const segTitle = g => g.key === "__other" ? `Diğer ${g.other.length} segment` : g.seg ? g.seg.label : "Segment envanterinde yok";
-const segSub = g => g.key === "__other" ? "" : g.seg ? [g.seg.label !== g.seg.cidr && g.seg.cidr, g.seg.vlan && "VLAN " + g.seg.vlan].filter(Boolean).join(" · ") : "";
+const cidrText = set => set.size <= 1 ? [...set].join("") : `${set.size} CIDR`;
+const segSub = g => {
+  if (g.key === "__other" || !g.seg) return "";
+  const c = cidrText(g.cidrs);
+  return [c !== g.seg.label && c, g.vlans.size && "VLAN " + [...g.vlans].join(",")].filter(Boolean).join(" · ");
+};
 
 // ---------- Topoloji çizimi ----------
 // Sütunlar: [segment] → [bize gelen sunucu] → [BİZİM IP] → [gittiğimiz sunucu] → [segment]
@@ -495,7 +509,7 @@ function renderTopology() {
       const isSel = sel && sel.type === "seg" && sel.dir === dir && sel.key === g.key;
       const same = isTargetSeg(g.seg);
       nodes += `<g class="sgn ${dir}${g.key === UNK ? " unknown" : ""}${g.key === "__other" ? " more" : ""}${same ? " same" : ""}${isSel ? " sel" : ""}" data-id="${segId(dir, gi)}" data-dir="${dir}" data-key="${esc(g.key)}" transform="translate(${segX},${g.y})">
-        <title>${esc(segTitle(g))}\n${esc(segSub(g))}\n${fmt(g.links.size)} sunucu · ~${fmt(g.ipCount)} IP · ${fmt(g.hits)} hit${g.apps.size ? "\nUygulama: " + esc([...g.apps].join(", ")) : ""}</title>
+        <title>${esc(segTitle(g))}\n${esc(g.cidrs ? [...g.cidrs].join(", ") : g.other.map(segTitle).join(", "))}\n${fmt(g.links.size)} sunucu · ~${fmt(g.ipCount)} IP · ${fmt(g.hits)} hit${g.apps.size ? "\nUygulama: " + esc([...g.apps].join(", ")) : ""}</title>
         <rect width="${SW}" height="${GH}" rx="8"></rect>
         <text class="t1" x="10" y="19">${esc(trunc(segTitle(g), 24))}</text>
         <text class="num" x="${SW - 10}" y="19" text-anchor="end">${fmt(g.hits)}</text>
@@ -635,7 +649,8 @@ function renderDetail() {
     el.innerHTML = `<div class="panel">
       <div class="toolbar"><h2 style="margin:0">${esc(segTitle(g))} <span class="muted" style="font-weight:400">${toServer ? "→ bu sunuculara geliyor" : "← bu sunucular buraya gidiyor"}</span></h2>
         <button type="button" id="closeDetail">Kapat</button></div>
-      <div class="target-grid"><div>${g.key === "__other" ? `<div class="muted">${esc(g.other.map(segTitle).join(", "))}</div>` : segDl(g.seg)}</div>
+      <div class="target-grid"><div>${g.key === "__other" ? `<div class="muted">${esc(g.other.map(segTitle).join(", "))}</div>` : segDl(g.seg)
+        + (g.cidrs.size > 1 ? `<div style="margin-top:8px"><b>Bu adla ${g.cidrs.size} CIDR:</b><div class="mono small">${[...g.cidrs].map(esc).join("<br>")}</div></div>` : "")}</div>
       <div class="tbl-wrap" style="max-height:300px"><table>
         <thead><tr><th>Sunucu</th><th>Port</th><th>Uygulama</th><th>Örnek IP'ler</th><th class="num">Hit</th></tr></thead>
         <tbody>${rows.map(([ip, l]) => `<tr><td class="mono">${esc(ip)}</td><td class="mono">${esc(l.agg?.ports.join(", ") ?? "")}</td>
@@ -684,7 +699,8 @@ function renderSummary() {
     for (const e of edges) {
       const k = zoneKey(e);
       let r = m.get(k);
-      if (!r) m.set(k, r = { key: k, seg: e.peerSegment, same: sameSegment(e), ips: new Set(), ports: new Set(), apps: new Set(), hits: 0 });
+      if (!r) m.set(k, r = { key: k, seg: e.peerSegment, same: sameSegment(e), cidrs: new Set(), vlans: new Set(), ips: new Set(), ports: new Set(), apps: new Set(), hits: 0 });
+      if (e.peerSegment) { r.cidrs.add(e.peerSegment.cidr); if (e.peerSegment.vlan) r.vlans.add(e.peerSegment.vlan); }
       r.ips.add(e.peerIp); r.ports.add(e.port); r.hits += e.hits;
       appNames(dir === "in" ? e.localApp : e.peerApps).forEach(a => r.apps.add(a));
     }
@@ -694,8 +710,8 @@ function renderSummary() {
       ${rows.length ? `<div class="tbl-wrap" style="max-height:340px"><table>
         <thead><tr><th>Segment</th><th>VLAN</th><th class="num">IP</th><th>Port</th><th>${dir === "in" ? "Bizdeki uygulama" : "Hedef uygulama"}</th><th class="num">Hit</th></tr></thead>
         <tbody>${rows.map(r => `<tr class="click" data-dir="${dir}" data-key="${esc(r.key)}">
-          <td>${r.seg ? `<b>${esc(r.seg.label)}</b>${r.same ? ' <span class="badge strong">aynı segment</span>' : ""}<div class="small muted mono">${esc(r.seg.cidr)}${r.seg.tenant ? " · " + esc(r.seg.tenant) : ""}</div>` : `<span class="unk">Segment envanterinde yok</span>`}</td>
-          <td class="mono">${esc(r.seg?.vlan ?? "")}</td>
+          <td>${r.seg ? `<b>${esc(r.seg.label)}</b>${r.same ? ' <span class="badge strong">aynı segment</span>' : ""}<div class="small muted mono" title="${esc([...r.cidrs].join(", "))}">${esc([...r.cidrs].slice(0, 3).join(", "))}${r.cidrs.size > 3 ? ` +${r.cidrs.size - 3}` : ""}${r.seg.tenant ? " · " + esc(r.seg.tenant) : ""}</div>` : `<span class="unk">Segment envanterinde yok</span>`}</td>
+          <td class="mono">${esc([...r.vlans].join(", "))}</td>
           <td class="num">${fmt(r.ips.size)}</td>
           <td class="mono">${esc([...r.ports].sort(portSort).map(portText).slice(0, 8).join(", "))}${r.ports.size > 8 ? "…" : ""}</td>
           <td>${esc([...r.apps].slice(0, 4).join(", "))}${r.apps.size > 4 ? "…" : ""}</td>
