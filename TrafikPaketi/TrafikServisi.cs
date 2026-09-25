@@ -1,18 +1,75 @@
 // ============================================================================
-// DeltaFlow · Trafik Servisi (taşınabilir tek dosya)
+// DeltaFlow · Trafik Servisi (tek dosya)
 //
 // Bir IPv4 adresinin son N saatlik (varsayılan 24) ağ trafiğini iki kaynaktan çeker:
-//   1) Splunk / Carbon Black  : uç nokta (endpoint) bağlantı kayıtları, süreç ve bilgisayar adıyla
-//   2) Riverbed AppResponse   : ağdan görülen L4 (TCP) akışlar ve L7 (web) URL'ler; tüm kutular paralel
-// Sonuçları sorgulanan IP'ye göre GELEN / GİDEN olarak birleştirir ve AI'a gönderilecek metni üretir.
+//   1) CARBON BLACK  : uç nokta (endpoint) bağlantı kayıtları; süreç ve bilgisayar adıyla.
+//                      Veri Splunk'taki Carbon Black index'inden (varsayılan "carbonblack",
+//                      sourcetype "bit9:carbonblack:json") Splunk export API'siyle okunur.
+//   2) APPRESPONSE   : Riverbed AppResponse'un ağdan gördüğü L4 (TCP) akışlar ve L7 (web) URL'ler;
+//                      Servers listesindeki tüm kutular paralel sorgulanır.
+// Sonuçlar sorgulanan IP'ye göre GELEN / GİDEN olarak birleştirilir ve AI'a gidecek metin üretilir.
 //
-// Kullanım (Program.cs):
-//     builder.Services.AddDeltaFlowTrafik(builder.Configuration);
-//     ...
-//     var trafik = await app.Services.GetRequiredService<TrafikServisi>().GetirAsync("10.50.20.15", ct: ct);
-//     string trafikMetin = TrafikServisi.AiMetni(trafik);   // kayıt yoksa "KAYIT YOK." döner
+// ----------------------------------------------------------------------------
+// KURULUM
+// ----------------------------------------------------------------------------
+// 1) Bu dosyayı projeye ekleyin (ek NuGet paketi gerekmez).
+// 2) Program.cs:
+//        using DeltaFlow.Trafik;
+//        builder.Services.AddDeltaFlowTrafik(builder.Configuration);
+// 3) Kullanım (endpoint parametresine "TrafikServisi trafikServisi" ekleyerek):
+//        var trafik = await trafikServisi.GetirAsync(ip);          // son 24 saat
+//        string trafikMetin = TrafikServisi.AiMetni(trafik);        // kayıt yoksa "KAYIT YOK."
+//    Farklı aralık: GetirAsync(ip, saat: 6). Ham veri: trafik.Gelen / trafik.Giden (Akis listesi).
 //
-// Ayarlar: appsettings.json -> "Trafik" bölümü (bkz. appsettings.trafik.json)
+// ----------------------------------------------------------------------------
+// APPSETTINGS.JSON (şifre/token'ları git'e girmeyen bir dosyada tutun, ör. appsettings.Production.json)
+// ----------------------------------------------------------------------------
+//   "Trafik": {
+//     "SaatAraligi": 24,
+//     "Kaynaklar": "carbonblack,appresponse",
+//
+//     "CarbonBlack": {
+//       "SplunkUrl": "https://splunk-sunucu:8089",
+//       "Token": "",                       // Splunk token (Bearer). Yoksa Username/Password (Basic)
+//       "Username": "",
+//       "Password": "",
+//       "Index": "carbonblack",
+//       "Sourcetype": "bit9:carbonblack:json",
+//       "ExportPath": "/services/search/v2/jobs/export",
+//       "IgnoreSslErrors": false,
+//       "TimeoutMinutes": 10
+//     },
+//
+//     "AppResponse": {
+//       "Username": "",
+//       "Password": "",
+//       "Servers": [ { "Name": "Kutu-1", "Ip": "10.x.x.x" }, { "Name": "Kutu-2", "Ip": "10.x.x.x" } ],
+//       "Cihaz": "tum",                     // "tum" = hepsi paralel; tek kutu için sıra numarası: "0", "1"...
+//       "SourcePathType": "jobs",
+//       "SourceL4": "flow_tcp",
+//       "SourceL7": "wtapages",
+//       "VifgIds": [],                      // doluysa her VIFG için ayrı rapor
+//       "DeleteReportInstances": true,
+//       "IgnoreSslErrors": true,
+//       "BeklemeSaniye": 120,               // 24 saatlik rapor uzun sürebilir; "tamamlanmadı" olursa artırın
+//       "TimeoutMinutes": 3
+//     }
+//   }
+//
+// ----------------------------------------------------------------------------
+// MANTIK
+// ----------------------------------------------------------------------------
+// Carbon Black : SPL "search index=<Index> sourcetype=<Sourcetype> TERM(<ip>)" (TERM: sadece IP'yi içeren
+//                olaylar okunur). direction alanına göre istemci/sunucu ayrılır (outbound: local = istemci),
+//                süreç adı process_path'ten alınır; client_ip, server_ip, server_port, Protocol bazında
+//                count / first_seen / last_seen / computer_name / process. Yanıt NDJSON; preview satırları atlanır.
+// AppResponse  : kutu başına token -> STEELFILTER "(cli_tcp.ip == IP or srv_tcp.ip == IP)" ile L4+L7 rapor
+//                -> iki data_def "completed" olana kadar 2 sn aralıkla bekleme -> veri -> rapor silinir.
+//                Hata veren kutu diğerlerini durdurmaz; hata Mesajlar'a yazılır.
+// Birleştirme  : sunucu = IP -> GELEN (karşı = istemci, port = IP'nin portu); istemci = IP -> GİDEN
+//                (karşı = sunucu, port = karşının portu). Aynı (yön, karşı IP, port) iki kaynaktan gelirse
+//                hit'ler toplanır (CarbonBlackHit / AppResponseHit ayrıca tutulur). L7 URL'leri aynı karşı
+//                IP'nin akışına eklenir; L4 karşılığı yoksa portsuz ("web") akış olur.
 // ============================================================================
 using System.Diagnostics;
 using System.Net;
@@ -28,7 +85,7 @@ using Microsoft.Extensions.Logging;
 namespace DeltaFlow.Trafik
 {
     // Sorgulanan IP'ye göre tek bir akış: Yon "in" (karşı IP -> sorgulanan IP:Port) ya da "out" (sorgulanan IP -> karşı IP:Port)
-    public sealed record Akis(string Yon, string KarsiIp, string Port, long Hit, long SplunkHit, long AppResponseHit,
+    public sealed record Akis(string Yon, string KarsiIp, string Port, long Hit, long CarbonBlackHit, long AppResponseHit,
         List<string> Protokoller, List<string> Surecler, List<string> Bilgisayarlar, List<string> Urller,
         string? IlkGorulme, string? SonGorulme);
 
@@ -43,8 +100,8 @@ namespace DeltaFlow.Trafik
         // HttpClient'lar kurumsal proxy'yi kullanmaz (Splunk ve AppResponse iç adresler).
         public static IServiceCollection AddDeltaFlowTrafik(this IServiceCollection services, IConfiguration cfg)
         {
-            services.AddHttpClient(TrafikServisi.SplunkClient, c => c.Timeout = TimeSpan.FromMinutes(cfg.GetValue("Trafik:Splunk:TimeoutMinutes", 10)))
-                .ConfigurePrimaryHttpMessageHandler(() => Handler(cfg.GetValue("Trafik:Splunk:IgnoreSslErrors", false)));
+            services.AddHttpClient(TrafikServisi.CarbonBlackClient, c => c.Timeout = TimeSpan.FromMinutes(cfg.GetValue("Trafik:CarbonBlack:TimeoutMinutes", 10)))
+                .ConfigurePrimaryHttpMessageHandler(() => Handler(cfg.GetValue("Trafik:CarbonBlack:IgnoreSslErrors", false)));
             services.AddHttpClient(TrafikServisi.AppResponseClient, c => c.Timeout = TimeSpan.FromMinutes(cfg.GetValue("Trafik:AppResponse:TimeoutMinutes", 3)))
                 .ConfigurePrimaryHttpMessageHandler(() => Handler(cfg.GetValue("Trafik:AppResponse:IgnoreSslErrors", true)));
             services.AddSingleton<TrafikServisi>();
@@ -61,7 +118,7 @@ namespace DeltaFlow.Trafik
 
     public sealed class TrafikServisi(IHttpClientFactory factory, IConfiguration cfg, ILogger<TrafikServisi> log)
     {
-        public const string SplunkClient = "deltaflow-splunk";
+        public const string CarbonBlackClient = "deltaflow-carbonblack";
         public const string AppResponseClient = "deltaflow-appresponse";
 
         // ------------------------------------------------------------------
@@ -74,16 +131,17 @@ namespace DeltaFlow.Trafik
 
             var bitis = DateTimeOffset.Now;
             var baslangic = bitis.AddHours(-(saat ?? cfg.GetValue("Trafik:SaatAraligi", 24.0)));
-            string kaynaklar = (cfg["Trafik:Kaynaklar"] ?? "splunk,appresponse").ToLowerInvariant();
+            string kaynaklar = (cfg["Trafik:Kaynaklar"] ?? "carbonblack,appresponse").ToLowerInvariant();
             var sw = Stopwatch.StartNew();
             var mesajlar = new List<string>();
 
             // İki kaynak paralel; biri hata verirse diğerinin sonucu yine kullanılır.
-            var spTask = kaynaklar.Contains("splunk") ? Guvenli("Splunk", () => SplunkAsync(ip, baslangic, bitis, ct), mesajlar, ct) : Task.FromResult<List<Satir>?>(null);
+            var cbTask = kaynaklar.Contains("carbonblack") || kaynaklar.Contains("splunk")
+                ? Guvenli("Carbon Black", () => CarbonBlackAsync(ip, baslangic, bitis, ct), mesajlar, ct) : Task.FromResult<List<Satir>?>(null);
             var arTask = kaynaklar.Contains("appresponse") ? Guvenli("AppResponse", () => AppResponseTumKutularAsync(ip, baslangic, bitis, mesajlar, ct), mesajlar, ct) : Task.FromResult<List<Satir>?>(null);
-            await Task.WhenAll(spTask, arTask);
+            await Task.WhenAll(cbTask, arTask);
 
-            var (gelen, giden) = Birlestir(ip, spTask.Result ?? [], arTask.Result ?? []);
+            var (gelen, giden) = Birlestir(ip, cbTask.Result ?? [], arTask.Result ?? []);
             return new TrafikSonucu(ip, baslangic, bitis, gelen, giden, mesajlar, sw.ElapsedMilliseconds);
         }
 
@@ -96,7 +154,7 @@ namespace DeltaFlow.Trafik
                 return "KAYIT YOK." + (s.Mesajlar.Count > 0 ? $" ({string.Join("; ", s.Mesajlar)})" : "");
 
             var sb = new StringBuilder();
-            sb.AppendLine($"Kaynak: Splunk/Carbon Black + Riverbed AppResponse | {s.Baslangic:yyyy-MM-dd HH:mm} - {s.Bitis:yyyy-MM-dd HH:mm}");
+            sb.AppendLine($"Kaynak: Carbon Black (CB) + Riverbed AppResponse (AR) | {s.Baslangic:yyyy-MM-dd HH:mm} - {s.Bitis:yyyy-MM-dd HH:mm}");
             void Yaz(string baslik, List<Akis> list, bool gelen)
             {
                 sb.AppendLine($"{baslik}: {list.Select(a => a.KarsiIp).Distinct().Count()} farklı IP, {list.Count} akış");
@@ -104,7 +162,8 @@ namespace DeltaFlow.Trafik
                 {
                     string port = a.Port == "" ? "web" : a.Port;
                     string yon = gelen ? $"{a.KarsiIp} -> {s.Ip}:{port}" : $"{s.Ip} -> {a.KarsiIp}:{port}";
-                    var ek = new List<string> { $"{a.Hit} bağlantı" };
+                    var ek = new List<string> { $"{a.Hit} bağlantı (CB: {a.CarbonBlackHit}, AR: {a.AppResponseHit})" };
+                    if (a.Bilgisayarlar.Count > 0) ek.Add("bilgisayar: " + string.Join(", ", a.Bilgisayarlar.Take(2)));
                     if (a.Surecler.Count > 0) ek.Add("süreç: " + string.Join(", ", a.Surecler.Take(3)));
                     if (a.Urller.Count > 0) ek.Add("url: " + string.Join(", ", a.Urller.Take(3)));
                     if (a.SonGorulme != null) ek.Add("son: " + a.SonGorulme);
@@ -117,21 +176,21 @@ namespace DeltaFlow.Trafik
             return sb.ToString().TrimEnd();
         }
 
-        // Ham satır: istemci -> sunucu:port (Kaynak "splunk" | "l4" | "l7")
+        // Ham satır: istemci -> sunucu:port (Kaynak "cb" | "l4" | "l7")
         sealed record Satir(string Kaynak, string Istemci, string Sunucu, string Port, long Hit,
             string? Protokol = null, string? Surec = null, string? Bilgisayar = null, string? Url = null,
             string? Ilk = null, string? Son = null);
 
         // ==================================================================
-        // 1) SPLUNK / CARBON BLACK
-        //    /services/search/v2/jobs/export'a SPL gönderilir; TERM(ip) ile sadece o IP'yi
-        //    içeren olaylar okunur. direction alanına göre istemci/sunucu ayrılır ve
+        // 1) CARBON BLACK (Splunk'taki Carbon Black index'i üzerinden)
+        //    Splunk /services/search/v2/jobs/export'a SPL gönderilir; TERM(ip) ile sadece o IP'yi
+        //    içeren Carbon Black olayları okunur. direction alanına göre istemci/sunucu ayrılır ve
         //    (istemci, sunucu, port, protokol) bazında gruplanır.
         // ==================================================================
-        async Task<List<Satir>> SplunkAsync(string ip, DateTimeOffset bas, DateTimeOffset bit, CancellationToken ct)
+        async Task<List<Satir>> CarbonBlackAsync(string ip, DateTimeOffset bas, DateTimeOffset bit, CancellationToken ct)
         {
-            var s = cfg.GetSection("Trafik:Splunk");
-            string baseUrl = (s["BaseUrl"] ?? throw new InvalidOperationException("Trafik:Splunk:BaseUrl tanımlı değil.")).TrimEnd('/');
+            var s = cfg.GetSection("Trafik:CarbonBlack");
+            string baseUrl = (s["SplunkUrl"] ?? throw new InvalidOperationException("Trafik:CarbonBlack:SplunkUrl tanımlı değil.")).TrimEnd('/');
             string index = s["Index"] ?? "carbonblack";
             string sourcetype = s["Sourcetype"] ?? "bit9:carbonblack:json";
 
@@ -165,11 +224,11 @@ namespace DeltaFlow.Trafik
                 req.Headers.Authorization = new AuthenticationHeaderValue("Basic",
                     Convert.ToBase64String(Encoding.UTF8.GetBytes($"{s["Username"]}:{s["Password"]}")));
             else
-                throw new InvalidOperationException("Trafik:Splunk:Token veya Username/Password tanımlı değil.");
+                throw new InvalidOperationException("Trafik:CarbonBlack:Token veya Username/Password tanımlı değil.");
 
-            using var resp = await factory.CreateClient(SplunkClient).SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
+            using var resp = await factory.CreateClient(CarbonBlackClient).SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
             if (!resp.IsSuccessStatusCode)
-                throw new HttpRequestException($"Splunk HTTP {(int)resp.StatusCode}: {Kisalt(await resp.Content.ReadAsStringAsync(ct), 300)}");
+                throw new HttpRequestException($"Splunk (Carbon Black) HTTP {(int)resp.StatusCode}: {Kisalt(await resp.Content.ReadAsStringAsync(ct), 300)}");
 
             // Export endpoint'i her satırda ayrı bir JSON nesnesi döner (NDJSON); preview satırları atlanır.
             var rows = new List<Satir>();
@@ -184,7 +243,7 @@ namespace DeltaFlow.Trafik
                 if (node?["result"] is not JsonObject r) continue;
 
                 string? V(string k) => Temiz(r[k] switch { JsonArray a => string.Join(", ", a.Select(x => x?.ToString())), var x => x?.ToString() });
-                rows.Add(new Satir("splunk", V("client_ip") ?? "", V("server_ip") ?? "", V("server_port") ?? "",
+                rows.Add(new Satir("cb", V("client_ip") ?? "", V("server_ip") ?? "", V("server_port") ?? "",
                     long.TryParse(V("count"), out long c) ? c : 1, V("Protocol"), V("process"), V("computer_name"),
                     null, V("first_seen"), V("last_seen")));
             }
@@ -334,12 +393,12 @@ namespace DeltaFlow.Trafik
         //    istemci == IP -> GİDEN (karşı = sunucu, port = karşının portu). Aynı (yön, karşı IP, port) toplanır.
         //    L7 URL'leri aynı yöndeki aynı karşı IP'nin akışına eklenir; L4 karşılığı yoksa portsuz ("web") satır olur.
         // ==================================================================
-        static (List<Akis> gelen, List<Akis> giden) Birlestir(string ip, List<Satir> splunk, List<Satir> ar)
+        static (List<Akis> gelen, List<Akis> giden) Birlestir(string ip, List<Satir> cb, List<Satir> ar)
         {
             var agg = new Dictionary<(string yon, string karsi, string port), Toplam>();
             var urls = new Dictionary<(string yon, string karsi), Dictionary<string, long>>();
 
-            foreach (var r in splunk.Concat(ar))
+            foreach (var r in cb.Concat(ar))
             {
                 string yon, karsi;
                 if (r.Sunucu == ip && r.Istemci != ip && r.Istemci is not ("" or "-")) { yon = "in"; karsi = r.Istemci; }
@@ -355,7 +414,7 @@ namespace DeltaFlow.Trafik
                 }
                 var key = (yon, karsi, r.Port == "-" ? "" : r.Port);
                 var t = agg.TryGetValue(key, out var x) ? x : agg[key] = new Toplam();
-                if (r.Kaynak == "splunk") t.Splunk += r.Hit; else t.Ar += r.Hit;
+                if (r.Kaynak == "cb") t.Cb += r.Hit; else t.Ar += r.Hit;
                 if (r.Protokol != null) t.Protokol.Add(r.Protokol);
                 foreach (var p in Parcala(r.Surec)) t.Surec.Add(p);
                 foreach (var p in Parcala(r.Bilgisayar)) t.Bilgisayar.Add(p);
@@ -366,7 +425,7 @@ namespace DeltaFlow.Trafik
                 if (!agg.Keys.Any(a => a.yon == k.yon && a.karsi == k.karsi))
                     agg[(k.yon, k.karsi, "")] = new Toplam { Ar = u.Values.Sum() };
 
-            var list = agg.Select(kv => new Akis(kv.Key.yon, kv.Key.karsi, kv.Key.port, kv.Value.Splunk + kv.Value.Ar, kv.Value.Splunk, kv.Value.Ar,
+            var list = agg.Select(kv => new Akis(kv.Key.yon, kv.Key.karsi, kv.Key.port, kv.Value.Cb + kv.Value.Ar, kv.Value.Cb, kv.Value.Ar,
                     kv.Value.Protokol.Order().ToList(), kv.Value.Surec.Order().ToList(), kv.Value.Bilgisayar.Order().ToList(),
                     urls.TryGetValue((kv.Key.yon, kv.Key.karsi), out var uu) ? uu.OrderByDescending(x => x.Value).Take(10).Select(x => x.Key).ToList() : [],
                     kv.Value.Ilk, kv.Value.Son))
@@ -376,7 +435,7 @@ namespace DeltaFlow.Trafik
 
         sealed class Toplam
         {
-            public long Splunk, Ar;
+            public long Cb, Ar;
             public string? Ilk, Son;
             public HashSet<string> Protokol = new(StringComparer.OrdinalIgnoreCase), Surec = new(StringComparer.OrdinalIgnoreCase),
                 Bilgisayar = new(StringComparer.OrdinalIgnoreCase);
