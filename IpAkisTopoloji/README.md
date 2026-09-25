@@ -25,6 +25,23 @@ o IP'nin akışlarını çeker, iki SQL Server envanteriyle zenginleştirir ve �
 
 Sayfa: `/topoloji.html?ip=10.210.10.63` (adres çubuğundaki link paylaşılabilir).
 
+- **AI etki analizi**: sorgu bittikten sonra "AI'a yorumlat" ile gelen/giden sunucular (segment, uygulama,
+  sahip/muhafız, port, trafik, 2. seviye segmentler) şirket içi AI servisine gönderilir ve
+  "bu sunucuda değişiklik yapılırsa nereler etkilenir" yorumu alınır. Soru metni değiştirilebilir;
+  AI'a gönderilen metin sayfada görülebilir.
+
+## AI servisi
+
+OpenAI uyumlu `/chat/completions` servisi kullanılır (`Authorization: Bearer <ApiKey>`,
+yanıt `choices[0].message.content`). `appsettings.json`:
+
+```json
+"Ai": { "Url": "https://.../v1/chat/completions", "ApiKey": "...", "Model": "zt-ga-small-0",
+        "Temperature": 0.1, "TimeoutMinutes": 3, "IgnoreSslErrors": true }
+```
+
+Her tarafta en yoğun 30 sunucu gönderilir. Endpoint: `POST /api/ai/etki`.
+
 ## Envanter tabloları
 
 | Tablo | Kullanım |

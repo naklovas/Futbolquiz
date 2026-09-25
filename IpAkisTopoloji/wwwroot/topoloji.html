@@ -89,6 +89,13 @@
   .sumgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
   @media (max-width: 1100px) { .sumgrid { grid-template-columns: 1fr; } }
   tr.click { cursor: pointer; }
+  .ai-q { width: 100%; min-height: 54px; resize: vertical; font: inherit; color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; }
+  .ai-out { margin-top: 12px; line-height: 1.55; }
+  .ai-out h3 { font-size: 14px; margin: 14px 0 4px; color: var(--in); }
+  .ai-out ul { margin: 4px 0; padding-left: 20px; }
+  .ai-out p { margin: 4px 0; }
+  .ai-meta { font-size: 12px; color: var(--muted); margin-top: 10px; }
+  .ai-meta pre { white-space: pre-wrap; font-size: 11.5px; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 8px; max-height: 320px; overflow: auto; }
   .chip { display: inline-flex; align-items: center; gap: 6px; background: var(--in-soft); border-radius: 999px; padding: 2px 10px; font-size: 12.5px; }
   .chip button { border: 0; background: transparent; padding: 0 2px; }
   .tbl-wrap { overflow-x: auto; max-height: 560px; overflow-y: auto; border: 1px solid var(--line); border-radius: 6px; }
@@ -200,7 +207,7 @@ async function run() {
   });
   history.replaceState(null, "", "?" + new URLSearchParams({ ip: params.get("ip"), start: params.get("start"), end: params.get("end") }));
 
-  abort?.abort(); hopAbort?.abort();
+  abort?.abort(); hopAbort?.abort(); aiAbort?.abort();
   abort = new AbortController();
   $("#go").disabled = true; $("#cancel").hidden = false;
   $("#main").innerHTML = `<div class="panel empty"><span class="spinner"></span> Sorgulanıyor… (AppResponse raporu 1 dakikaya kadar sürebilir)</div>`;
@@ -277,6 +284,16 @@ function render() {
       <div class="detail" id="detail"></div>
     </section>
     <section class="panel">
+      <div class="toolbar"><h2 style="margin:0">AI etki analizi</h2>
+        <span class="muted small">Gelen/giden sunucular, segmentler ve uygulama sahipleri şirket içi AI servisine gönderilir.</span></div>
+      <textarea class="ai-q" id="aiQ"></textarea>
+      <div style="display:flex;gap:8px;margin-top:8px;align-items:center">
+        <button type="button" class="primary" id="aiGo">AI'a yorumlat</button>
+        <span class="muted small" id="aiNote"></span>
+      </div>
+      <div id="aiOut"></div>
+    </section>
+    <section class="panel">
       <h2>Sunucuların kendi segmentleri (1. seviye)</h2>
       <div class="sumgrid"><div id="sum-in"></div><div id="sum-out"></div></div>
     </section>
@@ -302,6 +319,8 @@ function render() {
     state.zoom = z === "0" ? 1 : Math.min(4, Math.max(0.4, state.zoom * (z === "+" ? 1.25 : 0.8)));
     applyZoom();
   }));
+  $("#aiQ").value = AI_DEFAULT_Q;
+  $("#aiGo").addEventListener("click", runAi);
   $("#dlSvg").addEventListener("click", () => exportImage("svg"));
   $("#dlPng").addEventListener("click", () => exportImage("png"));
   renderTopology();
@@ -690,6 +709,82 @@ function renderDetail() {
     </div></div>`;
   $("#closeDetail").addEventListener("click", clearFilter);
   $("#drill").addEventListener("click", () => { $("#ip").value = s.ip; window.scrollTo({ top: 0, behavior: "smooth" }); run(); });
+}
+
+// ---------- AI etki analizi ----------
+const AI_DEFAULT_Q = "Bu sunucuda bir değişiklik (bakım, yeniden başlatma, sürüm/konfigürasyon değişikliği, kapatma) yapılırsa nereler etkilenir?";
+const AI_MAX_PEERS = 30;
+let aiAbort = null;
+
+// Sorgu sonucunu AI'a gidecek sade bir özete çevirir (sunucu başına segment, uygulama, sahip, port, hit, 2. seviye segmentler).
+function buildAiRequest() {
+  const d = state.data;
+  const peersOf = dir => {
+    const edges = dir === "in" ? d.inbound : d.outbound;
+    return sideServers(dir).slice(0, AI_MAX_PEERS).map(s => {
+      const es = edges.filter(e => e.peerIp === s.ip);
+      const apps = es.flatMap(e => e.peerApps?.apps ?? []);
+      const hop = state.hop2?.peers?.get(s.ip);
+      const hopList = hop ? (dir === "in" ? hop.inbound : hop.outbound) : [];
+      return {
+        ip: s.ip,
+        segment: s.seg ? `${s.seg.label}${s.seg.label !== s.seg.cidr ? " (" + s.seg.cidr + ")" : ""}` : null,
+        apps: s.apps,
+        owners: [...new Set(apps.flatMap(a => [a.varlikMuhafizi, a.uygulamaVarlikSahibi, a.sunucuIsletenBirim]).filter(Boolean))],
+        ports: [...s.ports].filter(p => p !== "").sort(portSort),
+        hits: s.hits,
+        localApps: dir === "in" ? [...s.localApps] : null,
+        hop2Segments: [...new Set(hopList.map(a => a.segment ? a.segment.label : "segment envanterinde yok"))].slice(0, 6)
+      };
+    });
+  };
+  const t = d.target;
+  return {
+    question: $("#aiQ").value.trim(),
+    ip: t.ip,
+    segment: t.segment ? `${t.segment.label} (${t.segment.cidr}${t.segment.vlan ? ", VLAN " + t.segment.vlan : ""})` : null,
+    apps: [...new Set(t.apps.map(a => `${appName(a)}${a.port ? " :" + a.port : ""}`))],
+    period: state.lastParams ? `${state.lastParams.get("start").replace("T", " ")} - ${state.lastParams.get("end").replace("T", " ")}` : null,
+    inbound: peersOf("in"), outbound: peersOf("out"),
+    inboundTotal: sideServers("in").length, outboundTotal: sideServers("out").length
+  };
+}
+
+async function runAi() {
+  aiAbort?.abort();
+  aiAbort = new AbortController();
+  const btn = $("#aiGo");
+  btn.disabled = true;
+  $("#aiNote").textContent = state.hop2?.status === "loading" ? "Not: 2. seviye henüz bitmedi, onsuz gönderiliyor." : "";
+  $("#aiOut").innerHTML = `<div class="muted" style="margin-top:12px"><span class="spinner"></span> AI yorumluyor… (birkaç dakika sürebilir)</div>`;
+  try {
+    const r = await fetch("api/ai/etki", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(buildAiRequest()), signal: aiAbort.signal });
+    const body = await r.json().catch(() => ({ error: `HTTP ${r.status}` }));
+    if (!r.ok) throw new Error(body.error || `HTTP ${r.status}`);
+    $("#aiOut").innerHTML = `<div class="ai-out">${renderMarkdown(body.answer)}</div>
+      <div class="ai-meta">Model: ${esc(body.model)} · ${(body.elapsedMs / 1000).toFixed(1)} sn
+        <details><summary>AI'a gönderilen metin</summary><pre>${esc(body.prompt)}</pre></details></div>`;
+  } catch (e) {
+    if (e.name !== "AbortError") $("#aiOut").innerHTML = `<div style="color:var(--err);margin-top:12px">${esc(e.message)}</div>`;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// Modelin döndürdüğü basit markdown: ## başlık, - madde, **kalın**.
+function renderMarkdown(text) {
+  const inline = t => esc(t).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/`([^`]+)`/g, "<code>$1</code>");
+  let html = "", inList = false;
+  for (const raw of String(text ?? "").split(/\r?\n/)) {
+    const line = raw.trim();
+    const item = line.match(/^(?:[-*•]|\d+[.)])\s+(.*)$/);
+    if (item) { if (!inList) { html += "<ul>"; inList = true; } html += `<li>${inline(item[1])}</li>`; continue; }
+    if (inList) { html += "</ul>"; inList = false; }
+    const h = line.match(/^#{1,6}\s+(.*)$/);
+    if (h) html += `<h3>${inline(h[1])}</h3>`;
+    else if (line) html += `<p>${inline(line)}</p>`;
+  }
+  return html + (inList ? "</ul>" : "");
 }
 
 // ---------- Segment özeti ----------

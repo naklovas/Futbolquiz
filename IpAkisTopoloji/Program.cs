@@ -17,6 +17,9 @@ builder.Services.AddHttpClient("splunk", c => c.Timeout = TimeSpan.FromMinutes(1
 builder.Services.AddHttpClient("appresponse", c => c.Timeout = TimeSpan.FromMinutes(3))
     .ConfigurePrimaryHttpMessageHandler(() => CreateHandler(builder.Configuration.GetValue("AppResponseIgnoreSslErrors", true)));
 
+builder.Services.AddHttpClient("ai", c => c.Timeout = TimeSpan.FromMinutes(builder.Configuration.GetValue("Ai:TimeoutMinutes", 3)))
+    .ConfigurePrimaryHttpMessageHandler(() => CreateHandler(builder.Configuration.GetValue("Ai:IgnoreSslErrors", true)));
+
 builder.Services.AddSingleton<EnvanterService>();
 
 var app = builder.Build();
@@ -163,6 +166,29 @@ app.MapPost("/api/hop2", async (Hop2Request req, IConfiguration cfg, IHttpClient
     var peers = ips.Select(ip => Hop2Builder.Build(ip, q!.Ip, sp, ar, env)).ToList();
     var (spSt, arSt, envSt) = Statuses(wanted, sp, spErr, ar, arErr, env, envErr);
     return Results.Ok(new Hop2Response(peers, requested, ips.Count, spSt, arSt, envSt, sw.ElapsedMilliseconds));
+});
+
+// Sorgu sonucunun özetiyle şirket içi AI'a "bu sunucuda değişiklik olursa nereler etkilenir" sorusu.
+app.MapPost("/api/ai/etki", async (AiRequest req, IConfiguration cfg, IHttpClientFactory factory, CancellationToken ct) =>
+{
+    if (!LookupQuery.TryParseIpv4(req.Ip, out _))
+        return Results.BadRequest(new { error = "Geçerli bir IPv4 adresi yok." });
+    try
+    {
+        return Results.Ok(await AiEtkiService.AskAsync(req, cfg, factory.CreateClient("ai"), ct));
+    }
+    catch (OperationCanceledException) when (ct.IsCancellationRequested)
+    {
+        return Results.StatusCode(499);
+    }
+    catch (TaskCanceledException)
+    {
+        return Results.Json(new { error = "AI servisi zaman aşımına uğradı." }, statusCode: 504);
+    }
+    catch (Exception ex)
+    {
+        return Results.Json(new { error = ex.Message }, statusCode: 502);
+    }
 });
 
 app.MapGet("/api/envanter/durum", async (EnvanterService envanter, CancellationToken ct) =>
