@@ -21,6 +21,7 @@
     }
   }
   * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
   body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 "Segoe UI", system-ui, sans-serif; }
   header { padding: 14px 20px 16px; background: var(--panel); border-bottom: 1px solid var(--line); position: relative; }
   header::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 3px; background: linear-gradient(90deg, #1e3a8a, #2563eb 45%, #0d9488 75%, #f97316); }
@@ -31,6 +32,8 @@
   .brand-name .f { background: linear-gradient(90deg, #2563eb, #0d9488 60%, #f97316); -webkit-background-clip: text; background-clip: text; color: transparent; }
   .brand-user { margin-left: auto; font-size: 12.5px; color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 4px 12px; }
   .brand-user:empty { display: none; }
+  .modetabs { margin-bottom: 10px; }
+  .modetabs button { font-weight: 600; }
   .brand-tag { font-size: 12.5px; color: var(--muted); margin-top: 2px; letter-spacing: .01em; }
   h1 { font-size: 18px; margin: 0 0 10px; }
   h2 { font-size: 15px; margin: 0 0 10px; }
@@ -144,15 +147,21 @@
     </div>
     <div class="brand-user" id="me" title="Giriş yapan kullanıcı"></div>
   </div>
+  <div class="seg modetabs" id="modeTabs">
+    <button type="button" data-ui="ip" class="on">IP sorgula</button>
+    <button type="button" data-ui="app">Uygulama sorgula</button>
+  </div>
   <form id="f">
-    <label>IP adresi <input type="text" id="ip" placeholder="10.50.20.15" required></label>
+    <label id="ipLabel">IP adresi <input type="text" id="ip" placeholder="10.50.20.15"></label>
+    <label id="appLabel" hidden>Uygulama <input type="text" id="appName" list="appList" placeholder="Uygulama adı yazın…" autocomplete="off" style="width:280px"></label>
+    <datalist id="appList"></datalist>
     <label>Başlangıç <input type="datetime-local" id="start"></label>
     <label>Bitiş <input type="datetime-local" id="end"></label>
     <label>AppResponse kutusu <select id="appliance"></select></label>
     <div class="checks">
       <label><input type="checkbox" id="srcSplunk" checked> Splunk</label>
       <label><input type="checkbox" id="srcAr" checked> AppResponse</label>
-      <label title="Bulunan sunucuların kendi trafiğini de sorgular (segment → sunucu → sorgulanan IP → sunucu → segment)"><input type="checkbox" id="hop2On" checked> 2. seviye</label>
+      <label id="hop2Label" title="Bulunan sunucuların kendi trafiğini de sorgular (segment → sunucu → sorgulanan IP → sunucu → segment)"><input type="checkbox" id="hop2On" checked> 2. seviye</label>
     </div>
     <button class="primary" id="go" type="submit">Sorgula</button>
     <button type="button" id="cancel" hidden>İptal</button>
@@ -215,13 +224,16 @@ function initForm() {
   $("#end").value = p.get("end") || toLocalInput(now);
   $("#start").value = p.get("start") || toLocalInput(new Date(now - 3600e3));
   if (p.get("ip")) $("#ip").value = p.get("ip");
-  return !!p.get("ip");
+  if (p.get("app")) { $("#appName").value = p.get("app"); return "app"; }
+  return p.get("ip") ? "ip" : null;
 }
 
-$("#f").addEventListener("submit", ev => { ev.preventDefault(); run(); });
+$("#f").addEventListener("submit", ev => { ev.preventDefault(); uiMode === "app" ? runApp() : run(); });
 $("#cancel").addEventListener("click", () => abort?.abort());
 
 async function run() {
+  if (!$("#ip").value.trim()) { alert("IP adresi girin."); return; }
+  setUiMode("ip");
   const srcs = [$("#srcSplunk").checked && "splunk", $("#srcAr").checked && "appresponse"].filter(Boolean);
   if (!srcs.length) { alert("En az bir kaynak seçin."); return; }
   const params = new URLSearchParams({
@@ -907,7 +919,7 @@ function exportImage(kind) {
   clone.setAttribute("width", w); clone.setAttribute("height", h);
   clone.querySelector("*") && clone.insertAdjacentHTML("afterbegin", `<rect width="${w}" height="${h}" fill="${getComputedStyle(document.body).backgroundColor}"></rect>`);
   const xml = new XMLSerializer().serializeToString(clone);
-  const name = `DeltaFlow_${state.data.target.ip}_topoloji`;
+  const name = `DeltaFlow_${uiMode === "app" ? appState.data.name.replace(/[^\w.-]+/g, "_") : state.data.target.ip}_topoloji`;
   const save = (blob, ext) => { const l = document.createElement("a"); l.href = URL.createObjectURL(blob); l.download = `${name}.${ext}`; l.click(); setTimeout(() => URL.revokeObjectURL(l.href), 1000); };
   if (kind === "svg") { save(new Blob([xml], { type: "image/svg+xml" }), "svg"); return; }
   const img = new Image();
@@ -1039,7 +1051,8 @@ function exportCsv(dir) {
 
 window.addEventListener("resize", applyZoom);
 fetch("api/me").then(r => r.ok ? r.json() : null).then(me => { if (me?.name) $("#me").textContent = "👤 " + me.name; }).catch(() => {});
-loadAppliances().then(() => { if (initForm()) run(); });
+loadAppliances().then(() => { const m = initForm(); if (m === "app") runApp(); else if (m === "ip") run(); });
 </script>
+<script src="uygulama.js"></script>
 </body>
 </html>

@@ -202,6 +202,69 @@ app.MapGet("/api/flow", async (string? ip, string? start, string? end, int? appl
     return Results.Ok(new FlowResponse(target, inbound, outbound, spSt, arSt, envSt, sw.ElapsedMilliseconds));
 });
 
+// Uygulama listesi (ERT_HOSTIPADDRESS.APPNAME; "Sistem Portudur" kayıtları hariç)
+app.MapGet("/api/apps", async (EnvanterService envanter, CancellationToken ct) =>
+{
+    try
+    {
+        var env = await envanter.GetAsync(false, ct);
+        return Results.Ok(env.AppCatalog());
+    }
+    catch (Exception ex)
+    {
+        return Results.Json(new { error = ex.Message }, statusCode: 502);
+    }
+});
+
+// Uygulama topolojisi: uygulamanın tüm sunucuları ve VIP'leri tek Splunk sorgusu / tek AppResponse
+// raporuyla sorgulanır; akışlar uygulama seviyesinde gruplanır.
+app.MapGet("/api/app", async (string? name, string? start, string? end, int? appliance, string? sources,
+    IConfiguration cfg, IHttpClientFactory factory, EnvanterService envanter, CancellationToken ct) =>
+{
+    var sw = Stopwatch.StartNew();
+    var (env, envErr) = await Capture(() => envanter.GetAsync(false, ct), ct);
+    if (env == null)
+        return Results.Json(new { error = "Envanter okunamadı: " + envErr }, statusCode: 502);
+    if (string.IsNullOrWhiteSpace(name) || env.AppRows(name.Trim()).Count == 0)
+        return Results.BadRequest(new { error = $"Uygulama envanterde bulunamadı: {name}" });
+    name = name.Trim();
+
+    var (servers, vips) = AppTopology.Endpoints(name, env);
+    // VIP'ler önce (istemciler oraya gelir), sonra sunucular; limit aşılırsa fazlası sorgulanmaz.
+    int max = cfg.GetValue("Uygulama:MaxIp", cfg.GetValue("Hop2MaxPeers", 80));
+    var queried = vips.Select(v => v.Ip).Concat(servers.Select(s => s.Ip))
+        .Where(x => LookupQuery.TryParseIpv4(x, out _)).Distinct().Take(max).ToList();
+    if (queried.Count == 0)
+        return Results.BadRequest(new { error = "Uygulamanın envanterde geçerli bir IP'si yok." });
+
+    if (!LookupQuery.TryParse(queried[0], start, end, cfg.GetValue("MaxRangeHours", 24), out var q, out var error))
+        return Results.BadRequest(new { error });
+
+    var wanted = (sources ?? "splunk,appresponse").ToLowerInvariant();
+    var spTask = wanted.Contains("splunk")
+        ? Capture(() => SplunkService.QueryAsync(q!, cfg, factory.CreateClient("splunk"), ct, queried), ct)
+        : Task.FromResult<(SplunkResult?, string?)>((null, null));
+    var arTask = wanted.Contains("appresponse")
+        ? Capture(() => AppResponseService.QueryAnyAsync(q!, appliance ?? 0, cfg, factory.CreateClient("appresponse"), ct, queried), ct)
+        : Task.FromResult<(AppResponseResult?, string?)>((null, null));
+    try
+    {
+        await Task.WhenAll(spTask, arTask);
+    }
+    catch (OperationCanceledException) when (ct.IsCancellationRequested)
+    {
+        return Results.StatusCode(499);
+    }
+    if (ct.IsCancellationRequested)
+        return Results.StatusCode(499);
+
+    var (sp, spErr) = spTask.Result;
+    var (ar, arErr) = arTask.Result;
+    var (spSt, arSt, envSt) = Statuses(wanted, sp, spErr, ar, arErr, env, envErr);
+    return Results.Ok(AppTopology.Build(name, servers, vips, queried, sp, ar, env, AppTopology.InfraPorts(cfg),
+        spSt, arSt, envSt, sw.ElapsedMilliseconds));
+});
+
 // 2. seviye: sorgulanan IP'nin karşısındaki sunucuların kendi trafiği (tek sorguda, tüm sunucular için).
 // Her sunucu için gelen/giden trafik segment bazında özetlenir; sorgulanan IP özetten çıkarılır.
 app.MapPost("/api/hop2", async (Hop2Request req, IConfiguration cfg, IHttpClientFactory factory,

@@ -36,6 +36,24 @@ Sayfa: `/` ya da `/topoloji.html?ip=10.210.10.63` (adres çubuğundaki link payl
   AI yalnızca bu tabloyu yorumlar, tablo dışına çıkmaması ve her maddede uygulama/IP/port yazması istenir.
   2. seviye (sunucuların kendi trafiği) AI'a gönderilmez. Soru metni değiştirilebilir; gönderilen metin sayfada görülebilir.
 
+## Uygulama görünümü
+
+Başlıktaki **Uygulama sorgula** sekmesinde ERT_HOSTIPADDRESS'teki uygulamalar arama kutusunda listelenir
+(`/?app=<ad>` ile de açılır). Seçilen uygulamanın tüm sunucuları ve VIP'leri (ERT `VIP_IP` + `vip_envanteri`)
+tek Splunk sorgusu / tek AppResponse raporuyla sorgulanır ve akışlar **uygulama seviyesinde** gruplanır:
+
+```
+[Bu uygulamayı kullananlar] ──> [ UYGULAMA: VIP'ler + sunucular (segment bazında) ] ──> [Bağımlı olunanlar]
+```
+
+- Kenar kutuları uygulamadır; envanterde olmayan IP'ler segmentine göre gruplanır.
+- Ortadaki kutuda VIP'ler ve segment grupları; segment grubuna tıklayınca sunucular açılır.
+  Mor yaylar uygulama içi trafik: düz = LB (VIP → üye, GW üzerinden), kesik = sunucudan sunucuya.
+- Kullananlar / Bağımlılıklar / İç trafik / Altyapı seçilebilir. Altyapı (DNS, AD, NTP, izleme, RDP/SSH…)
+  varsayılan gizli; portlar `Uygulama:AltyapiPortlari` ile değiştirilebilir.
+- Kutuya tıklayınca IP'ler ve "Bu uygulamayı aç"; VIP/sunucuya tıklayınca üyeler ve IP topolojisi bağlantısı.
+- En fazla `Uygulama:MaxIp` (varsayılan 80) IP sorgulanır; VIP'ler önce gelir.
+
 ## Kimlik doğrulama ve yetki
 
 Sayfaya Windows Authentication ile girilir; yetki DokuPanel'den `AuthHelper.YetkiKontrol` ile alınır.

@@ -118,7 +118,7 @@ sealed class EnvanterService(IConfiguration cfg, ILogger<EnvanterService> log)
             log.LogWarning(ex, "VIP tabloları okunamadı ({Vip}, {Gw}); VIP çözümlemesi kapalı.", vipTable, vipGwTable);
         }
 
-        return new EnvanterSnapshot(segments, hosts, vips, vipGws);
+        return new EnvanterSnapshot(segments, hosts, vips, vipGws, marker);
     }
 
     static string? Clean(SqlDataReader r, int i) => r.IsDBNull(i) ? null : EnvanterSnapshot.Clean(Convert.ToString(r.GetValue(i)));
@@ -148,6 +148,8 @@ record VipMember(string? Hostname, string Ip, string? Port, string? Type, string
     public bool Verified => GwHits > 0;    // GW → üye:port akışı görüldü mü
 }
 
+record AppCatalogItem(string Name, int Servers, int Vips, string? Owner);
+
 // Kind: "ip-port" (birebir), "vip" (VIP_IP+VIP_PORT), "ip" (sadece IP), "vip-ip" (sadece VIP_IP), "yok"
 record AppMatch(string Kind, List<HostApp> Apps);
 
@@ -168,9 +170,14 @@ sealed class EnvanterSnapshot
     readonly Dictionary<string, string?> _gwFw = new();
     readonly Dictionary<uint, List<VipGwRow>>?[] _gwByPrefix = new Dictionary<uint, List<VipGwRow>>?[33];
 
+    // Uygulama adı -> envanter satırları ("Sistem Portudur..." kayıtları hariç)
+    readonly Dictionary<string, List<HostApp>> _byApp = new(StringComparer.OrdinalIgnoreCase);
+    readonly string _systemMarker;
+
     public EnvanterSnapshot(List<SegmentInfo> segments, List<HostApp> hosts,
-        List<VipRow>? vips = null, List<VipGwRow>? vipGws = null)
+        List<VipRow>? vips = null, List<VipGwRow>? vipGws = null, string systemMarker = SystemPorts.DefaultMarker)
     {
+        _systemMarker = systemMarker;
         foreach (var s in segments)
         {
             if (!TryParseCidr(s.Cidr, out uint net, out int prefix)) continue;
@@ -183,6 +190,7 @@ sealed class EnvanterSnapshot
         {
             if (h.Ip != null) Add(_byIp, h.Ip, h);
             if (h.VipIp != null) Add(_byVip, h.VipIp, h);
+            if (h.AppName != null && !IsSystemApp(h.AppName)) Add(_byApp, h.AppName, h);
             HostCount++;
         }
 
@@ -251,6 +259,26 @@ sealed class EnvanterSnapshot
     }
 
     public List<HostApp> AppsOnIp(string ip) => _byIp.TryGetValue(ip, out var l) ? l : [];
+
+    public bool IsSystemApp(string? appName) =>
+        appName != null && appName.StartsWith(_systemMarker, StringComparison.CurrentCultureIgnoreCase);
+
+    // IP üzerindeki uygulama adları (sistem portu kayıtları hariç)
+    public List<string> AppNamesOnIp(string ip) =>
+        AppsOnIp(ip).Select(h => h.AppName).OfType<string>().Where(n => !IsSystemApp(n)).Distinct().Order().ToList();
+
+    public List<HostApp> AppRows(string name) => _byApp.TryGetValue(name, out var l) ? l : [];
+
+    // Uygulama listesi: ad, sunucu sayısı, VIP sayısı, varlık muhafızı
+    public List<AppCatalogItem> AppCatalog() => _byApp
+        .Select(kv => new AppCatalogItem(kv.Value[0].AppName!,
+            kv.Value.Select(h => h.Ip).OfType<string>().Distinct().Count(),
+            kv.Value.Select(h => h.VipIp).OfType<string>()
+                .Concat(kv.Value.Select(h => h.Ip).OfType<string>().SelectMany(ip => MemberOf(ip)).Select(m => m.LbIp))
+                .Distinct().Count(),
+            kv.Value.Select(h => h.VarlikMuhafizi).OfType<string>().FirstOrDefault()))
+        .OrderBy(a => a.Name, StringComparer.CurrentCultureIgnoreCase)
+        .ToList();
 
     // Belirli bir IP:port'ta hangi uygulama var? En güçlü eşleşmeden zayıfa doğru arar.
     public AppMatch Match(string ip, string? port)
