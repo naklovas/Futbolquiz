@@ -25,10 +25,12 @@ o IP'nin akışlarını çeker, iki SQL Server envanteriyle zenginleştirir ve �
 
 Sayfa: `/topoloji.html?ip=10.210.10.63` (adres çubuğundaki link paylaşılabilir).
 
-- **AI etki analizi**: sorgu bittikten sonra "AI'a yorumlat" ile gelen/giden sunucular (segment, uygulama,
-  sahip/muhafız, port, trafik, 2. seviye segmentler) şirket içi AI servisine gönderilir ve
-  "bu sunucuda değişiklik yapılırsa nereler etkilenir" yorumu alınır. Soru metni değiştirilebilir;
-  AI'a gönderilen metin sayfada görülebilir.
+- **AI etki analizi**: sorgu bittikten sonra "AI'a yorumlat" ile şirket içi AI servisine bir etki tablosu gönderilir.
+  Tablo kodda hesaplanır:
+  - Sorgulanan sunucudaki her servis (uygulama + port) ve onu kullanan uygulamalar (IP, segment, sahip/muhafız).
+  - Sorgulanan sunucunun kullandığı servisler (hedef uygulama, IP:port, bağlantıyı açan süreç).
+  AI yalnızca bu tabloyu yorumlar, tablo dışına çıkmaması ve her maddede uygulama/IP/port yazması istenir.
+  2. seviye (sunucuların kendi trafiği) AI'a gönderilmez. Soru metni değiştirilebilir; gönderilen metin sayfada görülebilir.
 
 ## AI servisi
 
@@ -40,7 +42,7 @@ yanıt `choices[0].message.content`). `appsettings.json`:
         "Temperature": 0.1, "TimeoutMinutes": 3, "IgnoreSslErrors": true }
 ```
 
-Her tarafta en yoğun 30 sunucu gönderilir. Endpoint: `POST /api/ai/etki`.
+Her yönde en yoğun 80 bağlantı gönderilir. Endpoint: `POST /api/ai/etki`.
 
 ## Envanter tabloları
 

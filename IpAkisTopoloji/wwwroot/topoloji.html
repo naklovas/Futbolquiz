@@ -285,7 +285,7 @@ function render() {
     </section>
     <section class="panel">
       <div class="toolbar"><h2 style="margin:0">AI etki analizi</h2>
-        <span class="muted small">Gelen/giden sunucular, segmentler ve uygulama sahipleri şirket içi AI servisine gönderilir.</span></div>
+        <span class="muted small">Gelen/giden bağlantılar (uygulama, IP, port, segment, sahip) şirket içi AI servisine gönderilir.</span></div>
       <textarea class="ai-q" id="aiQ"></textarea>
       <div style="display:flex;gap:8px;margin-top:8px;align-items:center">
         <button type="button" class="primary" id="aiGo">AI'a yorumlat</button>
@@ -716,29 +716,26 @@ const AI_DEFAULT_Q = "Bu sunucuda bir değişiklik (bakım, yeniden başlatma, s
 const AI_MAX_PEERS = 30;
 let aiAbort = null;
 
-// Sorgu sonucunu AI'a gidecek sade bir özete çevirir (sunucu başına segment, uygulama, sahip, port, hit, 2. seviye segmentler).
+// Sorgu sonucunu AI'a gidecek bağlantı listesine çevirir: her (karşı IP, port) için iki uçtaki uygulamalar.
+// 2. seviye gönderilmez; etki listesi backend'de servis → kullanan uygulama olarak gruplanır.
+const AI_MAX_EDGES = 80;
 function buildAiRequest() {
   const d = state.data;
-  const peersOf = dir => {
-    const edges = dir === "in" ? d.inbound : d.outbound;
-    return sideServers(dir).slice(0, AI_MAX_PEERS).map(s => {
-      const es = edges.filter(e => e.peerIp === s.ip);
-      const apps = es.flatMap(e => e.peerApps?.apps ?? []);
-      const hop = state.hop2?.peers?.get(s.ip);
-      const hopList = hop ? (dir === "in" ? hop.inbound : hop.outbound) : [];
+  const edgesOf = dir => (dir === "in" ? d.inbound : d.outbound)
+    .slice().sort((a, b) => b.hits - a.hits).slice(0, AI_MAX_EDGES)
+    .map(e => {
+      const apps = e.peerApps?.apps ?? [];
       return {
-        ip: s.ip,
-        segment: s.seg ? `${s.seg.label}${s.seg.label !== s.seg.cidr ? " (" + s.seg.cidr + ")" : ""}` : null,
-        apps: s.apps,
-        owners: [...new Set(apps.flatMap(a => [a.varlikMuhafizi, a.uygulamaVarlikSahibi, a.sunucuIsletenBirim]).filter(Boolean))],
-        ports: [...s.ports].filter(p => p !== "").sort(portSort),
-        hits: s.hits,
-        localApps: dir === "in" ? [...s.localApps] : null,
-        processes: dir === "out" ? [...new Set(es.flatMap(e => e.processes))].slice(0, 6) : null,
-        hop2: hopAggByName(hopList).slice(0, 6)
+        ip: e.peerIp,
+        segment: e.peerSegment ? `${e.peerSegment.label}${e.peerSegment.label !== e.peerSegment.cidr ? " " + e.peerSegment.cidr : ""}` : null,
+        apps: appNames(e.peerApps),
+        owners: [...new Set(apps.flatMap(a => [a.varlikMuhafizi, a.uygulamaVarlikSahibi]).filter(Boolean))],
+        port: e.port === "" ? "web" : e.port,
+        hits: e.hits,
+        localApps: dir === "in" ? appNames(e.localApp) : null,
+        processes: dir === "out" ? e.processes.slice(0, 6) : null
       };
     });
-  };
   const t = d.target;
   return {
     question: $("#aiQ").value.trim(),
@@ -746,20 +743,9 @@ function buildAiRequest() {
     segment: t.segment ? `${t.segment.label} (${t.segment.cidr}${t.segment.vlan ? ", VLAN " + t.segment.vlan : ""})` : null,
     apps: [...new Set(t.apps.map(a => `${appName(a)}${a.port ? " :" + a.port : ""}`))],
     period: state.lastParams ? `${state.lastParams.get("start").replace("T", " ")} - ${state.lastParams.get("end").replace("T", " ")}` : null,
-    inbound: peersOf("in"), outbound: peersOf("out"),
+    inbound: edgesOf("in"), outbound: edgesOf("out"),
     inboundTotal: sideServers("in").length, outboundTotal: sideServers("out").length
   };
-}
-
-// 2. seviye özetini segment adına göre birleştirir (aynı adlı CIDR'lar tek kayıt), uygulamalarıyla birlikte.
-function hopAggByName(list) {
-  const m = new Map();
-  for (const a of list) {
-    const k = a.segment ? a.segment.label : "segment envanterinde yok";
-    const g = m.get(k) ?? m.set(k, { segment: k, apps: new Set(), ipCount: 0, hits: 0 }).get(k);
-    g.ipCount += a.ipCount; g.hits += a.hits; a.apps.forEach(x => g.apps.add(x));
-  }
-  return [...m.values()].sort((a, b) => b.hits - a.hits).map(g => ({ segment: g.segment, apps: [...g.apps], ipCount: g.ipCount }));
 }
 
 async function runAi() {
@@ -767,7 +753,7 @@ async function runAi() {
   aiAbort = new AbortController();
   const btn = $("#aiGo");
   btn.disabled = true;
-  $("#aiNote").textContent = state.hop2?.status === "loading" ? "Not: 2. seviye henüz bitmedi, onsuz gönderiliyor." : "";
+  $("#aiNote").textContent = "";
   $("#aiOut").innerHTML = `<div class="muted" style="margin-top:12px"><span class="spinner"></span> AI yorumluyor… (birkaç dakika sürebilir)</div>`;
   try {
     const r = await fetch("api/ai/etki", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(buildAiRequest()), signal: aiAbort.signal });

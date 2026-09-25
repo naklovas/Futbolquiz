@@ -7,21 +7,21 @@ using System.Text.Json;
 // Şirket içi AI servisi (OpenAI uyumlu /chat/completions) ile etki analizi.
 // Arayüz sorgu sonucunun özetini gönderir; burada prompt kurulur ve servise iletilir.
 // ---------------------------------------------------------------------------
-// Apps: karşı sunucudaki uygulama(lar); LocalApps: gelen trafikte sorgulanan sunucuda karşılayan uygulama;
-// Processes: giden trafikte bağlantıyı açan süreç(ler) (Splunk); Hop2: karşı sunucunun 2. seviye segmentleri ve uygulamaları.
-record AiPeer(string Ip, string? Segment, List<string>? Apps, List<string>? Owners, List<string>? Ports,
-    long Hits, List<string>? LocalApps, List<string>? Processes, List<AiHop>? Hop2);
-
-record AiHop(string? Segment, List<string>? Apps, int IpCount);
+// Bir bağlantı (karşı IP + port). Apps: karşı sunucudaki uygulama(lar);
+// LocalApps: gelen trafikte sorgulanan sunucuda o portu karşılayan uygulama;
+// Processes: giden trafikte bağlantıyı açan süreç(ler) (Splunk).
+record AiEdge(string Ip, string? Segment, List<string>? Apps, List<string>? Owners, string? Port,
+    long Hits, List<string>? LocalApps, List<string>? Processes);
 
 record AiRequest(string? Question, string? Ip, string? Segment, List<string>? Apps, string? Period,
-    List<AiPeer>? Inbound, List<AiPeer>? Outbound, int? InboundTotal, int? OutboundTotal);
+    List<AiEdge>? Inbound, List<AiEdge>? Outbound, int? InboundTotal, int? OutboundTotal);
 
 record AiResponse(string Answer, string Model, long ElapsedMs, string Prompt);
 
 static class AiEtkiService
 {
-    const int MaxPeers = 30, MaxText = 120, MaxList = 6, MaxQuestion = 500;
+    const int MaxEdges = 80, MaxIpsPerLine = 8, MaxText = 120, MaxList = 6, MaxQuestion = 500;
+    const string NoApp = "envanterde uygulama kaydı yok";
 
     public const string DefaultQuestion =
         "Bu sunucuda bir değişiklik (bakım, yeniden başlatma, sürüm/konfigürasyon değişikliği, kapatma) yapılırsa nereler etkilenir?";
@@ -72,83 +72,84 @@ static class AiEtkiService
         return new AiResponse(answer, model, sw.ElapsedMilliseconds, prompt);
     }
 
+    // Etki listesi kodda hesaplanır (servis → kullanan uygulamalar); AI yalnızca bu tabloyu yorumlar.
     public static string BuildPrompt(AiRequest r)
     {
         string question = Trunc(string.IsNullOrWhiteSpace(r.Question) ? DefaultQuestion : r.Question.Trim(), MaxQuestion);
+        var inbound = (r.Inbound ?? []).OrderByDescending(e => e.Hits).Take(MaxEdges).ToList();
+        var outbound = (r.Outbound ?? []).OrderByDescending(e => e.Hits).Take(MaxEdges).ToList();
         var sb = new StringBuilder();
 
         sb.AppendLine("Sen kurumsal bir bankanın BT altyapı ve uygulama bağımlılık analistisin.");
-        sb.AppendLine("Aşağıda bir sunucunun gerçek ağ trafiği özeti var (kaynak: Splunk/Carbon Black ve Riverbed AppResponse,");
-        sb.AppendLine("segment ve uygulama bilgisi kurum envanterinden). Sadece bu verilere dayan. Veride olmayan bir");
-        sb.AppendLine("çıkarım yapıyorsan başına \"(tahmin)\" yaz. IP, segment ve uygulama adlarını aynen kullan.");
+        sb.AppendLine("Aşağıdaki tablolar bir sunucunun gerçek ağ trafiğinden (Splunk/Carbon Black, Riverbed AppResponse) ve");
+        sb.AppendLine("kurum envanterinden çıkarıldı. KURALLAR:");
+        sb.AppendLine("- Sadece tablolardaki uygulama, IP, port ve ekipleri kullan; tabloda olmayan hiçbir şey ekleme.");
+        sb.AppendLine("- \"Bazı sistemler etkilenebilir\" gibi genel ifadeler kullanma; her maddede uygulama adı, IP ve port olsun.");
+        sb.AppendLine("- Uygulaması envanterde olmayan sunucuları ayrıca IP ve segmentiyle listele.");
         sb.AppendLine();
         sb.AppendLine($"SORU: {question}");
         sb.AppendLine();
-        sb.AppendLine($"SORGULANAN SUNUCU: {Clean(r.Ip)}");
-        sb.AppendLine($"- Segment: {Clean(r.Segment) ?? "envanterde yok"}");
-        sb.AppendLine($"- Üzerindeki uygulamalar: {JoinOr(r.Apps, "envanterde yok")}");
-        if (Clean(r.Period) is { } period) sb.AppendLine($"- İncelenen zaman aralığı: {period}");
+        sb.AppendLine($"SORGULANAN SUNUCU: {Clean(r.Ip)} | segment: {Clean(r.Segment) ?? "envanterde yok"} | uygulamalar: {JoinOr(r.Apps, NoApp)}");
+        if (Clean(r.Period) is { } period) sb.AppendLine($"İncelenen zaman aralığı: {period}");
         sb.AppendLine();
 
-        string targetApps = JoinOr(r.Apps, "envanterde yok");
-        AppendPeers(sb, "GELEN BAĞLANTILAR (bu sunucuyu kullanan sunucular; değişiklikten DOĞRUDAN etkilenirler)",
-            r.Inbound, r.InboundTotal, inbound: true, targetApps);
-        AppendPeers(sb, "GİDEN BAĞLANTILAR (bu sunucunun bağımlı olduğu servisler; değişiklik sonrası bu bağlantılar kontrol edilmeli)",
-            r.Outbound, r.OutboundTotal, inbound: false, targetApps);
-
-        sb.AppendLine("YANITI TÜRKÇE, KISA VE MADDE MADDE, AŞAĞIDAKİ BAŞLIKLARLA VER:");
-        sb.AppendLine("## Özet");
-        sb.AppendLine("(2-3 cümle: sunucunun rolü ve değişikliğin genel etki büyüklüğü)");
-        sb.AppendLine("## Doğrudan etkilenecekler");
-        sb.AppendLine("(gelen bağlantılardaki uygulamalar/segmentler, trafiği en yüksekten başlayarak)");
-        sb.AppendLine("## Dolaylı etkilenebilecekler");
-        sb.AppendLine("(gelen sunuculara bağlanan segmentler üzerinden zincirleme etkiler)");
-        sb.AppendLine("## Kontrol edilmesi gereken bağımlılıklar");
-        sb.AppendLine("(giden bağlantılar: değişiklik sonrası erişimi test edilmesi gereken servisler)");
-        sb.AppendLine("## Bilgilendirilmesi gereken ekipler");
-        sb.AppendLine("(varlık sahibi / muhafızı bilgilerinden)");
-        sb.AppendLine("## Değişiklik öncesi öneriler");
-        sb.AppendLine("(bakım penceresi, test adımları, geri dönüş planı)");
-        return sb.ToString();
-    }
-
-    // Her bağlantı iki ucundaki uygulamalarla, kaynak → hedef yönünde yazılır.
-    static void AppendPeers(StringBuilder sb, string title, List<AiPeer>? peers, int? total, bool inbound, string targetApps)
-    {
-        peers ??= [];
-        int shown = Math.Min(peers.Count, MaxPeers);
-        int all = Math.Max(total ?? peers.Count, peers.Count);
-        sb.AppendLine($"{title}: toplam {all} sunucu{(all > shown ? $", en yoğun {shown} tanesi" : "")}");
-        if (shown == 0) sb.AppendLine("- kayıt yok");
-
-        foreach (var p in peers.Take(MaxPeers))
+        // 1) Sorgulanan sunucudaki her servis (uygulama + port) ve onu kullanan uygulamalar
+        int inTotal = Math.Max(r.InboundTotal ?? 0, inbound.Select(e => e.Ip).Distinct().Count());
+        sb.AppendLine($"ETKİ TABLOSU — SORGULANAN SUNUCUDAKİ SERVİSLER VE ONLARI KULLANANLAR (toplam {inTotal} kaynak sunucu):");
+        if (inbound.Count == 0) sb.AppendLine("- gelen bağlantı yok");
+        foreach (var svc in inbound.GroupBy(e => (Port: Clean(e.Port) ?? "?", App: JoinOr(e.LocalApps, NoApp)))
+                     .OrderByDescending(g => g.Sum(e => e.Hits)))
         {
-            string ip = Clean(p.Ip) ?? "?";
-            string ports = JoinOr(p.Ports, "?");
-            string peerApps = JoinOr(p.Apps, "envanterde yok");
-
-            sb.AppendLine($"- {ip} | segment: {Clean(p.Segment) ?? "bilinmiyor"} | trafik: {p.Hits} bağlantı");
-            if (inbound)
+            sb.AppendLine($"* Servis: {svc.Key.App} — port {svc.Key.Port} ({svc.Select(e => e.Ip).Distinct().Count()} sunucu, {svc.Sum(e => e.Hits)} bağlantı)");
+            foreach (var user in svc.GroupBy(e => JoinOr(e.Apps, "")).OrderBy(g => g.Key == "").ThenByDescending(g => g.Sum(e => e.Hits)))
             {
-                string local = p.LocalApps is { Count: > 0 } ? JoinOr(p.LocalApps, "") : targetApps;
-                sb.AppendLine($"  bağlantı: {ip} (uygulama: {peerApps}) → SORGULANAN SUNUCU port {ports} (karşılayan uygulama: {local})");
-            }
-            else
-            {
-                string proc = p.Processes is { Count: > 0 } ? $"süreç: {JoinOr(p.Processes, "")}; " : "";
-                sb.AppendLine($"  bağlantı: SORGULANAN SUNUCU ({proc}sunucudaki uygulamalar: {targetApps}) → {ip} port {ports} (hedef uygulama: {peerApps})");
-            }
-            if (p.Owners is { Count: > 0 }) sb.AppendLine($"  {ip} sahip/muhafız: {JoinOr(p.Owners, "")}");
-            if (p.Hop2 is { Count: > 0 })
-            {
-                var hops = p.Hop2.Take(MaxList).Select(h =>
-                    $"{Clean(h.Segment) ?? "segment envanterde yok"} ({h.IpCount} IP; uygulama: {JoinOr(h.Apps, "bilinmiyor")})");
-                sb.AppendLine(inbound
-                    ? $"  {ip} sunucusuna gelen segmentler (dolaylı etki): {string.Join("; ", hops)}"
-                    : $"  {ip} sunucusunun gittiği segmentler: {string.Join("; ", hops)}");
+                string servers = IpList(user, withPort: false);
+                string owners = JoinOr(user.SelectMany(e => e.Owners ?? []).ToList(), "");
+                sb.AppendLine(user.Key == ""
+                    ? $"  - Uygulaması envanterde olmayan kaynak sunucular: {servers} | {user.Sum(e => e.Hits)} bağlantı"
+                    : $"  - Kullanan uygulama: {user.Key} | sunucular: {servers}{(owners != "" ? $" | sahip/muhafız: {owners}" : "")} | {user.Sum(e => e.Hits)} bağlantı");
             }
         }
         sb.AppendLine();
+
+        // 2) Sorgulanan sunucunun kullandığı servisler
+        int outTotal = Math.Max(r.OutboundTotal ?? 0, outbound.Select(e => e.Ip).Distinct().Count());
+        sb.AppendLine($"BAĞIMLILIK TABLOSU — SORGULANAN SUNUCUNUN KULLANDIĞI SERVİSLER (toplam {outTotal} hedef sunucu):");
+        if (outbound.Count == 0) sb.AppendLine("- giden bağlantı yok");
+        foreach (var dep in outbound.GroupBy(e => JoinOr(e.Apps, "")).OrderBy(g => g.Key == "").ThenByDescending(g => g.Sum(e => e.Hits)))
+        {
+            string targets = IpList(dep, withPort: true);
+            string procs = JoinOr(dep.SelectMany(e => e.Processes ?? []).ToList(), "");
+            string owners = JoinOr(dep.SelectMany(e => e.Owners ?? []).ToList(), "");
+            string extra = (procs != "" ? $" | bağlantıyı açan süreç: {procs}" : "") + (owners != "" ? $" | sahip/muhafız: {owners}" : "");
+            sb.AppendLine(dep.Key == ""
+                ? $"- Uygulaması envanterde olmayan hedefler: {targets}{extra} | {dep.Sum(e => e.Hits)} bağlantı"
+                : $"- Hedef uygulama: {dep.Key} | hedefler: {targets}{extra} | {dep.Sum(e => e.Hits)} bağlantı");
+        }
+        sb.AppendLine();
+
+        sb.AppendLine("YANITI TÜRKÇE VE AŞAĞIDAKİ BAŞLIKLARLA VER:");
+        sb.AppendLine("## Özet");
+        sb.AppendLine("(1-2 cümle: sunucunun rolü; kaç uygulama ve sunucu etkilenir)");
+        sb.AppendLine("## Etkilenecek uygulamalar");
+        sb.AppendLine("(ETKİ TABLOSU'ndaki her servis için tek madde: \"<servis> (port) kesilirse: <kullanan uygulamalar> (<IP'ler>)\"; en yoğundan başla)");
+        sb.AppendLine("## Kontrol edilecek bağımlılıklar");
+        sb.AppendLine("(BAĞIMLILIK TABLOSU'ndaki hedefler: değişiklik sonrası erişimi test edilecek uygulama, IP ve port)");
+        sb.AppendLine("## Bilgilendirilecek ekipler");
+        sb.AppendLine("(sadece tablolardaki sahip/muhafız bilgilerinden)");
+        sb.AppendLine("## Öneriler");
+        sb.AppendLine("(en fazla 4 madde, somut: bakım penceresi, test edilecek bağlantılar, geri dönüş)");
+        return sb.ToString();
+    }
+
+    static string IpList(IEnumerable<AiEdge> edges, bool withPort)
+    {
+        var items = edges
+            .GroupBy(e => withPort ? $"{e.Ip}:{Clean(e.Port) ?? "?"}" : e.Ip)
+            .OrderByDescending(g => g.Sum(e => e.Hits))
+            .Select(g => $"{Clean(g.Key)} ({Clean(g.First().Segment) ?? "segment yok"})")
+            .ToList();
+        return string.Join(", ", items.Take(MaxIpsPerLine)) + (items.Count > MaxIpsPerLine ? $" +{items.Count - MaxIpsPerLine} sunucu daha" : "");
     }
 
     static string? Clean(string? v)
