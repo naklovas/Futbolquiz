@@ -250,7 +250,7 @@ async function run() {
     const r = await fetch("api/flow?" + params, { signal: abort.signal });
     const body = await r.json().catch(() => ({ error: `HTTP ${r.status}` }));
     if (!r.ok) throw new Error(body.error || `HTTP ${r.status}`);
-    state.data = body; state.hop2 = null; state.filter = null; state.selected = null; state.zoom = 1;
+    state.raw = body; state.data = envFiltered(body); state.hop2 = null; state.filter = null; state.selected = null; state.zoom = 1;
     state.lastParams = params;
     render();
     if ($("#hop2On").checked) runHop2(params);
@@ -294,6 +294,7 @@ function render() {
     <section class="panel">
       <div class="toolbar">
         <h2 style="margin:0">Topoloji</h2>
+        ${envToggleHtml(envHiddenIps(state.raw))}
         <label style="flex-direction:row;align-items:center;gap:6px">Sunucu sayısı
           <select id="maxSrv">${SERVER_CHOICES.map(n => `<option value="${n}"${n === state.maxServers ? " selected" : ""}>ilk ${n}</option>`).join("")}</select></label>
         <label style="flex-direction:row;align-items:center;gap:6px">Segment sayısı
@@ -336,6 +337,14 @@ function render() {
       <section class="panel dir-in" id="tbl-in"></section>
       <section class="panel dir-out" id="tbl-out"></section>
     </div>`;
+  wireEnvToggles(() => {
+    state.data = envFiltered(state.raw); state.selected = null; state.filter = null;
+    render();
+    // Yeni görünen sunucuların 2. seviyesi yoksa tekrar sorgula.
+    const peers = state.hop2?.peers;
+    const missing = ["in", "out"].some(d => sideServers(d).slice(0, state.maxServers).some(x => !peers?.has(x.ip)));
+    if ($("#hop2On").checked && state.hop2?.status === "ok" && missing) runHop2(state.lastParams);
+  });
   $("#maxSrv").addEventListener("change", ev => {
     state.maxServers = +ev.target.value; state.selected = null;
     renderTopology(); renderDetail();
@@ -466,6 +475,7 @@ function sideSegments(dir, servers) {
   for (const srv of servers) {
     const hop = peers.get(srv.ip); if (!hop) continue;
     for (const a of (state.hopDir[dir] === "in" ? hop.inbound : hop.outbound)) {
+      if (!envAllowed(a.segment)) continue;
       const k = segKey(a.segment);
       let g = m.get(k);
       if (!g) m.set(k, g = { key: k, seg: a.segment, cidrs: new Set(), vlans: new Set(), hits: 0, ips: new Set(), ports: new Set(), apps: new Set(), links: new Map() });
@@ -726,6 +736,7 @@ function segDl(seg) {
 
 function hopTable(list, title) {
   if (!list) return "";
+  list = list.filter(a => envAllowed(a.segment));
   return `<h2 style="margin-top:12px">${title} <span class="muted" style="font-weight:400">(${fmt(list.length)} segment)</span></h2>
     ${list.length ? `<div class="tbl-wrap" style="max-height:260px"><table>
       <thead><tr><th>Segment</th><th class="num">IP</th><th>Port</th><th>Uygulama</th><th>Örnek IP'ler</th><th class="num">Hit</th></tr></thead>
@@ -1050,6 +1061,42 @@ function exportCsv(dir) {
 }
 
 window.addEventListener("resize", applyZoom);
+// ---------- Ortam filtreleri (ODM, TEST...) ----------
+// Karşı IP'nin segment Domain'inde anahtar kelime geçiyorsa o kategoriye girer; kutucuk işaretli değilse gizlenir.
+let envFilters = [{ key: "odm", label: "ODM", keyword: "odm" }, { key: "test", label: "TEST", keyword: "test" }];
+const envShow = {};
+fetch("api/filtreler").then(r => r.ok ? r.json() : null).then(f => { if (Array.isArray(f) && f.length) envFilters = f; }).catch(() => {});
+
+function envCat(seg) {
+  const d = (seg?.domain ?? "").toLocaleLowerCase("tr");
+  if (!d) return null;
+  return envFilters.find(f => d.includes(f.keyword.toLocaleLowerCase("tr")))?.key ?? null;
+}
+const envAllowed = seg => { const c = envCat(seg); return !c || !!envShow[c]; };
+// VIP'in havuz üyeleri (viaVip) sorgulanan VIP'in parçası olduğu için filtrelenmez.
+const envFiltered = raw => ({
+  ...raw,
+  inbound: raw.inbound.filter(e => envAllowed(e.peerSegment)),
+  outbound: raw.outbound.filter(e => e.viaVip || envAllowed(e.peerSegment))
+});
+// Kategori başına gizlenen farklı IP sayısı (ham veriden)
+function envHiddenIps(raw) {
+  const m = {};
+  for (const e of [...raw.inbound, ...raw.outbound]) {
+    const c = envCat(e.peerSegment);
+    if (c && !e.viaVip) (m[c] ??= new Set()).add(e.peerIp);
+  }
+  return Object.fromEntries(Object.entries(m).map(([k, v]) => [k, v.size]));
+}
+function envToggleHtml(counts) {
+  return `<div class="checks" style="padding:0" title="Segment Domain'inde bu ifade geçen IP'ler; işaretliyse gösterilir">
+    ${envFilters.map(f => `<label><input type="checkbox" data-env="${esc(f.key)}" ${envShow[f.key] ? "checked" : ""}> ${esc(f.label)} <span class="muted">(${fmt(counts[f.key] ?? 0)} IP)</span></label>`).join("")}
+  </div>`;
+}
+function wireEnvToggles(onChange) {
+  document.querySelectorAll("[data-env]").forEach(cb => cb.addEventListener("change", () => { envShow[cb.dataset.env] = cb.checked; onChange(); }));
+}
+
 fetch("api/me").then(r => r.ok ? r.json() : null).then(me => { if (me?.name) $("#me").textContent = "👤 " + me.name; }).catch(() => {});
 loadAppliances().then(() => { const m = initForm(); if (m === "app") runApp(); else if (m === "ip") run(); });
 </script>

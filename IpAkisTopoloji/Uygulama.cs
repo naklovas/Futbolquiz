@@ -20,8 +20,9 @@ record AppPeer(string Ip, SegmentInfo? Segment, long Hits, List<string> Ports);
 // Dış ilişki grubu: bir uygulama (ya da envanterde olmayan IP'ler için bir segment).
 // Targets: kullananlarda uygulamanın hangi uç noktasına (VIP/sunucu IP) geldiği,
 // bağımlılıklarda uygulamanın hangi sunucusundan gidildiği -> hit.
+// Env: ortam filtresi kategorisi (ör. "odm", "test"; segment Domain'ine göre) ya da null.
 record AppLink(string Key, string Name, bool Unknown, bool Infra, SegmentInfo? Segment, long Hits,
-    List<string> Ports, List<AppPeer> Peers, Dictionary<string, long> Targets, List<string> ViaVips);
+    List<string> Ports, List<AppPeer> Peers, Dictionary<string, long> Targets, List<string> ViaVips, string? Env);
 
 // Uygulama içi: kaynak -> hedef:port. Kind: "direct" ya da "lb" (VIP GW üzerinden havuz üyesine).
 record AppInternal(string From, string To, string Port, long Hits, string Kind);
@@ -73,7 +74,7 @@ static class AppTopology
     }
 
     public static AppTopologyResponse Build(string name, List<AppServer> servers, List<AppVip> vips, List<string> queried,
-        SplunkResult? sp, AppResponseResult? ar, EnvanterSnapshot env, HashSet<string> infraPorts,
+        SplunkResult? sp, AppResponseResult? ar, EnvanterSnapshot env, HashSet<string> infraPorts, List<EnvFilter> envFilters,
         SourceStatus spSt, SourceStatus arSt, SourceStatus envSt, long elapsedMs)
     {
         var appIps = servers.Select(s => s.Ip).Concat(vips.Select(v => v.Ip)).ToHashSet();
@@ -107,9 +108,9 @@ static class AppTopology
                 }
                 else
                 {
-                    var (key, label, unknown) = PeerKey(e.PeerIp, env.AppNamesOnIp(e.PeerIp), e.PeerSegment);
+                    var (key, label, unknown, cat) = PeerKey(env.AppNamesOnIp(e.PeerIp), e.PeerSegment, envFilters);
                     bool infra = infraPorts.Contains(e.Port) || (e.LocalApp?.Apps.All(a => env.IsSystemApp(a.AppName)) == true && e.LocalApp.Apps.Count > 0);
-                    Get(callers, key, label, unknown, e.PeerSegment).Add(e, x, infra, null);
+                    Get(callers, key, label, unknown, e.PeerSegment, cat).Add(e, x, infra, null);
                 }
             }
 
@@ -131,10 +132,10 @@ static class AppTopology
                     names = (e.PeerApps?.Apps ?? []).Select(a => a.AppName).OfType<string>()
                         .Where(n => !env.IsSystemApp(n)).Distinct().Order().ToList();
                 }
-                var (key, label, unknown) = PeerKey(e.PeerIp, names, e.PeerSegment);
+                var (key, label, unknown, cat) = PeerKey(names, e.PeerSegment, envFilters);
                 bool infra = infraPorts.Contains(e.Port) ||
                              (names.Count == 0 && e.PeerApps?.Apps.Any(a => env.IsSystemApp(a.AppName)) == true);
-                Get(deps, key, label, unknown, e.PeerSegment).Add(e, x, infra, viaVip);
+                Get(deps, key, label, unknown, e.PeerSegment, cat).Add(e, x, infra, viaVip);
             }
         }
 
@@ -150,15 +151,18 @@ static class AppTopology
             queried.Count, appIps.Count, spSt, arSt, envSt, elapsedMs);
     }
 
-    // Karşı IP'nin grubu: envanterdeki uygulama adları; yoksa segmenti.
-    static (string key, string label, bool unknown) PeerKey(string ip, List<string> names, SegmentInfo? seg)
+    // Karşı IP'nin grubu: envanterdeki uygulama adları; yoksa segmenti. ODM/TEST gibi ortamlar ayrı grup olur.
+    static (string key, string label, bool unknown, string? cat) PeerKey(List<string> names, SegmentInfo? seg, List<EnvFilter> envFilters)
     {
+        var f = EnvFilter.Match(seg, envFilters);
+        string suffix = f == null ? "" : " · " + f.Label;
+        string keySuffix = f == null ? "" : "|" + f.Key;
         if (names.Count > 0)
         {
             string label = string.Join(" + ", names.Take(3)) + (names.Count > 3 ? $" +{names.Count - 3}" : "");
-            return ("app:" + label.ToLowerInvariant(), label, false);
+            return ("app:" + label.ToLowerInvariant() + keySuffix, label + suffix, false, f?.Key);
         }
-        return ("seg:" + (seg?.Label ?? "?"), seg?.Label ?? "Segment envanterinde yok", true);
+        return ("seg:" + (seg?.Label ?? "?") + keySuffix, (seg?.Label ?? "Segment envanterinde yok") + suffix, true, f?.Key);
     }
 
     static void AddInternal(Dictionary<(string, string, string, string), long> d, string from, string to, string port, string kind, long hits)
@@ -167,13 +171,13 @@ static class AppTopology
         d[k] = d.GetValueOrDefault(k) + hits;
     }
 
-    static LinkAgg Get(Dictionary<string, LinkAgg> d, string key, string label, bool unknown, SegmentInfo? seg)
+    static LinkAgg Get(Dictionary<string, LinkAgg> d, string key, string label, bool unknown, SegmentInfo? seg, string? cat)
     {
-        if (!d.TryGetValue(key, out var a)) d[key] = a = new LinkAgg(key, label, unknown, seg);
+        if (!d.TryGetValue(key, out var a)) d[key] = a = new LinkAgg(key, label, unknown, seg, cat);
         return a;
     }
 
-    sealed class LinkAgg(string key, string name, bool unknown, SegmentInfo? seg)
+    sealed class LinkAgg(string key, string name, bool unknown, SegmentInfo? seg, string? cat)
     {
         long _hits, _infraHits;
         readonly HashSet<string> _ports = new();
@@ -199,6 +203,29 @@ static class AppTopology
             _peers.Select(kv => new AppPeer(kv.Key, kv.Value.seg, kv.Value.hits,
                 kv.Value.ports.OrderBy(p => int.TryParse(p, out var n) ? n : int.MaxValue).ToList()))
                 .OrderByDescending(p => p.Hits).ToList(),
-            _targets, _vias.ToList());
+            _targets, _vias.ToList(), cat);
     }
+}
+
+// ---------------------------------------------------------------------------
+// Ortam filtreleri (ODM, TEST...): karşı IP'nin segmentinin Domain kolonunda anahtar kelime geçiyorsa
+// o kategoriye girer; arayüzde kategori işaretli değilse gizlenir. Ayar: "OrtamFiltreleri".
+// ---------------------------------------------------------------------------
+record EnvFilter(string Key, string Label, string Keyword)
+{
+    static readonly System.Globalization.CultureInfo Tr = new("tr-TR");
+
+    public static List<EnvFilter> Load(IConfiguration cfg)
+    {
+        var list = cfg.GetSection("OrtamFiltreleri").GetChildren()
+            .Select(c => new EnvFilter((c["Key"] ?? c["Keyword"] ?? "").Trim().ToLowerInvariant(),
+                c["Label"] ?? c["Keyword"] ?? "", (c["Keyword"] ?? c["Key"] ?? "").Trim()))
+            .Where(f => f.Key != "" && f.Keyword != "")
+            .ToList();
+        return list.Count > 0 ? list : [new("odm", "ODM", "odm"), new("test", "TEST", "test")];
+    }
+
+    // İlk eşleşen kategori (büyük/küçük harf ve Türkçe İ/ı farkı gözetilmez)
+    public static EnvFilter? Match(SegmentInfo? seg, List<EnvFilter> filters) =>
+        seg?.Domain is { } d ? filters.FirstOrDefault(f => Tr.CompareInfo.IndexOf(d, f.Keyword, System.Globalization.CompareOptions.IgnoreCase) >= 0) : null;
 }

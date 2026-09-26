@@ -36,6 +36,24 @@ Sayfa: `/` ya da `/topoloji.html?ip=10.210.10.63` (adres çubuğundaki link payl
   AI yalnızca bu tabloyu yorumlar, tablo dışına çıkmaması ve her maddede uygulama/IP/port yazması istenir.
   2. seviye (sunucuların kendi trafiği) AI'a gönderilmez. Soru metni değiştirilebilir; gönderilen metin sayfada görülebilir.
 
+## ODM / TEST filtreleri
+
+Karşı IP'nin segmentinin (`KonsolideSegmentler4.Domain`) içinde "odm" ya da "test" geçiyorsa, topoloji araç
+çubuğundaki **ODM** / **TEST** kutucuğu işaretli değilse o IP gösterilmez (varsayılan: gizli). Kutucuğun yanında
+gizlenen IP sayısı yazar. Filtre tarayıcıda uygulanır: yeniden sorgu gerekmez; yeni görünen sunucuların
+2. seviyesi eksikse yalnızca o kısım tekrar sorgulanır. Tablolar, KPI'lar, 2. seviye segmentler ve AI metni aynı
+filtreyi kullanır. Sorgulanan IP'nin kendisi, uygulamanın kendi sunucuları ve VIP'in havuz üyeleri filtrelenmez.
+Uygulama görünümünde ODM/TEST segmentlerindeki kullanan/bağımlı uygulamalar ayrı grup olur ("KANAL API · ODM").
+
+Kategoriler ve anahtar kelimeler `appsettings.json`'da:
+
+```json
+"OrtamFiltreleri": [
+  { "Key": "odm", "Label": "ODM", "Keyword": "odm" },
+  { "Key": "test", "Label": "TEST", "Keyword": "test" }
+]
+```
+
 ## Uygulama görünümü
 
 Başlıktaki **Uygulama sorgula** sekmesinde ERT_HOSTIPADDRESS'teki uygulamalar arama kutusunda listelenir

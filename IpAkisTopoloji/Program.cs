@@ -202,6 +202,9 @@ app.MapGet("/api/flow", async (string? ip, string? start, string? end, int? appl
     return Results.Ok(new FlowResponse(target, inbound, outbound, spSt, arSt, envSt, sw.ElapsedMilliseconds));
 });
 
+// Ortam filtreleri (ODM, TEST...): arayüzdeki kutucuklar; segment Domain'inde anahtar kelime aranır.
+app.MapGet("/api/filtreler", (IConfiguration cfg) => EnvFilter.Load(cfg));
+
 // Uygulama listesi (ERT_HOSTIPADDRESS.APPNAME; "Sistem Portudur" kayıtları hariç)
 app.MapGet("/api/apps", async (EnvanterService envanter, CancellationToken ct) =>
 {
@@ -261,7 +264,7 @@ app.MapGet("/api/app", async (string? name, string? start, string? end, int? app
     var (sp, spErr) = spTask.Result;
     var (ar, arErr) = arTask.Result;
     var (spSt, arSt, envSt) = Statuses(wanted, sp, spErr, ar, arErr, env, envErr);
-    return Results.Ok(AppTopology.Build(name, servers, vips, queried, sp, ar, env, AppTopology.InfraPorts(cfg),
+    return Results.Ok(AppTopology.Build(name, servers, vips, queried, sp, ar, env, AppTopology.InfraPorts(cfg), EnvFilter.Load(cfg),
         spSt, arSt, envSt, sw.ElapsedMilliseconds));
 });
 

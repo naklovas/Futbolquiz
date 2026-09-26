@@ -72,7 +72,7 @@ async function runApp(name) {
 // ---------- Yardımcılar ----------
 const byPort = arr => [...arr].sort(portSort);
 const portsTxt = ports => { const p = byPort(ports).map(x => ":" + x); return p.slice(0, 4).join(" ") + (p.length > 4 ? "…" : ""); };
-const linkVisible = l => appState.show.infra || !l.infra;
+const linkVisible = l => (appState.show.infra || !l.infra) && (!l.env || !!envShow[l.env]);
 
 // Uygulama kutusunun ortada hangi satıra bağlanacağı: VIP satırı, açık segmentte sunucu satırı ya da segment grubu.
 function rowOfEndpoint(ip) {
@@ -96,6 +96,13 @@ function sideLinks(list) {
   };
   for (const r of rest) for (const [k, v] of Object.entries(r.targets)) other.targets[k] = (other.targets[k] ?? 0) + v;
   return [...vis.slice(0, appState.topN - 1), other];
+}
+
+// ODM/TEST gruplarındaki farklı IP sayısı
+function appEnvCounts(d) {
+  const m = {};
+  for (const l of [...d.callers, ...d.deps]) if (l.env) l.peers.forEach(p => (m[l.env] ??= new Set()).add(p.ip));
+  return Object.fromEntries(Object.entries(m).map(([k, v]) => [k, v.size]));
 }
 
 // ---------- Sayfa ----------
@@ -129,6 +136,7 @@ function renderApp() {
           <label><input type="checkbox" data-show="internal" ${appState.show.internal ? "checked" : ""}> İç trafik</label>
           <label title="DNS, AD, NTP, izleme, RDP/SSH gibi altyapı trafiği"><input type="checkbox" data-show="infra" ${appState.show.infra ? "checked" : ""}> Altyapı (${infraCount})</label>
         </div>
+        ${envToggleHtml(appEnvCounts(d))}
         <label style="flex-direction:row;align-items:center;gap:6px">Grup sayısı
           <select id="appTopN">${[8, 12, 20, 40].map(n => `<option value="${n}"${n === appState.topN ? " selected" : ""}>ilk ${n}</option>`).join("")}</select></label>
         <div class="zoom">
@@ -152,6 +160,7 @@ function renderApp() {
   document.querySelectorAll("[data-show]").forEach(cb => cb.addEventListener("change", () => {
     appState.show[cb.dataset.show] = cb.checked; appState.selected = null; renderApp();
   }));
+  wireEnvToggles(() => { appState.selected = null; renderApp(); });
   $("#appTopN").addEventListener("change", ev => { appState.topN = +ev.target.value; renderAppTopology(); });
   document.querySelectorAll("[data-zoom]").forEach(bt => bt.addEventListener("click", () => {
     const z = bt.dataset.zoom;
