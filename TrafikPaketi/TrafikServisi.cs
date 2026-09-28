@@ -47,7 +47,8 @@
 //       "Cihaz": "tum",                     // "tum" = hepsi paralel; tek kutu için sıra numarası: "0", "1"...
 //       "SourcePathType": "jobs",
 //       "SourceL4": "flow_tcp",
-//       "SourceL7": "wtapages",
+//       "SourceL7": "",                     // boş = yalnızca L4. URL için "wtapages" + kutunun kabul ettiği
+//       "L7Kolonlari": [],                  //   3 kolon: [istemci IP, sunucu IP, url] (web.client_ip geçersiz çıktı)
 //       "VifgIds": [],                      // doluysa her VIFG için ayrı rapor
 //       "DeleteReportInstances": true,
 //       "IgnoreSslErrors": true,
@@ -63,8 +64,8 @@
 //                olaylar okunur). direction alanına göre istemci/sunucu ayrılır (outbound: local = istemci),
 //                süreç adı process_path'ten alınır; client_ip, server_ip, server_port, Protocol bazında
 //                count / first_seen / last_seen / computer_name / process. Yanıt NDJSON; preview satırları atlanır.
-// AppResponse  : kutu başına token -> STEELFILTER "(cli_tcp.ip == IP or srv_tcp.ip == IP)" ile L4+L7 rapor
-//                -> iki data_def "completed" olana kadar 2 sn aralıkla bekleme -> veri -> rapor silinir.
+// AppResponse  : kutu başına token -> STEELFILTER "(cli_tcp.ip == IP or srv_tcp.ip == IP)" ile L4 (+ açıksa L7) rapor
+//                -> L4 "completed" olana kadar 2 sn aralıkla bekleme (L7 hatası raporu düşürmez) -> veri -> rapor silinir.
 //                Hata veren kutu diğerlerini durdurmaz; hata Mesajlar'a yazılır.
 // Birleştirme  : sunucu = IP -> GELEN (karşı = istemci, port = IP'nin portu); istemci = IP -> GİDEN
 //                (karşı = sunucu, port = karşının portu). Aynı (yön, karşı IP, port) iki kaynaktan gelirse
@@ -304,7 +305,11 @@ namespace DeltaFlow.Trafik
 
             // 2. Filtre: IP hem istemci hem sunucu olarak
             var filters = new object[] { new { id = "traffic", type = "STEELFILTER", value = $"(cli_tcp.ip == {ip} or srv_tcp.ip == {ip})" } };
-            string l4 = s["SourceL4"] ?? "flow_tcp", l7 = s["SourceL7"] ?? "wtapages", pathType = s["SourcePathType"] ?? "jobs";
+            // L7 varsayılan kapalı: kutular wtapages'te web.client_ip kolonunu tanımıyor (invalid_column_id).
+            // Açmak için SourceL7 ve kutunun kabul ettiği L7Kolonlari (istemci IP, sunucu IP, url sırasıyla) verilir.
+            string l4 = s["SourceL4"] ?? "flow_tcp", l7 = s["SourceL7"] ?? "", pathType = s["SourcePathType"] ?? "jobs";
+            var l7Kolonlar = s.GetSection("L7Kolonlari").GetChildren().Select(c => c.Value ?? "").Where(c => c != "").ToArray();
+            if (l7Kolonlar.Length != 3) l7Kolonlar = ["web.client_ip", "web.server_ip", "web.url"];
             var vifgs = s.GetSection("VifgIds").GetChildren().Select(c => (c.Value ?? "").Trim()).ToList();
             if (vifgs.Count == 0) vifgs.Add("");
             var time = new { start = bas.ToUnixTimeSeconds().ToString(), end = bit.ToUnixTimeSeconds().ToString() };
@@ -317,11 +322,13 @@ namespace DeltaFlow.Trafik
                 var payload = new
                 {
                     info = new { name = "DeltaFlow Trafik", description = $"{ip} | son {(bit - bas).TotalHours:0} saat" },
-                    data_defs = new object[]
-                    {
-                        new { source = Kaynak(l4), columns = new[] { "start_time", "cli_tcp.ip", "srv_tcp.ip", "srv_tcp.port" }, time, filters },
-                        new { source = Kaynak(l7), columns = new[] { "start_time", "web.client_ip", "web.server_ip", "web.url" }, time, filters, topn = 50000 }
-                    }
+                    data_defs = l7 == ""
+                        ? new object[] { new { source = Kaynak(l4), columns = new[] { "start_time", "cli_tcp.ip", "srv_tcp.ip", "srv_tcp.port" }, time, filters } }
+                        : new object[]
+                        {
+                            new { source = Kaynak(l4), columns = new[] { "start_time", "cli_tcp.ip", "srv_tcp.ip", "srv_tcp.port" }, time, filters },
+                            new { source = Kaynak(l7), columns = l7Kolonlar.Prepend("start_time").ToArray(), time, filters, topn = 50000 }
+                        }
                 };
 
                 // 3. Rapor oluştur
@@ -362,7 +369,7 @@ namespace DeltaFlow.Trafik
                             : $"AppResponse [{etiket}]: rapor {bekleme} sn'de tamamlanmadı");
                         continue;
                     }
-                    if (d7 != "completed")
+                    if (l7 != "" && d7 != "completed")
                         lock (mesajlar) mesajlar.Add($"AppResponse [{etiket}]: L7 ({l7}) {(d7 == "error" ? "hata verdi: " + Detay(1) : "tamamlanmadı")}; yalnızca L4 kullanıldı");
 
                     // 5. Veriler; aynı (istemci, sunucu, port/url) satırları sayılarak gruplanır

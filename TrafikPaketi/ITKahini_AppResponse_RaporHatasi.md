@@ -79,4 +79,51 @@ Canlıda çalışan DeltaFlow yalnızca **1. parçanın (L4)** durumuna bakıyor
 | `L4 (flow_tcp) raporu hata verdi: {...}` | L4 de hatalı. Parantez içindeki mesaj sebebi söyler. En sık iki sebep var: `SourceL4` adı kutuda farklı, ya da `VifgIds` / `SourcePathType` yanlış. Bu durumda o mesajı bana ilet. |
 | `rapor durumu okunamadı (HTTP 401)` | Token süresi dolmuş ya da yetki yok. |
 
+---
+
+## 2. adım — L7 kolon hatası (`invalid column id: web.client_ip source: wtapages`)
+
+İlk düzeltmeden sonra her kutu yalnızca L7 için hata verdi, L4 sorunsuz çalıştı. IP/port trafiği artık geliyor.
+
+AppResponse'un döndürdüğü mesaj: `wtapages` kaynağında `web.client_ip` diye bir kolon yok. L7 yalnızca URL listesi sağlıyor; IP ve port bilgisi zaten L4'ten geliyor. Bu yüzden **L7 varsayılan olarak kapatılır** ve istenirse ayardan açılabilir.
+
+### Kod değişikliği (`AppResponseKutuAsync`)
+`string l7 = ...` satırını ve `payload` tanımını aşağıdakiyle değiştir:
+
+```csharp
+            // L7 varsayılan kapalı (kutular wtapages'te web.client_ip'yi tanımıyor).
+            // Açmak için Trafik:AppResponse:SourceL7 = "wtapages" ve L7Kolonlari = [istemciIp, sunucuIp, url] verilir.
+            string l7 = s["SourceL7"] ?? "";
+            var l7Kolonlar = s.GetSection("L7Kolonlari").GetChildren().Select(c => c.Value ?? "").Where(c => c != "").ToArray();
+            if (l7Kolonlar.Length != 3) l7Kolonlar = new[] { "web.client_ip", "web.server_ip", "web.url" };
+```
+
+```csharp
+                var l4Def = new { source = Kaynak(l4), columns = new[] { "start_time", "cli_tcp.ip", "srv_tcp.ip", "srv_tcp.port" }, time, filters };
+                var payload = new
+                {
+                    info = new { name = "IT Kahini Trafik", description = $"{ip} | son {(bit - bas).TotalHours:0} saat" },
+                    data_defs = l7 == ""
+                        ? new object[] { l4Def }
+                        : new object[] { l4Def, new { source = Kaynak(l7), columns = l7Kolonlar.Prepend("start_time").ToArray(), time, filters, topn = 50000 } }
+                };
+```
+
+Bekleme bloğunda L7 uyarı satırının koşulunu da değiştir:
+
+```csharp
+                    if (l7 != "" && d7 != "completed")
+```
+
+### appsettings
+`Trafik:AppResponse` içinde `"SourceL7"` değeri varsa `""` yap ya da satırı sil.
+`AppResponse:SourceL7` gibi eski yedek anahtarlardan okuma da kalksın: `s["SourceL7"] ?? ""` yeterli.
+
+### L7'yi ileride açmak için
+Kutunun `wtapages` için kabul ettiği kolon adlarını AppResponse arayüzünden öğrenmek gerekir. İki yol var:
+- **Swagger sayfası:** kutunun arayüzünde *Help → REST API*.
+- **Rapor oluşturucu:** web sayfası raporunda istemci IP, sunucu IP ve URL kolonlarının id'lerine bakılır.
+
+Bulunan 3 kolon `"SourceL7": "wtapages"` ve `"L7Kolonlari": ["<istemci ip>", "<sunucu ip>", "<url>"]` olarak yazılır.
+
 Not: DeltaFlow tarafında `TrafikPaketi/TrafikServisi.cs` dosyasında da aynı hata vardı, orada da düzeltildi.
