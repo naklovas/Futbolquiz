@@ -338,24 +338,39 @@ namespace DeltaFlow.Trafik
 
                 try
                 {
-                    // 4. Tamamlanana kadar bekle (2 sn aralıkla; iki data_def de "completed" olmalı)
-                    bool bitti = false;
-                    for (int t = 0; t < bekleme / 2 && !bitti; t++)
+                    // 4. Bekle (2 sn aralıkla). L4 (1. data_def) esastır; L7 (wtapages) hata verirse ya da
+                    //    bitmezse rapor düşürülmez, yalnızca L4 kullanılır (WTA her kutuda yok / saklama süresi kısa olabilir).
+                    string? d4 = null, d7 = null;
+                    JsonArray? defs = null;
+                    for (int t = 0; t < bekleme / 2; t++)
                     {
                         await Task.Delay(2000, ct);
                         using var st = await http.SendAsync(Istek(HttpMethod.Get, $"{baseUrl}/api/npm.reports/1.0/instances/items/{id}", jwt), ct);
-                        var defs = JsonNode.Parse(await st.Content.ReadAsStringAsync(ct))?["data_defs"]?.AsArray();
-                        var durumlar = defs?.Select(d => d?["status"]?["state"]?.ToString()).ToList() ?? [];
-                        if (durumlar.Contains("error")) { lock (mesajlar) mesajlar.Add($"AppResponse [{etiket}]: rapor hata verdi"); break; }
-                        bitti = durumlar.Count > 0 && durumlar.All(x => x == "completed");
+                        if (!st.IsSuccessStatusCode) { d4 = $"HTTP {(int)st.StatusCode}"; break; }
+                        defs = JsonNode.Parse(await st.Content.ReadAsStringAsync(ct))?["data_defs"]?.AsArray();
+                        d4 = defs?.Count > 0 ? defs[0]?["status"]?["state"]?.ToString() : null;
+                        d7 = defs?.Count > 1 ? defs[1]?["status"]?["state"]?.ToString() : null;
+                        if (d4 == "error") break;
+                        if (d4 == "completed" && d7 is "completed" or "error" or null) break;
                     }
-                    if (!bitti) { lock (mesajlar) mesajlar.Add($"AppResponse [{etiket}]: rapor {bekleme} sn'de tamamlanmadı"); continue; }
+                    string Detay(int i) => defs?.Count > i ? Kisalt(defs[i]?["status"]?.ToJsonString() ?? "", 300) : "";
+                    if (d4 != "completed")
+                    {
+                        lock (mesajlar) mesajlar.Add(d4 == "error"
+                            ? $"AppResponse [{etiket}]: L4 ({l4}) raporu hata verdi: {Detay(0)}"
+                            : d4?.StartsWith("HTTP") == true ? $"AppResponse [{etiket}]: rapor durumu okunamadı ({d4})"
+                            : $"AppResponse [{etiket}]: rapor {bekleme} sn'de tamamlanmadı");
+                        continue;
+                    }
+                    if (d7 != "completed")
+                        lock (mesajlar) mesajlar.Add($"AppResponse [{etiket}]: L7 ({l7}) {(d7 == "error" ? "hata verdi: " + Detay(1) : "tamamlanmadı")}; yalnızca L4 kullanıldı");
 
                     // 5. Veriler; aynı (istemci, sunucu, port/url) satırları sayılarak gruplanır
                     foreach (var g in (await VeriAsync(http, baseUrl, id, 1, jwt, ct)).GroupBy(a => (a.c, a.s, a.x)))
                         rows.Add(new Satir("l4", g.Key.c, g.Key.s, g.Key.x, g.Count(), "TCP"));
-                    foreach (var g in (await VeriAsync(http, baseUrl, id, 2, jwt, ct)).GroupBy(a => (a.c, a.s, a.x)))
-                        rows.Add(new Satir("l7", g.Key.c, g.Key.s, "", g.Count(), Url: g.Key.x));
+                    if (d7 == "completed")
+                        foreach (var g in (await VeriAsync(http, baseUrl, id, 2, jwt, ct)).GroupBy(a => (a.c, a.s, a.x)))
+                            rows.Add(new Satir("l7", g.Key.c, g.Key.s, "", g.Count(), Url: g.Key.x));
                 }
                 finally
                 {
