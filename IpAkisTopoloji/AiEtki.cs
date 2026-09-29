@@ -33,7 +33,7 @@ static class AiEtkiService
         string apiKey = s["ApiKey"] ?? "";
         string model = s["Model"] is { Length: > 0 } m ? m : "zt-ga-small-0";
 
-        string prompt = BuildPrompt(req);
+        string prompt = BuildPrompt(req, cfg);
         var payload = new
         {
             model,
@@ -73,7 +73,7 @@ static class AiEtkiService
     }
 
     // Etki listesi kodda hesaplanır (servis → kullanan uygulamalar); AI yalnızca bu tabloyu yorumlar.
-    public static string BuildPrompt(AiRequest r)
+    public static string BuildPrompt(AiRequest r, IConfiguration cfg)
     {
         string question = Trunc(string.IsNullOrWhiteSpace(r.Question) ? DefaultQuestion : r.Question.Trim(), MaxQuestion);
         var inbound = (r.Inbound ?? []).OrderByDescending(e => e.Hits).Take(MaxEdges).ToList();
@@ -86,6 +86,12 @@ static class AiEtkiService
         sb.AppendLine("- Sadece tablolardaki uygulama, IP, port ve ekipleri kullan; tabloda olmayan hiçbir şey ekleme.");
         sb.AppendLine("- \"Bazı sistemler etkilenebilir\" gibi genel ifadeler kullanma; her maddede uygulama adı, IP ve port olsun.");
         sb.AppendLine("- Uygulaması envanterde olmayan sunucuları ayrıca IP ve segmentiyle listele.");
+        sb.AppendLine("- Portun adını yazıp geçme (\"MS-RPC etkilenecektir\" gibi cümleler YANLIŞ). Her port için tablodaki");
+        sb.AppendLine("  \"Kesilirse\" açıklamasını kullanarak hangi İŞİN duracağını ve bunu KİMİN (uygulama + IP) yaşayacağını yaz.");
+        sb.AppendLine("  Doğru örnek biçimi: \"3389 (RDP): Bu sunucu kapanırsa <IP> (<uygulama>) ve <IP> kaynaklarından yapılan uzak");
+        sb.AppendLine("  masaüstü bağlantıları kurulamaz; bu sunucuya RDP ile bağlanıp yönetim yapan kullanıcılar erişemez.\"");
+        sb.AppendLine("- Uygulamaya özel portlarda işi karşılayan uygulamanın adından çıkar (ör. \"X uygulamasının bu porttan verdiği");
+        sb.AppendLine("  servis/API çağrıları Y uygulamasında hata verir\"); emin değilsen \"muhtemelen\" de, uydurma.");
         sb.AppendLine();
         sb.AppendLine($"SORU: {question}");
         sb.AppendLine();
@@ -100,7 +106,11 @@ static class AiEtkiService
         foreach (var svc in inbound.GroupBy(e => (Port: Clean(e.Port) ?? "?", App: JoinOr(e.LocalApps, NoApp)))
                      .OrderByDescending(g => g.Sum(e => e.Hits)))
         {
-            sb.AppendLine($"* Servis: {svc.Key.App} — port {svc.Key.Port} ({svc.Select(e => e.Ip).Distinct().Count()} sunucu, {svc.Sum(e => e.Hits)} bağlantı)");
+            var pi = PortBilgisi.Find(svc.Key.Port, cfg);
+            sb.AppendLine($"* Servis: {svc.Key.App} — port {svc.Key.Port}{(pi != null ? $" ({pi.Name})" : "")} ({svc.Select(e => e.Ip).Distinct().Count()} sunucu, {svc.Sum(e => e.Hits)} bağlantı)");
+            sb.AppendLine(pi != null
+                ? $"  Kesilirse: {pi.Gelen}."
+                : $"  Kesilirse: uygulamaya özel port; {(svc.Key.App == NoApp ? "bu porttaki servis" : svc.Key.App)} uygulamasının bu porttan verdiği hizmet (ekran, API, entegrasyon, dosya/mesaj alışverişi) aşağıdaki kaynaklar için durur.");
             foreach (var user in svc.GroupBy(e => JoinOr(e.Apps, "")).OrderBy(g => g.Key == "").ThenByDescending(g => g.Sum(e => e.Hits)))
             {
                 string servers = IpList(user, withPort: false);
@@ -125,16 +135,20 @@ static class AiEtkiService
             sb.AppendLine(dep.Key == ""
                 ? $"- Uygulaması envanterde olmayan hedefler: {targets}{extra} | {dep.Sum(e => e.Hits)} bağlantı"
                 : $"- Hedef uygulama: {dep.Key} | hedefler: {targets}{extra} | {dep.Sum(e => e.Hits)} bağlantı");
+            foreach (var port in dep.Select(e => Clean(e.Port)).OfType<string>().Distinct().Take(MaxList))
+                sb.AppendLine(PortBilgisi.Find(port, cfg) is { } dp
+                    ? $"  port {port} ({dp.Name}) erişilemezse: {dp.Giden}."
+                    : $"  port {port} erişilemezse: bu sunucunun {(dep.Key == "" ? "hedefteki servise" : dep.Key + " uygulamasına")} yaptığı çağrılar (API, entegrasyon, veri alışverişi) başarısız olur.");
         }
         sb.AppendLine();
 
         sb.AppendLine("YANITI TÜRKÇE VE AŞAĞIDAKİ BAŞLIKLARLA VER:");
         sb.AppendLine("## Özet");
         sb.AppendLine("(1-2 cümle: sunucunun rolü; kaç uygulama ve sunucu etkilenir)");
-        sb.AppendLine("## Etkilenecek uygulamalar");
-        sb.AppendLine("(ETKİ TABLOSU'ndaki her servis için tek madde: \"<servis> (port) kesilirse: <kullanan uygulamalar> (<IP'ler>)\"; en yoğundan başla)");
+        sb.AppendLine("## Etkilenecek işler ve uygulamalar");
+        sb.AppendLine("(ETKİ TABLOSU'ndaki her servis için tek madde: \"**<port> (<işlev>)** — <duracak iş, 'Kesilirse' satırından>: <kullanan uygulamalar> (<IP'ler>)\"; en yoğundan başla)");
         sb.AppendLine("## Kontrol edilecek bağımlılıklar");
-        sb.AppendLine("(BAĞIMLILIK TABLOSU'ndaki hedefler: değişiklik sonrası erişimi test edilecek uygulama, IP ve port)");
+        sb.AppendLine("(BAĞIMLILIK TABLOSU'ndaki hedefler: \"<hedef uygulama> (<IP:port>) — erişilemezse bu sunucuda duracak iş\"; değişiklik sonrası test edilecekler)");
         sb.AppendLine("## Bilgilendirilecek ekipler");
         sb.AppendLine("(sadece tablolardaki sahip/muhafız bilgilerinden)");
         sb.AppendLine("## Öneriler");
