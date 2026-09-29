@@ -109,7 +109,7 @@ static class AppTopology
                 }
                 else
                 {
-                    var (key, label, unknown, cat) = PeerKey(env.AppNamesOnIp(e.PeerIp), e.PeerSegment, envFilters);
+                    var (key, label, unknown, cat) = PeerKey(env.AppNamesOnIp(e.PeerIp), e.PeerSegment, EnvFilter.Match(e.PeerSegment, e.PeerVip, envFilters));
                     bool infra = infraPorts.Contains(e.Port) || (e.LocalApp?.Apps.All(a => env.IsSystemApp(a.AppName)) == true && e.LocalApp.Apps.Count > 0);
                     Get(callers, key, label, unknown, e.PeerSegment, cat).Add(e, x, infra, null);
                 }
@@ -133,7 +133,7 @@ static class AppTopology
                     names = (e.PeerApps?.Apps ?? []).Select(a => a.AppName).OfType<string>()
                         .Where(n => !env.IsSystemApp(n)).Distinct().Order().ToList();
                 }
-                var (key, label, unknown, cat) = PeerKey(names, e.PeerSegment, envFilters);
+                var (key, label, unknown, cat) = PeerKey(names, e.PeerSegment, EnvFilter.Match(e.PeerSegment, e.PeerVip, envFilters));
                 bool infra = infraPorts.Contains(e.Port) ||
                              (names.Count == 0 && e.PeerApps?.Apps.Any(a => env.IsSystemApp(a.AppName)) == true);
                 Get(deps, key, label, unknown, e.PeerSegment, cat).Add(e, x, infra, viaVip);
@@ -153,9 +153,8 @@ static class AppTopology
     }
 
     // Karşı IP'nin grubu: envanterdeki uygulama adları; yoksa segmenti. ODM/TEST gibi ortamlar ayrı grup olur.
-    static (string key, string label, bool unknown, string? cat) PeerKey(List<string> names, SegmentInfo? seg, List<EnvFilter> envFilters)
+    static (string key, string label, bool unknown, string? cat) PeerKey(List<string> names, SegmentInfo? seg, EnvFilter? f)
     {
-        var f = EnvFilter.Match(seg, envFilters);
         string suffix = f == null ? "" : " · " + f.Label;
         string keySuffix = f == null ? "" : "|" + f.Key;
         if (names.Count > 0)
@@ -229,4 +228,13 @@ record EnvFilter(string Key, string Label, string Keyword)
     // İlk eşleşen kategori (büyük/küçük harf ve Türkçe İ/ı farkı gözetilmez)
     public static EnvFilter? Match(SegmentInfo? seg, List<EnvFilter> filters) =>
         seg?.Domain is { } d ? filters.FirstOrDefault(f => Tr.CompareInfo.IndexOf(d, f.Keyword, System.Globalization.CompareOptions.IgnoreCase) >= 0) : null;
+
+    // VIP'in kendi segmenti (LB/VIP segmenti) ortam bilgisi taşımaz: VIP, havuz üyelerinin hepsi aynı
+    // ortamdaysa (ör. hepsi ODM segmentinde) o ortamdan sayılır.
+    public static EnvFilter? Match(SegmentInfo? seg, List<VipMember>? members, List<EnvFilter> filters)
+    {
+        if (Match(seg, filters) is { } f || members is not { Count: > 0 }) return Match(seg, filters);
+        var cats = members.Select(m => Match(m.Segment, filters)).ToList();
+        return cats[0] is { } first && cats.All(c => c?.Key == first.Key) ? first : null;
+    }
 }

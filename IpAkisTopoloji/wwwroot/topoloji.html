@@ -499,7 +499,7 @@ function sideSegments(dir, servers) {
   for (const srv of servers) {
     const hop = peers.get(srv.ip); if (!hop) continue;
     for (const a of (state.hopDir[dir] === "in" ? hop.inbound : hop.outbound)) {
-      if (!envAllowed(a.segment)) continue;
+      if (!envSegAllowed(a.segment)) continue;
       const k = segKey(a.segment);
       let g = m.get(k);
       if (!g) m.set(k, g = { key: k, seg: a.segment, cidrs: new Set(), vlans: new Set(), hits: 0, ips: new Set(), ports: new Set(), apps: new Set(), links: new Map() });
@@ -760,7 +760,7 @@ function segDl(seg) {
 
 function hopTable(list, title) {
   if (!list) return "";
-  list = list.filter(a => envAllowed(a.segment));
+  list = list.filter(a => envSegAllowed(a.segment));
   return `<h2 style="margin-top:12px">${title} <span class="muted" style="font-weight:400">(${fmt(list.length)} segment)</span></h2>
     ${list.length ? `<div class="tbl-wrap" style="max-height:260px"><table>
       <thead><tr><th>Segment</th><th class="num">IP</th><th>Port</th><th>Uygulama</th><th>Örnek IP'ler</th><th class="num">Hit</th></tr></thead>
@@ -1113,18 +1113,26 @@ function envCat(seg) {
   if (!d) return null;
   return envFilters.find(f => d.includes(f.keyword.toLocaleLowerCase("tr")))?.key ?? null;
 }
-const envAllowed = seg => { const c = envCat(seg); return !c || !!envShow[c]; };
+// Karşı IP bir VIP ise kendi segmenti (LB) ortam bilgisi taşımaz; havuz üyelerinin hepsi aynı ortamdaysa VIP de o ortamdandır.
+function edgeEnv(e) {
+  const own = envCat(e.peerSegment);
+  if (own || !e.peerVip?.length) return own;
+  const cats = e.peerVip.map(m => envCat(m.segment));
+  return cats[0] && cats.every(c => c === cats[0]) ? cats[0] : null;
+}
+const envAllowed = e => { const c = edgeEnv(e); return !c || !!envShow[c]; };
+const envSegAllowed = seg => { const c = envCat(seg); return !c || !!envShow[c]; };
 // VIP'in havuz üyeleri (viaVip) sorgulanan VIP'in parçası olduğu için filtrelenmez.
 const envFiltered = raw => ({
   ...raw,
-  inbound: raw.inbound.filter(e => envAllowed(e.peerSegment)),
-  outbound: raw.outbound.filter(e => e.viaVip || envAllowed(e.peerSegment))
+  inbound: raw.inbound.filter(e => envAllowed(e)),
+  outbound: raw.outbound.filter(e => e.viaVip || envAllowed(e))
 });
 // Kategori başına gizlenen farklı IP sayısı (ham veriden)
 function envHiddenIps(raw) {
   const m = {};
   for (const e of [...raw.inbound, ...raw.outbound]) {
-    const c = envCat(e.peerSegment);
+    const c = edgeEnv(e);
     if (c && !e.viaVip) (m[c] ??= new Set()).add(e.peerIp);
   }
   return Object.fromEntries(Object.entries(m).map(([k, v]) => [k, v.size]));
