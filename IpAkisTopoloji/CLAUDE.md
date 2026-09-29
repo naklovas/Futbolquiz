@@ -53,6 +53,8 @@ topoloji çizer ve şirket içi AI'a etki analizi yaptırır. Canlıda IIS'te, W
 - **AI etki analizi** (`/api/ai/etki`): OpenAI uyumlu şirket içi servis, model `zt-ga-small-0`, Bearer ApiKey,
   tek user mesajı, temperature 0.1, `<think>` temizlenir. Etki tablosu kodda hesaplanır (servis → kullanan uygulamalar,
   bağımlılıklar; her bağlantı iki ucundaki uygulamayla). **2. seviye AI'a gönderilmez** (flu sonuç veriyordu).
+  Arayüzde AI paneli sayfanın altına sabit (alt bilgi gibi); cevap panel içinde kayar, "Gizle/Göster" ile küçülür,
+  Enter gönderir; ODM/TEST değişince soru/cevap korunur.
 - **Auth**: Negotiate (Windows Auth; IIS'te IIS'e bırakır) + her istekte `AuthHelper.YetkiKontrol` (DokuPanel),
   sonuç kullanıcı başına cache; yetkisiz sayfa/403 JSON; `/api/me` başlıkta kullanıcı; `Auth:Enabled=false` yerelde.
 - Marka: **DeltaFlow** adı ve logosu.

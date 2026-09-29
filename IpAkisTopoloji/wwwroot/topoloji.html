@@ -113,6 +113,18 @@
   .ai-out ul { margin: 4px 0; padding-left: 20px; }
   .ai-out p { margin: 4px 0; }
   .ai-meta { font-size: 12px; color: var(--muted); margin-top: 10px; }
+  /* AI etki analizi: sayfanın altına sabit (alt bilgi gibi); cevap alanı kendi içinde kayar, küçültülebilir */
+  .ai-dock { position: fixed; left: 20px; right: 20px; bottom: 0; z-index: 20; border-bottom: 0; border-radius: 10px 10px 0 0;
+    padding: 10px 16px; box-shadow: 0 -6px 22px rgba(0, 0, 0, .14); border-top: 2px solid var(--in); }
+  .ai-dock-bar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+  .ai-dock-bar h2 { margin: 0; white-space: nowrap; }
+  .ai-dock .ai-q { flex: 1 1 280px; width: auto; min-height: 38px; height: 38px; resize: none; padding: 7px 10px; }
+  .ai-dock-out { max-height: 45vh; overflow: auto; }
+  .ai-dock-out:empty { display: none; }
+  .ai-dock.min .ai-dock-out { display: none; }
+  #aiToggle { padding: 4px 10px; }
+  main:has(.ai-dock) { padding-bottom: calc(var(--dock-h, 70px) + 24px); }
+  @media (max-width: 700px) { .ai-dock { left: 0; right: 0; } }
   .ai-meta pre { white-space: pre-wrap; font-size: 11.5px; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 8px; max-height: 320px; overflow: auto; }
   .chip { display: inline-flex; align-items: center; gap: 6px; background: var(--in-soft); border-radius: 999px; padding: 2px 10px; font-size: 12.5px; }
   .chip button { border: 0; background: transparent; padding: 0 2px; }
@@ -288,6 +300,8 @@ async function runHop2(params) {
 // ---------- Render ----------
 function render() {
   const d = state.data;
+  // ODM/TEST değişince sayfa yeniden çizilir; o sırada AI sorusu ve cevabı kaybolmasın.
+  const prevAi = $("#aiDock") && { q: $("#aiQ").value, out: $("#aiOut").innerHTML, min: $("#aiDock").classList.contains("min") };
   $("#main").innerHTML = `
     <section class="panel">${renderStatus(d)}</section>
     <section class="panel">${renderTarget(d)}</section>
@@ -320,23 +334,23 @@ function render() {
       <div class="detail" id="detail"></div>
     </section>
     <section class="panel">
-      <div class="toolbar"><h2 style="margin:0">AI etki analizi</h2>
-        <span class="muted small">Gelen/giden bağlantılar (uygulama, IP, port, segment, sahip) şirket içi AI servisine gönderilir.</span></div>
-      <textarea class="ai-q" id="aiQ"></textarea>
-      <div style="display:flex;gap:8px;margin-top:8px;align-items:center">
-        <button type="button" class="primary" id="aiGo">AI'a yorumlat</button>
-        <span class="muted small" id="aiNote"></span>
-      </div>
-      <div id="aiOut"></div>
-    </section>
-    <section class="panel">
       <h2>Sunucuların kendi segmentleri (1. seviye)</h2>
       <div class="sumgrid"><div id="sum-in"></div><div id="sum-out"></div></div>
     </section>
     <div class="grid2">
       <section class="panel dir-in" id="tbl-in"></section>
       <section class="panel dir-out" id="tbl-out"></section>
-    </div>`;
+    </div>
+    <section class="panel ai-dock" id="aiDock">
+      <div class="ai-dock-bar">
+        <h2>AI etki analizi</h2>
+        <textarea class="ai-q" id="aiQ" rows="1" title="Enter: gönder · Shift+Enter: yeni satır"></textarea>
+        <button type="button" class="primary" id="aiGo">AI'a yorumlat</button>
+        <button type="button" id="aiToggle" title="Cevabı gizle / göster" hidden>▾ Gizle</button>
+      </div>
+      <div class="muted small" id="aiNote">Gelen/giden bağlantılar (uygulama, IP, port, segment, sahip) şirket içi AI servisine gönderilir.</div>
+      <div class="ai-dock-out" id="aiOut"></div>
+    </section>`;
   wireEnvToggles(() => {
     state.data = envFiltered(state.raw); state.selected = null; state.filter = null;
     render();
@@ -363,8 +377,12 @@ function render() {
     state.zoom = z === "0" ? 1 : Math.min(4, Math.max(0.4, state.zoom * (z === "+" ? 1.25 : 0.8)));
     applyZoom();
   }));
-  $("#aiQ").value = AI_DEFAULT_Q;
+  $("#aiQ").value = prevAi?.q ?? AI_DEFAULT_Q;
+  if (prevAi?.out) { $("#aiOut").innerHTML = prevAi.out; setAiMin(prevAi.min); }
   $("#aiGo").addEventListener("click", runAi);
+  $("#aiQ").addEventListener("keydown", ev => { if (ev.key === "Enter" && !ev.shiftKey) { ev.preventDefault(); if (!$("#aiGo").disabled) runAi(); } });
+  $("#aiToggle").addEventListener("click", () => setAiMin(!$("#aiDock").classList.contains("min")));
+  watchDockHeight();
   $("#dlSvg").addEventListener("click", () => exportImage("svg"));
   $("#dlPng").addEventListener("click", () => exportImage("png"));
   renderTopology();
@@ -847,12 +865,29 @@ function buildAiRequest() {
   };
 }
 
+// Alttaki sabit AI paneli: cevap gizle/göster ve sayfa altına panel yüksekliği kadar boşluk.
+function setAiMin(min) {
+  const dock = $("#aiDock"), t = $("#aiToggle");
+  if (!dock) return;
+  dock.classList.toggle("min", min);
+  t.hidden = !$("#aiOut").innerHTML.trim();
+  t.textContent = min ? "▴ Göster" : "▾ Gizle";
+}
+let dockObserver = null;
+function watchDockHeight() {
+  dockObserver?.disconnect();
+  const dock = $("#aiDock");
+  if (!dock || !window.ResizeObserver) return;
+  dockObserver = new ResizeObserver(() => document.documentElement.style.setProperty("--dock-h", dock.offsetHeight + "px"));
+  dockObserver.observe(dock);
+}
+
 async function runAi() {
   aiAbort?.abort();
   aiAbort = new AbortController();
   const btn = $("#aiGo");
   btn.disabled = true;
-  $("#aiNote").textContent = "";
+  setAiMin(false);
   $("#aiOut").innerHTML = `<div class="muted" style="margin-top:12px"><span class="spinner"></span> AI yorumluyor… (birkaç dakika sürebilir)</div>`;
   try {
     const r = await fetch("api/ai/etki", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(buildAiRequest()), signal: aiAbort.signal });
@@ -865,6 +900,7 @@ async function runAi() {
     if (e.name !== "AbortError") $("#aiOut").innerHTML = `<div style="color:var(--err);margin-top:12px">${esc(e.message)}</div>`;
   } finally {
     btn.disabled = false;
+    if ($("#aiDock")) setAiMin(false);
   }
 }
 
