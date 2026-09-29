@@ -44,7 +44,8 @@ static class AppTopology
         return list.Count > 0 ? list.ToHashSet() : DefaultInfraPorts;
     }
 
-    // Uygulamanın uç noktaları: sunucular (ERT IP'leri) ve VIP'ler (ERT VIP_IP + üyesi olduğu LB'ler)
+    // Uygulamanın uç noktaları: sunucular (ERT IP'leri) ve VIP'ler (ERT VIP_IP + sunucularının üyesi olduğu,
+    // bu uygulamaya ait LB'ler; paylaşımlı sunucudaki başka uygulamaların VIP'leri hariç, bkz. AppMemberOf)
     public static (List<AppServer> servers, List<AppVip> vips) Endpoints(string name, EnvanterSnapshot env)
     {
         var rows = env.AppRows(name);
@@ -53,12 +54,12 @@ static class AppTopology
                 g.Select(h => h.Port).OfType<string>().Distinct().OrderBy(p => int.TryParse(p, out var n) ? n : int.MaxValue).ToList(),
                 g.Select(h => h.UnixName).OfType<string>().FirstOrDefault(),
                 env.FindSegment(g.Key),
-                env.MemberOf(g.Key).Select(m => m.LbIp).Distinct().ToList()))
+                env.AppMemberOf(name, g.Key).Select(m => m.LbIp).Distinct().ToList()))
             .OrderBy(s => s.Segment?.Label).ThenBy(s => s.Ip, StringComparer.Ordinal)
             .ToList();
 
         var vipKeys = rows.Where(h => h.VipIp != null).Select(h => (Ip: h.VipIp!, Port: h.VipPort))
-            .Concat(servers.SelectMany(s => env.MemberOf(s.Ip)).Select(m => (Ip: m.LbIp, Port: m.LbPort)))
+            .Concat(servers.SelectMany(s => env.AppMemberOf(name, s.Ip)).Select(m => (Ip: m.LbIp, Port: m.LbPort)))
             .Distinct().ToList();
         var vips = vipKeys
             .GroupBy(k => k.Ip)
@@ -103,7 +104,7 @@ static class AppTopology
                 else if (isServer && env.IsVipGw(e.PeerIp, out _))
                 {
                     // LB, havuz üyesine GW IP'sinden gelir: VIP -> üye (uygulama içi)
-                    var viaVip = env.MemberOf(x).Where(m => m.Port == null || m.Port == e.Port).Select(m => m.LbIp).FirstOrDefault();
+                    var viaVip = env.AppMemberOf(name, x).Where(m => m.Port == null || m.Port == e.Port).Select(m => m.LbIp).FirstOrDefault();
                     AddInternal(internals, viaVip ?? $"LB GW {e.PeerIp}", x, e.Port, "lb", e.Hits);
                 }
                 else

@@ -231,6 +231,24 @@ sealed class EnvanterSnapshot
     // IP hangi VIP'lerin havuz üyesi?
     public List<VipMember> MemberOf(string ip) => _vipByMember.TryGetValue(ip, out var l) ? l : [];
 
+    // Sunucunun üyesi olduğu VIP'lerden yalnızca verilen uygulamaya ait olanlar. Paylaşımlı sunucuda
+    // (aynı sunucuda çok uygulama) diğer uygulamaların VIP'leri gelmesin diye:
+    //  - VIP ERT'de (VIP_IP) uygulamalara kayıtlıysa, bu uygulama da onlardan biri olmalı;
+    //  - kayıtlı değilse üye portu uygulamanın o sunucudaki ERT portlarından biri olmalı;
+    //  - uygulamanın o sunucuda port kaydı da yoksa sunucuda başka uygulama olmamalı.
+    public List<VipMember> AppMemberOf(string appName, string ip) => MemberOf(ip).Where(m => VipOfApp(appName, m)).ToList();
+
+    bool VipOfApp(string appName, VipMember m)
+    {
+        var owners = (_byVip.TryGetValue(m.LbIp, out var rows) ? rows : [])
+            .Select(h => h.AppName).OfType<string>().Where(n => !IsSystemApp(n)).ToList();
+        if (owners.Count > 0) return owners.Contains(appName, StringComparer.OrdinalIgnoreCase);
+        var ports = AppsOnIp(m.Ip).Where(h => string.Equals(h.AppName, appName, StringComparison.OrdinalIgnoreCase))
+            .Select(h => h.Port).OfType<string>().ToHashSet();
+        if (ports.Count > 0) return m.Port != null && ports.Contains(m.Port);
+        return AppNamesOnIp(m.Ip).All(n => string.Equals(n, appName, StringComparison.OrdinalIgnoreCase));
+    }
+
     // IP bir LB GW IP'si mi? (FW adıyla)
     public bool IsVipGw(string ip, out string? fw) => _gwFw.TryGetValue(ip, out fw);
 
@@ -274,7 +292,7 @@ sealed class EnvanterSnapshot
         .Select(kv => new AppCatalogItem(kv.Value[0].AppName!,
             kv.Value.Select(h => h.Ip).OfType<string>().Distinct().Count(),
             kv.Value.Select(h => h.VipIp).OfType<string>()
-                .Concat(kv.Value.Select(h => h.Ip).OfType<string>().SelectMany(ip => MemberOf(ip)).Select(m => m.LbIp))
+                .Concat(kv.Value.Select(h => h.Ip).OfType<string>().Distinct().SelectMany(ip => AppMemberOf(kv.Key, ip)).Select(m => m.LbIp))
                 .Distinct().Count(),
             kv.Value.Select(h => h.VarlikMuhafizi).OfType<string>().FirstOrDefault()))
         .OrderBy(a => a.Name, StringComparer.CurrentCultureIgnoreCase)
