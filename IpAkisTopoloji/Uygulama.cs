@@ -10,7 +10,7 @@ record AppServer(string Ip, List<string> Ports, string? Hostname, SegmentInfo? S
     public long OutHits { get; set; }
 }
 
-record AppVip(string Ip, string? Port, string? Pool, List<VipMember> Members)
+record AppVip(string Ip, string? Port, string? Pool, List<VipMember> Members, SegmentInfo? Segment)
 {
     public long Hits { get; set; }
 }
@@ -68,7 +68,7 @@ static class AppTopology
             .Select(k =>
             {
                 var members = env.VipMembers(k.Ip, k.Port);
-                return new AppVip(k.Ip, k.Port, members.Select(m => m.Pool).OfType<string>().FirstOrDefault(), members);
+                return new AppVip(k.Ip, k.Port, members.Select(m => m.Pool).OfType<string>().FirstOrDefault(), members, env.FindSegment(k.Ip));
             })
             .ToList();
         return (servers, vips);

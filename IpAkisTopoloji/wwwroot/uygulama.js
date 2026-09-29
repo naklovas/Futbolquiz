@@ -8,7 +8,7 @@
 
 let uiMode = "ip";
 const appState = {
-  data: null, catalog: null, selected: null, expand: new Set(), topN: 12,
+  raw: null, data: null, catalog: null, selected: null, expand: new Set(), topN: 12,
   show: { callers: true, deps: true, internal: true, infra: false }
 };
 
@@ -59,7 +59,7 @@ async function runApp(name) {
     const r = await fetch("api/app?" + params, { signal: abort.signal });
     const body = await r.json().catch(() => ({ error: `HTTP ${r.status}` }));
     if (!r.ok) throw new Error(body.error || `HTTP ${r.status}`);
-    appState.data = body; appState.selected = null; appState.expand = new Set(); state.zoom = 1;
+    appState.raw = body; appState.selected = null; appState.expand = new Set(); state.zoom = 1;
     renderApp();
   } catch (e) {
     const msg = e.name === "AbortError" ? "Sorgu iptal edildi." : e.message;
@@ -98,16 +98,48 @@ function sideLinks(list) {
   return [...vis.slice(0, appState.topN - 1), other];
 }
 
-// ODM/TEST gruplarındaki farklı IP sayısı
-function appEnvCounts(d) {
+// Uygulamanın kendi VIP'inin ortamı: VIP segmentinin Domain'i; yoksa havuz üyelerinin hepsi aynı ortamdaysa o ortam.
+function appVipEnv(v) {
+  const own = envCat(v.segment);
+  if (own || !v.members?.length) return own;
+  const cats = v.members.map(m => envCat(m.segment));
+  return cats[0] && cats.every(c => c === cats[0]) ? cats[0] : null;
+}
+const envOk = c => !c || !!envShow[c];
+
+// ODM/TEST kutucukları uygulamanın kendi VIP ve sunucularına da uygulanır: işaretli değilse gizlenir,
+// yalnızca gizlenen uç noktalara bağlanan kullanan/bağımlılık grupları ve iç trafik de düşer.
+function appFiltered(raw) {
+  const vips = raw.vips.filter(v => envOk(appVipEnv(v)));
+  const servers = raw.servers.filter(s => envOk(envCat(s.segment)));
+  const all = new Set([...raw.vips.map(v => v.ip), ...raw.servers.map(s => s.ip)]);
+  const own = new Set([...vips.map(v => v.ip), ...servers.map(s => s.ip)]);
+  const keep = l => {
+    const t = Object.entries(l.targets ?? {}).filter(([ip]) => own.has(ip) || !all.has(ip));
+    return t.length || !Object.keys(l.targets ?? {}).length ? { ...l, targets: Object.fromEntries(t) } : null;
+  };
+  return {
+    ...raw, vips,
+    servers: servers.map(s => ({ ...s, vips: s.vips.filter(ip => own.has(ip)) })),
+    callers: raw.callers.map(keep).filter(Boolean),
+    deps: raw.deps.map(keep).filter(Boolean),
+    internal: raw.internal.filter(i => own.has(i.to) && (own.has(i.from) || !all.has(i.from)))
+  };
+}
+
+// ODM/TEST'e giren farklı IP sayısı: karşı IP'ler + uygulamanın kendi VIP/sunucuları
+function appEnvCounts(raw) {
   const m = {};
-  for (const l of [...d.callers, ...d.deps]) if (l.env) l.peers.forEach(p => (m[l.env] ??= new Set()).add(p.ip));
+  const add = (c, ip) => { if (c) (m[c] ??= new Set()).add(ip); };
+  for (const l of [...raw.callers, ...raw.deps]) l.peers.forEach(p => add(l.env, p.ip));
+  raw.vips.forEach(v => add(appVipEnv(v), v.ip));
+  raw.servers.forEach(s => add(envCat(s.segment), s.ip));
   return Object.fromEntries(Object.entries(m).map(([k, v]) => [k, v.size]));
 }
 
 // ---------- Sayfa ----------
 function renderApp() {
-  const d = appState.data;
+  const d = appState.data = appFiltered(appState.raw);
   const callers = d.callers.filter(linkVisible), deps = d.deps.filter(linkVisible);
   const infraCount = d.callers.filter(l => l.infra).length + d.deps.filter(l => l.infra).length;
   $("#main").innerHTML = `
@@ -136,7 +168,7 @@ function renderApp() {
           <label><input type="checkbox" data-show="internal" ${appState.show.internal ? "checked" : ""}> İç trafik</label>
           <label title="DNS, AD, NTP, izleme, RDP/SSH gibi altyapı trafiği"><input type="checkbox" data-show="infra" ${appState.show.infra ? "checked" : ""}> Altyapı (${infraCount})</label>
         </div>
-        ${envToggleHtml(appEnvCounts(d))}
+        ${envToggleHtml(appEnvCounts(appState.raw))}
         <label style="flex-direction:row;align-items:center;gap:6px">Grup sayısı
           <select id="appTopN">${[8, 12, 20, 40].map(n => `<option value="${n}"${n === appState.topN ? " selected" : ""}>ilk ${n}</option>`).join("")}</select></label>
         <div class="zoom">
