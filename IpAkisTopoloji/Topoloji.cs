@@ -385,10 +385,19 @@ record FlowEdge(
     public VipMember? ViaVip { get; init; }          // bu kenar VIP → havuz üyesi (sorgulanan IP bir VIP)
     public List<VipMember>? PeerVip { get; init; }   // karşı IP bir VIP: arkasındaki üyeler
     public string? PeerVipGw { get; init; }          // karşı IP bir LB GW'si: FW adı
+    // Firewall (Palo Alto) oturumları: toplam, engellenen, kural / cihaz / uygulama (App-ID)
+    public long FirewallHits { get; init; }
+    public long FirewallDenied { get; init; }
+    public List<string> FwRules { get; init; } = [];
+    public List<string> FwDevices { get; init; } = [];
+    public List<string> FwApps { get; init; } = [];
 }
 
 record FlowResponse(TargetInfo Target, List<FlowEdge> Inbound, List<FlowEdge> Outbound,
-    SourceStatus Splunk, SourceStatus AppResponse, SourceStatus Envanter, long ElapsedMs);
+    SourceStatus Splunk, SourceStatus AppResponse, SourceStatus Envanter, long ElapsedMs)
+{
+    public SourceStatus? Firewall { get; init; }
+}
 
 static class FlowBuilder
 {
@@ -396,15 +405,25 @@ static class FlowBuilder
 
     sealed class Agg
     {
-        public long Splunk, Ar;
+        public long Splunk, Ar, Fw, FwDenied;
         public string? First, Last;
         public readonly HashSet<string> Protocols = new(StringComparer.OrdinalIgnoreCase);
         public readonly HashSet<string> Computers = new(StringComparer.OrdinalIgnoreCase);
         public readonly HashSet<string> Processes = new(StringComparer.OrdinalIgnoreCase);
+        public readonly HashSet<string> Rules = new(StringComparer.OrdinalIgnoreCase);
+        public readonly HashSet<string> Devices = new(StringComparer.OrdinalIgnoreCase);
+        public readonly HashSet<string> FwApps = new(StringComparer.OrdinalIgnoreCase);
+
+        public void Seen(string? first, string? last)
+        {
+            // "yyyy-MM-dd HH:mm:ss" metin olarak sıralanabilir.
+            if (first != null && (First == null || string.CompareOrdinal(first, First) < 0)) First = first;
+            if (last != null && (Last == null || string.CompareOrdinal(last, Last) > 0)) Last = last;
+        }
     }
 
     public static (List<FlowEdge> inbound, List<FlowEdge> outbound) Build(
-        string target, SplunkResult? sp, AppResponseResult? ar, EnvanterSnapshot? env)
+        string target, SplunkResult? sp, AppResponseResult? ar, EnvanterSnapshot? env, SplunkResult? fw = null)
     {
         var aggs = new Dictionary<(string dir, string peer, string port), Agg>();
         var urls = new Dictionary<(string dir, string peer), Dictionary<string, long>>();
@@ -426,9 +445,23 @@ static class FlowBuilder
                 if (V(row, "Protocol") is { } proto) a.Protocols.Add(proto);
                 foreach (var x in Split(V(row, "computer_name"))) a.Computers.Add(x);
                 foreach (var x in Split(V(row, "process"))) a.Processes.Add(x);
-                // "yyyy-MM-dd HH:mm:ss" metin olarak sıralanabilir.
-                if (V(row, "first_seen") is { } f && (a.First == null || string.CompareOrdinal(f, a.First) < 0)) a.First = f;
-                if (V(row, "last_seen") is { } l && (a.Last == null || string.CompareOrdinal(l, a.Last) > 0)) a.Last = l;
+                a.Seen(V(row, "first_seen"), V(row, "last_seen"));
+            }
+        }
+
+        if (fw != null)
+        {
+            foreach (var row in fw.Rows)
+            {
+                if (!Orient(target, V(row, "client_ip"), V(row, "server_ip"), out var dir, out var peer)) continue;
+                var a = Get(dir, peer, V(row, "server_port") ?? "");
+                long n = long.TryParse(V(row, "count"), out long c) ? c : 1;
+                a.Fw += n;
+                if (V(row, "fw_denied") == "1") a.FwDenied += n;
+                foreach (var x in Split(V(row, "fw_rule"))) a.Rules.Add(x);
+                foreach (var x in Split(V(row, "fw_device"))) a.Devices.Add(x);
+                foreach (var x in Split(V(row, "fw_app"))) a.FwApps.Add(x);
+                a.Seen(V(row, "first_seen"), V(row, "last_seen"));
             }
         }
 
@@ -484,9 +517,13 @@ static class FlowBuilder
             }
 
             var edge = new FlowEdge(dir, peer, port,
-                [.. a.Protocols.Order()], a.Splunk + a.Ar, a.Splunk, a.Ar, a.First, a.Last,
+                [.. a.Protocols.Order()], a.Splunk + a.Ar + a.Fw, a.Splunk, a.Ar, a.First, a.Last,
                 [.. a.Computers.Order()], [.. a.Processes.Order()], edgeUrls,
-                env?.FindSegment(peer), peerApps, localApp);
+                env?.FindSegment(peer), peerApps, localApp)
+            {
+                FirewallHits = a.Fw, FirewallDenied = a.FwDenied,
+                FwRules = [.. a.Rules.Order()], FwDevices = [.. a.Devices.Order()], FwApps = [.. a.FwApps.Order()]
+            };
 
             (dir == "in" ? inbound : outbound).Add(edge);
         }
@@ -521,15 +558,19 @@ record SegmentAgg(SegmentInfo? Segment, int IpCount, long Hits, List<string> Por
 record PeerHop(string Ip, SegmentInfo? Segment, List<SegmentAgg> Inbound, List<SegmentAgg> Outbound);
 
 record Hop2Response(List<PeerHop> Peers, int Requested, int Queried,
-    SourceStatus Splunk, SourceStatus AppResponse, SourceStatus Envanter, long ElapsedMs);
+    SourceStatus Splunk, SourceStatus AppResponse, SourceStatus Envanter, long ElapsedMs)
+{
+    public SourceStatus? Firewall { get; init; }
+}
 
 static class Hop2Builder
 {
     const int TopIps = 10, MaxPorts = 12, MaxApps = 6;
 
-    public static PeerHop Build(string peer, string mainTarget, SplunkResult? sp, AppResponseResult? ar, EnvanterSnapshot? env)
+    public static PeerHop Build(string peer, string mainTarget, SplunkResult? sp, AppResponseResult? ar, EnvanterSnapshot? env,
+        SplunkResult? fw = null)
     {
-        var (inbound, outbound) = FlowBuilder.Build(peer, sp, ar, env);
+        var (inbound, outbound) = FlowBuilder.Build(peer, sp, ar, env, fw);
         return new PeerHop(peer, env?.FindSegment(peer), Summarize(inbound, mainTarget), Summarize(outbound, mainTarget));
     }
 
@@ -565,7 +606,7 @@ static class VipResolver
     // Sorgulanan IP bir VIP: her üye için "VIP → üye:port" kenarı. Trafik, üyenin o portuna gelen
     // akışlardan; GW'den gelen kısım doğrulama olarak ayrıca tutulur.
     public static (List<VipMember> members, List<FlowEdge> edges) MemberEdges(
-        List<VipMember> vipMembers, SplunkResult? sp, AppResponseResult? ar, EnvanterSnapshot env)
+        List<VipMember> vipMembers, SplunkResult? sp, AppResponseResult? ar, EnvanterSnapshot env, SplunkResult? fw = null)
     {
         var members = new List<VipMember>();
         var edges = new List<FlowEdge>();
@@ -574,7 +615,7 @@ static class VipResolver
         foreach (var m in vipMembers.DistinctBy(m => (m.Ip, m.Port)))
         {
             if (!inboundCache.TryGetValue(m.Ip, out var mIn))
-                inboundCache[m.Ip] = mIn = FlowBuilder.Build(m.Ip, sp, ar, env).inbound;
+                inboundCache[m.Ip] = mIn = FlowBuilder.Build(m.Ip, sp, ar, env, fw).inbound;
             var onPort = mIn.Where(e => m.Port == null || e.Port == m.Port).ToList();
             long gwHits = onPort.Where(e => env.IsVipGw(e.PeerIp, out _)).Sum(e => e.Hits);
             var mm = m with { Hits = onPort.Sum(e => e.Hits), GwHits = gwHits };
@@ -587,7 +628,14 @@ static class VipResolver
                 onPort.Select(e => e.LastSeen).OfType<string>().DefaultIfEmpty().Max(),
                 onPort.SelectMany(e => e.Computers).Distinct().ToList(),
                 onPort.SelectMany(e => e.Processes).Distinct().ToList(),
-                [], m.Segment ?? env.FindSegment(m.Ip), env.Match(m.Ip, m.Port), null) { ViaVip = mm });
+                [], m.Segment ?? env.FindSegment(m.Ip), env.Match(m.Ip, m.Port), null)
+            {
+                ViaVip = mm,
+                FirewallHits = onPort.Sum(e => e.FirewallHits), FirewallDenied = onPort.Sum(e => e.FirewallDenied),
+                FwRules = onPort.SelectMany(e => e.FwRules).Distinct().ToList(),
+                FwDevices = onPort.SelectMany(e => e.FwDevices).Distinct().ToList(),
+                FwApps = onPort.SelectMany(e => e.FwApps).Distinct().ToList()
+            });
         }
         return (members, edges);
     }

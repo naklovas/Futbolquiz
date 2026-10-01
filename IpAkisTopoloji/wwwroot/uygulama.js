@@ -43,7 +43,7 @@ async function runApp(name) {
   name = $("#appName").value.trim();
   if (!name) { alert("Bir uygulama seçin."); return; }
   setUiMode("app");
-  const srcs = [$("#srcSplunk").checked && "splunk", $("#srcAr").checked && "appresponse"].filter(Boolean);
+  const srcs = selectedSources();
   if (!srcs.length) { alert("En az bir kaynak seçin."); return; }
   const params = new URLSearchParams({
     name, start: $("#start").value, end: $("#end").value,

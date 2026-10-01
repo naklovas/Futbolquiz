@@ -135,6 +135,25 @@ app.MapGet("/api/appresponse", async (string? ip, string? start, string? end, in
     }
 });
 
+app.MapGet("/api/firewall", async (string? ip, string? start, string? end,
+    IConfiguration cfg, IHttpClientFactory factory, CancellationToken ct) =>
+{
+    if (!LookupQuery.TryParse(ip, start, end, cfg.GetValue("MaxRangeHours", 24), out var q, out var error))
+        return Results.BadRequest(new { error });
+    try
+    {
+        return Results.Ok(await FirewallService.QueryAsync(q!, cfg, factory.CreateClient("splunk"), ct));
+    }
+    catch (OperationCanceledException) when (ct.IsCancellationRequested)
+    {
+        return Results.StatusCode(499);
+    }
+    catch (Exception ex)
+    {
+        return Results.Json(new { error = ex.Message }, statusCode: 502);
+    }
+});
+
 // Tek IP akış + topoloji: Splunk ve AppResponse paralel sorgulanır, envanterle zenginleştirilir.
 // sources=splunk,appresponse ile kaynak seçilebilir (varsayılan: ikisi de).
 app.MapGet("/api/flow", async (string? ip, string? start, string? end, int? appliance, string? sources,
@@ -143,7 +162,7 @@ app.MapGet("/api/flow", async (string? ip, string? start, string? end, int? appl
     if (!LookupQuery.TryParse(ip, start, end, cfg.GetValue("MaxRangeHours", 24), out var q, out var error))
         return Results.BadRequest(new { error });
 
-    var wanted = (sources ?? "splunk,appresponse").ToLowerInvariant();
+    var wanted = (sources ?? "splunk,appresponse,firewall").ToLowerInvariant();
     var sw = Stopwatch.StartNew();
 
     // Envanter önce: sorgulanan IP bir VIP ise havuz üyeleri ve GW'leri de aynı sorguya eklenir,
@@ -161,10 +180,11 @@ app.MapGet("/api/flow", async (string? ip, string? start, string? end, int? appl
     var arTask = wanted.Contains("appresponse")
         ? Capture(() => AppResponseService.QueryAnyAsync(q, appliance ?? 0, cfg, factory.CreateClient("appresponse"), ct, queryIps), ct)
         : Task.FromResult<(AppResponseResult?, string?)>((null, null));
+    var fwTask = FirewallTask(wanted, q, cfg, factory, ct, queryIps);
 
     try
     {
-        await Task.WhenAll(spTask, arTask);
+        await Task.WhenAll(spTask, arTask, fwTask);
     }
     catch (OperationCanceledException) when (ct.IsCancellationRequested)
     {
@@ -175,8 +195,9 @@ app.MapGet("/api/flow", async (string? ip, string? start, string? end, int? appl
 
     var (sp, spErr) = spTask.Result;
     var (ar, arErr) = arTask.Result;
+    var (fw, fwErr) = fwTask.Result;
 
-    var (inbound, outbound) = FlowBuilder.Build(q.Ip, sp, ar, env);
+    var (inbound, outbound) = FlowBuilder.Build(q.Ip, sp, ar, env, fw);
     var target = new TargetInfo(q.Ip, env?.FindSegment(q.Ip), env?.AppsOnIp(q.Ip) ?? []);
 
     if (env != null)
@@ -187,7 +208,7 @@ app.MapGet("/api/flow", async (string? ip, string? start, string? end, int? appl
         if (vipMembers.Count > 0)
         {
             // VIP → üyeler "giden" tarafa eklenir; böylece 2. seviye de üyelerin arkasını gösterir.
-            var (members, memberEdges) = VipResolver.MemberEdges(vipMembers, sp, ar, env);
+            var (members, memberEdges) = VipResolver.MemberEdges(vipMembers, sp, ar, env, fw);
             outbound = outbound.Where(e => !memberEdges.Any(m => m.PeerIp == e.PeerIp && m.Port == e.Port))
                 .Concat(memberEdges).OrderByDescending(e => e.Hits).ToList();
             target = target with { Vip = members, MemberOf = memberOf.Count > 0 ? memberOf : null };
@@ -199,7 +220,8 @@ app.MapGet("/api/flow", async (string? ip, string? start, string? end, int? appl
     }
 
     var (spSt, arSt, envSt) = Statuses(wanted, sp, spErr, ar, arErr, env, envErr);
-    return Results.Ok(new FlowResponse(target, inbound, outbound, spSt, arSt, envSt, sw.ElapsedMilliseconds));
+    return Results.Ok(new FlowResponse(target, inbound, outbound, spSt, arSt, envSt, sw.ElapsedMilliseconds)
+        { Firewall = FirewallStatus(wanted, cfg, fw, fwErr) });
 });
 
 // Ortam filtreleri (ODM, TEST...): arayüzdeki kutucuklar; segment Domain'inde anahtar kelime aranır.
@@ -243,16 +265,17 @@ app.MapGet("/api/app", async (string? name, string? start, string? end, int? app
     if (!LookupQuery.TryParse(queried[0], start, end, cfg.GetValue("MaxRangeHours", 24), out var q, out var error))
         return Results.BadRequest(new { error });
 
-    var wanted = (sources ?? "splunk,appresponse").ToLowerInvariant();
+    var wanted = (sources ?? "splunk,appresponse,firewall").ToLowerInvariant();
     var spTask = wanted.Contains("splunk")
         ? Capture(() => SplunkService.QueryAsync(q!, cfg, factory.CreateClient("splunk"), ct, queried), ct)
         : Task.FromResult<(SplunkResult?, string?)>((null, null));
     var arTask = wanted.Contains("appresponse")
         ? Capture(() => AppResponseService.QueryAnyAsync(q!, appliance ?? 0, cfg, factory.CreateClient("appresponse"), ct, queried), ct)
         : Task.FromResult<(AppResponseResult?, string?)>((null, null));
+    var fwTask = FirewallTask(wanted, q!, cfg, factory, ct, queried);
     try
     {
-        await Task.WhenAll(spTask, arTask);
+        await Task.WhenAll(spTask, arTask, fwTask);
     }
     catch (OperationCanceledException) when (ct.IsCancellationRequested)
     {
@@ -263,9 +286,10 @@ app.MapGet("/api/app", async (string? name, string? start, string? end, int? app
 
     var (sp, spErr) = spTask.Result;
     var (ar, arErr) = arTask.Result;
+    var (fw, fwErr) = fwTask.Result;
     var (spSt, arSt, envSt) = Statuses(wanted, sp, spErr, ar, arErr, env, envErr);
-    return Results.Ok(AppTopology.Build(name, servers, vips, queried, sp, ar, env, AppTopology.InfraPorts(cfg), EnvFilter.Load(cfg),
-        spSt, arSt, envSt, sw.ElapsedMilliseconds));
+    return Results.Ok(AppTopology.Build(name, servers, vips, queried, sp, ar, fw, env, AppTopology.InfraPorts(cfg), EnvFilter.Load(cfg),
+        spSt, arSt, envSt, sw.ElapsedMilliseconds) with { Firewall = FirewallStatus(wanted, cfg, fw, fwErr) });
 });
 
 // 2. seviye: sorgulanan IP'nin karşısındaki sunucuların kendi trafiği (tek sorguda, tüm sunucular için).
@@ -289,7 +313,7 @@ app.MapPost("/api/hop2", async (Hop2Request req, IConfiguration cfg, IHttpClient
     if (ips.Count == 0)
         return Results.BadRequest(new { error = "Sorgulanacak sunucu IP'si yok." });
 
-    var wanted = (req.Sources ?? "splunk,appresponse").ToLowerInvariant();
+    var wanted = (req.Sources ?? "splunk,appresponse,firewall").ToLowerInvariant();
     var sw = Stopwatch.StartNew();
 
     var spTask = wanted.Contains("splunk")
@@ -298,11 +322,12 @@ app.MapPost("/api/hop2", async (Hop2Request req, IConfiguration cfg, IHttpClient
     var arTask = wanted.Contains("appresponse")
         ? Capture(() => AppResponseService.QueryAnyAsync(q!, req.Appliance ?? 0, cfg, factory.CreateClient("appresponse"), ct, ips), ct)
         : Task.FromResult<(AppResponseResult?, string?)>((null, null));
+    var fwTask = FirewallTask(wanted, q!, cfg, factory, ct, ips);
     var envTask = Capture(() => envanter.GetAsync(false, ct), ct);
 
     try
     {
-        await Task.WhenAll(spTask, arTask, envTask);
+        await Task.WhenAll(spTask, arTask, fwTask, envTask);
     }
     catch (OperationCanceledException) when (ct.IsCancellationRequested)
     {
@@ -314,10 +339,12 @@ app.MapPost("/api/hop2", async (Hop2Request req, IConfiguration cfg, IHttpClient
     var (sp, spErr) = spTask.Result;
     var (ar, arErr) = arTask.Result;
     var (env, envErr) = envTask.Result;
+    var (fw, fwErr) = fwTask.Result;
 
-    var peers = ips.Select(ip => Hop2Builder.Build(ip, q!.Ip, sp, ar, env)).ToList();
+    var peers = ips.Select(ip => Hop2Builder.Build(ip, q!.Ip, sp, ar, env, fw)).ToList();
     var (spSt, arSt, envSt) = Statuses(wanted, sp, spErr, ar, arErr, env, envErr);
-    return Results.Ok(new Hop2Response(peers, requested, ips.Count, spSt, arSt, envSt, sw.ElapsedMilliseconds));
+    return Results.Ok(new Hop2Response(peers, requested, ips.Count, spSt, arSt, envSt, sw.ElapsedMilliseconds)
+        { Firewall = FirewallStatus(wanted, cfg, fw, fwErr) });
 });
 
 // Sorgu sonucunun özetiyle şirket içi AI'a "bu sunucuda değişiklik olursa nereler etkilenir" sorusu.
@@ -384,6 +411,18 @@ static (SourceStatus sp, SourceStatus ar, SourceStatus env) Statuses(string want
             env == null ? [] : [$"{env.SegmentCount} segment, {env.HostCount} host kaydı ({env.LoadedAt:HH:mm:ss} yüklendi)"],
             null, env?.HostCount ?? 0));
 }
+
+// Firewall (Palo Alto) sorgusu: kaynak seçildiyse ve Firewall:Enabled açıksa Splunk bağlantısıyla çalışır.
+static Task<(SplunkResult? result, string? error)> FirewallTask(string wanted, LookupQuery q, IConfiguration cfg,
+    IHttpClientFactory factory, CancellationToken ct, IReadOnlyList<string> ips) =>
+    wanted.Contains("firewall") && FirewallService.Enabled(cfg)
+        ? Capture(() => FirewallService.QueryAsync(q, cfg, factory.CreateClient("splunk"), ct, ips), ct)
+        : Task.FromResult<(SplunkResult?, string?)>((null, null));
+
+static SourceStatus FirewallStatus(string wanted, IConfiguration cfg, SplunkResult? fw, string? err) =>
+    !wanted.Contains("firewall") ? SourceStatus.Skipped
+    : !FirewallService.Enabled(cfg) ? new SourceStatus(false, "Kapalı (Firewall:Enabled = false)", [], null, 0)
+    : new SourceStatus(err == null, err, fw?.Messages ?? [], fw?.ElapsedMs, fw?.Rows.Count ?? 0);
 
 // Bir kaynağın hatası diğerlerini durdurmasın: sonucu veya hata mesajını döndür.
 // Sadece kullanıcı isteği iptal ettiyse fırlat; HttpClient timeout'u hata mesajı olarak döner.
@@ -485,8 +524,6 @@ static class SplunkService
         ips ??= [q.Ip];
         string terms = ips.Count == 1 ? $"TERM({ips[0]})" : "(" + string.Join(" OR ", ips.Select(ip => $"TERM({ip})")) + ")";
         var s = cfg.GetSection("Splunk");
-        string baseUrl = (s["BaseUrl"] ?? throw new InvalidOperationException("Splunk:BaseUrl tanımlı değil.")).TrimEnd('/');
-        string exportPath = s["ExportPath"] ?? "/services/search/v2/jobs/export";
         string index = s["Index"] ?? "carbonblack";
         string sourcetype = s["Sourcetype"] ?? "bit9:carbonblack:json";
 
@@ -504,6 +541,18 @@ static class SplunkService
             | sort 0 - count
             | eval first_seen=strftime(first_seen, "%Y-%m-%d %H:%M:%S"), last_seen=strftime(last_seen, "%Y-%m-%d %H:%M:%S")
             """;
+
+        return await ExportAsync(spl, q, cfg, http, ct, "Splunk");
+    }
+
+    // Splunk export API'sine bir SPL gönderir; NDJSON yanıtın "result" satırlarını ve uyarılarını döndürür.
+    // Firewall (Palo Alto) sorgusu da aynı Splunk bağlantısını kullanır.
+    public static async Task<SplunkResult> ExportAsync(string spl, LookupQuery q, IConfiguration cfg, HttpClient http,
+        CancellationToken ct, string label)
+    {
+        var s = cfg.GetSection("Splunk");
+        string baseUrl = (s["BaseUrl"] ?? throw new InvalidOperationException("Splunk:BaseUrl tanımlı değil.")).TrimEnd('/');
+        string exportPath = s["ExportPath"] ?? "/services/search/v2/jobs/export";
 
         using var req = new HttpRequestMessage(HttpMethod.Post, baseUrl + exportPath)
         {
@@ -534,7 +583,7 @@ static class SplunkService
         if (!resp.IsSuccessStatusCode)
         {
             string body = await resp.Content.ReadAsStringAsync(ct);
-            throw new HttpRequestException($"Splunk HTTP {(int)resp.StatusCode}: {Truncate(body, 400)}");
+            throw new HttpRequestException($"{label} HTTP {(int)resp.StatusCode}: {Truncate(body, 400)}");
         }
 
         var rows = new List<Dictionary<string, string>>();

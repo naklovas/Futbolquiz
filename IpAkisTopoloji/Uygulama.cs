@@ -29,7 +29,10 @@ record AppInternal(string From, string To, string Port, long Hits, string Kind);
 
 record AppTopologyResponse(string Name, List<string> Owners, List<AppServer> Servers, List<AppVip> Vips,
     List<AppLink> Callers, List<AppLink> Deps, List<AppInternal> Internal, int QueriedIps, int TotalIps,
-    SourceStatus Splunk, SourceStatus AppResponse, SourceStatus Envanter, long ElapsedMs);
+    SourceStatus Splunk, SourceStatus AppResponse, SourceStatus Envanter, long ElapsedMs)
+{
+    public SourceStatus? Firewall { get; init; }
+}
 
 static class AppTopology
 {
@@ -75,7 +78,7 @@ static class AppTopology
     }
 
     public static AppTopologyResponse Build(string name, List<AppServer> servers, List<AppVip> vips, List<string> queried,
-        SplunkResult? sp, AppResponseResult? ar, EnvanterSnapshot env, HashSet<string> infraPorts, List<EnvFilter> envFilters,
+        SplunkResult? sp, AppResponseResult? ar, SplunkResult? fw, EnvanterSnapshot env, HashSet<string> infraPorts, List<EnvFilter> envFilters,
         SourceStatus spSt, SourceStatus arSt, SourceStatus envSt, long elapsedMs)
     {
         var appIps = servers.Select(s => s.Ip).Concat(vips.Select(v => v.Ip)).ToHashSet();
@@ -89,7 +92,10 @@ static class AppTopology
 
         foreach (var x in queried)
         {
-            var (inbound, outbound) = FlowBuilder.Build(x, sp, ar, env);
+            var (inbound, outbound) = FlowBuilder.Build(x, sp, ar, env, fw);
+            // Karşı IP VIP ise arkasındaki üyeler (bağımlılığın gerçek uygulaması ve ODM/TEST ortamı için)
+            inbound = VipResolver.Annotate(inbound, env);
+            outbound = VipResolver.Annotate(outbound, env);
             bool isServer = serverByIp.TryGetValue(x, out var srv);
 
             foreach (var e in inbound)
