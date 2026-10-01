@@ -178,6 +178,29 @@ app.MapGet("/api/surec", async (string? ip, string? start, string? end,
     return Results.Ok(new ProcessFlowResponse(q!.Ip, procs, spSt, envSt, sw.ElapsedMilliseconds));
 });
 
+// AppResponse ham akış testi (tek kutu, en fazla 15 dk): bağlantılar tek tek mi, süreleri ne, aynı anda kaç tane?
+// "Aynı oturumda gelen → giden" eşleştirmesinin bu veriyle yapılıp yapılamayacağını ölçmek için.
+app.MapGet("/api/appresponse/akis-testi", async (string? ip, string? start, string? end, int? appliance,
+    IConfiguration cfg, IHttpClientFactory factory, CancellationToken ct) =>
+{
+    if (!LookupQuery.TryParse(ip, start ?? DateTime.Now.AddMinutes(-5).ToString("s"), end, 1, out var q, out var error))
+        return Results.BadRequest(new { error });
+    if ((q!.End - q.Start).TotalMinutes > 15)
+        return Results.BadRequest(new { error = "Test aralığı en fazla 15 dakika olabilir." });
+    try
+    {
+        return Results.Ok(await AkisTesti.RunAsync(q, appliance is null or < 0 ? 0 : appliance.Value, cfg, factory.CreateClient("appresponse"), ct));
+    }
+    catch (OperationCanceledException) when (ct.IsCancellationRequested)
+    {
+        return Results.StatusCode(499);
+    }
+    catch (Exception ex)
+    {
+        return Results.Json(new { error = ex.Message }, statusCode: 502);
+    }
+});
+
 // Tek IP akış + topoloji: Splunk ve AppResponse paralel sorgulanır, envanterle zenginleştirilir.
 // sources=splunk,appresponse ile kaynak seçilebilir (varsayılan: ikisi de).
 app.MapGet("/api/flow", async (string? ip, string? start, string? end, int? appliance, string? sources,
@@ -737,22 +760,7 @@ static class AppResponseService
         IReadOnlyList<string>? ips = null)
     {
         ips ??= [q.Ip];
-        string? username = cfg["Credentials:Username"];
-        string? password = cfg["Credentials:Password"];
-        if (string.IsNullOrEmpty(username) || string.IsNullOrEmpty(password))
-            throw new InvalidOperationException("Config'de Credentials.Username veya Credentials.Password eksik.");
-
-        var servers = cfg.GetSection("Servers").GetChildren().ToList();
-        if (servers.Count == 0)
-            throw new InvalidOperationException("Config'de 'Servers' listesi boş.");
-        if (applianceIndex < 0 || applianceIndex >= servers.Count)
-            applianceIndex = 0;
-
-        string applianceName = servers[applianceIndex]["Name"] ?? "Riverbed";
-        string applianceIp = servers[applianceIndex]["Ip"] is { Length: > 0 } sip && !string.IsNullOrWhiteSpace(sip)
-            ? sip.Trim()
-            : throw new InvalidOperationException($"'{applianceName}' cihazının Ip değeri tanımlı değil.");
-        string baseUrl = $"https://{applianceIp}";
+        var (applianceName, baseUrl, jwt) = await ConnectAsync(applianceIndex, cfg, http, ct);
 
         string sourcePathType = cfg["SourcePathType"] ?? "jobs";
         string sourceL4Name = cfg["SourceL4"] ?? "flow_tcp";
@@ -769,27 +777,6 @@ static class AppResponseService
         var l4 = new List<L4Row>();
         var l7 = new List<L7Row>();
         int rawL4Total = 0, rawL7Total = 0;
-
-        // 1. Token
-        var tokenPayload = new { user_credentials = new { username, password }, generate_refresh_token = true };
-        using var tokenReq = new HttpRequestMessage(HttpMethod.Post, $"{baseUrl}/api/mgmt.aaa/1.0/token")
-        {
-            // Content-Type'a charset eklenmesin: bazı AppResponse sürümleri 415 döndürüyor.
-            Content = new StringContent(JsonSerializer.Serialize(tokenPayload), Encoding.UTF8)
-        };
-        tokenReq.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
-        tokenReq.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
-
-        using var tokenResp = await http.SendAsync(tokenReq, ct);
-        if (!tokenResp.IsSuccessStatusCode)
-        {
-            string tokenBody = await tokenResp.Content.ReadAsStringAsync(ct);
-            throw new HttpRequestException(
-                $"AppResponse token alınamadı ({applianceName} / {applianceIp}, HTTP {(int)tokenResp.StatusCode}): {Truncate(tokenBody, 400)}");
-        }
-
-        string jwt = JsonNode.Parse(await tokenResp.Content.ReadAsStringAsync(ct))?["access_token"]?.ToString()
-            ?? throw new InvalidOperationException("AppResponse token yanıtında access_token yok.");
 
         // 2. IP filtresi: hem client hem server olarak geçen akışlar
         string ipFilter = "(" + string.Join(" or ", ips.Select(ip => $"cli_tcp.ip == {ip} or srv_tcp.ip == {ip}")) + ")";
@@ -937,6 +924,82 @@ static class AppResponseService
             l7.OrderByDescending(r => r.Hit).ToList(),
             messages,
             sw.ElapsedMilliseconds);
+    }
+
+    // Kutuya bağlan: config'den kullanıcı/şifre ve kutu adresi, token al.
+    public static async Task<(string name, string baseUrl, string jwt)> ConnectAsync(int applianceIndex, IConfiguration cfg,
+        HttpClient http, CancellationToken ct)
+    {
+        string? username = cfg["Credentials:Username"];
+        string? password = cfg["Credentials:Password"];
+        if (string.IsNullOrEmpty(username) || string.IsNullOrEmpty(password))
+            throw new InvalidOperationException("Config'de Credentials.Username veya Credentials.Password eksik.");
+
+        var servers = cfg.GetSection("Servers").GetChildren().ToList();
+        if (servers.Count == 0)
+            throw new InvalidOperationException("Config'de 'Servers' listesi boş.");
+        if (applianceIndex < 0 || applianceIndex >= servers.Count)
+            applianceIndex = 0;
+
+        string applianceName = servers[applianceIndex]["Name"] ?? "Riverbed";
+        string applianceIp = servers[applianceIndex]["Ip"] is { Length: > 0 } sip && !string.IsNullOrWhiteSpace(sip)
+            ? sip.Trim()
+            : throw new InvalidOperationException($"'{applianceName}' cihazının Ip değeri tanımlı değil.");
+        string baseUrl = $"https://{applianceIp}";
+
+        var tokenPayload = new { user_credentials = new { username, password }, generate_refresh_token = true };
+        using var tokenReq = new HttpRequestMessage(HttpMethod.Post, $"{baseUrl}/api/mgmt.aaa/1.0/token")
+        {
+            // Content-Type'a charset eklenmesin: bazı AppResponse sürümleri 415 döndürüyor.
+            Content = new StringContent(JsonSerializer.Serialize(tokenPayload), Encoding.UTF8)
+        };
+        tokenReq.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
+        tokenReq.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+
+        using var tokenResp = await http.SendAsync(tokenReq, ct);
+        if (!tokenResp.IsSuccessStatusCode)
+        {
+            string tokenBody = await tokenResp.Content.ReadAsStringAsync(ct);
+            throw new HttpRequestException(
+                $"AppResponse token alınamadı ({applianceName} / {applianceIp}, HTTP {(int)tokenResp.StatusCode}): {Truncate(tokenBody, 400)}");
+        }
+
+        string jwt = JsonNode.Parse(await tokenResp.Content.ReadAsStringAsync(ct))?["access_token"]?.ToString()
+            ?? throw new InvalidOperationException("AppResponse token yanıtında access_token yok.");
+        return (applianceName, baseUrl, jwt);
+    }
+
+    // Tek data_def'li rapor: oluştur → bekle → veriyi al → sil. Hata durumunda AppResponse'un mesajı fırlatılır.
+    public static async Task<JsonArray> RunSingleAsync(string baseUrl, string jwt, object dataDef, bool delete,
+        HttpClient http, CancellationToken ct, int maxWaitSeconds = 60)
+    {
+        var payload = new { info = new { name = "DeltaFlow ham akış", description = "" }, data_defs = new[] { dataDef } };
+        using var createResp = await http.SendAsync(Req(HttpMethod.Post, $"{baseUrl}/api/npm.reports/1.0/instances", jwt, Json(payload)), ct);
+        string createBody = await createResp.Content.ReadAsStringAsync(ct);
+        if (!createResp.IsSuccessStatusCode)
+            throw new HttpRequestException($"Rapor oluşturulamadı (HTTP {(int)createResp.StatusCode}): {Truncate(createBody, 400)}");
+        string id = JsonNode.Parse(createBody)?["id"]?.ToString() ?? throw new InvalidOperationException("Rapor ID dönmedi.");
+        try
+        {
+            for (int i = 0; i < maxWaitSeconds / 2; i++)
+            {
+                await Task.Delay(2000, ct);
+                using var st = await http.SendAsync(Req(HttpMethod.Get, $"{baseUrl}/api/npm.reports/1.0/instances/items/{id}", jwt), ct);
+                var def = JsonNode.Parse(await st.Content.ReadAsStringAsync(ct))?["data_defs"]?.AsArray()?[0];
+                string? state = def?["status"]?["state"]?.ToString();
+                if (state == "error")
+                    throw new InvalidOperationException("Rapor hata verdi: " + Truncate(def?["status"]?.ToJsonString() ?? "", 400));
+                if (state != "completed") continue;
+                return await GetDataAsync(http, baseUrl, id, 1, jwt, ct) ?? [];
+            }
+            throw new TimeoutException($"Rapor {maxWaitSeconds} sn'de tamamlanmadı.");
+        }
+        finally
+        {
+            if (delete)
+                try { using var _ = await http.SendAsync(Req(HttpMethod.Delete, $"{baseUrl}/api/npm.reports/1.0/instances/items/{id}", jwt), CancellationToken.None); }
+                catch { /* yok say */ }
+        }
     }
 
     static async Task<JsonArray?> GetDataAsync(HttpClient http, string baseUrl, string raporId, int dataDef, string jwt, CancellationToken ct)
