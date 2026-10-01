@@ -154,6 +154,30 @@ app.MapGet("/api/firewall", async (string? ip, string? start, string? end,
     }
 });
 
+// Sunucu içi akış: gelen bağlantıları hangi süreç karşılıyor, o süreç nereye gidiyor (Carbon Black).
+app.MapGet("/api/surec", async (string? ip, string? start, string? end,
+    IConfiguration cfg, IHttpClientFactory factory, EnvanterService envanter, CancellationToken ct) =>
+{
+    if (!LookupQuery.TryParse(ip, start, end, cfg.GetValue("MaxRangeHours", 24), out var q, out var error))
+        return Results.BadRequest(new { error });
+    var sw = Stopwatch.StartNew();
+    var spTask = Capture(() => SplunkService.ProcessFlowAsync(q!, cfg, factory.CreateClient("splunk"), ct), ct);
+    var envTask = Capture(() => envanter.GetAsync(false, ct), ct);
+    try
+    {
+        await Task.WhenAll(spTask, envTask);
+    }
+    catch (OperationCanceledException) when (ct.IsCancellationRequested)
+    {
+        return Results.StatusCode(499);
+    }
+    var (sp, spErr) = spTask.Result;
+    var (env, envErr) = envTask.Result;
+    var (spSt, _, envSt) = Statuses("splunk", sp, spErr, null, null, env, envErr);
+    var procs = sp == null ? [] : ProcessFlowBuilder.Build(q!.Ip, sp, env);
+    return Results.Ok(new ProcessFlowResponse(q!.Ip, procs, spSt, envSt, sw.ElapsedMilliseconds));
+});
+
 // Tek IP akış + topoloji: Splunk ve AppResponse paralel sorgulanır, envanterle zenginleştirilir.
 // sources=splunk,appresponse ile kaynak seçilebilir (varsayılan: ikisi de).
 app.MapGet("/api/flow", async (string? ip, string? start, string? end, int? appliance, string? sources,
@@ -542,6 +566,28 @@ static class SplunkService
             | eval first_seen=strftime(first_seen, "%Y-%m-%d %H:%M:%S"), last_seen=strftime(last_seen, "%Y-%m-%d %H:%M:%S")
             """;
 
+        return await ExportAsync(spl, q, cfg, http, ct, "Splunk");
+    }
+
+    // Sunucu içi akış: yalnızca sorgulanan sunucunun kendi ajanının olayları (local_ip = IP), süreç bazında.
+    // Gelen: port = sunucunun dinlediği port; giden: port = karşının portu.
+    public static async Task<SplunkResult> ProcessFlowAsync(LookupQuery q, IConfiguration cfg, HttpClient http, CancellationToken ct)
+    {
+        var s = cfg.GetSection("Splunk");
+        string index = s["Index"] ?? "carbonblack";
+        string sourcetype = s["Sourcetype"] ?? "bit9:carbonblack:json";
+        string pidField = s["ProcessIdField"] is { Length: > 0 } pf && System.Text.RegularExpressions.Regex.IsMatch(pf, "^[A-Za-z0-9_.]+$") ? pf : "process_pid";
+
+        string spl = $"""
+            search index={index} sourcetype="{sourcetype}" TERM({q.Ip}) local_ip="{q.Ip}"
+            | eval yon=if(lower(direction)=="outbound", "out", "in"),
+                   process=replace(process_path, "^.*[\\/]", ""),
+                   pid=coalesce('{pidField}', "-"),
+                   peer=remote_ip,
+                   port=if(yon=="out", remote_port, local_port)
+            | stats count by process pid yon peer port
+            | sort 0 - count
+            """;
         return await ExportAsync(spl, q, cfg, http, ct, "Splunk");
     }
 

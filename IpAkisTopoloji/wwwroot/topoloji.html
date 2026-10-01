@@ -95,6 +95,19 @@
   .edge { fill: none; opacity: .5; transition: opacity .12s; }
   .edge.in { stroke: var(--in); } .edge.out { stroke: var(--out); }
   .edge.hop { stroke-dasharray: 6 3; }
+  .proc-svg .pn rect { fill: var(--panel); stroke: var(--line); stroke-width: 1.5; }
+  .proc-svg .pn.in rect { stroke: var(--in); } .proc-svg .pn.out rect { stroke: var(--out); }
+  .proc-svg .pn.proc rect { fill: var(--target); stroke: var(--target); }
+  .proc-svg .pn.proc text { fill: var(--target-text); }
+  .proc-svg .pn.proc .t3 { fill: var(--target-text); opacity: .75; }
+  .proc-svg .pn { cursor: pointer; }
+  .proc-svg .pn .t1 { fill: var(--text); font-size: 12.5px; font-weight: 700; }
+  .proc-svg .pn .t2 { fill: var(--text); font-size: 11.5px; }
+  .proc-svg .pn .t3 { fill: var(--muted); font-size: 11px; }
+  .proc-svg .pe { fill: none; opacity: .45; }
+  .proc-svg .pe.in { stroke: var(--in); } .proc-svg .pe.out { stroke: var(--out); }
+  .proc-svg.hl .pe { opacity: .06; } .proc-svg.hl .pe.on { opacity: .95; }
+  .proc-svg.hl .pn { opacity: .35; } .proc-svg.hl .pn.on { opacity: 1; }
   .edge.denied { stroke: var(--err); stroke-dasharray: 5 4; }
   .fw-deny { color: var(--err); font-weight: 600; }
   svg.hl .edge { opacity: .07; } svg.hl .edge.on { opacity: .95; }
@@ -260,7 +273,8 @@ async function run() {
   });
   history.replaceState(null, "", "?" + new URLSearchParams({ ip: params.get("ip"), start: params.get("start"), end: params.get("end") }));
 
-  abort?.abort(); hopAbort?.abort(); aiAbort?.abort();
+  abort?.abort(); hopAbort?.abort(); aiAbort?.abort(); procAbort?.abort();
+  state.proc = null; state.procSel = null;
   abort = new AbortController();
   $("#go").disabled = true; $("#cancel").hidden = false;
   $("#main").innerHTML = `<div class="panel empty"><span class="spinner"></span> Sorgulanıyor… (AppResponse raporu 1 dakikaya kadar sürebilir)</div>`;
@@ -272,6 +286,7 @@ async function run() {
     state.lastParams = params;
     render();
     if ($("#hop2On").checked) runHop2(params);
+    if ($("#srcSplunk").checked) runProc(params);
   } catch (e) {
     const msg = e.name === "AbortError" ? "Sorgu iptal edildi." : e.message;
     $("#main").innerHTML = `<div class="panel empty" style="color:var(--err)">${esc(msg)}</div>`;
@@ -340,6 +355,7 @@ function render() {
       <div class="topo-wrap" id="topo"></div>
       <div class="detail" id="detail"></div>
     </section>
+    <section class="panel" id="procPanel"></section>
     <section class="panel">
       <h2>Sunucuların kendi segmentleri (1. seviye)</h2>
       <div class="sumgrid"><div id="sum-in"></div><div id="sum-out"></div></div>
@@ -396,6 +412,7 @@ function render() {
   $("#dlSvg").addEventListener("click", () => exportImage("svg"));
   $("#dlPng").addEventListener("click", () => exportImage("png"));
   renderTopology();
+  renderProc();
   renderSummary();
   renderTables();
 }
@@ -838,6 +855,151 @@ function renderDetail() {
     </div></div>`;
   $("#closeDetail").addEventListener("click", clearFilter);
   $("#drill").addEventListener("click", () => { $("#ip").value = s.ip; window.scrollTo({ top: 0, behavior: "smooth" }); run(); });
+}
+
+// ---------- Sunucu içi akış: gelen → süreç → giden (Carbon Black) ----------
+// Sorgulanan sunucuda gelen bağlantıyı hangi süreç karşılıyor ve o süreç nereye bağlanıyor.
+// Süreç bazında bir bağdır (istek bazında değil): aynı süreçten geçen gelen ve giden trafik.
+let procAbort = null;
+const PROC_INFRA = new Set(["22", "53", "88", "123", "135", "137", "138", "139", "161", "162", "389", "445", "464", "514",
+  "636", "3268", "3269", "3389", "5985", "5986", "10050", "10051"]);
+const PROC_MAX = { procs: 8, side: 14 };
+
+async function runProc(params) {
+  procAbort?.abort();
+  procAbort = new AbortController();
+  state.proc = { status: "loading" };
+  renderProc();
+  try {
+    const p = new URLSearchParams({ ip: params.get("ip"), start: params.get("start"), end: params.get("end") });
+    const r = await fetch("api/surec?" + p, { signal: procAbort.signal });
+    const body = await r.json().catch(() => ({ error: `HTTP ${r.status}` }));
+    if (!r.ok) throw new Error(body.error || `HTTP ${r.status}`);
+    state.proc = { status: "ok", body, infra: false };
+  } catch (e) {
+    state.proc = e.name === "AbortError" ? null : { status: "error", error: e.message };
+  }
+  renderProc();
+}
+
+function procView() {
+  const pr = state.proc, show = p => (pr.infra || !PROC_INFRA.has(p.port)) && envSegAllowed(p.segment);
+  const procs = pr.body.processes
+    .map(n => ({ ...n, inbound: n.inbound.filter(show), outbound: n.outbound.filter(show) }))
+    .filter(n => n.inbound.length || n.outbound.length)
+    .map(n => ({ ...n, hits: n.inbound.reduce((a, p) => a + p.hits, 0) + n.outbound.reduce((a, p) => a + p.hits, 0) }))
+    .sort((a, b) => b.hits - a.hits);
+  const shownProcs = state.procSel ? procs.filter(n => n.key === state.procSel) : procs.slice(0, PROC_MAX.procs);
+  // Kenarlardaki düğümler: karşı IP (gelende) / IP (gidende); portlar alt satırda.
+  const side = dir => {
+    const m = new Map();
+    for (const n of shownProcs) for (const p of n[dir]) {
+      let x = m.get(p.ip);
+      if (!x) m.set(p.ip, x = { ip: p.ip, hits: 0, ports: new Set(), seg: p.segment, apps: new Set(), vip: p.vip, lbGw: p.lbGw, links: new Map() });
+      x.hits += p.hits; x.ports.add(p.port); p.apps.forEach(a => x.apps.add(a));
+      x.links.set(n.key, (x.links.get(n.key) ?? 0) + p.hits);
+    }
+    const list = [...m.values()].sort((a, b) => b.hits - a.hits);
+    if (list.length <= PROC_MAX.side) return list;
+    const rest = list.slice(PROC_MAX.side - 1);
+    const other = { ip: `Diğer ${rest.length} IP`, other: true, hits: rest.reduce((a, x) => a + x.hits, 0), ports: new Set(), apps: new Set(), links: new Map() };
+    rest.forEach(x => x.links.forEach((h, k) => other.links.set(k, (other.links.get(k) ?? 0) + h)));
+    return [...list.slice(0, PROC_MAX.side - 1), other];
+  };
+  return { procs, shownProcs, left: side("inbound"), right: side("outbound") };
+}
+
+const procLabel = n => n.pid ? `${n.name} (PID ${n.pid})` : n.name;
+
+function renderProc() {
+  const el = $("#procPanel");
+  if (!el) return;
+  const pr = state.proc;
+  const head = extra => `<div class="toolbar"><h2 style="margin:0">Sunucu içi akış: gelen → süreç → giden</h2>${extra ?? ""}</div>
+    <div class="small muted" style="margin:-4px 0 8px">Carbon Black: sorgulanan sunucuda gelen bağlantıyı hangi süreç karşılıyor ve o süreç nereye bağlanıyor. Süreç bazındadır; tek tek istekleri değil, aynı süreçten geçen trafiği birlikte gösterir.</div>`;
+  if (!pr) { el.innerHTML = ""; el.hidden = true; return; }
+  el.hidden = false;
+  if (pr.status === "loading") { el.innerHTML = head() + `<div class="muted"><span class="spinner"></span> Süreçler sorgulanıyor…</div>`; return; }
+  if (pr.status === "error") { el.innerHTML = head() + `<div style="color:var(--err)">${esc(pr.error)}</div>`; return; }
+
+  const v = procView();
+  const tools = `<div class="checks" style="padding:0">
+      <label title="DNS, AD, RPC, SMB, RDP, izleme gibi altyapı portları"><input type="checkbox" id="procInfra" ${pr.infra ? "checked" : ""}> Altyapı portları</label>
+      ${state.procSel ? `<span class="chip">Süreç: ${esc(procLabel(state.proc.body.processes.find(n => n.key === state.procSel) ?? { name: "?" }))} <button type="button" id="procClear" title="Tümünü göster">✕</button></span>` : ""}
+      <span class="muted small">${fmt(v.procs.length)} süreç${!state.procSel && v.procs.length > PROC_MAX.procs ? `, en yoğun ${PROC_MAX.procs} gösteriliyor` : ""}</span>
+    </div>`;
+  if (!v.shownProcs.length) {
+    el.innerHTML = head(tools) + `<div class="muted">Bu aralıkta sorgulanan sunucunun Carbon Black kaydı yok (ajan kurulu değil ya da trafik yalnızca altyapı portlarında).</div>`;
+    wireProc();
+    return;
+  }
+
+  const W = 1180, NW = 300, PW = 300, NH = 44, PH = 60, GAP = 10;
+  const X = { l: 0, p: (W - PW) / 2, r: W - NW };
+  const colH = (n, h) => n * (h + GAP) - GAP;
+  const H = Math.max(colH(v.left.length, NH), colH(v.shownProcs.length, PH), colH(v.right.length, NH), PH) + 40;
+  const y0 = (n, h) => 30 + (H - 30 - colH(n, h)) / 2;
+  const maxHit = Math.max(1, ...v.left.map(x => x.hits), ...v.right.map(x => x.hits));
+  const sw = h => (1.2 + 7 * Math.log(1 + h) / Math.log(1 + maxHit)).toFixed(1);
+  const curve = (x1, y1, x2, y2) => { const mx = (x1 + x2) / 2; return `M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}`; };
+  const procY = new Map(v.shownProcs.map((n, i) => [n.key, y0(v.shownProcs.length, PH) + i * (PH + GAP)]));
+  const procName = new Map(v.shownProcs.map(n => [n.key, procLabel(n)]));
+  const label = x => x.other ? "" : [...x.apps].slice(0, 2).join(", ") || (x.vip ? "VIP" : x.lbGw ? "Load balancer GW" : "uygulama ?");
+  const sub = x => x.other ? "" : `${x.seg ? x.seg.label : "segment ?"} · ${portsLabel(x.ports)}`;
+
+  let edges = "", nodes = "";
+  const sideNodes = (list, dir) => list.forEach((x, i) => {
+    const y = y0(list.length, NH) + i * (NH + GAP), xx = dir === "in" ? X.l : X.r;
+    for (const [pkey, h] of x.links) {
+      const py = procY.get(pkey); if (py == null) continue;
+      const pname = procName.get(pkey);
+      const path = dir === "in" ? curve(X.l + NW, y + NH / 2, X.p, py + PH / 2) : curve(X.p + PW, py + PH / 2, X.r, y + NH / 2);
+      edges += `<path class="pe ${dir}" data-p="${esc(pkey)}" data-n="${dir}:${esc(x.ip)}" stroke-width="${sw(h)}" d="${path}"><title>${esc(dir === "in" ? `${x.ip} → ${pname}` : `${pname} → ${x.ip}`)}: ${fmt(h)} bağlantı</title></path>`;
+    }
+    nodes += `<g class="pn ${dir}" data-n="${dir}:${esc(x.ip)}" data-ip="${x.other ? "" : esc(x.ip)}" transform="translate(${xx},${y})">
+      <rect width="${NW}" height="${NH}" rx="6"/><title>${esc(x.ip)}\n${esc([...x.apps].join(", "))}\n${fmt(x.hits)} bağlantı${x.other ? "" : "\nTıkla: bu IP'nin topolojisini aç"}</title>
+      <text class="t1" x="8" y="16">${esc(trunc(x.ip, 24))}</text><text class="t3" x="${NW - 8}" y="16" text-anchor="end">${fmt(x.hits)}</text>
+      <text class="t2" x="8" y="29">${esc(trunc(label(x), 44))}</text><text class="t3" x="8" y="40">${esc(trunc(sub(x), 48))}</text></g>`;
+  });
+  sideNodes(v.left, "in"); sideNodes(v.right, "out");
+  v.shownProcs.forEach(n => {
+    const y = procY.get(n.key);
+    nodes += `<g class="pn proc" data-p="${esc(n.key)}" transform="translate(${X.p},${y})">
+      <rect width="${PW}" height="${PH}" rx="8"/><title>${esc(procLabel(n))}\nGelen ${fmt(n.inHits)} · giden ${fmt(n.outHits)}\nTıkla: yalnızca bu süreç</title>
+      <text class="t1" x="10" y="18">⚙ ${esc(trunc(procLabel(n), 30))}</text>
+      <text class="t3" x="${PW - 10}" y="18" text-anchor="end">${fmt(n.inHits)} → ${fmt(n.outHits)}</text>
+      <text class="t2" x="10" y="35">${esc(trunc(n.listenPorts.length ? "dinler: " + n.listenPorts.slice(0, 6).map(p => ":" + p).join(" ") : "yalnızca giden bağlantı", 44))}</text>
+      <text class="t3" x="10" y="51">${esc(trunc(n.localApps.join(", "), 46))}</text></g>`;
+  });
+  const colHead = (x, t, anchor) => `<text class="colhead" x="${x}" y="14" text-anchor="${anchor}">${t}</text>`;
+  el.innerHTML = head(tools) + `<div class="topo-wrap"><svg class="proc-svg" id="procSvg" viewBox="0 0 ${W} ${H}" width="100%" style="min-width:900px">
+      ${colHead(X.l, `GELEN (${fmt(v.left.length)})`, "start")}${colHead(X.p + PW / 2, "SÜREÇ (SORGULANAN SUNUCU)", "middle")}${colHead(W, `GİDEN (${fmt(v.right.length)})`, "end")}
+      ${edges}${nodes}</svg></div>`;
+  wireProc();
+}
+
+function wireProc() {
+  $("#procInfra")?.addEventListener("change", ev => { state.proc.infra = ev.target.checked; renderProc(); });
+  $("#procClear")?.addEventListener("click", () => { state.procSel = null; renderProc(); });
+  const svg = $("#procSvg"); if (!svg) return;
+  const hl = (sel) => {
+    svg.classList.add("hl");
+    svg.querySelectorAll(".pe").forEach(e => {
+      const on = sel.p ? e.dataset.p === sel.p : e.dataset.n === sel.n;
+      e.classList.toggle("on", on);
+      if (on) { svg.querySelectorAll(`.pn[data-n="${CSS.escape(e.dataset.n)}"], .pn[data-p="${CSS.escape(e.dataset.p)}"]`).forEach(x => x.classList.add("on")); }
+    });
+    svg.querySelectorAll(sel.p ? `.pn[data-p="${CSS.escape(sel.p)}"]` : `.pn[data-n="${CSS.escape(sel.n)}"]`).forEach(x => x.classList.add("on"));
+  };
+  const clear = () => { svg.classList.remove("hl"); svg.querySelectorAll(".on").forEach(x => x.classList.remove("on")); };
+  svg.querySelectorAll(".pn").forEach(g => {
+    g.addEventListener("mouseenter", () => hl(g.dataset.p ? { p: g.dataset.p } : { n: g.dataset.n }));
+    g.addEventListener("mouseleave", clear);
+    g.addEventListener("click", () => {
+      if (g.dataset.p) { state.procSel = state.procSel === g.dataset.p ? null : g.dataset.p; renderProc(); }
+      else if (g.dataset.ip) { $("#ip").value = g.dataset.ip; run(); }
+    });
+  });
 }
 
 // ---------- AI etki analizi ----------
