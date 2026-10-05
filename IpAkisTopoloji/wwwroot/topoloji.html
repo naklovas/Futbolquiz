@@ -104,7 +104,7 @@
   .proc-svg .pn .t1 { fill: var(--text); font-size: 12.5px; font-weight: 700; }
   .proc-svg .pn .t2 { fill: var(--text); font-size: 11.5px; }
   .proc-svg .pn .t3 { fill: var(--muted); font-size: 11px; }
-  .proc-svg .pe { fill: none; opacity: .45; }
+  .proc-svg .pe { fill: none; opacity: .6; }
   .proc-svg .pe.in { stroke: var(--in); } .proc-svg .pe.out { stroke: var(--out); }
   .proc-svg.hl .pe { opacity: .06; } .proc-svg.hl .pe.on { opacity: .95; }
   .proc-svg.hl .pn { opacity: .35; } .proc-svg.hl .pn.on { opacity: 1; }
@@ -273,8 +273,8 @@ async function run() {
   });
   history.replaceState(null, "", "?" + new URLSearchParams({ ip: params.get("ip"), start: params.get("start"), end: params.get("end") }));
 
-  abort?.abort(); hopAbort?.abort(); aiAbort?.abort(); procAbort?.abort();
-  state.proc = null; state.procSel = null;
+  abort?.abort(); hopAbort?.abort(); aiAbort?.abort(); procAbort?.abort(); sessAbort?.abort();
+  state.proc = null; state.procSel = null; state.sess = null;
   abort = new AbortController();
   $("#go").disabled = true; $("#cancel").hidden = false;
   $("#main").innerHTML = `<div class="panel empty"><span class="spinner"></span> Sorgulanıyor… (AppResponse raporu 1 dakikaya kadar sürebilir)</div>`;
@@ -287,6 +287,7 @@ async function run() {
     render();
     if ($("#hop2On").checked) runHop2(params);
     if ($("#srcSplunk").checked) runProc(params);
+    if ($("#srcAr").checked) runSess(params);
   } catch (e) {
     const msg = e.name === "AbortError" ? "Sorgu iptal edildi." : e.message;
     $("#main").innerHTML = `<div class="panel empty" style="color:var(--err)">${esc(msg)}</div>`;
@@ -911,14 +912,25 @@ function procView() {
 
 const procLabel = n => n.pid ? `${n.name} (PID ${n.pid})` : n.name;
 
+// Panel iki sekmeli: Oturum akışı (AppResponse, aynı oturumda gelen → giden) ve Süreçler (Carbon Black).
 function renderProc() {
   const el = $("#procPanel");
   if (!el) return;
-  const pr = state.proc;
-  const head = extra => `<div class="toolbar"><h2 style="margin:0">Sunucu içi akış: gelen → süreç → giden</h2>${extra ?? ""}</div>
-    <div class="small muted" style="margin:-4px 0 8px">Carbon Black: sorgulanan sunucuda gelen bağlantıyı hangi süreç karşılıyor ve o süreç nereye bağlanıyor. Süreç bazındadır; tek tek istekleri değil, aynı süreçten geçen trafiği birlikte gösterir.</div>`;
-  if (!pr) { el.innerHTML = ""; el.hidden = true; return; }
+  if (!state.proc && !state.sess) { el.innerHTML = ""; el.hidden = true; return; }
   el.hidden = false;
+  const tab = state.procTab ?? (state.sess ? "oturum" : "surec");
+  const tabs = `<div class="seg">
+      <button type="button" data-ptab="oturum" class="${tab === "oturum" ? "on" : ""}">Oturum akışı (AppResponse)</button>
+      <button type="button" data-ptab="surec" class="${tab === "surec" ? "on" : ""}">Süreçler (Carbon Black)</button></div>`;
+  if (tab === "oturum") renderSess(el, tabs); else renderSurec(el, tabs);
+  el.querySelectorAll("[data-ptab]").forEach(b => b.addEventListener("click", () => { state.procTab = b.dataset.ptab; renderProc(); }));
+}
+
+function renderSurec(el, tabs) {
+  const pr = state.proc;
+  const head = extra => `<div class="toolbar"><h2 style="margin:0">Sunucu içi akış</h2>${tabs}${extra ?? ""}</div>
+    <div class="small muted" style="margin:-4px 0 8px">Carbon Black: sorgulanan sunucuda gelen bağlantıyı hangi süreç karşılıyor ve o süreç nereye bağlanıyor. Süreç bazındadır; tek tek istekleri değil, aynı süreçten geçen trafiği birlikte gösterir.</div>`;
+  if (!pr) { el.innerHTML = head() + `<div class="muted">Splunk (Carbon Black) kaynağı seçili değil.</div>`; return; }
   if (pr.status === "loading") { el.innerHTML = head() + `<div class="muted"><span class="spinner"></span> Süreçler sorgulanıyor…</div>`; return; }
   if (pr.status === "error") { el.innerHTML = head() + `<div style="color:var(--err)">${esc(pr.error)}</div>`; return; }
 
@@ -997,6 +1009,121 @@ function wireProc() {
     g.addEventListener("mouseleave", clear);
     g.addEventListener("click", () => {
       if (g.dataset.p) { state.procSel = state.procSel === g.dataset.p ? null : g.dataset.p; renderProc(); }
+      else if (g.dataset.ip) { $("#ip").value = g.dataset.ip; run(); }
+    });
+  });
+}
+
+// ---------- Oturum akışı: aynı oturumda gelen → giden (AppResponse, zaman kapsaması) ----------
+let sessAbort = null;
+
+async function runSess(params) {
+  sessAbort?.abort();
+  sessAbort = new AbortController();
+  state.sess = { status: "loading" };
+  renderProc();
+  try {
+    const p = new URLSearchParams({ ip: params.get("ip"), start: params.get("start"), end: params.get("end"), appliance: params.get("appliance") });
+    const r = await fetch("api/oturum?" + p, { signal: sessAbort.signal });
+    const body = await r.json().catch(() => ({ error: `HTTP ${r.status}` }));
+    if (!r.ok) throw new Error(body.error || `HTTP ${r.status}`);
+    state.sess = { status: "ok", body, rare: false, sel: null };
+  } catch (e) {
+    state.sess = e.name === "AbortError" ? null : { status: "error", error: e.message };
+  }
+  renderProc();
+}
+
+const pct = x => `%${Math.round(x * 100)}`;
+const peerLabel = p => p.apps.length ? p.apps.slice(0, 2).join(", ") : p.vip ? "VIP" : p.lbGw ? "Load balancer GW" : "uygulama ?";
+
+function renderSess(el, tabs) {
+  const ss = state.sess;
+  const head = extra => `<div class="toolbar"><h2 style="margin:0">Sunucu içi akış</h2>${tabs}${extra ?? ""}</div>
+    <div class="small muted" style="margin:-4px 0 8px">AppResponse: sorgulanan sunucuya gelen her kısa bağlantının (bir istek) açık olduğu süre içinde sunucunun açtığı giden bağlantılar o isteğe bağlanır. Çizgi kalınlığı bağlantı sayısı, koyuluğu o girişin oturumlarından yüzde kaçında görüldüğü.</div>`;
+  if (!ss) { el.innerHTML = head() + `<div class="muted">AppResponse kaynağı seçili değil.</div>`; return; }
+  if (ss.status === "loading") { el.innerHTML = head() + `<div class="muted"><span class="spinner"></span> Bağlantılar tek tek çekiliyor ve oturumlar eşleştiriliyor (en fazla son 15 dk)…</div>`; return; }
+  if (ss.status === "error") { el.innerHTML = head() + `<div style="color:var(--err)">${esc(ss.error)}</div>`; return; }
+
+  const b = ss.body;
+  const trust = b.ortAyniAnda <= 1.5 ? ["güvenilir", "ok"] : b.ortAyniAnda <= 4 ? ["orta", "warn"] : ["zayıf", "err"];
+  const stats = `<div class="status" style="margin-bottom:8px">
+      <span class="pill">${esc(b.kutu)} · ${esc(b.pencere)} · çözünürlük: ${esc(b.cozunurluk)}</span>
+      <span class="pill">${fmt(b.gelenOturum - b.uzunOturum)} gelen oturum${b.uzunOturum ? ` (+${fmt(b.uzunOturum)} uzun/keep-alive, dışarıda)` : ""}</span>
+      <span class="pill">${fmt(b.gidenBaglanti)} giden bağlantı · ${fmt(b.eslesmeyen)} tanesi hiçbir oturuma düşmedi</span>
+      <span class="pill" title="Bir giden bağlantının başladığı anda ortalama kaç gelen oturum açıktı. 1'e yakınsa eşleşme kesin.">aynı anda ort. ${b.ortAyniAnda} → eşleşme <b style="color:var(--${trust[1]})">${trust[0]}</b></span>
+    </div>${b.mesajlar.length ? `<div class="msgs">${esc(b.mesajlar.join("\n"))}</div>` : ""}`;
+  const tools = `<div class="checks" style="padding:0">
+      <label title="Oturumların %5'inden azında görülen hedefler (genelde arka plan trafiği)"><input type="checkbox" id="sessRare" ${ss.rare ? "checked" : ""}> Seyrek hedefler</label>
+      ${ss.sel ? `<span class="chip">Giriş: ${esc(ss.sel)} <button type="button" id="sessClear" title="Tümünü göster">✕</button></span>` : ""}</div>`;
+
+  const girisler = b.girisler.filter(g => envSegAllowed(g.kaynak.segment) && (!ss.sel || `${g.kaynak.ip}:${g.kaynak.port}` === ss.sel))
+    .map(g => ({ ...g, hedefler: g.hedefler.filter(h => (ss.rare || h.oran >= 0.05) && envSegAllowed(h.hedef.segment)) }));
+  if (!girisler.length) {
+    el.innerHTML = head(tools) + stats + `<div class="muted">Bu aralıkta eşleşen gelen oturum yok.</div>`;
+    wireSess(); return;
+  }
+  const rightMap = new Map();
+  girisler.forEach(g => g.hedefler.forEach(h => {
+    const k = `${h.hedef.ip}:${h.hedef.port}`;
+    const r = rightMap.get(k) ?? rightMap.set(k, { k, p: h.hedef, w: 0 }).get(k);
+    r.w += h.agirlik;
+  }));
+  const right = [...rightMap.values()].sort((a, b2) => b2.w - a.w);
+
+  const W = 1180, NW = 320, NH = 46, GAP = 10, CX = W / 2, CW = 150;
+  const colH = n => n * (NH + GAP) - GAP;
+  const H = Math.max(colH(girisler.length), colH(right.length), 80) + 40;
+  const y0 = n => 30 + (H - 30 - colH(n)) / 2;
+  const ly = new Map(girisler.map((g, i) => [`${g.kaynak.ip}:${g.kaynak.port}`, y0(girisler.length) + i * (NH + GAP)]));
+  const ry = new Map(right.map((r, i) => [r.k, y0(right.length) + i * (NH + GAP)]));
+  const maxW = Math.max(1, ...girisler.flatMap(g => g.hedefler.map(h => h.agirlik)));
+  const sw = w => (1.2 + 8 * Math.log(1 + w) / Math.log(1 + maxW)).toFixed(1);
+
+  let edges = "", nodes = "";
+  girisler.forEach(g => {
+    const lk = `${g.kaynak.ip}:${g.kaynak.port}`, y1 = ly.get(lk) + NH / 2;
+    g.hedefler.forEach(h => {
+      const rk = `${h.hedef.ip}:${h.hedef.port}`, y2 = ry.get(rk) + NH / 2, x1 = NW, x2 = W - NW;
+      edges += `<path class="pe out" data-l="${esc(lk)}" data-r="${esc(rk)}" stroke-width="${sw(h.agirlik)}" stroke-opacity="${(0.35 + 0.65 * h.oran).toFixed(2)}"
+        d="M${x1},${y1} C${CX - 40},${y1} ${CX - 40},${(y1 + y2) / 2} ${CX},${(y1 + y2) / 2} S${CX + 40},${y2} ${x2},${y2}"><title>${esc(lk)} oturumlarının ${pct(h.oran)}'ünde → ${esc(rk)}\n${fmt(Math.round(h.agirlik))} bağlantı (${fmt(h.kesin)} kesin)</title></path>`;
+    });
+    nodes += `<g class="pn in" data-l="${esc(lk)}" transform="translate(0,${ly.get(lk)})"><rect width="${NW}" height="${NH}" rx="6"/>
+      <title>${esc(lk)}\n${esc(g.kaynak.apps.join(", "))}\n${fmt(g.oturum)} oturum, medyan ${fmt(g.sureMsMedyan)} ms\nTıkla: yalnızca bu giriş</title>
+      <text class="t1" x="8" y="16">${esc(g.kaynak.ip)} → :${esc(g.kaynak.port)}</text><text class="t3" x="${NW - 8}" y="16" text-anchor="end">${fmt(g.oturum)} oturum</text>
+      <text class="t2" x="8" y="30">${esc(trunc(peerLabel(g.kaynak), 46))}</text><text class="t3" x="8" y="41">${esc(trunc(`${g.kaynak.segment ? g.kaynak.segment.label : "segment ?"} · medyan ${fmt(g.sureMsMedyan)} ms`, 50))}</text></g>`;
+  });
+  right.forEach(r => {
+    nodes += `<g class="pn out" data-r="${esc(r.k)}" data-ip="${esc(r.p.ip)}" transform="translate(${W - NW},${ry.get(r.k)})"><rect width="${NW}" height="${NH}" rx="6"/>
+      <title>${esc(r.k)}\n${esc(r.p.apps.join(", "))}\nTıkla: bu IP'nin topolojisini aç</title>
+      <text class="t1" x="8" y="16">${esc(r.k)}</text><text class="t3" x="${NW - 8}" y="16" text-anchor="end">${fmt(Math.round(r.w))}</text>
+      <text class="t2" x="8" y="30">${esc(trunc(peerLabel(r.p), 46))}</text><text class="t3" x="8" y="41">${esc(trunc(r.p.segment ? r.p.segment.label : "segment ?", 50))}</text></g>`;
+  });
+  const center = `<g><rect x="${CX - CW / 2}" y="24" width="${CW}" height="${H - 30}" rx="10" fill="var(--target)" opacity=".08"/>
+    <text class="colhead" x="${CX}" y="14" text-anchor="middle">${esc(b.ip)}</text></g>`;
+  el.innerHTML = head(tools) + stats + `<div class="topo-wrap"><svg class="proc-svg" id="sessSvg" viewBox="0 0 ${W} ${H}" width="100%" style="min-width:900px">
+      <text class="colhead" x="0" y="14">GELEN OTURUM (${fmt(girisler.length)})</text><text class="colhead" x="${W}" y="14" text-anchor="end">AYNI OTURUMDA GİDİLEN (${fmt(right.length)})</text>
+      ${center}${edges}${nodes}</svg></div>`;
+  wireSess();
+}
+
+function wireSess() {
+  $("#sessRare")?.addEventListener("change", ev => { state.sess.rare = ev.target.checked; renderProc(); });
+  $("#sessClear")?.addEventListener("click", () => { state.sess.sel = null; renderProc(); });
+  const svg = $("#sessSvg"); if (!svg) return;
+  const clear = () => { svg.classList.remove("hl"); svg.querySelectorAll(".on").forEach(x => x.classList.remove("on")); };
+  svg.querySelectorAll(".pn").forEach(g => {
+    g.addEventListener("mouseenter", () => {
+      svg.classList.add("hl"); g.classList.add("on");
+      svg.querySelectorAll(".pe").forEach(e => {
+        if (g.dataset.l ? e.dataset.l !== g.dataset.l : e.dataset.r !== g.dataset.r) return;
+        e.classList.add("on");
+        svg.querySelectorAll(`.pn[data-l="${CSS.escape(e.dataset.l)}"], .pn[data-r="${CSS.escape(e.dataset.r)}"]`).forEach(x => x.classList.add("on"));
+      });
+    });
+    g.addEventListener("mouseleave", clear);
+    g.addEventListener("click", () => {
+      if (g.dataset.l) { state.sess.sel = state.sess.sel === g.dataset.l ? null : g.dataset.l; renderProc(); }
       else if (g.dataset.ip) { $("#ip").value = g.dataset.ip; run(); }
     });
   });

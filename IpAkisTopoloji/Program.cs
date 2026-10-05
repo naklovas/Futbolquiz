@@ -178,6 +178,30 @@ app.MapGet("/api/surec", async (string? ip, string? start, string? end,
     return Results.Ok(new ProcessFlowResponse(q!.Ip, procs, spSt, envSt, sw.ElapsedMilliseconds));
 });
 
+// Oturum akışı: gelen bağlantının açık olduğu süre içinde sunucunun açtığı giden bağlantılar (AppResponse, zaman kapsaması).
+// Bağlantı bazında veri çok olduğu için aralık en fazla Oturum:MaxDakika (varsayılan 15); daha uzunsa son kısmı alınır.
+app.MapGet("/api/oturum", async (string? ip, string? start, string? end, int? appliance,
+    IConfiguration cfg, IHttpClientFactory factory, EnvanterService envanter, CancellationToken ct) =>
+{
+    if (!LookupQuery.TryParse(ip, start, end, cfg.GetValue("MaxRangeHours", 24), out var q, out var error))
+        return Results.BadRequest(new { error });
+    int maxMin = cfg.GetValue("Oturum:MaxDakika", 15);
+    if ((q!.End - q.Start).TotalMinutes > maxMin) q = q with { Start = q.End.AddMinutes(-maxMin) };
+    var (env, _) = await Capture(() => envanter.GetAsync(false, ct), ct);
+    try
+    {
+        return Results.Ok(await OturumAkisi.RunAsync(q, appliance ?? -1, cfg, factory.CreateClient("appresponse"), env, ct));
+    }
+    catch (OperationCanceledException) when (ct.IsCancellationRequested)
+    {
+        return Results.StatusCode(499);
+    }
+    catch (Exception ex)
+    {
+        return Results.Json(new { error = ex.Message }, statusCode: 502);
+    }
+});
+
 // AppResponse ham akış testi (tek kutu, en fazla 15 dk): bağlantılar tek tek mi, süreleri ne, aynı anda kaç tane?
 // "Aynı oturumda gelen → giden" eşleştirmesinin bu veriyle yapılıp yapılamayacağını ölçmek için.
 app.MapGet("/api/appresponse/akis-testi", async (string? ip, string? start, string? end, int? appliance,

@@ -50,7 +50,7 @@ static class ProcessFlowBuilder
             .ToList();
     }
 
-    static ProcPeer Peer(string target, string ip, string port, long hits, string dir, EnvanterSnapshot? env)
+    public static ProcPeer Peer(string target, string ip, string port, long hits, string dir, EnvanterSnapshot? env)
     {
         if (env == null) return new ProcPeer(ip, port, hits, null, [], false, false);
         bool lbGw = env.IsVipGw(ip, out _);
