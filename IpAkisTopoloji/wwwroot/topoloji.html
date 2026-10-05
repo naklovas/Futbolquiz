@@ -113,6 +113,8 @@
   .proc-svg .pe { fill: none; opacity: .6; }
   .proc-svg .pe.in { stroke: var(--in); } .proc-svg .pe.out { stroke: var(--out); }
   .proc-svg .pe.pool { stroke-dasharray: 6 4; }
+  .proc-svg .pn.shared rect { stroke: var(--muted); stroke-dasharray: 3 3; }
+  .proc-svg .sep { stroke: var(--line); stroke-dasharray: 4 4; }
   .proc-svg.hl .pe { opacity: .06; } .proc-svg.hl .pe.on { opacity: .95; }
   .proc-svg.hl .pn { opacity: .35; } .proc-svg.hl .pn.on { opacity: 1; }
   .edge.denied { stroke: var(--err); stroke-dasharray: 5 4; }
@@ -1098,9 +1100,13 @@ function journeyGroups(b) {
     : n.apps.length ? [...n.apps].sort().join(" + ") : `${n.segment ? n.segment.label : "Segment ?"} · uygulaması bilinmeyen`;
   const groups = new Map(), byNode = new Map();
   for (const n of b.nodes.filter(n => n.kind === "dis" || envSegAllowed(n.segment))) {
-    const k = `${n.level}|${keyOf(n)}`;
-    const g = groups.get(k) ?? groups.set(k, { k, level: n.level, name: nameOf(n), kind: n.kind, sub: n.kind === "vip" && n.apps.length ? n.apps.join(", ") : "", ips: [], root: n.level === 0 }).get(k);
-    g.ips.push(n.ip); byNode.set(n.id, k);
+    // Ortak hizmet (SiteScope, Redis, Splunk…): hangi durakta görülürse görülsün tek kutu (sütunlar dışında, altta)
+    const ortak = n.ortak && n.level !== 0;
+    const k = ortak ? `o|${n.ortak}` : `${n.level}|${keyOf(n)}`;
+    const g = groups.get(k) ?? groups.set(k, { k, level: n.level, name: ortak ? n.ortak : nameOf(n), kind: n.kind, ortak,
+      sub: ortak ? "ortak hizmet" : n.kind === "vip" && n.apps.length ? n.apps.join(", ") : "", ips: [], root: n.level === 0 }).get(k);
+    if (!g.ips.includes(n.ip)) g.ips.push(n.ip);
+    byNode.set(n.id, k);
   }
   const links = new Map();
   for (const e of b.edges) {
@@ -1120,22 +1126,34 @@ function renderJourney(el, tabs) {
   if (js.status === "loading") { el.innerHTML = head + `<div class="muted"><span class="spinner"></span> Duraklar sırayla sorgulanıyor (her seviye ayrı sorgu, en fazla son 5 dk; 1-3 dakika sürebilir)…</div>`; return; }
   if (js.status === "error") { el.innerHTML = head + `<div style="color:var(--err)">${esc(js.error)}</div>`; return; }
 
-  const b = js.body, { groups, links } = journeyGroups(b);
+  const b = js.body, { groups: allGroups, links } = journeyGroups(b);
+  const groups = allGroups.filter(g => !g.ortak), shared = allGroups.filter(g => g.ortak);
   const levels = [...new Set(groups.map(g => g.level))].sort((x, y) => x - y);
   const BW = 250, GX = 80, LINE = 14, MAXL = 5, GAP = 14;
   const boxH = g => 40 + LINE * (Math.min(g.ips.length, MAXL) + (g.ips.length > MAXL ? 1 : 0)) + (g.sub ? LINE : 0);
   const cols = levels.map(l => groups.filter(g => g.level === l).sort((x, y) => sumW(y) - sumW(x)));
   function sumW(g) { return links.filter(l => l.a === g.k || l.c === g.k).reduce((s2, l) => s2 + l.w, 0); }
   const colH = c => c.reduce((s2, g) => s2 + boxH(g) + GAP, -GAP);
-  const W = levels.length * BW + (levels.length - 1) * GX, H = Math.max(...cols.map(colH), 80) + 50;
+  const W = Math.max(levels.length * BW + (levels.length - 1) * GX, BW), HM = Math.max(...cols.map(colH), 80) + 50;
   const pos = new Map();
-  cols.forEach((c, ci) => { let y = 36 + (H - 36 - colH(c)) / 2; c.forEach(g => { pos.set(g.k, { x: ci * (BW + GX), y }); y += boxH(g) + GAP; }); });
+  cols.forEach((c, ci) => { let y = 36 + (HM - 36 - colH(c)) / 2; c.forEach(g => { pos.set(g.k, { x: ci * (BW + GX), y }); y += boxH(g) + GAP; }); });
+  // Ortak hizmetler altta tek sıra: çizgi çekilmez (veriyi ezmesin), bağlantıları kutuda yazar, üstüne gelince vurgulanır
+  const perRow = Math.max(1, Math.floor((W + GAP) / (BW + GAP)));
+  const sharedTop = HM + 24, sharedRowH = Math.max(0, ...shared.map(boxH)) + 16 + GAP;
+  shared.forEach((g, i) => {
+    const conn = links.filter(l => l.a === g.k || l.c === g.k);
+    g.sub = `${fmt(Math.round(conn.reduce((s2, l) => s2 + l.w, 0)))} oturum · ${new Set(conn.map(l => l.a === g.k ? l.c : l.a)).size} kutuya bağlı`;
+    pos.set(g.k, { x: (i % perRow) * (BW + GAP), y: sharedTop + 20 + Math.floor(i / perRow) * sharedRowH });
+  });
+  const H = shared.length ? sharedTop + 20 + Math.ceil(shared.length / perRow) * sharedRowH : HM;
   const maxW = Math.max(1, ...links.map(l => l.w));
   const sw = w => (1.5 + 9 * Math.log(1 + w) / Math.log(1 + maxW)).toFixed(1);
   const colTitle = l => l === 0 ? "SORGULANAN" : l < 0 ? `${-l}. DURAK ÖNCESİ` : `${l}. DURAK SONRASI`;
 
   let edges = "", nodes = "";
+  const sharedKeys = new Set(shared.map(g => g.k));
   for (const l of links) {
+    if (sharedKeys.has(l.a) || sharedKeys.has(l.c)) continue;
     const A = pos.get(l.a), C = pos.get(l.c); if (!A || !C) continue;
     const ga = groups.find(g => g.k === l.a), gc = groups.find(g => g.k === l.c);
     const y1 = A.y + boxH(ga) / 2, y2 = C.y + boxH(gc) / 2, x1 = A.x + BW, x2 = C.x, mx = (x1 + x2) / 2;
@@ -1143,17 +1161,18 @@ function renderJourney(el, tabs) {
       : `${fmt(Math.round(l.w))} oturum${l.oran ? ` (${pct(l.oran)})` : ""}`;
     edges += `<path class="pe out${l.havuz ? " pool" : ""}" data-a="${esc(l.a)}" data-c="${esc(l.c)}" stroke-width="${l.havuz ? 2 : sw(l.w)}" d="M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}"><title>${esc(ga.name)} → ${esc(gc.name)}: ${tip}</title></path>`;
   }
-  for (const g of groups) {
-    const P = pos.get(g.k), cls = g.root ? "proc" : g.level < 0 ? "in" : "out";
+  for (const g of [...groups, ...shared]) {
+    const P = pos.get(g.k), cls = g.root ? "proc" : g.ortak ? "shared" : g.level < 0 ? "in" : "out";
     const ipLines = g.ips.slice(0, MAXL).map((ip, i) => `<text class="t3 mono" x="10" y="${(g.sub ? 50 : 36) + i * LINE}">${esc(ip)}</text>`).join("")
       + (g.ips.length > MAXL ? `<text class="t3" x="10" y="${(g.sub ? 50 : 36) + MAXL * LINE}">+${g.ips.length - MAXL} daha</text>` : "");
     nodes += `<g class="pn ${cls}" data-g="${esc(g.k)}" ${g.ips.length === 1 && g.kind !== "dis" ? `data-ip="${esc(g.ips[0])}"` : ""} transform="translate(${P.x},${P.y})">
       <rect width="${BW}" height="${boxH(g)}" rx="8" ${g.kind === "vip" ? `style="stroke:var(--vip)"` : g.kind === "dis" ? `style="stroke-dasharray:5 3"` : ""}/>
-      <title>${esc(g.name)}\n${g.ips.map(esc).join("\n")}</title>
+      <title>${esc(g.name)}${g.ortak ? ` (ortak hizmet)\n${esc(g.sub)}` : ""}\n${g.ips.map(esc).join("\n")}</title>
       <text class="t1" x="10" y="18">${esc(trunc(g.name, 30))}</text>
       ${g.sub ? `<text class="t2" x="10" y="34">${esc(trunc(g.sub, 34))}</text>` : ""}${ipLines}</g>`;
   }
-  const heads = levels.map((l, i) => `<text class="colhead" x="${i * (BW + GX) + BW / 2}" y="16" text-anchor="middle">${colTitle(l)}</text>`).join("");
+  const heads = levels.map((l, i) => `<text class="colhead" x="${i * (BW + GX) + BW / 2}" y="16" text-anchor="middle">${colTitle(l)}</text>`).join("")
+    + (shared.length ? `<line x1="0" x2="${W}" y1="${sharedTop}" y2="${sharedTop}" class="sep"/><text class="colhead" x="0" y="${sharedTop + 14}">ORTAK HİZMETLER (izleme, önbellek, log — hangi durakta görülürse görülsün tek kutu; üstüne gelince bağlı kutular yanar)</text>` : "");
   el.innerHTML = head + `<div class="status" style="margin-bottom:8px"><span class="pill">${esc(b.kaynaklar)} · ${esc(b.pencere)}</span>
       <span class="pill">${fmt(groups.length)} durak · ${(b.sureMs / 1000).toFixed(1)} sn</span></div>
     ${b.mesajlar.length ? `<div class="msgs">${esc(b.mesajlar.join("\n"))}</div>` : ""}
@@ -1166,8 +1185,10 @@ function renderJourney(el, tabs) {
   svg.querySelectorAll(".pn").forEach(n => {
     n.addEventListener("mouseenter", () => {
       const on = new Set([n.dataset.g]), onE = new Set();
-      const walk = (k, map, next) => (map.get(k) ?? []).forEach(l => { onE.add(`${l.a}>${l.c}`); if (!on.has(l[next])) { on.add(l[next]); walk(l[next], map, next); } });
-      walk(n.dataset.g, out, "c"); walk(n.dataset.g, inn, "a");
+      // Ortak hizmet kutusundan geçilmez (her şeyi yakmasın); ortak kutunun üstündeyken yalnızca bağlı kutular yanar
+      const walk = (k, map, next) => (map.get(k) ?? []).forEach(l => { onE.add(`${l.a}>${l.c}`); if (!on.has(l[next])) { on.add(l[next]); if (!sharedKeys.has(l[next])) walk(l[next], map, next); } });
+      if (sharedKeys.has(n.dataset.g)) links.forEach(l => { if (l.a === n.dataset.g) on.add(l.c); if (l.c === n.dataset.g) on.add(l.a); });
+      else { walk(n.dataset.g, out, "c"); walk(n.dataset.g, inn, "a"); }
       svg.classList.add("hl");
       svg.querySelectorAll(".pn").forEach(x => x.classList.toggle("on", on.has(x.dataset.g)));
       svg.querySelectorAll(".pe").forEach(x => x.classList.toggle("on", onE.has(`${x.dataset.a}>${x.dataset.c}`)));

@@ -12,9 +12,11 @@
 //  - Bağlantı havuzu: DB'ye uygulamalar çoğunlukla önceden açık (havuzdaki) bağlantılarla gider; bu bağlantılar
 //    istek anında açılmadığı için zaman eşleştirmesine girmez. Bu yüzden ileri yönde her sunucunun DB portlarına
 //    (Yolculuk:HavuzPortlari) giden bağlantıları ayrıca "havuz" bağı (kesik çizgi) olarak eklenir.
+//  - Ortak hizmetler (Yolculuk:OrtakHizmetler — SiteScope, Redis, Splunk…): uygulama adı eşleşen düğüm Ortak etiketi alır,
+//    Dallanma sınırına sayılmaz ve devam edilmez (Redis → Redis küme trafiği gibi zincirler oluşmaz). Arayüz tek kutu çizer.
 // Veri her seviye için tek seferde çekilir (o seviyedeki tüm sunucular için tek AppResponse raporu + tek Firewall sorgusu).
 // ---------------------------------------------------------------------------
-record JNode(string Id, int Level, string Ip, string? Port, string Kind, SegmentInfo? Segment, List<string> Apps);
+record JNode(string Id, int Level, string Ip, string? Port, string Kind, SegmentInfo? Segment, List<string> Apps, string? Ortak = null);
 record JEdge(string From, string To, double W, int Exact, double? Oran, bool Havuz = false);
 record YolculukSonuc(string Ip, string Pencere, string Kaynaklar, List<JNode> Nodes, List<JEdge> Edges, List<string> Mesajlar, long SureMs);
 
@@ -37,6 +39,8 @@ static class Yolculuk
         double maxSec = cfg.GetValue("Oturum:MaxOturumSaniye", 30.0);
         var poolPorts = cfg.GetSection("Yolculuk:HavuzPortlari").GetChildren().Select(c => c.Value ?? "").Where(v => v != "").ToHashSet();
         if (poolPorts.Count == 0) poolPorts = ["1521", "1522", "1526", "2484", "1433", "1434", "5432", "3306", "50000", "27017", "9042"];
+        var shared = cfg.GetSection("Yolculuk:OrtakHizmetler").GetChildren().Select(c => (c.Value ?? "").Trim()).Where(v => v != "").ToList();
+        if (shared.Count == 0) shared = ["SiteScope", "Redis", "Splunk", "Carbon Black"];
         var msgs = new List<string>();
         var sources = new List<string>();
         useFw = useFw && FirewallService.Enabled(cfg);
@@ -60,15 +64,24 @@ static class Yolculuk
         var nodes = new Dictionary<string, JNode>();
         var edges = new Dictionary<(string, string), JEdge>();
         static string NodeId(int level, string ip, string kind, string? port) => $"{level}|{ip}|{(kind == "vip" ? port : "")}";
+        List<string> AppsOf(string ip, string kind, string? port) => env == null ? []
+            : kind == "vip" ? env.VipMembers(ip, port).SelectMany(m => env.AppNamesOnIp(m.Ip)).Distinct().Order().ToList()
+            : env.AppNamesOnIp(ip);
+        // Uygulamalarından biri ortak hizmet listesindeyse o hizmetin adı (SiteScope, Redis…)
+        string? OrtakOf(List<string> apps) =>
+            shared.FirstOrDefault(sh => apps.Any(a => a.Contains(sh, StringComparison.OrdinalIgnoreCase)));
+        string? OrtakIp(string ip, string? port)
+        {
+            string kind = env != null && env.VipMembers(ip, null).Count > 0 ? "vip" : Kind(ip);
+            return kind == "dis" ? null : OrtakOf(AppsOf(ip, kind, kind == "vip" ? port : null));
+        }
         string Node(int level, string ip, string kind, string? port)
         {
             string id = NodeId(level, ip, kind, port);
             if (!nodes.ContainsKey(id))
             {
-                var apps = env == null ? []
-                    : kind == "vip" ? env.VipMembers(ip, port).SelectMany(m => env.AppNamesOnIp(m.Ip)).Distinct().Order().ToList()
-                    : env.AppNamesOnIp(ip);
-                nodes[id] = new JNode(id, level, ip, port, kind, env?.FindSegment(ip), apps);
+                var apps = AppsOf(ip, kind, port);
+                nodes[id] = new JNode(id, level, ip, port, kind, env?.FindSegment(ip), apps, kind == "dis" ? null : OrtakOf(apps));
             }
             return id;
         }
@@ -118,13 +131,17 @@ static class Yolculuk
                     .GroupBy(x => x.Key)
                     .Select(g => (key: g.Key, w: g.Sum(x => x.Value.w), exact: g.Sum(x => x.Value.exact), cov: (double)g.Select(x => x.i).Distinct().Count() / Math.Max(1, active)))
                     .Where(t => t.cov >= 0.05)
-                    .OrderByDescending(t => t.cov).ThenByDescending(t => t.w).Take(K).ToList();
+                    .OrderByDescending(t => t.cov).ThenByDescending(t => t.w)
+                    .Select(t => (t.key, t.w, t.exact, t.cov, ortak: OrtakIp(t.key.ip, t.key.port) != null)).ToList();
+                // Ortak hizmetler Dallanma sınırına sayılmaz, ayrı sınırla eklenir
+                targets = [.. targets.Where(t => !t.ortak).Take(K), .. targets.Where(t => t.ortak).Take(K)];
                 foreach (var t in targets)
                 {
                     bool isVip = env != null && env.VipMembers(t.key.ip, null).Count > 0;
                     string kind = isVip ? "vip" : Kind(t.key.ip);
                     string id = Node(it.Level + 1, t.key.ip, kind, kind == "vip" ? t.key.port : null);
                     Edge(it.Id, id, Math.Round(t.w, 1), t.exact, Math.Round(t.cov, 3));
+                    if (t.ortak) continue;
                     if (kind == "vip" || (kind == "host" && it.Hops + 1 < down))
                         next.Add(new(id, t.key.ip, kind, it.Level + 1, kind == "vip" ? null : [it.Ip], null, null, kind == "vip" ? t.key.port : null,
                             kind == "vip" ? it.Hops : it.Hops + 1));
@@ -173,7 +190,8 @@ static class Yolculuk
                     foreach (var g in srcFlows.GroupBy(f => f.Cip)) src[g.Key] = (g.Count(), g.GroupBy(f => f.Sport).OrderByDescending(x => x.Count()).First().Key);
                 }
                 if (total == 0) continue;
-                foreach (var (sip, (n, port)) in src.OrderByDescending(x => x.Value.n).Take(K))
+                var ranked = src.OrderByDescending(x => x.Value.n).Select(x => (x, ortak: OrtakIp(x.Key, null) != null)).ToList();
+                foreach (var ((sip, (n, port)), ortak) in ranked.Where(r => !r.ortak).Take(K).Concat(ranked.Where(r => r.ortak).Take(K)))
                 {
                     double oran = Math.Round((double)n / total, 3);
                     if (env != null && it.Kind == "host" && env.IsVipGw(sip, out _))
@@ -192,7 +210,7 @@ static class Yolculuk
                     string kind = Kind(sip);
                     string id = Node(it.Level - 1, sip, kind, null);
                     Edge(id, it.Id, n, 0, oran);
-                    if (kind == "host" && it.Level - 1 > -up) next.Add(new(id, sip, "host", it.Level - 1, null, [it.Ip], null, null));
+                    if (kind == "host" && !ortak && it.Level - 1 > -up) next.Add(new(id, sip, "host", it.Level - 1, null, [it.Ip], null, null));
                 }
             }
             level = next.DistinctBy(i => i.Id).ToList();
