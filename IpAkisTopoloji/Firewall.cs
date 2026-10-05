@@ -54,4 +54,35 @@ static class FirewallService
 
         return await SplunkService.ExportAsync(spl, q, cfg, http, ct, "Firewall");
     }
+
+    // Oturum akışı için oturumlar tek tek: başlangıç (log zamanı - duration), bitiş, istemci IP:port, sunucu IP:port.
+    // Yalnızca izin verilen oturumlar; en fazla Firewall:MaxOturum (varsayılan 50000) satır.
+    public static async Task<SplunkResult> SessionsAsync(LookupQuery q, IConfiguration cfg, HttpClient http, CancellationToken ct)
+    {
+        var s = cfg.GetSection("Firewall");
+        var f = s.GetSection("Alanlar");
+        string Name(string? value, string fallback)
+        {
+            string v = string.IsNullOrWhiteSpace(value) ? fallback : value.Trim();
+            return SafeName.IsMatch(v) ? v : throw new InvalidOperationException($"Firewall ayarında geçersiz ad: {v}");
+        }
+        string index = Name(s["Index"], "fw_paloalto");
+        string src = Name(f["SrcIp"], "src_ip"), sport = Name(f["SrcPort"], "src_port");
+        string dest = Name(f["DestIp"], "dest_ip"), dport = Name(f["DestPort"], "dest_port");
+        string action = Name(f["Action"], "action"), dur = Name(f["Duration"], "duration");
+        var allowed = s.GetSection("IzinDegerleri").GetChildren().Select(c => (c.Value ?? "").Trim().ToLowerInvariant())
+            .Where(v => v != "" && SafeName.IsMatch(v)).ToList();
+        if (allowed.Count == 0) allowed = ["allowed", "allow", "accept"];
+        int max = s.GetValue("MaxOturum", 50000);
+
+        string spl = $"""
+            search index={index} TERM({q.Ip})
+            | eval cip='{src}', cport='{sport}', sip='{dest}', sport='{dport}', a=lower('{action}')
+            | where (cip="{q.Ip}" OR sip="{q.Ip}") AND in(a, {string.Join(", ", allowed.Select(v => $"\"{v}\""))})
+            | eval e=_time, s=_time-coalesce(tonumber('{dur}'), 0)
+            | table s e cip cport sip sport
+            | head {max}
+            """;
+        return await SplunkService.ExportAsync(spl, q, cfg, http, ct, "Firewall");
+    }
 }

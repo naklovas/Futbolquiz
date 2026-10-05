@@ -930,7 +930,7 @@ function renderProc() {
   if (!el || $("#flowModal").hidden) return;
   const tab = state.procTab ?? "oturum";
   const tabs = `<div class="seg">
-      <button type="button" data-ptab="oturum" class="${tab === "oturum" ? "on" : ""}">Oturum akışı (AppResponse)</button>
+      <button type="button" data-ptab="oturum" class="${tab === "oturum" ? "on" : ""}">Oturum akışı (AppResponse + Firewall)</button>
       <button type="button" data-ptab="surec" class="${tab === "surec" ? "on" : ""}">Süreçler (Carbon Black)</button></div>`;
   if (tab === "oturum") renderSess(el, tabs); else renderSurec(el, tabs);
   el.querySelectorAll("[data-ptab]").forEach(b => b.addEventListener("click", () => { state.procTab = b.dataset.ptab; ensureFlowData(); renderProc(); }));
@@ -951,7 +951,7 @@ function closeFlow() {
 }
 function ensureFlowData() {
   const tab = state.procTab ?? "oturum";
-  if (tab === "oturum" && !state.sess && $("#srcAr").checked) runSess(state.lastParams);
+  if (tab === "oturum" && !state.sess && ($("#srcAr").checked || $("#srcFw").checked)) runSess(state.lastParams);
   if (tab === "surec" && !state.proc && $("#srcSplunk").checked) runProc(state.lastParams);
 }
 $("#flowModalClose").addEventListener("click", closeFlow);
@@ -1055,7 +1055,8 @@ async function runSess(params) {
   state.sess = { status: "loading" };
   renderProc();
   try {
-    const p = new URLSearchParams({ ip: params.get("ip"), start: params.get("start"), end: params.get("end"), appliance: params.get("appliance") });
+    const p = new URLSearchParams({ ip: params.get("ip"), start: params.get("start"), end: params.get("end"), appliance: params.get("appliance"),
+      sources: params.get("sources") });
     const r = await fetch("api/oturum?" + p, { signal: sessAbort.signal });
     const body = await r.json().catch(() => ({ error: `HTTP ${r.status}` }));
     if (!r.ok) throw new Error(body.error || `HTTP ${r.status}`);
@@ -1072,15 +1073,15 @@ const peerLabel = p => p.apps.length ? p.apps.slice(0, 2).join(", ") : p.vip ? "
 function renderSess(el, tabs) {
   const ss = state.sess;
   const head = extra => `<div class="toolbar">${tabs}${extra ?? ""}</div>
-    <div class="small muted" style="margin:-4px 0 8px">AppResponse: sorgulanan sunucuya gelen her kısa bağlantının (bir istek) açık olduğu süre içinde sunucunun açtığı giden bağlantılar o isteğe bağlanır. Çizgi kalınlığı bağlantı sayısı, koyuluğu o girişin oturumlarından yüzde kaçında görüldüğü.</div>`;
-  if (!ss) { el.innerHTML = head() + `<div class="muted">AppResponse kaynağı seçili değil.</div>`; return; }
+    <div class="small muted" style="margin:-4px 0 8px">AppResponse (milisaniye, segment içi dahil) ve Firewall (saniye, yalnızca firewall'dan geçen): sorgulanan sunucuya gelen her kısa bağlantının (bir istek) açık olduğu süre içinde sunucunun açtığı giden bağlantılar o isteğe bağlanır. Çizgi kalınlığı bağlantı sayısı, koyuluğu o girişin oturumlarından yüzde kaçında görüldüğü.</div>`;
+  if (!ss) { el.innerHTML = head() + `<div class="muted">AppResponse ya da Firewall kaynağı seçili değil.</div>`; return; }
   if (ss.status === "loading") { el.innerHTML = head() + `<div class="muted"><span class="spinner"></span> Bağlantılar tek tek çekiliyor ve oturumlar eşleştiriliyor (en fazla son 15 dk)…</div>`; return; }
   if (ss.status === "error") { el.innerHTML = head() + `<div style="color:var(--err)">${esc(ss.error)}</div>`; return; }
 
   const b = ss.body;
   const trust = b.ortAyniAnda <= 1.5 ? ["güvenilir", "ok"] : b.ortAyniAnda <= 4 ? ["orta", "warn"] : ["zayıf", "err"];
   const stats = `<div class="status" style="margin-bottom:8px">
-      <span class="pill">${esc(b.kutu)} · ${esc(b.pencere)} · çözünürlük: ${esc(b.cozunurluk)}</span>
+      <span class="pill">${esc(b.kutu)} bağlantı · ${esc(b.pencere)} · çözünürlük: ${esc(b.cozunurluk)}</span>
       <span class="pill">${fmt(b.gelenOturum - b.uzunOturum)} gelen oturum${b.uzunOturum ? ` (+${fmt(b.uzunOturum)} uzun/keep-alive, dışarıda)` : ""}</span>
       <span class="pill">${fmt(b.gidenBaglanti)} giden bağlantı · ${fmt(b.eslesmeyen)} tanesi hiçbir oturuma düşmedi</span>
       <span class="pill" title="Bir giden bağlantının başladığı anda ortalama kaç gelen oturum açıktı. 1'e yakınsa eşleşme kesin.">aynı anda ort. ${b.ortAyniAnda} → eşleşme <b style="color:var(--${trust[1]})">${trust[0]}</b></span>

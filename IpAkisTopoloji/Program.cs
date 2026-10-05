@@ -180,7 +180,7 @@ app.MapGet("/api/surec", async (string? ip, string? start, string? end,
 
 // Oturum akışı: gelen bağlantının açık olduğu süre içinde sunucunun açtığı giden bağlantılar (AppResponse, zaman kapsaması).
 // Bağlantı bazında veri çok olduğu için aralık en fazla Oturum:MaxDakika (varsayılan 15); daha uzunsa son kısmı alınır.
-app.MapGet("/api/oturum", async (string? ip, string? start, string? end, int? appliance,
+app.MapGet("/api/oturum", async (string? ip, string? start, string? end, int? appliance, string? sources,
     IConfiguration cfg, IHttpClientFactory factory, EnvanterService envanter, CancellationToken ct) =>
 {
     if (!LookupQuery.TryParse(ip, start, end, cfg.GetValue("MaxRangeHours", 24), out var q, out var error))
@@ -190,7 +190,9 @@ app.MapGet("/api/oturum", async (string? ip, string? start, string? end, int? ap
     var (env, _) = await Capture(() => envanter.GetAsync(false, ct), ct);
     try
     {
-        return Results.Ok(await OturumAkisi.RunAsync(q, appliance ?? -1, cfg, factory.CreateClient("appresponse"), env, ct));
+        string wanted = (sources ?? "appresponse,firewall").ToLowerInvariant();
+        return Results.Ok(await OturumAkisi.RunAsync(q, appliance ?? -1, wanted.Contains("appresponse"), wanted.Contains("firewall"), cfg,
+            factory.CreateClient("appresponse"), factory.CreateClient("splunk"), env, ct));
     }
     catch (OperationCanceledException) when (ct.IsCancellationRequested)
     {
