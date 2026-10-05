@@ -57,7 +57,8 @@ static class FirewallService
 
     // Oturum akışı için oturumlar tek tek: başlangıç (log zamanı - duration), bitiş, istemci IP:port, sunucu IP:port.
     // Yalnızca izin verilen oturumlar; en fazla Firewall:MaxOturum (varsayılan 50000) satır.
-    public static async Task<SplunkResult> SessionsAsync(LookupQuery q, IConfiguration cfg, HttpClient http, CancellationToken ct)
+    // NAT: hedef adresin çevrilmiş hali (dest_translated_ip) varsa sunucu IP'si olarak o kullanılır (dış IP → DMZ/VIP).
+    public static async Task<SplunkResult> SessionsAsync(LookupQuery q, IReadOnlyList<string> ips, IConfiguration cfg, HttpClient http, CancellationToken ct)
     {
         var s = cfg.GetSection("Firewall");
         var f = s.GetSection("Alanlar");
@@ -70,15 +71,20 @@ static class FirewallService
         string src = Name(f["SrcIp"], "src_ip"), sport = Name(f["SrcPort"], "src_port");
         string dest = Name(f["DestIp"], "dest_ip"), dport = Name(f["DestPort"], "dest_port");
         string action = Name(f["Action"], "action"), dur = Name(f["Duration"], "duration");
+        string natDest = Name(f["NatDestIp"], "dest_translated_ip"), natPort = Name(f["NatDestPort"], "dest_translated_port");
+        string terms = ips.Count == 1 ? $"TERM({ips[0]})" : "(" + string.Join(" OR ", ips.Select(ip => $"TERM({ip})")) + ")";
+        string ipList = string.Join(", ", ips.Select(ip => $"\"{ip}\""));
         var allowed = s.GetSection("IzinDegerleri").GetChildren().Select(c => (c.Value ?? "").Trim().ToLowerInvariant())
             .Where(v => v != "" && SafeName.IsMatch(v)).ToList();
         if (allowed.Count == 0) allowed = ["allowed", "allow", "accept"];
         int max = s.GetValue("MaxOturum", 50000);
 
         string spl = $"""
-            search index={index} TERM({q.Ip})
-            | eval cip='{src}', cport='{sport}', sip='{dest}', sport='{dport}', a=lower('{action}')
-            | where (cip="{q.Ip}" OR sip="{q.Ip}") AND in(a, {string.Join(", ", allowed.Select(v => $"\"{v}\""))})
+            search index={index} {terms}
+            | eval nat=if(isnull('{natDest}') OR '{natDest}'="" OR '{natDest}'="0.0.0.0", null(), '{natDest}')
+            | eval cip='{src}', cport='{sport}', sip=coalesce(nat, '{dest}'),
+                   sport=if(isnull(nat), '{dport}', coalesce(nullif('{natPort}', "0"), '{dport}')), a=lower('{action}')
+            | where (in(cip, {ipList}) OR in(sip, {ipList})) AND in(a, {string.Join(", ", allowed.Select(v => $"\"{v}\""))})
             | eval e=_time, s=_time-coalesce(tonumber('{dur}'), 0)
             | table s e cip cport sip sport
             | head {max}

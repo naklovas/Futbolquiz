@@ -204,6 +204,32 @@ app.MapGet("/api/oturum", async (string? ip, string? start, string? end, int? ap
     }
 });
 
+// Uçtan uca yolculuk: sorgulanan sunucudan geriye (dış IP'ler) ve ileriye (DB) durak durak oturum eşleştirmesi.
+// Her seviye ayrı veri çekimi olduğu için aralık kısa tutulur (Yolculuk:Dakika, varsayılan 5).
+app.MapGet("/api/yolculuk", async (string? ip, string? start, string? end, int? appliance, string? sources,
+    IConfiguration cfg, IHttpClientFactory factory, EnvanterService envanter, CancellationToken ct) =>
+{
+    if (!LookupQuery.TryParse(ip, start, end, cfg.GetValue("MaxRangeHours", 24), out var q, out var error))
+        return Results.BadRequest(new { error });
+    int maxMin = cfg.GetValue("Yolculuk:Dakika", 5);
+    if ((q!.End - q.Start).TotalMinutes > maxMin) q = q with { Start = q.End.AddMinutes(-maxMin) };
+    var (env, _) = await Capture(() => envanter.GetAsync(false, ct), ct);
+    string wanted = (sources ?? "appresponse,firewall").ToLowerInvariant();
+    try
+    {
+        return Results.Ok(await Yolculuk.RunAsync(q, appliance ?? -1, wanted.Contains("appresponse"), wanted.Contains("firewall"), cfg,
+            factory.CreateClient("appresponse"), factory.CreateClient("splunk"), env, ct));
+    }
+    catch (OperationCanceledException) when (ct.IsCancellationRequested)
+    {
+        return Results.StatusCode(499);
+    }
+    catch (Exception ex)
+    {
+        return Results.Json(new { error = ex.Message }, statusCode: 502);
+    }
+});
+
 // AppResponse ham akış testi (tek kutu, en fazla 15 dk): bağlantılar tek tek mi, süreleri ne, aynı anda kaç tane?
 // "Aynı oturumda gelen → giden" eşleştirmesinin bu veriyle yapılıp yapılamayacağını ölçmek için.
 app.MapGet("/api/appresponse/akis-testi", async (string? ip, string? start, string? end, int? appliance,

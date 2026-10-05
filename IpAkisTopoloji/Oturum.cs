@@ -32,8 +32,8 @@ static class OturumAkisi
         var msgs = new List<string>();
         var parts = new List<string>();
 
-        var arTask = useAr ? FetchArAsync(q, appliance, cfg, arHttp, msgs, ct) : Task.FromResult<(string, List<FlowRec>)?>(null);
-        var fwTask = useFw && FirewallService.Enabled(cfg) ? FetchFwAsync(q, cfg, splunkHttp, msgs, ct) : Task.FromResult<List<FlowRec>?>(null);
+        var arTask = useAr ? FetchArAsync(q, [q.Ip], appliance, false, cfg, arHttp, msgs, ct) : Task.FromResult<(string, List<FlowRec>)?>(null);
+        var fwTask = useFw && FirewallService.Enabled(cfg) ? FetchFwAsync(q, [q.Ip], cfg, splunkHttp, msgs, ct) : Task.FromResult<List<FlowRec>?>(null);
         await Task.WhenAll(arTask, fwTask);
         var ar = arTask.Result;
         var fw = fwTask.Result;
@@ -64,29 +64,39 @@ static class OturumAkisi
         };
     }
 
-    // Tüm kutular seçiliyse hepsi sorgulanır, en çok bağlantı gören kutu kullanılır
-    // (aynı segmenti iki kutu görüyorsa akışlar iki kez sayılmasın).
-    static async Task<(string, List<FlowRec>)?> FetchArAsync(LookupQuery q, int appliance, IConfiguration cfg, HttpClient http,
-        List<string> msgs, CancellationToken ct)
+    // Tüm kutular seçiliyse hepsi sorgulanır. union=false: en çok bağlantı gören kutu kullanılır (tek sunucu);
+    // union=true: tüm kutuların kayıtları birleştirilir, aynı bağlantı (istemci IP:port → sunucu IP:port) bir kez sayılır
+    // (çok sunuculu yolculukta sunucuları farklı kutular görebilir).
+    public static async Task<(string, List<FlowRec>)?> FetchArAsync(LookupQuery q, IReadOnlyList<string> ips, int appliance, bool union,
+        IConfiguration cfg, HttpClient http, List<string> msgs, CancellationToken ct)
     {
         int boxCount = cfg.GetSection("Servers").GetChildren().Count();
         var boxes = appliance >= 0 ? [appliance] : Enumerable.Range(0, boxCount).ToList();
         var results = await Task.WhenAll(boxes.Select(async b =>
         {
-            try { return (b, flows: await FetchAsync(q, b, cfg, http, ct), err: (string?)null); }
+            try { return (b, flows: await FetchAsync(q, ips, b, cfg, http, ct), err: (string?)null); }
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
             catch (Exception ex) { return (b, flows: (name: $"Kutu {b + 1}", list: new List<FlowRec>()), err: (string?)ex.Message); }
         }));
         lock (msgs) foreach (var r in results.Where(r => r.err != null)) msgs.Add($"AppResponse [{r.flows.name}] {r.err}");
-        var best = results.Where(r => r.err == null).OrderByDescending(r => r.flows.list.Count).FirstOrDefault();
-        return best.flows.list == null ? null : (best.flows.name, best.flows.list);
+        var ok = results.Where(r => r.err == null).ToList();
+        if (ok.Count == 0) return null;
+        if (union)
+        {
+            var seen = new HashSet<(string, string, string, string)>();
+            return (string.Join(", ", ok.Select(r => r.flows.name)),
+                ok.SelectMany(r => r.flows.list).Where(f => seen.Add((f.Cip, f.Cport, f.Sip, f.Sport))).ToList());
+        }
+        var best = ok.OrderByDescending(r => r.flows.list.Count).First();
+        return (best.flows.name, best.flows.list);
     }
 
-    static async Task<List<FlowRec>?> FetchFwAsync(LookupQuery q, IConfiguration cfg, HttpClient http, List<string> msgs, CancellationToken ct)
+    public static async Task<List<FlowRec>?> FetchFwAsync(LookupQuery q, IReadOnlyList<string> ips, IConfiguration cfg, HttpClient http,
+        List<string> msgs, CancellationToken ct)
     {
         try
         {
-            var sp = await FirewallService.SessionsAsync(q, cfg, http, ct);
+            var sp = await FirewallService.SessionsAsync(q, ips, cfg, http, ct);
             static string V(Dictionary<string, string> r, string k) => r.TryGetValue(k, out var v) ? v : "";
             static double? T(string s) => double.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out var d) ? d : null;
             lock (msgs) msgs.AddRange(sp.Messages.Select(m => "Firewall: " + m));
@@ -103,7 +113,8 @@ static class OturumAkisi
         }
     }
 
-    static async Task<(string name, List<FlowRec> list)> FetchAsync(LookupQuery q, int appliance, IConfiguration cfg, HttpClient http, CancellationToken ct)
+    static async Task<(string name, List<FlowRec> list)> FetchAsync(LookupQuery q, IReadOnlyList<string> ips, int appliance,
+        IConfiguration cfg, HttpClient http, CancellationToken ct)
     {
         var cols = cfg.GetSection("AkisTesti:Kolonlar").GetChildren().Select(c => (c.Value ?? "").Trim()).Where(c => c != "").ToList();
         if (cols.Count != 6) cols = [.. DefaultCols];
@@ -116,7 +127,8 @@ static class OturumAkisi
             source,
             columns = cols,
             time = new { start = q.StartUnix.ToString(), end = q.EndUnix.ToString() },
-            filters = new object[] { new { id = "traffic", type = "STEELFILTER", value = $"(cli_tcp.ip == {q.Ip} or srv_tcp.ip == {q.Ip})" } }
+            filters = new object[] { new { id = "traffic", type = "STEELFILTER",
+                value = "(" + string.Join(" or ", ips.Select(ip => $"cli_tcp.ip == {ip} or srv_tcp.ip == {ip}")) + ")" } }
         };
         var data = await AppResponseService.RunSingleAsync(baseUrl, jwt, def, cfg.GetValue("DeleteReportInstances", true), http, ct, 90);
         static double? T(string? s) => double.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out var d) ? d : null;
@@ -129,21 +141,17 @@ static class OturumAkisi
         return (name, list);
     }
 
-    public static OturumSonuc Build(string target, List<FlowRec> flows, EnvanterSnapshot? env, double maxSessionSec)
-    {
-        var msgs = new List<string>();
-        string coz = flows.Count == 0 ? "veri yok"
-            : flows.Count(f => f.S % 1 != 0) > flows.Count / 2 ? "milisaniye"
-            : flows.Count(f => f.S % 60 == 0) > flows.Count * 0.95 ? "dakika" : "saniye";
-        if (coz == "dakika")
-            msgs.Add("AppResponse bu kaynakta bağlantıları dakikalık özet olarak veriyor; oturum eşleştirmesi yapılamaz.");
+    // Oturum eşleştirmesinin çekirdeği: target'a gelen kısa oturumlar, target'tan giden bağlantılar,
+    // her giden bağlantının hangi oturum(lar)ın içinde başladığı ve oturum başına hedef ağırlıkları.
+    public record MatchResult(List<FlowRec> ShortIn, int LongIn, List<FlowRec> Outbound, List<int>?[] Owners,
+        Dictionary<int, Dictionary<(string ip, string port), (double w, int exact)>> PerSession);
 
+    public static MatchResult Match(string target, List<FlowRec> flows, double maxSessionSec)
+    {
         var inbound = flows.Where(f => f.Sip == target && f.Cip != target && f.E != null).ToList();
         var outbound = flows.Where(f => f.Cip == target && f.Sip != target).OrderBy(f => f.S).ToList();
         var shortIn = inbound.Where(f => f.E!.Value - f.S <= maxSessionSec).ToList();
         int longIn = inbound.Count - shortIn.Count;
-        if (inbound.Count > 0 && longIn > inbound.Count / 2)
-            msgs.Add($"Gelen bağlantıların çoğu {maxSessionSec:0} sn'den uzun (keep-alive): içine çok sayıda istek düştüğü için eşleştirme zayıf.");
 
         // Her giden bağlantı hangi kısa gelen oturumların içinde başladı?
         var owners = new List<int>[outbound.Count];
@@ -163,8 +171,6 @@ static class OturumAkisi
             if (owners[j] is { } o && o.Any(i => !shortIn[i].Kaba) && o.Any(i => shortIn[i].Kaba))
                 owners[j] = o.Where(i => !shortIn[i].Kaba).ToList();
 
-        int unmatched = owners.Count(o => o == null);
-        double avgK = owners.Where(o => o != null).Select(o => (double)o!.Count).DefaultIfEmpty(0).Average();
 
         // Gelen oturum → hedef (ip, port): ağırlık, kesin sayısı, hedefi içeren oturumlar
         var perSession = new Dictionary<int, Dictionary<(string ip, string port), (double w, int exact)>>();
@@ -180,6 +186,25 @@ static class OturumAkisi
                 d[key] = (cur.w + w, cur.exact + (owners[j]!.Count == 1 ? 1 : 0));
             }
         }
+
+        return new MatchResult(shortIn, longIn, outbound, owners, perSession);
+    }
+
+    public static OturumSonuc Build(string target, List<FlowRec> flows, EnvanterSnapshot? env, double maxSessionSec)
+    {
+        var msgs = new List<string>();
+        string coz = flows.Count == 0 ? "veri yok"
+            : flows.Count(f => f.S % 1 != 0) > flows.Count / 2 ? "milisaniye"
+            : flows.Count(f => f.S % 60 == 0) > flows.Count * 0.95 ? "dakika" : "saniye";
+        if (coz == "dakika")
+            msgs.Add("AppResponse bu kaynakta bağlantıları dakikalık özet olarak veriyor; oturum eşleştirmesi yapılamaz.");
+
+        var m = Match(target, flows, maxSessionSec);
+        var (shortIn, longIn, outbound, owners, perSession) = (m.ShortIn, m.LongIn, m.Outbound, m.Owners, m.PerSession);
+        if (m.ShortIn.Count + m.LongIn > 0 && m.LongIn > (m.ShortIn.Count + m.LongIn) / 2)
+            msgs.Add($"Gelen bağlantıların çoğu {maxSessionSec:0} sn'den uzun (keep-alive): içine çok sayıda istek düştüğü için eşleştirme zayıf.");
+        int unmatched = owners.Count(o => o == null);
+        double avgK = owners.Where(o => o != null).Select(o => (double)o!.Count).DefaultIfEmpty(0).Average();
 
         var girisler = shortIn.Select((f, i) => (f, i))
             .GroupBy(x => (x.f.Cip, x.f.Sport))
@@ -199,7 +224,7 @@ static class OturumAkisi
             })
             .OrderByDescending(g => g.Oturum).Take(MaxGiris).ToList();
 
-        return new OturumSonuc(target, "", "", coz, inbound.Count, longIn, outbound.Count, unmatched, Math.Round(avgK, 1),
+        return new OturumSonuc(target, "", "", coz, shortIn.Count + longIn, longIn, outbound.Count, unmatched, Math.Round(avgK, 1),
             girisler, msgs, 0);
     }
 }
