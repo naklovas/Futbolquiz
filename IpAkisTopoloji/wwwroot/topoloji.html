@@ -228,8 +228,14 @@ function expectList(body, field) {
     throw new Error(body?.error || `Sunucudan beklenmeyen yanıt ("${field}" yok). Sunucudaki DeltaFlow sürümü sayfayla aynı mı? (dotnet publish ile tüm dosyalar güncellenmeli)`);
 }
 // Beklenmeyen bir JavaScript hatası sessizce kalmasın: ekranda nerede olduğu ile gösterilir.
-window.addEventListener("error", ev => showJsError(`${ev.message} (${(ev.filename ?? "").split("/").pop()}:${ev.lineno})`));
-window.addEventListener("unhandledrejection", ev => showJsError(String(ev.reason?.stack ?? ev.reason).split("\n").slice(0, 2).join(" · ")));
+// Yalnızca bu sayfanın kendi kodundaki hatalar gösterilir; Visual Studio Browser Link, tarayıcı eklentileri gibi
+// dışarıdan enjekte edilen betiklerin hataları (ör. "$.noConflict is not a function (browserLink)") yok sayılır.
+const ownScript = f => { const u = (f ?? "").split(/[?#]/)[0]; return !u || u === location.href.split(/[?#]/)[0] || /\/uygulama\.js$/.test(u); };
+window.addEventListener("error", ev => { if (ownScript(ev.filename)) showJsError(`${ev.message} (${(ev.filename ?? "").split("/").pop()}:${ev.lineno})`); });
+window.addEventListener("unhandledrejection", ev => {
+  const st = String(ev.reason?.stack ?? ev.reason);
+  if (!/browserLink|extension:\/\//i.test(st)) showJsError(st.split("\n").slice(0, 2).join(" · "));
+});
 function showJsError(text) {
   let el = document.getElementById("jsError");
   if (!el) {
