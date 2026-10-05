@@ -6,15 +6,21 @@
 //  - Geri: X'in SONRAKİ durağa giden oturumları hangi kaynaklardan geldi → önceki durak.
 //    Kaynak LB GW ise: sunucunun VIP'i, sonra VIP'e gelenler (Firewall NAT'ı çözülmüş hedefle).
 //  - Özel (10/8, 172.16/12, 192.168/16) olmayan IP "dış" sayılır, orada durulur.
+//  - Oran, hedefe giden oturumların "bir yere giden" oturumlara oranıdır: health check / izleme gibi hiçbir yere
+//    gitmeyen kısa oturumlar paydayı şişirmez. Hedefler önce bu orana, sonra ağırlığa göre seçilir.
+//  - VIP durak sayısını (Ileri) tüketmez: kök → VIP → üye tek durak sayılır.
+//  - Bağlantı havuzu: DB'ye uygulamalar çoğunlukla önceden açık (havuzdaki) bağlantılarla gider; bu bağlantılar
+//    istek anında açılmadığı için zaman eşleştirmesine girmez. Bu yüzden ileri yönde her sunucunun DB portlarına
+//    (Yolculuk:HavuzPortlari) giden bağlantıları ayrıca "havuz" bağı (kesik çizgi) olarak eklenir.
 // Veri her seviye için tek seferde çekilir (o seviyedeki tüm sunucular için tek AppResponse raporu + tek Firewall sorgusu).
 // ---------------------------------------------------------------------------
 record JNode(string Id, int Level, string Ip, string? Port, string Kind, SegmentInfo? Segment, List<string> Apps);
-record JEdge(string From, string To, double W, int Exact, double? Oran);
+record JEdge(string From, string To, double W, int Exact, double? Oran, bool Havuz = false);
 record YolculukSonuc(string Ip, string Pencere, string Kaynaklar, List<JNode> Nodes, List<JEdge> Edges, List<string> Mesajlar, long SureMs);
 
 static class Yolculuk
 {
-    sealed record Item(string Id, string Ip, string Kind, int Level, HashSet<string>? Allowed, HashSet<string>? Next, string? ParentVip, string? Port);
+    sealed record Item(string Id, string Ip, string Kind, int Level, HashSet<string>? Allowed, HashSet<string>? Next, string? ParentVip, string? Port, int Hops = 0);
 
     public static bool IsPrivate(string ip)
     {
@@ -29,6 +35,8 @@ static class Yolculuk
         var sw = System.Diagnostics.Stopwatch.StartNew();
         int up = cfg.GetValue("Yolculuk:Geri", 3), down = cfg.GetValue("Yolculuk:Ileri", 3), K = cfg.GetValue("Yolculuk:Dallanma", 6);
         double maxSec = cfg.GetValue("Oturum:MaxOturumSaniye", 30.0);
+        var poolPorts = cfg.GetSection("Yolculuk:HavuzPortlari").GetChildren().Select(c => c.Value ?? "").Where(v => v != "").ToHashSet();
+        if (poolPorts.Count == 0) poolPorts = ["1521", "1522", "1526", "2484", "1433", "1434", "5432", "3306", "50000", "27017", "9042"];
         var msgs = new List<string>();
         var sources = new List<string>();
         useFw = useFw && FirewallService.Enabled(cfg);
@@ -64,10 +72,10 @@ static class Yolculuk
             }
             return id;
         }
-        void Edge(string from, string to, double w, int exact, double? oran)
+        void Edge(string from, string to, double w, int exact, double? oran, bool havuz = false)
         {
             var e = edges.GetValueOrDefault((from, to));
-            edges[(from, to)] = e == null ? new JEdge(from, to, w, exact, oran)
+            edges[(from, to)] = e == null ? new JEdge(from, to, w, exact, oran, havuz)
                 : e with { W = e.W + w, Exact = e.Exact + exact, Oran = e.Oran == null || oran == null ? e.Oran ?? oran : Math.Min(1, e.Oran.Value + oran.Value) };
         }
         string Kind(string ip) => !IsPrivate(ip) ? "dis" : "host";
@@ -89,7 +97,7 @@ static class Yolculuk
                 {
                     // VIP → havuz üyeleri: üyenin kendi işlemesinde LB GW'den gelen oturumlarla bağlanır
                     foreach (var m in env?.VipMembers(it.Ip, it.Port).Take(K) ?? [])
-                        next.Add(new(NodeId(it.Level + 1, m.Ip, "host", null), m.Ip, "host", it.Level + 1, m.GwIps.ToHashSet(), null, it.Id, m.Port));
+                        next.Add(new(NodeId(it.Level + 1, m.Ip, "host", null), m.Ip, "host", it.Level + 1, m.GwIps.ToHashSet(), null, it.Id, m.Port, it.Hops + 1));
                     continue;
                 }
                 var mr = OturumAkisi.Match(it.Ip, flows, maxSec);
@@ -102,21 +110,33 @@ static class Yolculuk
                     Node(it.Level, it.Ip, "host", null);
                     Edge(it.ParentVip, it.Id, considered.Count, 0, null);
                 }
-                if (considered.Count == 0 || it.Level >= down) continue;
+                if (considered.Count == 0 || it.Hops >= down) continue;
+                // Pay: bu oturumlardan en az bir yere gidenler (health check / izleme oturumları oranı düşürmesin)
+                int active = considered.Count(mr.PerSession.ContainsKey);
                 var targets = considered.Where(mr.PerSession.ContainsKey)
                     .SelectMany(i => mr.PerSession[i].Select(kv => (kv.Key, kv.Value, i)))
                     .GroupBy(x => x.Key)
-                    .Select(g => (key: g.Key, w: g.Sum(x => x.Value.w), exact: g.Sum(x => x.Value.exact), cov: (double)g.Select(x => x.i).Distinct().Count() / considered.Count))
+                    .Select(g => (key: g.Key, w: g.Sum(x => x.Value.w), exact: g.Sum(x => x.Value.exact), cov: (double)g.Select(x => x.i).Distinct().Count() / Math.Max(1, active)))
                     .Where(t => t.cov >= 0.05)
-                    .OrderByDescending(t => t.w).Take(K);
+                    .OrderByDescending(t => t.cov).ThenByDescending(t => t.w).Take(K).ToList();
                 foreach (var t in targets)
                 {
                     bool isVip = env != null && env.VipMembers(t.key.ip, null).Count > 0;
                     string kind = isVip ? "vip" : Kind(t.key.ip);
                     string id = Node(it.Level + 1, t.key.ip, kind, kind == "vip" ? t.key.port : null);
                     Edge(it.Id, id, Math.Round(t.w, 1), t.exact, Math.Round(t.cov, 3));
-                    if (kind == "vip" || (kind == "host" && it.Level + 1 < down))
-                        next.Add(new(id, t.key.ip, kind, it.Level + 1, kind == "vip" ? null : [it.Ip], null, null, kind == "vip" ? t.key.port : null));
+                    if (kind == "vip" || (kind == "host" && it.Hops + 1 < down))
+                        next.Add(new(id, t.key.ip, kind, it.Level + 1, kind == "vip" ? null : [it.Ip], null, null, kind == "vip" ? t.key.port : null,
+                            kind == "vip" ? it.Hops : it.Hops + 1));
+                }
+                // Havuz bağlantıları: DB portlarına giden, oturum eşleşmesine girmemiş hedefler (uç durak, devam edilmez)
+                var matched = targets.Select(t => t.key).ToHashSet();
+                foreach (var g in mr.Outbound.Where(o => poolPorts.Contains(o.Sport) && !matched.Contains((o.Sip, o.Sport)))
+                    .GroupBy(o => (o.Sip, o.Sport)).OrderByDescending(g => g.Count()).Take(K))
+                {
+                    bool isVip = env != null && env.VipMembers(g.Key.Sip, null).Count > 0;
+                    string kind = isVip ? "vip" : Kind(g.Key.Sip);
+                    Edge(it.Id, Node(it.Level + 1, g.Key.Sip, kind, kind == "vip" ? g.Key.Sport : null), g.Count(), 0, null, true);
                 }
             }
             level = next;

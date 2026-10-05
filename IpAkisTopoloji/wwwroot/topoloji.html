@@ -112,6 +112,7 @@
   .proc-svg .pn .t3 { fill: var(--muted); font-size: 11px; }
   .proc-svg .pe { fill: none; opacity: .6; }
   .proc-svg .pe.in { stroke: var(--in); } .proc-svg .pe.out { stroke: var(--out); }
+  .proc-svg .pe.pool { stroke-dasharray: 6 4; }
   .proc-svg.hl .pe { opacity: .06; } .proc-svg.hl .pe.on { opacity: .95; }
   .proc-svg.hl .pn { opacity: .35; } .proc-svg.hl .pn.on { opacity: 1; }
   .edge.denied { stroke: var(--err); stroke-dasharray: 5 4; }
@@ -1105,8 +1106,8 @@ function journeyGroups(b) {
   for (const e of b.edges) {
     const a = byNode.get(e.from), c = byNode.get(e.to);
     if (!a || !c) continue;
-    const l = links.get(`${a}>${c}`) ?? links.set(`${a}>${c}`, { a, c, w: 0, oran: 0 }).get(`${a}>${c}`);
-    l.w += e.w; l.oran = Math.min(1, l.oran + (e.oran ?? 0));
+    const l = links.get(`${a}>${c}`) ?? links.set(`${a}>${c}`, { a, c, w: 0, oran: 0, havuz: true }).get(`${a}>${c}`);
+    l.w += e.w; l.oran = Math.min(1, l.oran + (e.oran ?? 0)); l.havuz &&= !!e.havuz;
   }
   return { groups: [...groups.values()], links: [...links.values()] };
 }
@@ -1114,7 +1115,7 @@ function journeyGroups(b) {
 function renderJourney(el, tabs) {
   const js = state.jour;
   const head = `<div class="toolbar">${tabs}</div>
-    <div class="small muted" style="margin:-4px 0 8px">Sorgulanan sunucudan geriye (dış IP'lere) ve ileriye (veritabanına) durak durak: her durakta bir önceki duraktan gelen oturumların içinde nereye gidildiğine bakılır (AppResponse + Firewall, zaman eşleştirmesi). VIP'ler ve NAT çözülür. Çizgi kalınlığı oturum sayısı.</div>`;
+    <div class="small muted" style="margin:-4px 0 8px">Sorgulanan sunucudan geriye (dış IP'lere) ve ileriye (veritabanına) durak durak: her durakta bir önceki duraktan gelen oturumların içinde nereye gidildiğine bakılır (AppResponse + Firewall, zaman eşleştirmesi). VIP'ler ve NAT çözülür. Çizgi kalınlığı oturum sayısı; kesik çizgi DB bağlantı havuzu (önceden açık bağlantı).</div>`;
   if (!js) { el.innerHTML = head + `<div class="muted">AppResponse ya da Firewall kaynağı seçili değil.</div>`; return; }
   if (js.status === "loading") { el.innerHTML = head + `<div class="muted"><span class="spinner"></span> Duraklar sırayla sorgulanıyor (her seviye ayrı sorgu, en fazla son 5 dk; 1-3 dakika sürebilir)…</div>`; return; }
   if (js.status === "error") { el.innerHTML = head + `<div style="color:var(--err)">${esc(js.error)}</div>`; return; }
@@ -1138,7 +1139,9 @@ function renderJourney(el, tabs) {
     const A = pos.get(l.a), C = pos.get(l.c); if (!A || !C) continue;
     const ga = groups.find(g => g.k === l.a), gc = groups.find(g => g.k === l.c);
     const y1 = A.y + boxH(ga) / 2, y2 = C.y + boxH(gc) / 2, x1 = A.x + BW, x2 = C.x, mx = (x1 + x2) / 2;
-    edges += `<path class="pe out" data-a="${esc(l.a)}" data-c="${esc(l.c)}" stroke-width="${sw(l.w)}" d="M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}"><title>${esc(ga.name)} → ${esc(gc.name)}: ${fmt(Math.round(l.w))} oturum${l.oran ? ` (${pct(l.oran)})` : ""}</title></path>`;
+    const tip = l.havuz ? `${fmt(Math.round(l.w))} havuz bağlantısı (önceden açık DB bağlantısı; istek anında açılmadığı için oturumla eşleşmez)`
+      : `${fmt(Math.round(l.w))} oturum${l.oran ? ` (${pct(l.oran)})` : ""}`;
+    edges += `<path class="pe out${l.havuz ? " pool" : ""}" data-a="${esc(l.a)}" data-c="${esc(l.c)}" stroke-width="${l.havuz ? 2 : sw(l.w)}" d="M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}"><title>${esc(ga.name)} → ${esc(gc.name)}: ${tip}</title></path>`;
   }
   for (const g of groups) {
     const P = pos.get(g.k), cls = g.root ? "proc" : g.level < 0 ? "in" : "out";
