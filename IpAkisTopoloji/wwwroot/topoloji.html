@@ -219,6 +219,24 @@
 const $ = s => document.querySelector(s);
 const esc = v => String(v ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const fmt = n => (n ?? 0).toLocaleString("tr-TR");
+// Sunucudan beklenen liste gelmediyse (eski sürüm sunucu, araya giren hata sayfası…) anlaşılır bir hata ver.
+function expectList(body, field) {
+  if (!Array.isArray(body?.[field]))
+    throw new Error(body?.error || `Sunucudan beklenmeyen yanıt ("${field}" yok). Sunucudaki DeltaFlow sürümü sayfayla aynı mı? (dotnet publish ile tüm dosyalar güncellenmeli)`);
+}
+// Beklenmeyen bir JavaScript hatası sessizce kalmasın: ekranda nerede olduğu ile gösterilir.
+window.addEventListener("error", ev => showJsError(`${ev.message} (${(ev.filename ?? "").split("/").pop()}:${ev.lineno})`));
+window.addEventListener("unhandledrejection", ev => showJsError(String(ev.reason?.stack ?? ev.reason).split("\n").slice(0, 2).join(" · ")));
+function showJsError(text) {
+  let el = document.getElementById("jsError");
+  if (!el) {
+    el = document.createElement("div"); el.id = "jsError";
+    el.style.cssText = "position:fixed;top:12px;left:50%;transform:translateX(-50%);z-index:99;background:var(--err);color:#fff;padding:8px 14px;border-radius:8px;font-size:13px;max-width:90vw;box-shadow:0 4px 16px rgba(0,0,0,.25);cursor:pointer";
+    el.title = "Kapatmak için tıklayın"; el.onclick = () => el.remove();
+    document.body.appendChild(el);
+  }
+  el.textContent = "Hata: " + text;
+}
 const pad = n => String(n).padStart(2, "0");
 const toLocalInput = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 
@@ -293,8 +311,9 @@ async function run() {
   $("#main").innerHTML = `<div class="panel empty"><span class="spinner"></span> Sorgulanıyor… (AppResponse raporu 1 dakikaya kadar sürebilir)</div>`;
   try {
     const r = await fetch("api/flow?" + params, { signal: abort.signal });
-    const body = await r.json().catch(() => ({ error: `HTTP ${r.status}` }));
+    const body = await r.json().catch(() => ({ error: `HTTP ${r.status}: sunucu JSON yerine başka bir yanıt döndü (zaman aşımı, yetki ya da sunucu hata sayfası olabilir)` }));
     if (!r.ok) throw new Error(body.error || `HTTP ${r.status}`);
+    expectList(body, "inbound");
     state.raw = body; state.data = envFiltered(body); state.hop2 = null; state.filter = null; state.selected = null; state.zoom = 1;
     state.lastParams = params;
     render();
@@ -320,8 +339,9 @@ async function runHop2(params) {
       body: JSON.stringify({ target: params.get("ip"), ips, start: params.get("start"), end: params.get("end"),
         appliance: +params.get("appliance"), sources: params.get("sources") })
     });
-    const body = await r.json().catch(() => ({ error: `HTTP ${r.status}` }));
+    const body = await r.json().catch(() => ({ error: `HTTP ${r.status}: sunucu JSON yerine başka bir yanıt döndü (zaman aşımı, yetki ya da sunucu hata sayfası olabilir)` }));
     if (!r.ok) throw new Error(body.error || `HTTP ${r.status}`);
+    expectList(body, "peers");
     const errs = [["Splunk", body.splunk], ["AppResponse", body.appResponse], ["Firewall", body.firewall]].filter(([, s]) => s && s.error && s.error !== "Sorgulanmadı").map(([n, s]) => `${n}: ${s.error}`);
     state.hop2 = { status: "ok", peers: new Map(body.peers.map(p => [p.ip, p])), warn: errs.join(" · "), body };
   } catch (e) {
@@ -886,8 +906,9 @@ async function runProc(params) {
   try {
     const p = new URLSearchParams({ ip: params.get("ip"), start: params.get("start"), end: params.get("end") });
     const r = await fetch("api/surec?" + p, { signal: procAbort.signal });
-    const body = await r.json().catch(() => ({ error: `HTTP ${r.status}` }));
+    const body = await r.json().catch(() => ({ error: `HTTP ${r.status}: sunucu JSON yerine başka bir yanıt döndü (zaman aşımı, yetki ya da sunucu hata sayfası olabilir)` }));
     if (!r.ok) throw new Error(body.error || `HTTP ${r.status}`);
+    expectList(body, "processes");
     state.proc = { status: "ok", body, infra: false };
   } catch (e) {
     state.proc = e.name === "AbortError" ? null : { status: "error", error: e.message };
@@ -1058,8 +1079,9 @@ async function runJourney(params) {
   try {
     const p = new URLSearchParams({ ip: params.get("ip"), start: params.get("start"), end: params.get("end"), appliance: params.get("appliance"), sources: params.get("sources") });
     const r = await fetch("api/yolculuk?" + p, { signal: jourAbort.signal });
-    const body = await r.json().catch(() => ({ error: `HTTP ${r.status}` }));
+    const body = await r.json().catch(() => ({ error: `HTTP ${r.status}: sunucu JSON yerine başka bir yanıt döndü (zaman aşımı, yetki ya da sunucu hata sayfası olabilir)` }));
     if (!r.ok) throw new Error(body.error || `HTTP ${r.status}`);
+    expectList(body, "nodes");
     state.jour = { status: "ok", body };
   } catch (e) {
     state.jour = e.name === "AbortError" ? null : { status: "error", error: e.message };
@@ -1164,8 +1186,9 @@ async function runSess(params) {
     const p = new URLSearchParams({ ip: params.get("ip"), start: params.get("start"), end: params.get("end"), appliance: params.get("appliance"),
       sources: params.get("sources") });
     const r = await fetch("api/oturum?" + p, { signal: sessAbort.signal });
-    const body = await r.json().catch(() => ({ error: `HTTP ${r.status}` }));
+    const body = await r.json().catch(() => ({ error: `HTTP ${r.status}: sunucu JSON yerine başka bir yanıt döndü (zaman aşımı, yetki ya da sunucu hata sayfası olabilir)` }));
     if (!r.ok) throw new Error(body.error || `HTTP ${r.status}`);
+    expectList(body, "girisler");
     state.sess = { status: "ok", body, rare: false, sel: null };
   } catch (e) {
     state.sess = e.name === "AbortError" ? null : { status: "error", error: e.message };
@@ -1363,7 +1386,7 @@ async function runAi() {
   showAiPanel(`<div class="muted"><span class="spinner"></span> AI yorumluyor… (birkaç dakika sürebilir)</div>`);
   try {
     const r = await fetch("api/ai/etki", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(buildAiRequest()), signal: aiAbort.signal });
-    const body = await r.json().catch(() => ({ error: `HTTP ${r.status}` }));
+    const body = await r.json().catch(() => ({ error: `HTTP ${r.status}: sunucu JSON yerine başka bir yanıt döndü (zaman aşımı, yetki ya da sunucu hata sayfası olabilir)` }));
     if (!r.ok) throw new Error(body.error || `HTTP ${r.status}`);
     showAiPanel(`<div class="ai-out">${renderMarkdown(body.answer)}</div>
       <div class="ai-meta">Model: ${esc(body.model)} · ${(body.elapsedMs / 1000).toFixed(1)} sn

@@ -57,8 +57,9 @@ async function runApp(name) {
   $("#main").innerHTML = `<div class="panel empty"><span class="spinner"></span> "${esc(name)}" uygulamasının sunucuları ve VIP'leri sorgulanıyor…</div>`;
   try {
     const r = await fetch("api/app?" + params, { signal: abort.signal });
-    const body = await r.json().catch(() => ({ error: `HTTP ${r.status}` }));
+    const body = await r.json().catch(() => ({ error: `HTTP ${r.status}: sunucu JSON yerine başka bir yanıt döndü (zaman aşımı, yetki ya da sunucu hata sayfası olabilir)` }));
     if (!r.ok) throw new Error(body.error || `HTTP ${r.status}`);
+    expectList(body, "callers");
     appState.raw = body; appState.selected = null; appState.expand = new Set(); state.zoom = 1;
     renderApp();
   } catch (e) {
