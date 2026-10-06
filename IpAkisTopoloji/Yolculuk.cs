@@ -20,7 +20,7 @@
 // Veri her seviye için tek seferde çekilir (o seviyedeki tüm sunucular için tek AppResponse raporu + tek Firewall sorgusu).
 // ---------------------------------------------------------------------------
 record JNode(string Id, int Level, string Ip, string? Port, string Kind, SegmentInfo? Segment, List<string> Apps, string? Ortak = null);
-record JEdge(string From, string To, double W, int Exact, double? Oran, bool Havuz = false);
+record JEdge(string From, string To, double W, int Exact, double? Oran, bool Havuz = false, bool Envanter = false);
 record YolculukSonuc(string Ip, string Pencere, string Kaynaklar, List<JNode> Nodes, List<JEdge> Edges, List<string> Mesajlar, long SureMs);
 
 static class Yolculuk
@@ -88,10 +88,10 @@ static class Yolculuk
             }
             return id;
         }
-        void Edge(string from, string to, double w, int exact, double? oran, bool havuz = false)
+        void Edge(string from, string to, double w, int exact, double? oran, bool havuz = false, bool envanter = false)
         {
             var e = edges.GetValueOrDefault((from, to));
-            edges[(from, to)] = e == null ? new JEdge(from, to, w, exact, oran, havuz)
+            edges[(from, to)] = e == null ? new JEdge(from, to, w, exact, oran, havuz, envanter)
                 : e with { W = e.W + w, Exact = e.Exact + exact, Oran = e.Oran == null || oran == null ? e.Oran ?? oran : Math.Min(1, e.Oran.Value + oran.Value) };
         }
         bool Internal(string ip)
@@ -118,19 +118,25 @@ static class Yolculuk
             {
                 if (it.Kind == "vip")
                 {
-                    // VIP → havuz üyeleri: üyenin kendi işlemesinde LB GW'den gelen oturumlarla bağlanır
+                    // VIP → havuz üyeleri: üyenin kendi işlemesinde LB GW'den gelen oturumlarla bağlanır.
+                    // Next = VIP'i çağıran sunucu (LB kaynak adresi çevirmiyorsa üyeye istemcinin kendi IP'si gelir).
                     foreach (var m in env?.VipMembers(it.Ip, it.Port).Take(K) ?? [])
-                        next.Add(new(NodeId(it.Level + 1, m.Ip, "host", null), m.Ip, "host", it.Level + 1, m.GwIps.ToHashSet(), null, it.Id, m.Port, it.Hops + 1));
+                        next.Add(new(NodeId(it.Level + 1, m.Ip, "host", null), m.Ip, "host", it.Level + 1, m.GwIps.ToHashSet(), it.Allowed, it.Id, m.Port, it.Hops + 1));
                     continue;
                 }
                 var mr = OturumAkisi.Match(it.Ip, flows, maxSec);
-                var considered = Enumerable.Range(0, mr.ShortIn.Count)
-                    .Where(i => (it.Allowed == null || it.Allowed.Contains(mr.ShortIn[i].Cip)) && (it.Port == null || mr.ShortIn[i].Sport == it.Port))
-                    .ToList();
+                List<int> Pick(Func<FlowRec, bool> from) => Enumerable.Range(0, mr.ShortIn.Count)
+                    .Where(i => from(mr.ShortIn[i]) && (it.Port == null || mr.ShortIn[i].Sport == it.Port)).ToList();
+                var considered = Pick(f => it.Allowed == null || it.Allowed.Contains(f.Cip));
                 if (it.ParentVip != null)
                 {
-                    if (considered.Count == 0) continue;
+                    // Üyede LB GW'den gelen oturum yoksa: 1) LB kaynak adresi çevirmiyor olabilir → VIP'i çağıranın kendisinden
+                    // gelenler, 2) üyenin VIP portuna gelen tüm oturumlar. Hiçbiri yoksa (üyenin trafiği görünmüyor) VIP → üye
+                    // bağı envanterden kesik çizgiyle çizilir ve o üyeden devam edilmez.
+                    if (considered.Count == 0 && it.Next != null) considered = Pick(f => it.Next.Contains(f.Cip));
+                    if (considered.Count == 0 && it.Port != null) considered = Pick(_ => true);
                     Node(it.Level, it.Ip, "host", null);
+                    if (considered.Count == 0) { Edge(it.ParentVip, it.Id, 0, 0, null, envanter: true); continue; }
                     Edge(it.ParentVip, it.Id, considered.Count, 0, null);
                 }
                 if (considered.Count == 0 || it.Hops >= down) continue;
@@ -153,7 +159,7 @@ static class Yolculuk
                     Edge(it.Id, id, Math.Round(t.w, 1), t.exact, Math.Round(t.cov, 3));
                     if (t.ortak) continue;
                     if (kind == "vip" || (kind == "host" && it.Hops + 1 < down))
-                        next.Add(new(id, t.key.ip, kind, it.Level + 1, kind == "vip" ? null : [it.Ip], null, null, kind == "vip" ? t.key.port : null,
+                        next.Add(new(id, t.key.ip, kind, it.Level + 1, [it.Ip], null, null, kind == "vip" ? t.key.port : null,
                             kind == "vip" ? it.Hops : it.Hops + 1));
                 }
                 // Havuz bağlantıları: DB portlarına giden, oturum eşleşmesine girmemiş hedefler (uç durak, devam edilmez)
