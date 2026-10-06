@@ -9,7 +9,7 @@
 let uiMode = "ip";
 const appState = {
   raw: null, data: null, catalog: null, selected: null, expand: new Set(), topN: 12,
-  show: { callers: true, deps: true, internal: true, infra: false }
+  show: { callers: true, deps: true, internal: true, infra: false, segView: false }
 };
 
 // ---------- Sekmeler ----------
@@ -87,16 +87,39 @@ function rowOfEndpoint(ip) {
 
 // Kenardaki uygulama grupları: görünür olanlar, ilk N + "Diğer".
 function sideLinks(list) {
-  const vis = list.filter(linkVisible);
+  const vis = appState.show.segView ? segmentLinks(list) : list.filter(linkVisible);
   if (vis.length <= appState.topN) return vis;
   const rest = vis.slice(appState.topN - 1);
   const other = {
     key: "__other", name: `Diğer ${rest.length} grup`, other: rest, unknown: true, infra: false,
     hits: rest.reduce((n, r) => n + r.hits, 0), ports: [...new Set(rest.flatMap(r => r.ports))],
-    peers: rest.flatMap(r => r.peers), targets: {}, viaVips: []
+    peers: rest.flatMap(r => r.peers), targets: {}, viaVips: [], lines: []
   };
   for (const r of rest) for (const [k, v] of Object.entries(r.targets)) other.targets[k] = (other.targets[k] ?? 0) + v;
   return [...vis.slice(0, appState.topN - 1), other];
+}
+
+// Segment görünümü: kenardaki gruplar karşı IP'lerin segmentine göre tek kutu; kutunun içinde o segmentteki
+// VIP'ler (adıyla) ve uygulama adları listelenir. Hedef bağlantıları karşı IP'lerin hit payına göre dağıtılır.
+function segmentLinks(list) {
+  const m = new Map();
+  for (const l of list.filter(linkVisible)) {
+    const tot = l.peers.reduce((n, p) => n + p.hits, 0) || 1;
+    for (const p of l.peers) {
+      const name = segLabel(p.segment) ?? "Segment envanterinde yok";
+      const g = m.get(name) ?? m.set(name, { key: "segv:" + name, name, segView: true, unknown: true, infra: true, hits: 0,
+        ports: new Set(), peers: [], targets: {}, viaVips: [], apps: new Set(), vipMap: new Map(), seg: p.segment }).get(name);
+      g.hits += p.hits; p.ports.forEach(x => g.ports.add(x)); g.peers.push(p); g.infra &&= l.infra;
+      for (const [k, v] of Object.entries(l.targets)) g.targets[k] = (g.targets[k] ?? 0) + Math.round(v * p.hits / tot);
+      if (l.viaVips.includes(p.ip)) { g.viaVips.push(p.ip); g.vipMap.set(`${p.ip}${p.ports[0] ? ":" + p.ports[0] : ""}`, l.unknown ? "" : l.name); }
+      else if (!l.unknown) g.apps.add(l.name);
+    }
+  }
+  return [...m.values()].map(g => {
+    const vips = [...g.vipMap].map(([ip, n]) => `VIP ${ip}${n ? " · " + n : ""}`);
+    const apps = [...g.apps].sort();
+    return { ...g, ports: [...g.ports], lines: [...vips, ...apps.map(a => "• " + a)], nVip: vips.length, nApp: apps.length };
+  }).sort((a, b) => b.hits - a.hits);
 }
 
 // Uygulamanın kendi VIP'inin ortamı: VIP segmentinin Domain'i; yoksa havuz üyelerinin hepsi aynı ortamdaysa o ortam.
@@ -168,6 +191,7 @@ function renderApp() {
           <label><input type="checkbox" data-show="deps" ${appState.show.deps ? "checked" : ""}> Bağımlılıklar</label>
           <label><input type="checkbox" data-show="internal" ${appState.show.internal ? "checked" : ""}> İç trafik</label>
           <label title="DNS, AD, NTP, izleme, RDP/SSH gibi altyapı trafiği"><input type="checkbox" data-show="infra" ${appState.show.infra ? "checked" : ""}> Altyapı (${infraCount})</label>
+          <label title="Kullananlar ve bağımlılıklar segment bazında tek kutu; kutunun içinde o segmentteki VIP'ler ve uygulamalar"><input type="checkbox" data-show="segView" ${appState.show.segView ? "checked" : ""}> Yalnızca segmentler</label>
         </div>
         ${envToggleHtml(appEnvCounts(appState.raw))}
         <label style="flex-direction:row;align-items:center;gap:6px">Grup sayısı
@@ -234,11 +258,14 @@ function renderAppTopology() {
   let cy = HEAD;
   rows.forEach(r => { r.y = cy; cy += RH[r.kind] + (r.kind === "title" ? 0 : 6); });
   const CH = cy + 8;
-  const colH = n => n ? n * NH + (n - 1) * NG : 0;
-  const inner = Math.max(CH, colH(L.length), colH(R.length));
+  const MAXLINES = 6, LH = 14;
+  const nodeH = l => NH + (l.lines?.length ? Math.min(l.lines.length, MAXLINES) * LH + (l.lines.length > MAXLINES ? LH : 0) + 4 : 0);
+  [...L, ...R].forEach(l => { l.h = nodeH(l); });
+  const colH = list => list.length ? list.reduce((n, l) => n + l.h, 0) + (list.length - 1) * NG : 0;
+  const inner = Math.max(CH, colH(L), colH(R));
   const H = TOP + inner + 20;
   const cTop = TOP + (inner - CH) / 2;
-  const place = list => { let y = TOP + (inner - colH(list.length)) / 2; list.forEach(n => { n.y = y; y += NH + NG; }); };
+  const place = list => { let y = TOP + (inner - colH(list)) / 2; list.forEach(n => { n.y = y; y += n.h + NG; }); };
   place(L); place(R);
   const rowY = new Map(rows.filter(r => r.id).map(r => [r.id, cTop + r.y + RH[r.kind] / 2]));
 
@@ -256,19 +283,22 @@ function renderAppTopology() {
     for (const [ip, h] of Object.entries(l.targets)) { const rid = rowOfEndpoint(ip); if (rid) agg.set(rid, (agg.get(rid) ?? 0) + h); }
     for (const [rid, h] of agg) {
       const ry = rowY.get(rid); if (ry == null) continue;
-      const path = dir === "in" ? curve(X.l + LW, l.y + NH / 2, X.c, ry) : curve(X.c + CW, ry, X.r, l.y + NH / 2);
+      const path = dir === "in" ? curve(X.l + LW, l.y + l.h / 2, X.c, ry) : curve(X.c + CW, ry, X.r, l.y + l.h / 2);
       edges += `<path class="edge ${dir}" data-rel="${id} ${rid}" marker-end="url(#arr-${dir})" stroke-width="${sw(h)}" d="${path}"><title>${esc(l.name)} ${dir === "in" ? "→" : "←"} ${esc(rid.split(":").slice(1).join(":"))}: ${fmt(h)} hit</title></path>`;
     }
     const isSel = sel && sel.type === "link" && sel.dir === dir && sel.key === l.key;
-    const sub = l.unknown && l.key !== "__other"
+    const sub = l.segView ? `${fmt(new Set(l.peers.map(p => p.ip)).size)} IP · ${l.nVip} VIP · ${l.nApp} uygulama · ${portsTxt(l.ports)}`
+      : l.unknown && l.key !== "__other"
       ? `envanterde yok · ${fmt(l.peers.length)} IP · ${portsTxt(l.ports)}`
       : `${fmt(l.peers.length)} sunucu · ${portsTxt(l.ports)}${l.viaVips?.length ? " · VIP" : ""}`;
-    nodes += `<g class="srv ${dir}${l.unknown ? " more" : ""}${l.infra ? " nohit" : ""}${isSel ? " sel" : ""}" data-id="${id}" data-link="${dir}|${esc(l.key)}" transform="translate(${x},${l.y})">
-      <title>${esc(l.name)}\n${esc(l.peers.slice(0, 20).map(p => p.ip).join(", "))}\n${fmt(l.hits)} hit</title>
-      <rect width="${w}" height="${NH}" rx="8"></rect>
+    nodes += `<g class="srv ${dir}${l.unknown && !l.segView ? " more" : ""}${l.infra ? " nohit" : ""}${isSel ? " sel" : ""}" data-id="${id}" data-link="${dir}|${esc(l.key)}" transform="translate(${x},${l.y})">
+      <title>${esc(l.name)}${l.lines?.length ? "\n" + esc(l.lines.join("\n")) : ""}\n${esc(l.peers.slice(0, 20).map(p => p.ip).join(", "))}\n${fmt(l.hits)} hit</title>
+      <rect width="${w}" height="${l.h}" rx="8"></rect>
       <text class="t1" x="10" y="20" style="font-family:inherit">${esc(trunc(l.name, 30))}</text>
       <text class="num" x="${w - 10}" y="20" text-anchor="end">${fmt(l.hits)}</text>
       <text class="t3" x="10" y="40">${esc(trunc(sub, 44))}${l.infra ? " · altyapı" : ""}</text>
+      ${(l.lines ?? []).slice(0, MAXLINES).map((t, k) => `<text class="t3" x="10" y="${NH + 6 + k * LH}" style="${t.startsWith("VIP") ? "fill:var(--vip);" : ""}font-family:inherit">${esc(trunc(t, 46))}</text>`).join("")}
+      ${l.lines?.length > MAXLINES ? `<text class="t3" x="10" y="${NH + 6 + MAXLINES * LH}">+${l.lines.length - MAXLINES} daha</text>` : ""}
     </g>`;
   });
   drawSide(L, "in"); drawSide(R, "out");
