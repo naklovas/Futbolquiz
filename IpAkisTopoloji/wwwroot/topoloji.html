@@ -1151,7 +1151,7 @@ function journeyGroups(b) {
   const nameOf = n => n.kind === "dis" ? "Dış IP'ler (internet)" : n.kind === "vip" ? `VIP ${n.ip}:${n.port ?? ""}`
     : n.apps.length ? [...n.apps].sort().join(" + ") : `${n.segment ? n.segment.label : "Segment ?"} · uygulaması bilinmeyen`;
   const groups = new Map(), byNode = new Map();
-  for (const n of b.nodes.filter(n => n.kind === "dis" || envSegAllowed(n.segment))) {
+  for (const n of b.nodes.filter(n => n.level === 0 || n.kind === "dis" || envSegAllowed(n.segment))) {
     // Ortak hizmet (SiteScope, Redis, Splunk…): hangi durakta görülürse görülsün tek kutu (sütunlar dışında, altta)
     const ortak = n.ortak && n.level !== 0;
     const k = ortak ? `o|${n.ortak}` : `${n.level}|${keyOf(n)}`;
