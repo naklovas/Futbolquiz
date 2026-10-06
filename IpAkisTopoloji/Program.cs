@@ -206,7 +206,7 @@ app.MapGet("/api/oturum", async (string? ip, string? start, string? end, int? ap
 
 // Uçtan uca yolculuk: sorgulanan sunucudan geriye (dış IP'ler) ve ileriye (DB) durak durak oturum eşleştirmesi.
 // Her seviye ayrı veri çekimi olduğu için aralık kısa tutulur (Yolculuk:Dakika, varsayılan 5).
-app.MapGet("/api/yolculuk", async (string? ip, string? start, string? end, int? appliance, string? sources,
+app.MapGet("/api/yolculuk", async (string? ip, string? start, string? end, int? appliance, string? sources, bool? dis,
     IConfiguration cfg, IHttpClientFactory factory, EnvanterService envanter, CancellationToken ct) =>
 {
     if (!LookupQuery.TryParse(ip, start, end, cfg.GetValue("MaxRangeHours", 24), out var q, out var error))
@@ -218,7 +218,7 @@ app.MapGet("/api/yolculuk", async (string? ip, string? start, string? end, int? 
     try
     {
         return Results.Ok(await Yolculuk.RunAsync(q, appliance ?? -1, wanted.Contains("appresponse"), wanted.Contains("firewall"), cfg,
-            factory.CreateClient("appresponse"), factory.CreateClient("splunk"), env, ct));
+            factory.CreateClient("appresponse"), factory.CreateClient("splunk"), env, ct, dis == true));
     }
     catch (OperationCanceledException) when (ct.IsCancellationRequested)
     {

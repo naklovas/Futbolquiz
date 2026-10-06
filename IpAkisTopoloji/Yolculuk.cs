@@ -5,7 +5,10 @@
 //    Hedef VIP ise: VIP düğümü, sonra havuz üyeleri; üyelerde yalnızca LB GW'den gelen oturumlar sayılır.
 //  - Geri: X'in SONRAKİ durağa giden oturumları hangi kaynaklardan geldi → önceki durak.
 //    Kaynak LB GW ise: sunucunun VIP'i, sonra VIP'e gelenler (Firewall NAT'ı çözülmüş hedefle).
-//  - Özel (10/8, 172.16/12, 192.168/16) olmayan IP "dış" sayılır, orada durulur.
+//  - Özel (10/8, 172.16/12, 192.168/16) olmayan IP, envanterde segmenti / uygulaması da yoksa "dış" sayılır, orada durulur
+//    (kurum içinde kullanılan genel adresli bloklar — ör. VIP'ler — segment tablosunda olduğu için iç sayılır).
+//  - Dıştan içe (dis=true): geri yönde daha geniş (Yolculuk:DisDallanma) ve derin (Yolculuk:DisGeri) aranır, dış kaynaklar
+//    öne alınır, sonunda geri tarafta yalnızca bir dış IP'den başlayan yollar bırakılır.
 //  - Oran, hedefe giden oturumların "bir yere giden" oturumlara oranıdır: health check / izleme gibi hiçbir yere
 //    gitmeyen kısa oturumlar paydayı şişirmez. Hedefler önce bu orana, sonra ağırlığa göre seçilir.
 //  - VIP durak sayısını (Ileri) tüketmez: kök → VIP → üye tek durak sayılır.
@@ -32,7 +35,7 @@ static class Yolculuk
     }
 
     public static async Task<YolculukSonuc> RunAsync(LookupQuery q, int appliance, bool useAr, bool useFw, IConfiguration cfg,
-        HttpClient arHttp, HttpClient spHttp, EnvanterSnapshot? env, CancellationToken ct)
+        HttpClient arHttp, HttpClient spHttp, EnvanterSnapshot? env, CancellationToken ct, bool disOnly = false)
     {
         var sw = System.Diagnostics.Stopwatch.StartNew();
         int up = cfg.GetValue("Yolculuk:Geri", 3), down = cfg.GetValue("Yolculuk:Ileri", 3), K = cfg.GetValue("Yolculuk:Dallanma", 6);
@@ -91,7 +94,14 @@ static class Yolculuk
             edges[(from, to)] = e == null ? new JEdge(from, to, w, exact, oran, havuz)
                 : e with { W = e.W + w, Exact = e.Exact + exact, Oran = e.Oran == null || oran == null ? e.Oran ?? oran : Math.Min(1, e.Oran.Value + oran.Value) };
         }
-        string Kind(string ip) => !IsPrivate(ip) ? "dis" : "host";
+        bool Internal(string ip)
+        {
+            if (IsPrivate(ip) || env == null) return IsPrivate(ip);
+            if (env.AppNamesOnIp(ip).Count > 0 || env.IsVipGw(ip, out _)) return true;
+            var seg = env.FindSegment(ip);
+            return seg != null && int.TryParse(seg.Cidr.Split('/').ElementAtOrDefault(1), out int len) && len >= 8;
+        }
+        string Kind(string ip) => Internal(ip) ? "host" : "dis";
 
         string target = q.Ip;
         await Ensure([target]);
@@ -159,7 +169,10 @@ static class Yolculuk
             level = next;
         }
 
-        // ---- geri (dış IP yönü)
+        // ---- geri (dış IP yönü). VIP durak sayısını (Geri) tüketmez.
+        int upB = disOnly ? cfg.GetValue("Yolculuk:DisGeri", 6) : up;
+        int Kb = disOnly ? cfg.GetValue("Yolculuk:DisDallanma", 15) : K;
+        int levelMax = cfg.GetValue("Yolculuk:SeviyeMax", 60);
         level = [new(root, target, "host", 0, null, null, null, null)];
         for (int guard = 0; guard < 12 && level.Count > 0; guard++)
         {
@@ -190,8 +203,10 @@ static class Yolculuk
                     foreach (var g in srcFlows.GroupBy(f => f.Cip)) src[g.Key] = (g.Count(), g.GroupBy(f => f.Sport).OrderByDescending(x => x.Count()).First().Key);
                 }
                 if (total == 0) continue;
-                var ranked = src.OrderByDescending(x => x.Value.n).Select(x => (x, ortak: OrtakIp(x.Key, null) != null)).ToList();
-                foreach (var ((sip, (n, port)), ortak) in ranked.Where(r => !r.ortak).Take(K).Concat(ranked.Where(r => r.ortak).Take(K)))
+                // Dıştan içe modunda dış kaynaklar öne alınır, ortak hizmetler (izleme vb.) dışarıya götürmeyeceği için atlanır
+                var ranked = src.OrderBy(x => disOnly && Kind(x.Key) == "dis" ? 0 : 1).ThenByDescending(x => x.Value.n)
+                    .Select(x => (x, ortak: OrtakIp(x.Key, null) != null)).ToList();
+                foreach (var ((sip, (n, port)), ortak) in ranked.Where(r => !r.ortak).Take(Kb).Concat(ranked.Where(r => r.ortak && !disOnly).Take(K)))
                 {
                     double oran = Math.Round((double)n / total, 3);
                     if (env != null && it.Kind == "host" && env.IsVipGw(sip, out _))
@@ -203,17 +218,34 @@ static class Yolculuk
                         {
                             string vid = Node(it.Level - 1, v.LbIp, "vip", v.LbPort);
                             Edge(vid, it.Id, n, 0, oran);
-                            next.Add(new(vid, v.LbIp, "vip", it.Level - 1, null, null, null, v.LbPort));
+                            next.Add(new(vid, v.LbIp, "vip", it.Level - 1, null, null, null, v.LbPort, it.Hops));
                         }
                         continue;
                     }
                     string kind = Kind(sip);
                     string id = Node(it.Level - 1, sip, kind, null);
                     Edge(id, it.Id, n, 0, oran);
-                    if (kind == "host" && !ortak && it.Level - 1 > -up) next.Add(new(id, sip, "host", it.Level - 1, null, [it.Ip], null, null));
+                    if (kind == "host" && !ortak && it.Hops + 1 < upB) next.Add(new(id, sip, "host", it.Level - 1, null, [it.Ip], null, null, it.Hops + 1));
                 }
             }
-            level = next.DistinctBy(i => i.Id).ToList();
+            level = next.DistinctBy(i => i.Id).Take(levelMax).ToList();
+        }
+
+        // Dıştan içe: geri tarafta yalnızca bir dış IP'den başlayıp sorgulanan sunucuya ulaşan yollar kalır
+        if (disOnly)
+        {
+            var keep = nodes.Values.Where(n => n.Level < 0 && n.Kind == "dis").Select(n => n.Id).ToHashSet();
+            for (bool changed = true; changed;)
+            {
+                changed = false;
+                foreach (var e in edges.Values)
+                    if (keep.Contains(e.From) && nodes[e.To].Level < 0 && keep.Add(e.To)) changed = true;
+            }
+            foreach (var id in nodes.Values.Where(n => n.Level < 0 && !keep.Contains(n.Id)).Select(n => n.Id).ToList()) nodes.Remove(id);
+            if (keep.Count == 0)
+                msgs.Add($"Dıştan içe: {upB} durak içinde dış IP'den (internet) bu sunucuya gelen bir yol bulunamadı. Sunucu internete açık bir " +
+                    "uygulamanın arkasında olmayabilir ya da giriş, bu zaman aralığında trafiği olmayan bir yoldan geliyor olabilir. " +
+                    "İnternete açık ön yüz sunucusunu (DMZ / API Gateway) sorgulayıp ileri yöndeki yolculuğa bakın.");
         }
 
         if (useAr) sources.Add($"AppResponse {arCount:N0}");
