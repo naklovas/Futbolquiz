@@ -114,6 +114,11 @@
   .proc-svg .pe { fill: none; opacity: .6; }
   .proc-svg .pe.in { stroke: var(--in); } .proc-svg .pe.out { stroke: var(--out); }
   .proc-svg .pe.pool { stroke-dasharray: 6 4; }
+  #jourSvg.hl .pe.on { stroke-dasharray: 10 6; animation: jflow .8s linear infinite; }
+  @keyframes jflow { from { stroke-dashoffset: 16; } to { stroke-dashoffset: 0; } }
+  .jdir { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 0 0 8px; font-size: 13px; }
+  .jdir .jarrow { padding: 1px 10px; border-radius: 10px; color: #fff; font-size: 12px; }
+  .jdir .jarrow.in { background: var(--in); } .jdir .jarrow.out { background: var(--out); }
   .proc-svg .pn.shared rect { stroke: var(--muted); stroke-dasharray: 3 3; }
   .proc-svg .sep { stroke: var(--line); stroke-dasharray: 4 4; }
   .proc-svg.hl .pe { opacity: .06; } .proc-svg.hl .pe.on { opacity: .95; }
@@ -1198,6 +1203,8 @@ function renderJourney(el, tabs) {
   const maxW = Math.max(1, ...links.map(l => l.w));
   const sw = w => (1.5 + 9 * Math.log(1 + w) / Math.log(1 + maxW)).toFixed(1);
   const colTitle = l => l === 0 ? "SORGULANAN" : l < 0 ? `${-l}. DURAK ÖNCESİ` : `${l}. DURAK SONRASI`;
+  const defs = `<defs>${["in", "out"].map(k => `<marker id="jarr-${k}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="11" markerHeight="11" markerUnits="userSpaceOnUse" orient="auto">
+    <path d="M0,0 L10,5 L0,10 z" style="fill:var(--${k})"/></marker>`).join("")}</defs>`;
 
   let edges = "", nodes = "";
   const sharedKeys = new Set(shared.map(g => g.k));
@@ -1208,7 +1215,9 @@ function renderJourney(el, tabs) {
     const y1 = A.y + boxH(ga) / 2, y2 = C.y + boxH(gc) / 2, x1 = A.x + BW, x2 = C.x, mx = (x1 + x2) / 2;
     const tip = l.havuz ? `${fmt(Math.round(l.w))} havuz bağlantısı (önceden açık DB bağlantısı; istek anında açılmadığı için oturumla eşleşmez)`
       : `${fmt(Math.round(l.w))} oturum${l.oran ? ` (${pct(l.oran)})` : ""}`;
-    edges += `<path class="pe out${l.havuz ? " pool" : ""}" data-a="${esc(l.a)}" data-c="${esc(l.c)}" stroke-width="${l.havuz ? 2 : sw(l.w)}" d="M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}"><title>${esc(ga.name)} → ${esc(gc.name)}: ${tip}</title></path>`;
+    // Yön: soldan sağa = isteğin gidişi. Sorgulanana gelen taraf mavi, sorgulanandan giden taraf turuncu; uçta ok.
+    const side = gc.level <= 0 ? "in" : "out";
+    edges += `<path class="pe ${side}${l.havuz ? " pool" : ""}" data-a="${esc(l.a)}" data-c="${esc(l.c)}" stroke-width="${l.havuz ? 2 : sw(l.w)}" marker-end="url(#jarr-${side})" d="M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2 - 2},${y2}"><title>${esc(ga.name)} → ${esc(gc.name)}: ${tip}</title></path>`;
   }
   for (const g of [...groups, ...shared]) {
     const P = pos.get(g.k), cls = g.root ? "proc" : g.ortak ? "shared" : g.level < 0 ? "in" : "out";
@@ -1224,8 +1233,10 @@ function renderJourney(el, tabs) {
     + (shared.length ? `<line x1="0" x2="${W}" y1="${sharedTop}" y2="${sharedTop}" class="sep"/><text class="colhead" x="0" y="${sharedTop + 14}">ORTAK HİZMETLER (izleme, önbellek, log — hangi durakta görülürse görülsün tek kutu; üstüne gelince bağlı kutular yanar)</text>` : "");
   el.innerHTML = head + `<div class="status" style="margin-bottom:8px"><span class="pill">${esc(b.kaynaklar)} · ${esc(b.pencere)}</span>
       <span class="pill">${fmt(groups.length)} durak · ${(b.sureMs / 1000).toFixed(1)} sn</span></div>
+    <div class="jdir"><span><b>${state.jourDis ? "İnternet" : "İstemciler"}</b> (sol)</span><span class="jarrow in">istek gelir ▶</span><b>Sorgulanan</b><span class="jarrow out">istek gider ▶</span><span><b>Arka uç / DB</b> (sağ)</span>
+      <span class="muted small">Oklar isteğin yönünü gösterir (bağlantıyı açan → karşılayan). Bir kutunun üstüne gelince geçtiği yol akarak gösterilir.</span></div>
     ${b.mesajlar.length ? `<div class="msgs">${esc(b.mesajlar.join("\n"))}</div>` : ""}
-    <div class="topo-wrap"><svg class="proc-svg" id="jourSvg" viewBox="0 0 ${W} ${H}" width="100%" style="min-width:${Math.min(W, 1100)}px">${heads}${edges}${nodes}</svg></div>`;
+    <div class="topo-wrap"><svg class="proc-svg" id="jourSvg" viewBox="0 0 ${W} ${H}" width="100%" style="min-width:${Math.min(W, 1100)}px">${defs}${heads}${edges}${nodes}</svg></div>`;
 
   // Bir kutunun üstüne gelince ondan geçen tüm yol (geriye ve ileriye) vurgulanır.
   const svg = $("#jourSvg");
