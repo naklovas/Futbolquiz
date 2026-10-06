@@ -100,6 +100,7 @@
   .modal-head { display: flex; justify-content: space-between; align-items: center; padding: 10px 16px; border-bottom: 1px solid var(--line); font-size: 15px; }
   .modal-body { overflow: auto; padding: 12px 16px; flex: 1; }
   .modal-body .topo-wrap { max-height: none; }
+  .flow-zoom { margin-bottom: 6px; align-items: center; }
   .proc-svg .mono { font-family: Consolas, ui-monospace, monospace; }
   .proc-svg .pn rect { fill: var(--panel); stroke: var(--line); stroke-width: 1.5; }
   .proc-svg .pn.in rect { stroke: var(--in); } .proc-svg .pn.out rect { stroke: var(--out); }
@@ -965,6 +966,40 @@ function renderProc() {
       <button type="button" data-ptab="surec" class="${tab === "surec" ? "on" : ""}">Süreçler (Carbon Black)</button></div>`;
   if (tab === "yolculuk") renderJourney(el, tabs); else if (tab === "oturum") renderSess(el, tabs); else renderSurec(el, tabs);
   el.querySelectorAll("[data-ptab]").forEach(b => b.addEventListener("click", () => { state.procTab = b.dataset.ptab; ensureFlowData(); renderProc(); }));
+  flowZoom(el, tab);
+}
+
+// Modal grafiği: yaklaştır / uzaklaştır / sığdır. Ölçek sekme başına saklanır (yeniden çizimde korunur);
+// null = genişliğe yay (varsayılan). Grafik alanı modalın kalan yüksekliğini kaplar, kendi içinde kayar. Ctrl + tekerlek de çalışır.
+function flowZoom(el, tab) {
+  const svg = el.querySelector("svg.proc-svg"), wrap = svg?.closest(".topo-wrap");
+  if (!svg || !wrap) return;
+  const [, , W, H] = svg.getAttribute("viewBox").split(/\s+/).map(Number);
+  const bar = document.createElement("div");
+  bar.className = "zoom flow-zoom";
+  bar.innerHTML = `<button type="button" data-fz="-" title="Uzaklaş">−</button><button type="button" data-fz="fit" title="Grafiğin tamamını ekrana sığdır">Sığdır</button>
+    <button type="button" data-fz="+" title="Yakınlaş">+</button><button type="button" data-fz="w" title="Genişliğe yay (varsayılan)">Genişlik</button><span class="small muted" id="fzPct"></span>`;
+  wrap.before(bar);
+  const fitWrap = () => { wrap.style.height = Math.max(240, el.getBoundingClientRect().bottom - wrap.getBoundingClientRect().top - 14) + "px"; };
+  fitWrap();
+  state.flowZoom ??= {};
+  const apply = () => {
+    const z = state.flowZoom[tab];
+    if (z == null) { svg.setAttribute("width", "100%"); svg.removeAttribute("height"); svg.style.width = ""; }
+    else { svg.style.minWidth = "0"; svg.setAttribute("width", Math.round(W * z)); svg.setAttribute("height", Math.round(H * z)); }
+    $("#fzPct").textContent = z == null ? "" : `%${Math.round(z * 100)}`;
+  };
+  const current = () => state.flowZoom[tab] ?? svg.getBoundingClientRect().width / W;
+  const set = z => { state.flowZoom[tab] = Math.min(4, Math.max(0.1, z)); apply(); };
+  bar.querySelectorAll("[data-fz]").forEach(b => b.addEventListener("click", () => {
+    const k = b.dataset.fz;
+    if (k === "w") { state.flowZoom[tab] = null; renderProc(); return; }
+    if (k === "fit") set(Math.min((wrap.clientWidth - 4) / W, (wrap.clientHeight - 4) / H));
+    else set(current() * (k === "+" ? 1.25 : 0.8));
+    if (k === "fit") wrap.scrollTo(0, 0);
+  }));
+  wrap.addEventListener("wheel", ev => { if (!ev.ctrlKey) return; ev.preventDefault(); set(current() * (ev.deltaY < 0 ? 1.1 : 0.9)); }, { passive: false });
+  apply();
 }
 
 // Modal: açılınca seçili sekmenin verisi (henüz yoksa) çekilir; sorgu her yeni IP sorgusunda sıfırlanır.
@@ -987,8 +1022,7 @@ function ensureFlowData() {
   if (tab === "surec" && !state.proc && $("#srcSplunk").checked) runProc(state.lastParams);
 }
 $("#flowModalClose").addEventListener("click", closeFlow);
-$("#flowModal").addEventListener("click", ev => { if (ev.target.id === "flowModal") closeFlow(); });
-document.addEventListener("keydown", ev => { if (ev.key === "Escape" && !$("#flowModal").hidden) closeFlow(); });
+// Modal yalnızca Kapat düğmesiyle kapanır (arka plana tıklama / Esc kapatmaz: uzun sorgu sonucu yanlışlıkla kaybolmasın).
 
 function renderSurec(el, tabs) {
   const pr = state.proc;
