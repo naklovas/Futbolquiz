@@ -1167,7 +1167,22 @@ function journeyGroups(b) {
     const l = links.get(`${a}>${c}`) ?? links.set(`${a}>${c}`, { a, c, w: 0, oran: 0, havuz: true, envanter: true }).get(`${a}>${c}`);
     l.w += e.w; l.oran = Math.min(1, l.oran + (e.oran ?? 0)); l.havuz &&= !!e.havuz; l.envanter &&= !!e.envanter;
   }
-  return { groups: [...groups.values()], links: [...links.values()] };
+  // Sorgulanana bir yolla bağlı olmayan kutular gizlenir: bağlandığı kutu ODM/TEST filtresiyle gizlenmiş ya da yalnızca
+  // ortak hizmet üzerinden bağlıysa ortada sahipsiz kalıyordu. Ortak hizmetler yol taşımaz, yalnızca bağlı kutusu kalırsa görünür.
+  const shared = new Set([...groups.values()].filter(g => g.ortak).map(g => g.k));
+  const rootKeys = [...groups.values()].filter(g => g.root).map(g => g.k);
+  const seen = new Set(rootKeys), queue = [...rootKeys];
+  while (queue.length) {
+    const k = queue.pop();
+    for (const l of links.values()) {
+      const o = l.a === k ? l.c : l.c === k ? l.a : null;
+      if (o && !seen.has(o) && !shared.has(o)) { seen.add(o); queue.push(o); }
+    }
+  }
+  const all = [...links.values()];
+  for (const k of shared) if (all.some(l => (l.a === k && seen.has(l.c)) || (l.c === k && seen.has(l.a)))) seen.add(k);
+  const hidden = [...groups.values()].filter(g => !seen.has(g.k)).length;
+  return { groups: [...groups.values()].filter(g => seen.has(g.k)), links: all.filter(l => seen.has(l.a) && seen.has(l.c)), hidden };
 }
 
 function renderJourney(el, tabs) {
@@ -1181,7 +1196,7 @@ function renderJourney(el, tabs) {
   if (js.status === "loading") { el.innerHTML = head + `<div class="muted"><span class="spinner"></span> Duraklar sırayla sorgulanıyor (her seviye ayrı sorgu, en fazla son 5 dk; 1-3 dakika sürebilir)…</div>`; return; }
   if (js.status === "error") { el.innerHTML = head + `<div style="color:var(--err)">${esc(js.error)}</div>`; return; }
 
-  const b = js.body, { groups: allGroups, links } = journeyGroups(b);
+  const b = js.body, { groups: allGroups, links, hidden } = journeyGroups(b);
   const groups = allGroups.filter(g => !g.ortak), shared = allGroups.filter(g => g.ortak);
   const levels = [...new Set(groups.map(g => g.level))].sort((x, y) => x - y);
   const BW = 250, GX = 80, LINE = 14, MAXL = 5, GAP = 14;
@@ -1238,6 +1253,7 @@ function renderJourney(el, tabs) {
     <div class="jdir"><span><b>${state.jourDis ? "İnternet" : "İstemciler"}</b> (sol)</span><span class="jarrow in">istek gelir ▶</span><b>Sorgulanan</b><span class="jarrow out">istek gider ▶</span><span><b>Arka uç / DB</b> (sağ)</span>
       <span class="muted small">Oklar isteğin yönünü gösterir (bağlantıyı açan → karşılayan). Bir kutunun üstüne gelince geçtiği yol akarak gösterilir.</span></div>
     ${b.mesajlar.length ? `<div class="msgs">${esc(b.mesajlar.join("\n"))}</div>` : ""}
+    ${hidden ? `<div class="small muted" style="margin-bottom:6px">${hidden} kutu sorgulanan sunucuya bağlanan yolu ODM/TEST filtresiyle gizlendiği için gösterilmedi.</div>` : ""}
     <div class="topo-wrap"><svg class="proc-svg" id="jourSvg" viewBox="0 0 ${W} ${H}" width="100%" style="min-width:${Math.min(W, 1100)}px">${defs}${heads}${edges}${nodes}</svg></div>`;
 
   // Bir kutunun üstüne gelince ondan geçen tüm yol (geriye ve ileriye) vurgulanır.
