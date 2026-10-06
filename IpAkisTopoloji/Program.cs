@@ -668,7 +668,24 @@ static class SplunkService
 
     // Splunk export API'sine bir SPL gönderir; NDJSON yanıtın "result" satırlarını ve uyarılarını döndürür.
     // Firewall (Palo Alto) sorgusu da aynı Splunk bağlantısını kullanır.
+    // Bağlantı veri akarken koparsa (TLS "The decryption operation failed", connection reset — genelde aradaki cihazın
+    // zaman aşımı) hiç satır gelmemişse istek bir kez tekrarlanır; satır gelmişse eldekiyle devam edilir ve uyarı yazılır.
     public static async Task<SplunkResult> ExportAsync(string spl, LookupQuery q, IConfiguration cfg, HttpClient http,
+        CancellationToken ct, string label)
+    {
+        try { return await ExportOnceAsync(spl, q, cfg, http, ct, label); }
+        catch (Exception ex) when (!ct.IsCancellationRequested && IsTransportError(ex))
+        {
+            var r = await ExportOnceAsync(spl, q, cfg, http, ct, label);
+            r.Messages.Insert(0, $"WARN: {label} bağlantısı ilk denemede koptu ({ex.Message}), tekrar denendi.");
+            return r;
+        }
+    }
+
+    static bool IsTransportError(Exception ex) =>
+        ex is IOException || (ex is HttpRequestException h && h.StatusCode == null && h.InnerException is IOException or System.Net.Sockets.SocketException);
+
+    static async Task<SplunkResult> ExportOnceAsync(string spl, LookupQuery q, IConfiguration cfg, HttpClient http,
         CancellationToken ct, string label)
     {
         var s = cfg.GetSection("Splunk");
@@ -713,8 +730,15 @@ static class SplunkService
         // Export endpoint'i her satırda ayrı bir JSON nesnesi döner.
         using var reader = new StreamReader(await resp.Content.ReadAsStreamAsync(ct));
         string? line;
-        while ((line = await reader.ReadLineAsync(ct)) != null)
+        while (true)
         {
+            try { line = await reader.ReadLineAsync(ct); }
+            catch (IOException ex) when (rows.Count > 0 && !ct.IsCancellationRequested)
+            {
+                messages.Add($"WARN: {label} bağlantısı veri akarken koptu ({ex.Message}); {rows.Count:N0} satır alındı, sonuç eksik olabilir. Aralığı kısaltmayı deneyin.");
+                break;
+            }
+            if (line == null) break;
             if (string.IsNullOrWhiteSpace(line)) continue;
 
             JsonNode? node;
