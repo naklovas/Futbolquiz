@@ -9,7 +9,7 @@
 let uiMode = "ip";
 const appState = {
   raw: null, data: null, catalog: null, selected: null, expand: new Set(), topN: 12,
-  show: { callers: true, deps: true, internal: true, infra: false, segView: false }
+  show: { callers: true, deps: true, internal: true, infra: false, segView: true }
 };
 
 // ---------- Sekmeler ----------
@@ -78,7 +78,8 @@ const linkVisible = l => (appState.show.infra || !l.infra) && (!l.env || !!envSh
 // Uygulama kutusunun ortada hangi satıra bağlanacağı: VIP satırı, açık segmentte sunucu satırı ya da segment grubu.
 function rowOfEndpoint(ip) {
   const d = appState.data;
-  if (d.vips.some(v => v.ip === ip)) return "vip:" + ip;
+  const v = d.vips.find(v => v.ip === ip);
+  if (v) return appState.show.segView ? "seg:" + (segLabel(v.segment) ?? "Segment envanterinde yok") : "vip:" + ip;
   const s = d.servers.find(x => x.ip === ip);
   if (!s) return null;
   const g = segLabel(s.segment) ?? "Segment envanterinde yok";
@@ -191,7 +192,7 @@ function renderApp() {
           <label><input type="checkbox" data-show="deps" ${appState.show.deps ? "checked" : ""}> Bağımlılıklar</label>
           <label><input type="checkbox" data-show="internal" ${appState.show.internal ? "checked" : ""}> İç trafik</label>
           <label title="DNS, AD, NTP, izleme, RDP/SSH gibi altyapı trafiği"><input type="checkbox" data-show="infra" ${appState.show.infra ? "checked" : ""}> Altyapı (${infraCount})</label>
-          <label title="Kullananlar ve bağımlılıklar segment bazında tek kutu; kutunun içinde o segmentteki VIP'ler ve uygulamalar"><input type="checkbox" data-show="segView" ${appState.show.segView ? "checked" : ""}> Yalnızca segmentler</label>
+          <label title="Kullananlar, bağımlılıklar ve uygulamanın kendi VIP/sunucuları segment bazında tek kutu; kutunun içinde o segmentteki VIP'ler ve uygulamalar. İşareti kaldırınca tümü ayrı ayrı görünür"><input type="checkbox" data-show="segView" ${appState.show.segView ? "checked" : ""}> Yalnızca segmentler</label>
         </div>
         ${envToggleHtml(appEnvCounts(appState.raw))}
         <label style="flex-direction:row;align-items:center;gap:6px">Grup sayısı
@@ -238,25 +239,33 @@ function renderAppTopology() {
   const R = appState.show.deps ? sideLinks(d.deps) : [];
 
   // Ortadaki satırlar: VIP'ler, sonra segment grupları (açıksa altında sunucular)
+  // Segment görünümünde VIP'ler de kendi segmentlerinin kutusuna girer (kutunun içinde adıyla listelenir).
+  const segView = appState.show.segView;
   const segGroups = new Map();
-  for (const s of d.servers) {
-    const g = segLabel(s.segment) ?? "Segment envanterinde yok";
-    if (!segGroups.has(g)) segGroups.set(g, { name: g, seg: s.segment, servers: [] });
-    segGroups.get(g).servers.push(s);
-  }
+  const groupOf = (seg) => {
+    const g = segLabel(seg) ?? "Segment envanterinde yok";
+    if (!segGroups.has(g)) segGroups.set(g, { name: g, seg, servers: [], vips: [] });
+    return segGroups.get(g);
+  };
+  for (const s of d.servers) groupOf(s.segment).servers.push(s);
+  if (segView) d.vips.forEach(v => groupOf(v.segment).vips.push(v));
   const rows = [];
-  if (d.vips.length) rows.push({ kind: "title", text: `VIP'LER (${d.vips.length})` });
-  d.vips.forEach(v => rows.push({ kind: "vip", id: "vip:" + v.ip, v }));
-  rows.push({ kind: "title", text: `SUNUCULAR (${d.servers.length})` });
+  if (!segView) {
+    if (d.vips.length) rows.push({ kind: "title", text: `VIP'LER (${d.vips.length})` });
+    d.vips.forEach(v => rows.push({ kind: "vip", id: "vip:" + v.ip, v }));
+  }
+  rows.push({ kind: "title", text: segView ? `SEGMENTLER (${segGroups.size}) · ${d.vips.length} VIP, ${d.servers.length} sunucu` : `SUNUCULAR (${d.servers.length})` });
+  const SEGL = 6;
   for (const g of segGroups.values()) {
-    rows.push({ kind: "seg", id: "seg:" + g.name, g });
+    g.lines = g.vips.map(v => `VIP ${v.ip}${v.port ? ":" + v.port : ""} · ${(v.pool ?? "").split("/").pop() || "havuz ?"} · ${v.members.length} üye`);
+    rows.push({ kind: "seg", id: "seg:" + g.name, g, h: 44 + (g.lines.length ? Math.min(g.lines.length, SEGL) * 14 + (g.lines.length > SEGL ? 14 : 0) + 4 : 0) });
     if (appState.expand.has(g.name)) g.servers.forEach(s => rows.push({ kind: "srv", id: "srv:" + s.ip, s }));
   }
 
   const TOP = 40, NH = 52, NG = 10, RH = { title: 24, vip: 44, seg: 44, srv: 30 }, HEAD = 58;
   const X = { l: 12, c: 440, r: 1030 }, LW = 300, CW = 440, RW = 300, W = X.r + RW + 12, GUT = 26;
   let cy = HEAD;
-  rows.forEach(r => { r.y = cy; cy += RH[r.kind] + (r.kind === "title" ? 0 : 6); });
+  rows.forEach(r => { r.h ??= RH[r.kind]; r.y = cy; cy += r.h + (r.kind === "title" ? 0 : 6); });
   const CH = cy + 8;
   const MAXLINES = 6, LH = 14;
   const nodeH = l => NH + (l.lines?.length ? Math.min(l.lines.length, MAXLINES) * LH + (l.lines.length > MAXLINES ? LH : 0) + 4 : 0);
@@ -267,7 +276,7 @@ function renderAppTopology() {
   const cTop = TOP + (inner - CH) / 2;
   const place = list => { let y = TOP + (inner - colH(list)) / 2; list.forEach(n => { n.y = y; y += n.h + NG; }); };
   place(L); place(R);
-  const rowY = new Map(rows.filter(r => r.id).map(r => [r.id, cTop + r.y + RH[r.kind] / 2]));
+  const rowY = new Map(rows.filter(r => r.id).map(r => [r.id, cTop + r.y + Math.min(r.h, 44) / 2]));
 
   const allHits = [...L, ...R].flatMap(l => Object.values(l.targets)).concat(d.internal.map(i => i.hits), [1]);
   const maxHit = Math.max(...allHits);
@@ -310,7 +319,7 @@ function renderAppTopology() {
     <text x="${CW / 2}" y="24" text-anchor="middle" style="fill:var(--target-text);font-size:16px;font-weight:800">${esc(trunc(d.name, 40))}</text>
     <text x="${CW / 2}" y="41" text-anchor="middle" style="fill:var(--target-text);font-size:11px;opacity:.85">${esc(trunc(d.owners[0] ?? "", 56))}</text>`;
   for (const r of rows) {
-    const h = RH[r.kind];
+    const h = r.h;
     if (r.kind === "title") { box += `<text class="colhead" x="${GUT + 4}" y="${r.y + 16}">${r.text}</text>`; continue; }
     const isSel = sel && sel.type === r.kind && sel.id === r.id;
     if (r.kind === "vip") {
@@ -324,13 +333,15 @@ function renderAppTopology() {
       </g>`;
     } else if (r.kind === "seg") {
       const g = r.g, open = appState.expand.has(g.name);
-      const hin = g.servers.reduce((n, s) => n + s.inHits, 0), hout = g.servers.reduce((n, s) => n + s.outHits, 0);
+      const hin = g.servers.reduce((n, s) => n + s.inHits, 0) + (g.vips ?? []).reduce((n, v) => n + (v.hits ?? 0), 0), hout = g.servers.reduce((n, s) => n + s.outHits, 0);
       box += `<g class="srv${isSel ? " sel" : ""}" data-id="${esc(r.id)}" data-row="${esc(r.id)}" transform="translate(${GUT},${r.y})">
-        <title>${esc(g.name)}\n${g.servers.map(s => `${s.ip} ${s.hostname ?? ""}`).join("\n")}\nTıkla: sunucuları aç/kapat</title>
+        <title>${esc(g.name)}${g.lines.length ? "\n" + esc(g.lines.join("\n")) : ""}\n${g.servers.map(s => `${s.ip} ${s.hostname ?? ""}`).join("\n")}\nTıkla: sunucuları aç/kapat</title>
         <rect width="${CW - GUT - 12}" height="${h}" rx="7" style="stroke:var(--line)"></rect>
         <text class="t1" x="10" y="18" style="font-family:inherit">${open ? "▾" : "▸"} ${esc(trunc(g.name, 30))}</text>
         <text class="num" x="${CW - GUT - 22}" y="18" text-anchor="end">↓${fmt(hin)} ↑${fmt(hout)}</text>
-        <text class="t3" x="10" y="34">${esc(trunc(`${g.servers.length} sunucu${g.seg ? " · " + g.seg.cidr : ""}${g.seg?.vlan ? " · VLAN " + g.seg.vlan : ""}`, 52))}</text>
+        <text class="t3" x="10" y="34">${esc(trunc(`${g.vips.length ? g.vips.length + " VIP · " : ""}${g.servers.length} sunucu${g.seg ? " · " + g.seg.cidr : ""}${g.seg?.vlan ? " · VLAN " + g.seg.vlan : ""}`, 52))}</text>
+        ${g.lines.slice(0, SEGL).map((t, k) => `<text class="t3" x="10" y="${52 + k * 14}" style="fill:var(--vip)">${esc(trunc(t, 56))}</text>`).join("")}
+        ${g.lines.length > SEGL ? `<text class="t3" x="10" y="${52 + SEGL * 14}">+${g.lines.length - SEGL} VIP daha</text>` : ""}
       </g>`;
     } else {
       const s = r.s;
