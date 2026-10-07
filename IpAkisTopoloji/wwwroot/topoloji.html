@@ -100,6 +100,12 @@
   .modal-head { display: flex; justify-content: space-between; align-items: center; padding: 10px 16px; border-bottom: 1px solid var(--line); font-size: 15px; }
   .modal-body { overflow: auto; padding: 12px 16px; flex: 1; }
   .modal-body .topo-wrap { max-height: none; }
+  .modal.ip-pick { z-index: 60; }
+  .ip-pick-box { width: min(560px, 92vw); height: auto; max-height: 80vh; animation: pickIn .15s ease-out; }
+  @keyframes pickIn { from { transform: scale(.85); opacity: 0; } to { transform: none; opacity: 1; } }
+  #ipPickList a { display: flex; justify-content: space-between; gap: 12px; padding: 7px 10px; border: 1px solid var(--line); border-radius: 6px; margin-bottom: 6px; text-decoration: none; color: var(--text); }
+  #ipPickList a:hover { border-color: var(--in); background: var(--in-soft); }
+  #ipPickList .mono { font-family: Consolas, ui-monospace, monospace; font-weight: 700; }
   .flow-zoom { margin-bottom: 6px; align-items: center; }
   .proc-svg .mono { font-family: Consolas, ui-monospace, monospace; }
   .proc-svg .pn rect { fill: var(--panel); stroke: var(--line); stroke-width: 1.5; }
@@ -215,9 +221,15 @@
   </form>
 </header>
 
+<div class="modal ip-pick" id="ipPick" hidden>
+  <div class="modal-box ip-pick-box" role="dialog" aria-modal="true" aria-labelledby="ipPickTitle">
+    <div class="modal-head"><b id="ipPickTitle"></b><button type="button" id="ipPickClose">✕ Kapat</button></div>
+    <div class="modal-body"><div class="small muted" style="margin-bottom:8px">Bir IP'ye tıklayınca topolojisi yeni sekmede açılır.</div><div id="ipPickList"></div></div>
+  </div>
+</div>
 <div class="modal" id="flowModal" hidden>
   <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="flowModalTitle">
-    <div class="modal-head"><b id="flowModalTitle">Sunucu içi akış</b><button type="button" id="flowModalClose">✕ Kapat</button></div>
+    <div class="modal-head"><b id="flowModalTitle">Veri Akışı</b><button type="button" id="flowModalClose">✕ Kapat</button></div>
     <div class="modal-body" id="flowModalBody"></div>
   </div>
 </div>
@@ -980,6 +992,28 @@ function renderProc() {
   flowZoom(el, tab);
 }
 
+// Veri Akışı modalındaki kutular: tek IP'li kutuya tıklayınca o IP, çok IP'li kutuya tıklayınca IP listesi (ortada açılan
+// küçük pencere) — seçilen IP'nin topolojisi aynı zaman aralığıyla yeni sekmede açılır.
+function ipTabUrl(ip) {
+  const p = state.lastParams;
+  return "?" + new URLSearchParams({ ip, ...(p ? { start: p.get("start"), end: p.get("end") } : {}) });
+}
+function openIpTab(ip) { window.open(ipTabUrl(ip), "_blank", "noopener"); }
+function showIpPicker(title, items) {
+  $("#ipPickTitle").textContent = `${title} · ${items.length} IP`;
+  $("#ipPickList").innerHTML = items.map(it => `<a href="${esc(ipTabUrl(it.ip))}" target="_blank" rel="noopener">
+    <span class="mono">${esc(it.ip)}</span><span class="small muted">${esc(it.sub ?? "")}</span></a>`).join("");
+  $("#ipPick").hidden = false;
+}
+const ipOf = t => (String(t).match(/\d{1,3}(?:\.\d{1,3}){3}/) ?? [null])[0];
+function boxClick(el, title) {
+  if (el.dataset.ip) openIpTab(el.dataset.ip);
+  else if (el.dataset.ips) showIpPicker(title ?? el.querySelector(".t1")?.textContent ?? "IP'ler", JSON.parse(el.dataset.ips));
+}
+$("#ipPickClose").addEventListener("click", () => { $("#ipPick").hidden = true; });
+$("#ipPick").addEventListener("click", ev => { if (ev.target.id === "ipPick") $("#ipPick").hidden = true; });
+document.addEventListener("keydown", ev => { if (ev.key === "Escape" && !$("#ipPick").hidden) $("#ipPick").hidden = true; });
+
 // Modal grafiği: yaklaştır / uzaklaştır / sığdır. Ölçek sekme başına saklanır (yeniden çizimde korunur);
 // null = genişliğe yay (varsayılan). Grafik alanı modalın kalan yüksekliğini kaplar, kendi içinde kayar. Ctrl + tekerlek de çalışır.
 function flowZoom(el, tab) {
@@ -1016,7 +1050,7 @@ function flowZoom(el, tab) {
 // Modal: açılınca seçili sekmenin verisi (henüz yoksa) çekilir; sorgu her yeni IP sorgusunda sıfırlanır.
 function openFlow() {
   if (!state.lastParams) return;
-  $("#flowModalTitle").textContent = `Sunucu içi akış · ${state.lastParams.get("ip")}`;
+  $("#flowModalTitle").textContent = `Veri Akışı · ${state.lastParams.get("ip")}`;
   $("#flowModal").hidden = false;
   document.body.style.overflow = "hidden";
   ensureFlowData();
@@ -1118,7 +1152,7 @@ function wireProc() {
     g.addEventListener("mouseleave", clear);
     g.addEventListener("click", () => {
       if (g.dataset.p) { state.procSel = state.procSel === g.dataset.p ? null : g.dataset.p; renderProc(); }
-      else if (g.dataset.ip) { $("#ip").value = g.dataset.ip; closeFlow(); run(); }
+      else boxClick(g);
     });
   });
 }
@@ -1197,6 +1231,8 @@ function renderJourney(el, tabs) {
   if (js.status === "error") { el.innerHTML = head + `<div style="color:var(--err)">${esc(js.error)}</div>`; return; }
 
   const b = js.body, { groups: allGroups, links, hidden } = journeyGroups(b);
+  // IP listesi penceresinde her IP'nin yanında uygulaması / segmenti
+  const nodeInfo = new Map(b.nodes.map(n => [n.ip, n.apps.length ? n.apps.join(", ") : n.segment ? n.segment.label : n.kind === "dis" ? "dış IP" : ""]));
   const groups = allGroups.filter(g => !g.ortak), shared = allGroups.filter(g => g.ortak);
   const levels = [...new Set(groups.map(g => g.level))].sort((x, y) => x - y);
   const BW = 250, GX = 80, LINE = 14, MAXL = 5, GAP = 14;
@@ -1240,7 +1276,9 @@ function renderJourney(el, tabs) {
     const P = pos.get(g.k), cls = g.root ? "proc" : g.ortak ? "shared" : g.level < 0 ? "in" : "out";
     const ipLines = g.ips.slice(0, MAXL).map((ip, i) => `<text class="t3 mono" x="10" y="${(g.sub ? 50 : 36) + i * LINE}">${esc(ip)}</text>`).join("")
       + (g.ips.length > MAXL ? `<text class="t3" x="10" y="${(g.sub ? 50 : 36) + MAXL * LINE}">+${g.ips.length - MAXL} daha</text>` : "");
-    nodes += `<g class="pn ${cls}" data-g="${esc(g.k)}" ${g.ips.length === 1 && g.kind !== "dis" ? `data-ip="${esc(g.ips[0])}"` : ""} transform="translate(${P.x},${P.y})">
+    const ipAttr = g.ips.length === 1 ? `data-ip="${esc(g.ips[0])}"`
+      : `data-ips="${esc(JSON.stringify(g.ips.map(ip => ({ ip, sub: nodeInfo.get(ip) ?? "" }))))}"`;
+    nodes += `<g class="pn ${cls}" data-g="${esc(g.k)}" data-name="${esc(g.name)}" ${ipAttr} transform="translate(${P.x},${P.y})">
       <rect width="${BW}" height="${boxH(g)}" rx="8" ${g.kind === "vip" ? `style="stroke:var(--vip)"` : g.kind === "dis" ? `style="stroke-dasharray:5 3"` : ""}/>
       <title>${esc(g.name)}${g.ortak ? ` (ortak hizmet)\n${esc(g.sub)}` : ""}\n${g.ips.map(esc).join("\n")}</title>
       <text class="t1" x="10" y="18">${esc(trunc(g.name, 30))}</text>
@@ -1272,7 +1310,7 @@ function renderJourney(el, tabs) {
       svg.querySelectorAll(".pe").forEach(x => x.classList.toggle("on", onE.has(`${x.dataset.a}>${x.dataset.c}`)));
     });
     n.addEventListener("mouseleave", () => { svg.classList.remove("hl"); svg.querySelectorAll(".on").forEach(x => x.classList.remove("on")); });
-    n.addEventListener("click", () => { if (n.dataset.ip) { $("#ip").value = n.dataset.ip; closeFlow(); run(); } });
+    n.addEventListener("click", () => boxClick(n, n.dataset.name));
   });
 }
 
@@ -1386,8 +1424,9 @@ function renderSess(el, tabs) {
   });
   right.forEach(R => {
     const single = R.members.size === 1;
-    nodes += `<g class="pn out" data-r="${esc(R.k)}" ${single ? `data-ip="${esc(R.ip)}"` : ""} transform="translate(${W - NW},${ry.get(R.k)})"><rect width="${NW}" height="${boxH(R.members)}" rx="8"/>
-      <title>${esc(R.name)}\n${[...R.members.keys()].map(esc).join("\n")}${single ? "\nTıkla: bu IP'nin topolojisini aç" : ""}</title>
+    const rIps = [...new Set([...R.members.keys()].map(ipOf).filter(Boolean))];
+    nodes += `<g class="pn out" data-r="${esc(R.k)}" ${rIps.length === 1 ? `data-ip="${esc(rIps[0])}"` : `data-ips="${esc(JSON.stringify([...R.members.keys()].filter(ipOf).map(t => ({ ip: ipOf(t), sub: t }))))}"`} transform="translate(${W - NW},${ry.get(R.k)})"><rect width="${NW}" height="${boxH(R.members)}" rx="8"/>
+      <title>${esc(R.name)}\n${[...R.members.keys()].map(esc).join("\n")}\nTıkla: ${single ? "bu IP'nin topolojisi yeni sekmede" : "IP listesi"}</title>
       <text class="t1" x="10" y="17">${esc(trunc(R.name, 40))}</text><text class="t3" x="${NW - 10}" y="17" text-anchor="end">${fmt(Math.round(R.w))}</text>
       ${memberLines(R.members, 10, 34, v => fmt(Math.round(v)))}</g>`;
   });
@@ -1416,7 +1455,7 @@ function wireSess() {
     g.addEventListener("mouseleave", clear);
     g.addEventListener("click", () => {
       if (g.dataset.l) { state.sess.sel = state.sess.sel === g.dataset.l ? null : g.dataset.l; renderProc(); }
-      else if (g.dataset.ip) { $("#ip").value = g.dataset.ip; closeFlow(); run(); }
+      else boxClick(g);
     });
   });
 }
