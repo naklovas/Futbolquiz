@@ -105,7 +105,8 @@
   @keyframes pickIn { from { transform: scale(.85); opacity: 0; } to { transform: none; opacity: 1; } }
   #ipPickList a { display: flex; justify-content: space-between; gap: 12px; padding: 7px 10px; border: 1px solid var(--line); border-radius: 6px; margin-bottom: 6px; text-decoration: none; color: var(--text); }
   #ipPickList a:hover { border-color: var(--in); background: var(--in-soft); }
-  #ipPickList .mono { font-family: Consolas, ui-monospace, monospace; font-weight: 700; }
+  #ipPickList .mono { font-family: Consolas, ui-monospace, monospace; font-weight: 700; font-size: 17px; }
+  #ipPickList a { align-items: center; padding: 10px 12px; }
   .flow-zoom { margin-bottom: 6px; align-items: center; }
   .proc-svg .mono { font-family: Consolas, ui-monospace, monospace; }
   .proc-svg .pn rect { fill: var(--panel); stroke: var(--line); stroke-width: 1.5; }
@@ -1006,9 +1007,10 @@ function showIpPicker(title, items) {
   $("#ipPick").hidden = false;
 }
 const ipOf = t => (String(t).match(/\d{1,3}(?:\.\d{1,3}){3}/) ?? [null])[0];
+// Tek IP'li kutuda da liste penceresi açılır (küçük kutudaki IP ekranın ortasında büyük ve okunur görünsün).
 function boxClick(el, title) {
-  if (el.dataset.ip) openIpTab(el.dataset.ip);
-  else if (el.dataset.ips) showIpPicker(title ?? el.querySelector(".t1")?.textContent ?? "IP'ler", JSON.parse(el.dataset.ips));
+  const items = el.dataset.ips ? JSON.parse(el.dataset.ips) : el.dataset.ip ? [{ ip: el.dataset.ip, sub: "" }] : [];
+  if (items.length) showIpPicker(title ?? el.querySelector(".t1")?.textContent ?? "IP'ler", items);
 }
 $("#ipPickClose").addEventListener("click", () => { $("#ipPick").hidden = true; });
 $("#ipPick").addEventListener("click", ev => { if (ev.target.id === "ipPick") $("#ipPick").hidden = true; });
@@ -1276,8 +1278,7 @@ function renderJourney(el, tabs) {
     const P = pos.get(g.k), cls = g.root ? "proc" : g.ortak ? "shared" : g.level < 0 ? "in" : "out";
     const ipLines = g.ips.slice(0, MAXL).map((ip, i) => `<text class="t3 mono" x="10" y="${(g.sub ? 50 : 36) + i * LINE}">${esc(ip)}</text>`).join("")
       + (g.ips.length > MAXL ? `<text class="t3" x="10" y="${(g.sub ? 50 : 36) + MAXL * LINE}">+${g.ips.length - MAXL} daha</text>` : "");
-    const ipAttr = g.ips.length === 1 ? `data-ip="${esc(g.ips[0])}"`
-      : `data-ips="${esc(JSON.stringify(g.ips.map(ip => ({ ip, sub: nodeInfo.get(ip) ?? "" }))))}"`;
+    const ipAttr = `data-ips="${esc(JSON.stringify(g.ips.map(ip => ({ ip, sub: nodeInfo.get(ip) ?? "" }))))}"`;
     nodes += `<g class="pn ${cls}" data-g="${esc(g.k)}" data-name="${esc(g.name)}" ${ipAttr} transform="translate(${P.x},${P.y})">
       <rect width="${BW}" height="${boxH(g)}" rx="8" ${g.kind === "vip" ? `style="stroke:var(--vip)"` : g.kind === "dis" ? `style="stroke-dasharray:5 3"` : ""}/>
       <title>${esc(g.name)}${g.ortak ? ` (ortak hizmet)\n${esc(g.sub)}` : ""}\n${g.ips.map(esc).join("\n")}</title>
@@ -1423,10 +1424,8 @@ function renderSess(el, tabs) {
       ${memberLines(L.members, 10, 34, v => fmt(v))}</g>`;
   });
   right.forEach(R => {
-    const single = R.members.size === 1;
-    const rIps = [...new Set([...R.members.keys()].map(ipOf).filter(Boolean))];
-    nodes += `<g class="pn out" data-r="${esc(R.k)}" ${rIps.length === 1 ? `data-ip="${esc(rIps[0])}"` : `data-ips="${esc(JSON.stringify([...R.members.keys()].filter(ipOf).map(t => ({ ip: ipOf(t), sub: t }))))}"`} transform="translate(${W - NW},${ry.get(R.k)})"><rect width="${NW}" height="${boxH(R.members)}" rx="8"/>
-      <title>${esc(R.name)}\n${[...R.members.keys()].map(esc).join("\n")}\nTıkla: ${single ? "bu IP'nin topolojisi yeni sekmede" : "IP listesi"}</title>
+    nodes += `<g class="pn out" data-r="${esc(R.k)}" data-ips="${esc(JSON.stringify([...R.members.keys()].filter(ipOf).map(t => ({ ip: ipOf(t), sub: t }))))}" transform="translate(${W - NW},${ry.get(R.k)})"><rect width="${NW}" height="${boxH(R.members)}" rx="8"/>
+      <title>${esc(R.name)}\n${[...R.members.keys()].map(esc).join("\n")}\nTıkla: IP listesi</title>
       <text class="t1" x="10" y="17">${esc(trunc(R.name, 40))}</text><text class="t3" x="${NW - 10}" y="17" text-anchor="end">${fmt(Math.round(R.w))}</text>
       ${memberLines(R.members, 10, 34, v => fmt(Math.round(v)))}</g>`;
   });
