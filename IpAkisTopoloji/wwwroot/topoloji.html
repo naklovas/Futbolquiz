@@ -5,6 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>DeltaFlow · Akış Topolojisi</title>
 <link rel="icon" type="image/svg+xml" href="deltaflow.svg">
+<script>
+  // Seçili tema sayfa çizilmeden uygulanır (açılışta yanıp sönmesin).
+  try { const t = localStorage.getItem("deltaflow.theme"); if (t === "light" || t === "dark") document.documentElement.dataset.theme = t; } catch {}
+</script>
 <style>
   :root {
     --bg: #f5f6f8; --panel: #ffffff; --text: #1d2330; --muted: #677084; --line: #dde1e8;
@@ -12,14 +16,22 @@
     --ok: #2e8b57; --err: #c8353a; --warn: #b7791f; --unknown: #9aa1ad;
     --node: #ffffff; --target: #1d2330; --target-text: #ffffff; --vip: #7c3aed;
   }
+  /* Tema: Otomatik = Windows/tarayıcı ayarı (prefers-color-scheme); üstteki seçimle Açık / Koyu sabitlenebilir. */
   @media (prefers-color-scheme: dark) {
-    :root {
+    :root:not([data-theme="light"]) {
       --bg: #14171d; --panel: #1c2028; --text: #e4e7ec; --muted: #9098a8; --line: #2d333e;
       --in: #6ea0f0; --in-soft: #1f2d45; --out: #eba35c; --out-soft: #3a2c1d;
       --ok: #5cc28a; --err: #ef6b6f; --warn: #e0b050; --unknown: #6b7280;
       --node: #232833; --target: #e4e7ec; --target-text: #14171d; --vip: #a78bfa;
     }
   }
+  :root[data-theme="dark"] {
+      --bg: #14171d; --panel: #1c2028; --text: #e4e7ec; --muted: #9098a8; --line: #2d333e;
+      --in: #6ea0f0; --in-soft: #1f2d45; --out: #eba35c; --out-soft: #3a2c1d;
+      --ok: #5cc28a; --err: #ef6b6f; --warn: #e0b050; --unknown: #6b7280;
+      --node: #232833; --target: #e4e7ec; --target-text: #14171d; --vip: #a78bfa;
+  }
+  .theme-sw { margin-left: auto; } .theme-sw button { padding: 4px 10px; font-size: 12.5px; }
   * { box-sizing: border-box; }
   [hidden] { display: none !important; }
   body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 "Segoe UI", system-ui, sans-serif; }
@@ -30,7 +42,7 @@
   .brand-name { font-size: 24px; font-weight: 800; letter-spacing: -.02em; line-height: 1.1; margin: 0; }
   .brand-name .d { color: var(--text); }
   .brand-name .f { background: linear-gradient(90deg, #2563eb, #0d9488 60%, #f97316); -webkit-background-clip: text; background-clip: text; color: transparent; }
-  .brand-user { margin-left: auto; font-size: 12.5px; color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 4px 12px; }
+  .brand-user { margin-left: 8px; font-size: 12.5px; color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 4px 12px; }
   .brand-user:empty { display: none; }
   .modetabs { margin-bottom: 10px; }
   .modetabs button { font-weight: 600; }
@@ -199,6 +211,9 @@
       <h1 class="brand-name"><span class="d">Delta</span><span class="f">Flow</span></h1>
       <div class="brand-tag">Ağ akışı · segment · uygulama topolojisi ve etki analizi</div>
     </div>
+    <div class="seg theme-sw" id="themeSw" title="Tema (bu bilgisayarda hatırlanır)">
+      <button type="button" data-theme-set="auto">Otomatik</button><button type="button" data-theme-set="light">☀ Açık</button><button type="button" data-theme-set="dark">☾ Koyu</button>
+    </div>
     <div class="brand-user" id="me" title="Giriş yapan kullanıcı"></div>
   </div>
   <div class="seg modetabs" id="modeTabs">
@@ -240,6 +255,14 @@
 </main>
 
 <script>
+// Tema seçimi: Otomatik (sistem), Açık, Koyu — tarayıcıda saklanır.
+function setTheme(t) {
+  if (t === "light" || t === "dark") document.documentElement.dataset.theme = t; else delete document.documentElement.dataset.theme;
+  try { t === "auto" ? localStorage.removeItem("deltaflow.theme") : localStorage.setItem("deltaflow.theme", t); } catch {}
+  document.querySelectorAll("[data-theme-set]").forEach(b => b.classList.toggle("on", b.dataset.themeSet === t));
+}
+document.querySelectorAll("[data-theme-set]").forEach(b => b.addEventListener("click", () => setTheme(b.dataset.themeSet)));
+setTheme(document.documentElement.dataset.theme ?? "auto");
 const $ = s => document.querySelector(s);
 const esc = v => String(v ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const fmt = n => (n ?? 0).toLocaleString("tr-TR");
