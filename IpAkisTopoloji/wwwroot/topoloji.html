@@ -105,6 +105,7 @@
   @keyframes pickIn { from { transform: scale(.85); opacity: 0; } to { transform: none; opacity: 1; } }
   #ipPickList a { display: flex; justify-content: space-between; gap: 12px; padding: 7px 10px; border: 1px solid var(--line); border-radius: 6px; margin-bottom: 6px; text-decoration: none; color: var(--text); }
   #ipPickList a:hover { border-color: var(--in); background: var(--in-soft); }
+  .ip-pick-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; } .ip-pick-actions:empty { display: none; }
   #ipPickList .mono { font-family: Consolas, ui-monospace, monospace; font-weight: 700; font-size: 17px; }
   #ipPickList a { align-items: center; padding: 10px 12px; }
   .flow-zoom { margin-bottom: 6px; align-items: center; }
@@ -225,7 +226,7 @@
 <div class="modal ip-pick" id="ipPick" hidden>
   <div class="modal-box ip-pick-box" role="dialog" aria-modal="true" aria-labelledby="ipPickTitle">
     <div class="modal-head"><b id="ipPickTitle"></b><button type="button" id="ipPickClose">✕ Kapat</button></div>
-    <div class="modal-body"><div class="small muted" style="margin-bottom:8px">Bir IP'ye tıklayınca topolojisi yeni sekmede açılır.</div><div id="ipPickList"></div></div>
+    <div class="modal-body"><div id="ipPickActions" class="ip-pick-actions"></div><div class="small muted" style="margin-bottom:8px">Bir IP'ye tıklayınca topolojisi yeni sekmede açılır.</div><div id="ipPickList"></div></div>
   </div>
 </div>
 <div class="modal" id="flowModal" hidden>
@@ -780,10 +781,14 @@ function renderTopology() {
   renderFilterbar();
 }
 
+// zoom 1 = grafiğin tamamı alana sığar (genişlik ve yükseklik, alan en çok ekranın %80'i) ve ortalanır; +/− buna göre.
 function applyZoom() {
   const svg = $("#topoSvg"); if (!svg) return;
-  const base = Math.max($("#topo").clientWidth - 2, 1200);
-  svg.style.width = Math.round(base * state.zoom) + "px";
+  const [, , W, H] = (svg.getAttribute("viewBox") ?? "0 0 1200 800").split(/\s+/).map(Number);
+  const wrap = $("#topo"), maxH = window.innerHeight * 0.8 - 4;
+  const fitW = Math.max(320, Math.min(wrap.clientWidth - 2, maxH * W / H));
+  svg.style.width = Math.round(fitW * state.zoom) + "px";
+  svg.style.margin = "0 auto";
 }
 
 function wireTopology() {
@@ -810,25 +815,31 @@ function wireTopology() {
       svg.querySelectorAll(".on").forEach(x => x.classList.remove("on"));
     });
   });
+  // Tıklama (Veri Akışı ile aynı standart): ortada IP listesi; IP yeni sekmede açılır. Eski davranış (tablo/detay filtresi)
+  // pencerenin üstündeki düğmeyle.
+  const info = new Map(["in", "out"].flatMap(dir => sideServers(dir)).map(x =>
+    [x.ip, [...(x.apps ?? [])].join(", ") || (x.seg ?? x.segment)?.label || ""]));
+  const item = ip => ({ ip, sub: info.get(ip) ?? "" });
   svg.querySelectorAll(".srv").forEach(n => n.addEventListener("click", () => {
     const dir = n.dataset.dir, ip = n.dataset.ip;
     const s = state.cols[dir].srv.find(x => x.ip === ip);
-    const same = state.selected && state.selected.type === "srv" && state.selected.dir === dir && state.selected.ip === ip;
-    if (same) { clearFilter(); return; }
-    const set = new Set(s.more ? s.list.map(x => x.ip) : [ip]);
-    state.selected = s.more ? null : { type: "srv", dir, ip };
-    state.filter = { dir, label: s.more ? s.ip : ip, test: e => set.has(e.peerIp) };
-    renderTopology(); renderDetail(); renderTables();
+    const ips = s.more ? s.list.map(x => x.ip) : [ip];
+    showIpPicker(s.more ? s.ip : (info.get(ip) || ip), ips.map(item), [{ label: `${dir === "in" ? "Gelen" : "Giden"} tabloları bu ${s.more ? "sunucularla" : "sunucuyla"} filtrele`, fn: () => {
+      const set = new Set(ips);
+      state.selected = s.more ? null : { type: "srv", dir, ip };
+      state.filter = { dir, label: s.more ? s.ip : ip, test: e => set.has(e.peerIp) };
+      renderTopology(); renderDetail(); renderTables();
+    } }]);
   }));
   svg.querySelectorAll(".sgn").forEach(n => n.addEventListener("click", () => {
     const dir = n.dataset.dir, key = n.dataset.key;
     const g = state.cols[dir].seg.find(x => x.key === key);
-    const same = state.selected && state.selected.type === "seg" && state.selected.dir === dir && state.selected.key === key;
-    if (same) { clearFilter(); return; }
-    const set = new Set(g.links.keys());
-    state.selected = { type: "seg", dir, key };
-    state.filter = { dir, label: `${segTitle(g)} ile bağlantılı sunucular`, test: e => set.has(e.peerIp) };
-    renderTopology(); renderDetail(); renderTables();
+    showIpPicker(segTitle(g), [...g.links.keys()].map(item), [{ label: "Bu segmentle filtrele ve ayrıntıyı göster", fn: () => {
+      const set = new Set(g.links.keys());
+      state.selected = { type: "seg", dir, key };
+      state.filter = { dir, label: `${segTitle(g)} ile bağlantılı sunucular`, test: e => set.has(e.peerIp) };
+      renderTopology(); renderDetail(); renderTables();
+    } }]);
   }));
 }
 
@@ -1000,8 +1011,11 @@ function ipTabUrl(ip) {
   return "?" + new URLSearchParams({ ip, ...(p ? { start: p.get("start"), end: p.get("end") } : {}) });
 }
 function openIpTab(ip) { window.open(ipTabUrl(ip), "_blank", "noopener"); }
-function showIpPicker(title, items) {
+// actions: pencerenin üstünde ek düğmeler (ör. ana sayfada "Bu sunucuyla filtrele").
+function showIpPicker(title, items, actions = []) {
   $("#ipPickTitle").textContent = `${title} · ${items.length} IP`;
+  $("#ipPickActions").innerHTML = actions.map((a, i) => `<button type="button" data-act="${i}">${esc(a.label)}</button>`).join("");
+  $("#ipPickActions").querySelectorAll("[data-act]").forEach(b => b.addEventListener("click", () => { $("#ipPick").hidden = true; actions[+b.dataset.act].fn(); }));
   $("#ipPickList").innerHTML = items.map(it => `<a href="${esc(ipTabUrl(it.ip))}" target="_blank" rel="noopener">
     <span class="mono">${esc(it.ip)}</span><span class="small muted">${esc(it.sub ?? "")}</span></a>`).join("");
   $("#ipPick").hidden = false;
