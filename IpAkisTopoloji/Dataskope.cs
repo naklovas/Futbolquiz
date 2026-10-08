@@ -71,7 +71,7 @@ static class DataskopeService
                     ["password"] = cfg["Dataskope:Password"] ?? ""
                 })
             };
-            using var resp = await http.SendAsync(req, ct);
+            using var resp = await SendAsync(http, req, ct);
             string body = await resp.Content.ReadAsStringAsync(ct);
             if (!resp.IsSuccessStatusCode)
                 throw new HttpRequestException(body.Contains("no_accessible_endpoints")
@@ -115,7 +115,7 @@ static class DataskopeService
             if (next != null) qs.Add("nextPageId=" + Uri.EscapeDataString(next));
             using var req = new HttpRequestMessage(HttpMethod.Get, BaseUrl(cfg) + path + "?" + string.Join("&", qs));
             req.Headers.Authorization = new("Bearer", token);
-            using var resp = await http.SendAsync(req, ct);
+            using var resp = await SendAsync(http, req, ct);
             if (resp.StatusCode == System.Net.HttpStatusCode.Unauthorized && page == 0)
             {
                 token = await TokenAsync(cfg, http, ct, force: true); page = -1; continue;
@@ -155,6 +155,17 @@ static class DataskopeService
         bool eksik = next != null && next != "null" && list.Count >= max;
         if (eksik) msgs.Add($"İlk {max:N0} kayıt alındı (toplam {total:N0}); sonuç eksik olabilir, aralığı daraltın.");
         return new DataskopeSonuc(list, Math.Max(total, list.Count), eksik, msgs, sw.ElapsedMilliseconds);
+    }
+
+    // SSL hatasında iç hatayı ve çözümü yaz (IP ile bağlanınca sertifika adı eşleşmez; kurum kök sertifikası güvenilir değilse zincir hatası)
+    static async Task<HttpResponseMessage> SendAsync(HttpClient http, HttpRequestMessage req, CancellationToken ct)
+    {
+        try { return await http.SendAsync(req, ct); }
+        catch (HttpRequestException ex) when (ex.InnerException is System.Security.Authentication.AuthenticationException ae)
+        {
+            throw new HttpRequestException($"Dataskope SSL hatası: {ae.Message} Sertifika sunucu adına (IP değil) verilmiş ya da kurum kök sertifikası bu sunucuda güvenilir değil. " +
+                "Çözüm: BaseUrl'de IP yerine sertifikadaki sunucu adını kullanın ya da appsettings Dataskope bölümüne \"IgnoreSslErrors\": true ekleyin.", ex);
+        }
     }
 
     static string Short(string? s) => string.IsNullOrEmpty(s) ? "hata" : s.Length > 300 ? s[..300] + "…" : s;
