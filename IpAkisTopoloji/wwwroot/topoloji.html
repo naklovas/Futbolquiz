@@ -353,9 +353,15 @@ function initForm() {
   $("#end").value = p.get("end") || toLocalInput(now);
   $("#start").value = p.get("start") || toLocalInput(new Date(now - 3600e3));
   if (p.get("ip")) $("#ip").value = p.get("ip");
-  if (p.get("app")) { $("#appName").value = p.get("app"); return "app"; }
+  if (p.get("app")) $("#appName").value = p.get("app");
   if (p.get("src")) { $("#accSrc").value = p.get("src"); $("#accDst").value = p.get("dst") ?? ""; $("#accPort").value = p.get("port") ?? ""; return "erisim"; }
-  return p.get("ip") ? "ip" : null;
+  // IP / uygulama en fazla 24 saat sorgulanır: adresteki aralık daha uzunsa (ör. erişim sorgusundan kalma 7 gün) son 1 saate çekilir.
+  const s = new Date($("#start").value), e = new Date($("#end").value);
+  if (isNaN(s) || isNaN(e) || e <= s || e - s > 24 * 3600e3) {
+    const end = isNaN(e) ? now : e;
+    $("#end").value = toLocalInput(end); $("#start").value = toLocalInput(new Date(end - 3600e3));
+  }
+  return p.get("app") ? "app" : p.get("ip") ? "ip" : null;
 }
 
 $("#f").addEventListener("submit", ev => { ev.preventDefault(); uiMode === "app" ? runApp() : uiMode === "erisim" ? runAccess() : run(); });

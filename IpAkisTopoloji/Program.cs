@@ -86,7 +86,16 @@ var defaultFiles = new DefaultFilesOptions();
 defaultFiles.DefaultFileNames.Clear();
 defaultFiles.DefaultFileNames.Add("topoloji.html");
 app.UseDefaultFiles(defaultFiles);
-app.UseStaticFiles();
+// Sayfa ve betikler her açılışta sunucuya sorulur (ETag ile, değişmediyse 304): yeni sürüm kopyalanınca Ctrl+F5 gerekmesin,
+// eski topoloji.html ile yeni uygulama.js karışmasın.
+app.UseStaticFiles(new StaticFileOptions
+{
+    OnPrepareResponse = c =>
+    {
+        if (c.File.Name.EndsWith(".html") || c.File.Name.EndsWith(".js"))
+            c.Context.Response.Headers.CacheControl = "no-cache";
+    }
+});
 
 // Giriş yapan kullanıcı (başlıkta gösterilir)
 app.MapGet("/api/me", (HttpContext ctx) => new { name = ctx.User?.Identity?.Name });
