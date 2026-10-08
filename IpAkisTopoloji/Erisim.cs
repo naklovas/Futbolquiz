@@ -76,7 +76,17 @@ static class Erisim
         string? lastCb = cbl.Select(x => x.Last).Max(StringComparer.Ordinal);
         bool sameSeg = src.Segment != null && dst.Segment != null && src.Segment.Cidr == dst.Segment.Cidr;
         string karar, tur, detay;
-        if (lastAllow != null && (lastDeny == null || string.CompareOrdinal(lastAllow, lastDeny) >= 0))
+        string segAd = sameSeg ? $"{src.Segment!.Label} ({src.Segment.Cidr}{(src.Segment.Vlan is { } vl ? ", VLAN " + vl : "")})" : "";
+        // Aynı alt ağ (VLAN): trafik ağ geçidine / firewall'a uğramadan doğrudan gider, firewall kuralı gerekmez.
+        // Firewall'da kayıt varsa (ör. NAT'lı adres üzerinden gidilmiş) normal karar verilir, aynı VLAN notu eklenir.
+        if (sameSeg && lastAllow == null && lastDeny == null)
+        {
+            (karar, tur) = ("Aynı VLAN — firewall gerekmez", "info");
+            detay = $"İki IP aynı segmentte: {segAd}. Aradaki trafik firewall'a uğramaz, firewall kuralı / erişim talebi gerekmez."
+                + (lastCb != null ? $" Carbon Black bağlantıyı görmüş (son {lastCb})." : " Bu aralıkta Carbon Black da bağlantı görmedi (hiç denenmemiş olabilir).")
+                + " Engel varsa yalnızca sunucunun kendi yerel güvenlik duvarından (Windows Firewall / iptables) olabilir.";
+        }
+        else if (lastAllow != null && (lastDeny == null || string.CompareOrdinal(lastAllow, lastDeny) >= 0))
         {
             (karar, tur) = ("Erişim var", "ok");
             detay = $"Firewall son izin: {lastAllow} ({N(fw.Where(x => !x.Denied).Sum(x => x.Count))} oturum, port {string.Join(", ", fw.Where(x => !x.Denied).Select(x => x.Port).Distinct())})."
@@ -102,10 +112,11 @@ static class Erisim
         else
         {
             (karar, tur) = ("Kayıt yok", "skip");
-            detay = "Bu aralıkta kaynaktan hedefe ne izin verilen ne engellenen bir oturum görüldü. Erişim hiç denenmemiş olabilir; aralığı genişletin."
+            detay = "Bu aralıkta kaynaktan hedefe ne izin verilen ne de engellenen bir oturum görülmedi. Erişim hiç denenmemiş olabilir; aralığı genişletin."
                 + (sameSeg ? " İki IP aynı segmentte: aradaki trafik firewall'a uğramaz." : "");
         }
 
+        if (sameSeg && tur != "info") detay += $" Not: iki IP aynı segmentte ({segAd}); doğrudan erişimde firewall'a uğramaz.";
         return new ErisimSonuc(src, dst, port, $"{q.Start:dd.MM.yyyy HH:mm} - {q.End:dd.MM.yyyy HH:mm}", karar, tur, detay,
             fw, olay, cbl, fwSt, cbSt, envSt, ms);
     }
