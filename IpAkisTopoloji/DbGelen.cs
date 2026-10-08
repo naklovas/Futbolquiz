@@ -30,7 +30,8 @@ static class DbGelen
             }
         }
         string t = (tur ?? "").Trim().Replace("\"", "");
-        if (t != "") parts.Add($"db_type:\"{t}\"");
+        // Dataskope örneğiyle aynı yazım: db_type:oracle (tek kelimede tırnaksız)
+        if (t != "") parts.Add(t.All(char.IsLetterOrDigit) ? $"db_type:{t}" : $"db_type:\"{t}\"");
         return string.Join(" AND ", parts);  // boş = filtresiz (parametre hiç gönderilmez)
     }
 

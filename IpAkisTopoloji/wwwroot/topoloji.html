@@ -245,7 +245,7 @@
     <span id="dbLabel" class="acc-fields" hidden>
       <label title="Boş: tüm veritabanları. IP yazılırsa o DB sunucusu; ad yazılırsa instance / DB / makine adı; alan:değer olduğu gibi gönderilir">Veritabanı filtresi
         <input type="text" id="dbFiltre" placeholder="boş = tümü · IP · instance / DB adı" style="width:260px"></label>
-      <label>DB türü <input type="text" id="dbTur" list="dbTurList" placeholder="tümü" style="width:110px"></label>
+      <label>DB türü <input type="text" id="dbTur" list="dbTurList" value="oracle" placeholder="tümü" style="width:110px" title="Dataskope'un önerdiği temel filtre db_type:oracle; boş bırakılırsa filtresiz sorgulanır"></label>
       <datalist id="dbTurList"><option value="oracle"><option value="mssql"><option value="postgresql"><option value="mysql"><option value="db2"></datalist>
     </span>
     <label>Başlangıç <input type="datetime-local" id="start"></label>
@@ -364,7 +364,7 @@ function initForm() {
   $("#start").value = p.get("start") || toLocalInput(new Date(now - 3600e3));
   if (p.get("ip")) $("#ip").value = p.get("ip");
   if (p.get("app")) $("#appName").value = p.get("app");
-  if (p.get("db") != null) { $("#dbFiltre").value = p.get("filtre") ?? ""; $("#dbTur").value = p.get("tur") ?? ""; }
+  if (p.get("db") != null) { $("#dbFiltre").value = p.get("filtre") ?? ""; $("#dbTur").value = p.get("tur") ?? "oracle"; }
   if (p.get("src")) { $("#accSrc").value = p.get("src"); $("#accDst").value = p.get("dst") ?? ""; $("#accPort").value = p.get("port") ?? ""; return "erisim"; }
   // IP / uygulama en fazla 24 saat sorgulanır: adresteki aralık daha uzunsa (ör. erişim sorgusundan kalma 7 gün) son 1 saate çekilir.
   const s = new Date($("#start").value), e = new Date($("#end").value);
