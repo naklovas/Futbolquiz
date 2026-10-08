@@ -27,7 +27,17 @@ static class DataskopeService
     public static bool Enabled(IConfiguration cfg) =>
         cfg.GetValue("Dataskope:Enabled", true) && !string.IsNullOrWhiteSpace(cfg["Dataskope:BaseUrl"]);
 
-    static string BaseUrl(IConfiguration cfg) => (cfg["Dataskope:BaseUrl"] ?? "").TrimEnd('/');
+    // BaseUrl ".../InfraskopeESApi" olmalı; yanlışlıkla uç yolu da yazılmışsa (".../api/v1/nest/events", ".../token") kesilir.
+    static string BaseUrl(IConfiguration cfg)
+    {
+        string u = (cfg["Dataskope:BaseUrl"] ?? "").Trim().TrimEnd('/');
+        int i = u.IndexOf("/api/", StringComparison.OrdinalIgnoreCase);
+        if (i > 0) u = u[..i];
+        if (u.EndsWith("/token", StringComparison.OrdinalIgnoreCase)) u = u[..^6];
+        return u;
+    }
+    // BaseUrl'de nest/events yazılmışsa doğrudan eski uç kullanılır
+    static bool NestInUrl(IConfiguration cfg) => (cfg["Dataskope:BaseUrl"] ?? "").Contains("/nest/events", StringComparison.OrdinalIgnoreCase);
 
     static async Task<string> TokenAsync(IConfiguration cfg, HttpClient http, CancellationToken ct, bool force = false)
     {
@@ -79,7 +89,7 @@ static class DataskopeService
         var list = new List<DbKayit>();
         long total = 0;
         string? next = null;
-        bool legacy = s["Endpoint"] == "nest" || UseLegacy.ContainsKey(BaseUrl(cfg));
+        bool legacy = s["Endpoint"] == "nest" || NestInUrl(cfg) || UseLegacy.ContainsKey(BaseUrl(cfg));
         string token = await TokenAsync(cfg, http, ct);
         for (int page = 0; list.Count < max; page++)
         {
