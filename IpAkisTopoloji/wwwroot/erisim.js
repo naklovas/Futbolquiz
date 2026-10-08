@@ -15,7 +15,7 @@ async function runAccess() {
   setUiMode("erisim");
   const src = $("#accSrc").value.trim(), dst = $("#accDst").value.trim(), port = $("#accPort").value.trim();
   if (!src || !dst) { alert("Kaynak ve hedef IP girin."); return; }
-  const srcs = [$("#srcSplunk").checked && "splunk", $("#srcFw").checked && "firewall", $("#srcDs").checked && "dataskope"].filter(Boolean);
+  const srcs = [$("#srcSplunk").checked && "splunk", $("#srcFw").checked && "firewall", $("#srcDs").checked && "dataskope", $("#srcF5").checked && "f5"].filter(Boolean);
   if (!srcs.length) { alert("Splunk (Carbon Black), Firewall ya da Dataskope kaynaklarından en az birini seçin."); return; }
   const params = new URLSearchParams({ src, dst, ...(port ? { port } : {}), start: $("#start").value, end: $("#end").value, sources: srcs.join(",") });
   history.replaceState(null, "", "?" + new URLSearchParams({ src, dst, ...(port ? { port } : {}), start: params.get("start"), end: params.get("end") }));
@@ -45,7 +45,7 @@ function renderAccess(d) {
     return `<span class="pill ${cls}" title="${esc(s.error ?? "")}"><b>${name}</b> ${info}</span>`;
   };
   const msgs = [...d.firewallDurum.messages.map(m => "Firewall: " + m), ...d.carbonBlackDurum.messages.map(m => "Carbon Black: " + m),
-    ...(d.veritabaniDurum?.messages ?? []).map(m => "Dataskope: " + m)];
+    ...(d.veritabaniDurum?.messages ?? []).map(m => "Dataskope: " + m), ...(d.wafDurum?.messages ?? []).map(m => "F5: " + m)];
   const ipLink = ip => `<a class="mono" href="${esc(ipTabUrl(ip))}" target="_blank" rel="noopener" title="Topolojisini yeni sekmede aç">${esc(ip)}</a>`;
   const uc = (title, u) => `<div class="panel" style="margin:0">
       <div class="small muted">${title}</div>
@@ -68,6 +68,21 @@ function renderAccess(d) {
       <tbody>${d.sonOlaylar.map(o => `<tr><td class="mono">${esc(o.time)}</td><td class="mono">${esc(o.srcPort)}</td><td class="mono">${esc(o.destIp)}</td>
         <td class="mono">${esc(o.destPort)}</td><td class="mono">${esc(o.natIp ?? "")}</td><td>${act(o.action, o.denied)}</td><td>${esc(o.rule ?? "")}</td>
         <td>${esc(o.reason ?? "")}</td><td>${esc(o.device ?? "")}</td></tr>`).join("")}</tbody></table></div>` : "";
+  // F5 WAF: sonuç bazında özet + son olaylar (engellendi kırmızı, doğrulama / ihlal turuncu)
+  const wafCls = r => r === "engellendi" ? "deny" : r.startsWith("geçti") || r.startsWith("izlendi") ? "allow" : "";
+  const wf = d.waf ?? [], wo = d.wafOlaylar ?? [];
+  const wafTable = wf.length ? `<div class="tbl-wrap"><table>
+      <thead><tr><th>Sonuç</th><th class="num">İstek</th><th>İlk</th><th>Son</th><th>VIP (virtual server)</th><th>Saldırı / ihlal</th><th>URL</th><th>Support ID</th><th>Engelleyen</th></tr></thead>
+      <tbody>${wf.map(x => `<tr><td><span class="badge ${wafCls(x.sonuc)}">${esc(x.sonuc)}</span></td><td class="num">${fmt(x.count)}</td>
+        <td class="mono">${esc(x.first ?? "")}</td><td class="mono"><b>${esc(x.last ?? "")}</b></td><td>${esc(x.vsNames.join(", "))}${x.destPorts.length ? ` <span class="muted">:${esc(x.destPorts.join(", :"))}</span>` : ""}</td>
+        <td>${esc([...x.attackTypes, ...x.violations].join(", "))}</td><td class="mono small">${x.uris.map(esc).join("<br>")}</td>
+        <td class="mono">${esc(x.supportIds.join(", "))}</td><td>${esc(x.enforcedBy.join(", "))}</td></tr>`).join("")}</tbody></table></div>
+      ${wo.length ? `<details style="margin-top:8px"><summary>Son ${wo.length} F5 olayı</summary><div class="tbl-wrap"><table>
+        <thead><tr><th>Zaman</th><th>Sonuç</th><th>Metot</th><th>URL</th><th>Port</th><th>VIP</th><th>Saldırı</th><th>İhlal</th><th>HTTP</th><th>Support ID</th></tr></thead>
+        <tbody>${wo.map(o => `<tr><td class="mono">${esc(o.time)}</td><td><span class="badge ${wafCls(o.sonuc)}">${esc(o.sonuc)}</span></td><td>${esc(o.method ?? "")}</td>
+          <td class="mono small">${esc(o.uri ?? "")}</td><td class="mono">${esc(o.destPort ?? "")}</td><td>${esc(o.vsName ?? "")}</td><td>${esc(o.attackType ?? "")}</td>
+          <td>${esc(o.violations ?? "")}</td><td>${esc(o.respCode ?? "")}</td><td class="mono">${esc(o.supportId ?? "")}</td></tr>`).join("")}</tbody></table></div></details>` : ""}`
+    : `<div class="muted">${d.wafDurum?.ok ? "F5'te bu kaynaktan bu hedefe güvenlik kaydı yok (hedef WAF arkasındaki bir VIP değilse beklenen durum)." : "F5 sorgulanmadı ya da hata verdi."}</div>`;
   const vt = d.veritabani ?? [];
   const dbTable = vt.length ? `<div class="tbl-wrap"><table>
       <thead><tr><th>DB</th><th>Instance / DB adı</th><th>DB kullanıcısı</th><th>OS kullanıcısı</th><th>İstemci makine</th><th>Program</th><th>Port</th><th class="num">Kayıt</th><th>İlk</th><th>Son</th></tr></thead>
@@ -82,7 +97,7 @@ function renderAccess(d) {
     : `<div class="muted">${d.carbonBlackDurum.ok ? "Carbon Black bu bağlantıyı görmemiş (ajan yoksa görünmez)." : "Carbon Black sorgulanmadı ya da hata verdi."}</div>`;
 
   $("#main").innerHTML = `
-    <section class="panel"><div class="status">${pill("Firewall", d.firewallDurum)}${pill("Carbon Black", d.carbonBlackDurum)}${d.veritabaniDurum ? pill("Dataskope", d.veritabaniDurum) : ""}
+    <section class="panel"><div class="status">${pill("Firewall", d.firewallDurum)}${pill("Carbon Black", d.carbonBlackDurum)}${d.veritabaniDurum ? pill("Dataskope", d.veritabaniDurum) : ""}${d.wafDurum && d.wafDurum.error !== "Sorgulanmadı" ? pill("F5 WAF", d.wafDurum) : ""}
       ${pill("Envanter", d.envanter)}<span class="pill">Aralık ${esc(d.pencere)}</span><span class="pill">Toplam ${(d.elapsedMs / 1000).toFixed(1)} sn</span></div>
       ${msgs.length ? `<div class="msgs">${esc(msgs.join("\n"))}</div>` : ""}</section>
     <section class="panel">
@@ -92,5 +107,6 @@ function renderAccess(d) {
     <section class="panel"><h2>Firewall (port ve sonuç bazında)</h2>${fwTable}</section>
     ${olayTable ? `<section class="panel"><h2>Son ${d.sonOlaylar.length} firewall olayı</h2>${olayTable}</section>` : ""}
     <section class="panel"><h2>Carbon Black (uç nokta ajanının gördüğü bağlantılar)</h2>${cbTable}</section>
+    ${d.wafDurum && d.wafDurum.error !== "Sorgulanmadı" ? `<section class="panel"><h2>F5 WAF (güvenlik olayları)</h2>${wafTable}</section>` : ""}
     ${d.veritabaniDurum && d.veritabaniDurum.error !== "Sorgulanmadı" ? `<section class="panel"><h2>Veritabanı oturumları (Dataskope)</h2>${dbTable}</section>` : ""}`;
 }

@@ -21,6 +21,9 @@ record ErisimSonuc(ErisimUc Kaynak, ErisimUc Hedef, string? Port, string Pencere
 {
     public List<ErisimDb> Veritabani { get; init; } = [];
     public SourceStatus VeritabaniDurum { get; init; } = SourceStatus.Skipped;
+    public List<ErisimWaf> Waf { get; init; } = [];
+    public List<ErisimWafOlay> WafOlaylar { get; init; } = [];
+    public SourceStatus WafDurum { get; init; } = SourceStatus.Skipped;
 }
 
 static class Erisim
@@ -64,8 +67,11 @@ static class Erisim
 
     public static ErisimSonuc Build(ErisimUc src, ErisimUc dst, string? port, LookupQuery q,
         SplunkResult? fwSum, SplunkResult? fwRecent, SplunkResult? cb, SourceStatus fwSt, SourceStatus cbSt, SourceStatus envSt, long ms,
-        DataskopeSonuc? ds = null, SourceStatus? dsSt = null)
+        DataskopeSonuc? ds = null, SourceStatus? dsSt = null,
+        SplunkResult? wafSum = null, SplunkResult? wafRecent = null, SourceStatus? wafSt = null)
     {
+        var waf = F5Waf.Summary(wafSum);
+        var wafOlay = F5Waf.Recent(wafRecent);
         // DB oturumları: kullanıcı + program + veritabanı bazında sayı, ilk / son (zaman yerel "yyyy-MM-dd HH:mm:ss")
         static string? T(string? t) => DateTimeOffset.TryParse(t, out var d) ? d.LocalDateTime.ToString("yyyy-MM-dd HH:mm:ss") : t;
         var db = (ds?.Kayitlar ?? [])
@@ -141,8 +147,32 @@ static class Erisim
         }
 
         if (lastAllow != null || lastDeny != null) detay += dbOzet;  // firewall kararlarına DB bilgisi eklenir
+
+        // F5 (WAF / Bot Defense): ağ izni olsa bile istek F5'te engellenebilir
+        var blk = waf.FirstOrDefault(w => w.Sonuc == "engellendi");
+        string? lastWaf = waf.Select(w => w.Last).Max(StringComparer.Ordinal);
+        if (blk != null)
+        {
+            string sid = blk.SupportIds.Count > 0 ? $" (support ID: {string.Join(", ", blk.SupportIds.Take(3))})" : "";
+            string neden = string.Join(", ", blk.AttackTypes.Concat(blk.Violations).Distinct().Take(3));
+            string wafMetin = $" F5 WAF {N(blk.Count)} isteği engellemiş, son {blk.Last}{(neden != "" ? ": " + neden : "")}{sid}.";
+            if (tur is "ok" or "info" or "skip")
+            {
+                bool sonEngel = string.CompareOrdinal(blk.Last, lastAllow ?? "") >= 0;
+                if (tur == "skip") (karar, tur, detay) = ("F5 WAF engelliyor", "err", wafMetin.Trim());
+                else if (sonEngel) { karar += " — ama F5 WAF engelliyor"; tur = "warn"; detay += wafMetin; }
+                else detay += wafMetin;
+            }
+            else detay += wafMetin;
+        }
+        else if (lastWaf != null)
+        {
+            string ozet = string.Join(", ", waf.Select(w => $"{w.Sonuc} {N(w.Count)}"));
+            detay += $" F5 WAF kayıtları: {ozet} (son {lastWaf}); engel yok.";
+            if (tur == "skip") (karar, tur) = ("F5 üzerinden erişim görülmüş", "ok");
+        }
         if (sameSeg && tur != "info") detay += $" Not: iki IP aynı segmentte ({segAd}); doğrudan erişimde firewall'a uğramaz.";
         return new ErisimSonuc(src, dst, port, $"{q.Start:dd.MM.yyyy HH:mm} - {q.End:dd.MM.yyyy HH:mm}", karar, tur, detay,
-            fw, olay, cbl, fwSt, cbSt, envSt, ms) { Veritabani = db, VeritabaniDurum = dsSt ?? SourceStatus.Skipped };
+            fw, olay, cbl, fwSt, cbSt, envSt, ms) { Veritabani = db, VeritabaniDurum = dsSt ?? SourceStatus.Skipped, Waf = waf, WafOlaylar = wafOlay, WafDurum = wafSt ?? SourceStatus.Skipped };
     }
 }

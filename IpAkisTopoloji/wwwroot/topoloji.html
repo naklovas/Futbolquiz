@@ -257,6 +257,7 @@
       <label id="srcArLabel"><input type="checkbox" id="srcAr" checked> AppResponse</label>
       <label title="Palo Alto trafik logları (Splunk fw_paloalto): izin verilen ve engellenen oturumlar"><input type="checkbox" id="srcFw" checked> Firewall</label>
       <label id="srcDsLabel" hidden title="Dataskope veritabanı aktivite logları: hedefe hangi DB kullanıcısıyla bağlanılmış"><input type="checkbox" id="srcDs" checked> Dataskope (DB)</label>
+      <label id="srcF5Label" hidden title="F5 WAF / Bot Defense güvenlik logları (Splunk index=f5): hedef VIP'te istek engellenmiş mi"><input type="checkbox" id="srcF5" checked> F5 WAF</label>
       <label id="hop2Label" title="Bulunan sunucuların kendi trafiğini de sorgular (segment → sunucu → sorgulanan IP → sunucu → segment)"><input type="checkbox" id="hop2On" checked> 2. seviye</label>
     </div>
     <button class="primary" id="go" type="submit">Sorgula</button>
@@ -403,14 +404,54 @@ async function run() {
     expectList(body, "inbound");
     state.raw = body; state.data = envFiltered(body); state.hop2 = null; state.filter = null; state.selected = null; state.zoom = 1;
     state.lastParams = params;
+    state.f5 = null;
     render();
     if ($("#hop2On").checked) runHop2(params);
+    runF5Uri(params);
   } catch (e) {
     const msg = e.name === "AbortError" ? "Sorgu iptal edildi." : e.message;
     $("#main").innerHTML = `<div class="panel empty" style="color:var(--err)">${esc(msg)}</div>`;
   } finally {
     $("#go").disabled = false; $("#cancel").hidden = true;
   }
+}
+
+// F5 URI'leri: sorgulanan IP (VIP ya da VIP havuz üyesi) için F5 güvenlik loglarındaki istekler (arka planda).
+let f5Abort = null;
+async function runF5Uri(params) {
+  f5Abort?.abort(); f5Abort = new AbortController();
+  state.f5 = { status: "loading" }; showF5();
+  try {
+    const p = new URLSearchParams({ ip: params.get("ip"), start: params.get("start"), end: params.get("end") });
+    const r = await fetch("api/f5uri?" + p, { signal: f5Abort.signal });
+    const body = await r.json().catch(() => ({ error: `HTTP ${r.status}` }));
+    if (!r.ok) throw new Error(body.error || `HTTP ${r.status}`);
+    expectList(body, "satirlar");
+    state.f5 = { status: "ok", body };
+  } catch (e) { state.f5 = e.name === "AbortError" ? null : { status: "error", error: e.message }; }
+  showF5();
+}
+function showF5() { const el = $("#f5uri"); if (!el) return; const h = f5Html(); el.innerHTML = h; el.hidden = !h; }
+// Kayıt yoksa ya da F5 kapalıysa bölüm hiç görünmez.
+function f5Html() {
+  const f = state.f5;
+  if (!f) return "";
+  if (f.status === "loading") return `<div class="small muted"><span class="spinner"></span> F5 (WAF) kayıtlarında URI'ler aranıyor…</div>`;
+  if (f.status === "error") return `<div class="small" style="color:var(--err)">F5: ${esc(f.error)}</div>`;
+  const b = f.body, rows = b.satirlar;
+  if (!rows.length) return b.f5.ok ? "" : (b.f5.error && b.f5.error !== "Sorgulanmadı" ? `<div class="small" style="color:var(--err)">F5: ${esc(b.f5.error)}</div>` : "");
+  const cls = r => r === "engellendi" ? "deny" : r === "geçti" ? "allow" : "";
+  const vips = [...new Set(rows.map(r => r.vip))];
+  return `<div class="toolbar"><h2 style="margin:0">F5 üzerinden gelen istekler (URI)</h2>
+      <span class="small muted">${vips.length > 1 || vips[0] !== b.ip ? "VIP: " + vips.map(esc).join(", ") + " · " : ""}${fmt(rows.length)} URI · ${(b.elapsedMs / 1000).toFixed(1)} sn</span></div>
+    <div class="small muted" style="margin:-4px 0 8px">F5'te yalnızca güvenlik olayları (WAF ihlali, bot doğrulaması, engel) loglanıyor; liste tüm trafik değil, F5'e takılan istekler ağırlıklı.</div>
+    <div class="tbl-wrap" style="max-height:420px"><table>
+      <thead><tr><th>VIP:port</th><th>Site (Host)</th><th>Metot</th><th>URI</th><th class="num">İstek</th><th class="num">İstemci</th><th>Sonuç</th><th>Son</th></tr></thead>
+      <tbody>${rows.map(r => `<tr><td class="mono">${esc(r.vip)}${r.port ? ":" + esc(r.port) : ""}<div class="small muted">${esc(r.vsNames.join(", "))}</div></td>
+        <td>${esc(r.hosts.join(", "))}</td><td>${esc(r.method ?? "")}</td><td class="mono small" style="word-break:break-all">${esc(r.uri)}</td>
+        <td class="num">${fmt(r.count)}</td><td class="num">${fmt(r.clients)}</td>
+        <td>${r.sonuc.map(x => `<span class="badge ${cls(x)}">${esc(x)}</span>`).join(" ")}</td><td class="mono">${esc(r.last ?? "")}</td></tr>`).join("")}</tbody>
+    </table></div>`;
 }
 
 // 2. seviye: çizilen sunucuların kendi trafiğini tek istekte getir.
@@ -475,6 +516,7 @@ function render() {
       <div class="topo-wrap" id="topo"></div>
       <div class="detail" id="detail"></div>
     </section>
+    <section class="panel" id="f5uri"${f5Html() ? "" : " hidden"}>${f5Html()}</section>
     <section class="panel">
       <h2>Sunucuların kendi segmentleri (1. seviye)</h2>
       <div class="sumgrid"><div id="sum-in"></div><div id="sum-out"></div></div>
