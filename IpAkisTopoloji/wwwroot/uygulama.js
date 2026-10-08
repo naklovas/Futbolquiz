@@ -36,14 +36,17 @@ function setUiMode(m) {
   $("#hop2Label").hidden = m !== "ip";
   // Erişim sorgusu Firewall + Carbon Black ile çalışır; AppResponse kutusu ve 2. seviye anlamsız.
   $("#accLabel").hidden = m !== "erisim";
-  $("#applianceLabel").hidden = m === "erisim";
+  $("#applianceLabel").hidden = m === "erisim" || m === "db";
+  // DB'ye gelenler yalnız Dataskope ile çalışır: kaynak kutucukları gizli
+  $("#dbLabel").hidden = m !== "db";
+  $("#srcChecks").hidden = m === "db";
   $("#srcArLabel").hidden = m === "erisim";
   $("#srcDsLabel").hidden = m !== "erisim";
   if (m === "app") loadAppCatalog();
 }
 document.querySelectorAll("#modeTabs button").forEach(b => b.addEventListener("click", () => {
   setUiMode(b.dataset.ui);
-  (b.dataset.ui === "app" ? $("#appName") : b.dataset.ui === "erisim" ? $("#accSrc") : $("#ip")).focus();
+  (b.dataset.ui === "app" ? $("#appName") : b.dataset.ui === "erisim" ? $("#accSrc") : b.dataset.ui === "db" ? $("#dbFiltre") : $("#ip")).focus();
 }));
 
 async function loadAppCatalog() {

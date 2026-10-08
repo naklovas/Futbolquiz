@@ -216,6 +216,29 @@ app.MapGet("/api/oturum", async (string? ip, string? start, string? end, int? ap
     }
 });
 
+// DB'ye gelenler: Dataskope kayıtlarından veritabanları ve her birine bağlanan istemciler (segment / uygulama ile).
+// Hacim yüksek olabildiği için aralık en fazla Dataskope:DbGelenMaxSaat (varsayılan 24) saat.
+app.MapGet("/api/dbgelen", async (string? filtre, string? tur, string? start, string? end,
+    IConfiguration cfg, IHttpClientFactory factory, EnvanterService envanter, CancellationToken ct) =>
+{
+    var sw = Stopwatch.StartNew();
+    if (!LookupQuery.TryParse("0.0.0.0", start, end, cfg.GetValue("Dataskope:DbGelenMaxSaat", 24), out var q, out var error))
+        return Results.BadRequest(new { error });
+    if (!DataskopeService.Enabled(cfg))
+        return Results.BadRequest(new { error = "Dataskope tanımlı değil (appsettings.Production.json: Dataskope:BaseUrl, Username, Password)." });
+    string sorgu = DbGelen.Query(filtre, tur);
+    var dsTask = Capture(() => DataskopeService.SearchAsync(q!, sorgu, cfg, factory.CreateClient("dataskope"), ct,
+        cfg.GetValue("Dataskope:DbGelenMaxKayit", 20000)), ct);
+    var envTask = Capture(() => envanter.GetAsync(false, ct), ct);
+    try { await Task.WhenAll(dsTask, envTask); }
+    catch (OperationCanceledException) when (ct.IsCancellationRequested) { return Results.StatusCode(499); }
+    var (ds, dsErr) = dsTask.Result;
+    var (env, envErr) = envTask.Result;
+    var dsSt = new SourceStatus(dsErr == null, dsErr, ds?.Mesajlar ?? [], ds?.ElapsedMs, ds?.Kayitlar.Count ?? 0);
+    var (_, _, envSt) = Statuses("", null, null, null, null, env, envErr);
+    return Results.Ok(DbGelen.Build(q!, sorgu, ds, env, dsSt, envSt, sw.ElapsedMilliseconds));
+});
+
 // Erişim sorgula: kaynak IP'den hedef IP'ye (isteğe bağlı port) erişim olmuş mu — Firewall izin/engel + Carbon Black + envanter.
 // Uzun aralık gerekebildiği için en fazla Erisim:MaxGun (varsayılan 30) gün.
 app.MapGet("/api/erisim", async (string? src, string? dst, string? port, string? start, string? end, string? sources,

@@ -191,6 +191,7 @@
   .verdict.err { border-color: var(--err); } .verdict.err .big { color: var(--err); }
   .verdict.warn { border-color: var(--warn); } .verdict.warn .big { color: var(--warn); }
   .verdict.skip .big { color: var(--muted); }
+  tr.sel-row td { background: var(--in-soft); } tr[data-db]:hover td { background: var(--in-soft); }
   .verdict.info { border-color: var(--in); background: var(--in-soft); } .verdict.info .big { color: var(--in); }
   .badge.allow { background: var(--ok); color: #fff; } .badge.deny { background: var(--err); color: #fff; }
   th, td { padding: 6px 8px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
@@ -229,6 +230,7 @@
     <button type="button" data-ui="ip" class="on">IP sorgula</button>
     <button type="button" data-ui="app">Uygulama sorgula</button>
     <button type="button" data-ui="erisim">Erişim sorgula</button>
+    <button type="button" data-ui="db">DB'ye gelenler</button>
   </div>
   <form id="f">
     <label id="ipLabel">IP adresi <input type="text" id="ip" placeholder="10.50.20.15"></label>
@@ -240,10 +242,16 @@
       <label>Hedef IP <input type="text" id="accDst" placeholder="10.40.0.9"></label>
       <label>Port <input type="text" id="accPort" placeholder="tümü" style="width:80px"></label>
     </span>
+    <span id="dbLabel" class="acc-fields" hidden>
+      <label title="Boş: tüm veritabanları. IP yazılırsa o DB sunucusu; ad yazılırsa instance / DB / makine adı; alan:değer olduğu gibi gönderilir">Veritabanı filtresi
+        <input type="text" id="dbFiltre" placeholder="boş = tümü · IP · instance / DB adı" style="width:260px"></label>
+      <label>DB türü <input type="text" id="dbTur" list="dbTurList" placeholder="tümü" style="width:110px"></label>
+      <datalist id="dbTurList"><option value="oracle"><option value="mssql"><option value="postgresql"><option value="mysql"><option value="db2"></datalist>
+    </span>
     <label>Başlangıç <input type="datetime-local" id="start"></label>
     <label>Bitiş <input type="datetime-local" id="end"></label>
     <label id="applianceLabel">AppResponse kutusu <select id="appliance"></select></label>
-    <div class="checks">
+    <div class="checks" id="srcChecks">
       <label><input type="checkbox" id="srcSplunk" checked> Splunk</label>
       <label id="srcArLabel"><input type="checkbox" id="srcAr" checked> AppResponse</label>
       <label title="Palo Alto trafik logları (Splunk fw_paloalto): izin verilen ve engellenen oturumlar"><input type="checkbox" id="srcFw" checked> Firewall</label>
@@ -356,6 +364,7 @@ function initForm() {
   $("#start").value = p.get("start") || toLocalInput(new Date(now - 3600e3));
   if (p.get("ip")) $("#ip").value = p.get("ip");
   if (p.get("app")) $("#appName").value = p.get("app");
+  if (p.get("db") != null) { $("#dbFiltre").value = p.get("filtre") ?? ""; $("#dbTur").value = p.get("tur") ?? ""; }
   if (p.get("src")) { $("#accSrc").value = p.get("src"); $("#accDst").value = p.get("dst") ?? ""; $("#accPort").value = p.get("port") ?? ""; return "erisim"; }
   // IP / uygulama en fazla 24 saat sorgulanır: adresteki aralık daha uzunsa (ör. erişim sorgusundan kalma 7 gün) son 1 saate çekilir.
   const s = new Date($("#start").value), e = new Date($("#end").value);
@@ -363,10 +372,10 @@ function initForm() {
     const end = isNaN(e) ? now : e;
     $("#end").value = toLocalInput(end); $("#start").value = toLocalInput(new Date(end - 3600e3));
   }
-  return p.get("app") ? "app" : p.get("ip") ? "ip" : null;
+  return p.get("db") != null ? "db" : p.get("app") ? "app" : p.get("ip") ? "ip" : null;
 }
 
-$("#f").addEventListener("submit", ev => { ev.preventDefault(); uiMode === "app" ? runApp() : uiMode === "erisim" ? runAccess() : run(); });
+$("#f").addEventListener("submit", ev => { ev.preventDefault(); uiMode === "app" ? runApp() : uiMode === "erisim" ? runAccess() : uiMode === "db" ? runDbGelen() : run(); });
 $("#cancel").addEventListener("click", () => abort?.abort());
 
 async function run() {
@@ -1854,9 +1863,10 @@ function wireEnvToggles(onChange) {
 }
 
 fetch("api/me").then(r => r.ok ? r.json() : null).then(me => { if (me?.name) $("#me").textContent = "👤 " + me.name; }).catch(() => {});
-loadAppliances().then(() => { const m = initForm(); if (m) uiMode = m; /* adres çubuğundaki aralık o sekmenin aralığıdır */ if (m === "app") runApp(); else if (m === "erisim") runAccess(); else if (m === "ip") run(); });
+loadAppliances().then(() => { const m = initForm(); if (m) uiMode = m; /* adres çubuğundaki aralık o sekmenin aralığıdır */ if (m === "app") runApp(); else if (m === "erisim") runAccess(); else if (m === "db") runDbGelen(); else if (m === "ip") run(); });
 </script>
 <script src="uygulama.js"></script>
 <script src="erisim.js"></script>
+<script src="dbgelen.js"></script>
 </body>
 </html>

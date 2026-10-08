@@ -62,13 +62,14 @@ static class DataskopeService
     }
 
     // fullTextQuery ile arama; NextPageId bitene ya da Dataskope:MaxKayit (varsayılan 5000) dolana kadar sayfalar.
-    public static async Task<DataskopeSonuc> SearchAsync(LookupQuery q, string fullTextQuery, IConfiguration cfg, HttpClient http, CancellationToken ct)
+    public static async Task<DataskopeSonuc> SearchAsync(LookupQuery q, string fullTextQuery, IConfiguration cfg, HttpClient http, CancellationToken ct,
+        int? maxOverride = null)
     {
         var sw = System.Diagnostics.Stopwatch.StartNew();
         var s = cfg.GetSection("Dataskope");
         var f = s.GetSection("Alanlar");
         string F(string k, string d) => string.IsNullOrWhiteSpace(f[k]) ? d : f[k]!.Trim();
-        int max = s.GetValue("MaxKayit", 5000), pageSize = Math.Clamp(s.GetValue("PageSize", 1000), 1, 10000);
+        int max = maxOverride ?? s.GetValue("MaxKayit", 5000), pageSize = Math.Clamp(s.GetValue("PageSize", 1000), 1, 10000);
         string fmt = s["TarihBicimi"] ?? "yyyy-MM-ddTHH:mm:ss";
         bool utc = s.GetValue("Utc", false);
         string start = (utc ? q.Start.UtcDateTime : q.Start.LocalDateTime).ToString(fmt);
@@ -84,7 +85,8 @@ static class DataskopeService
         {
             string path = legacy ? "/api/v1/nest/events" : "/api/v1/third-party/search-by-events";
             var qs = new List<string> { "startDate=" + Uri.EscapeDataString(start), "endDate=" + Uri.EscapeDataString(end),
-                "pageSize=" + pageSize, "fullTextQuery=" + Uri.EscapeDataString(fullTextQuery) };
+                "pageSize=" + pageSize };
+            if (!string.IsNullOrWhiteSpace(fullTextQuery)) qs.Add("fullTextQuery=" + Uri.EscapeDataString(fullTextQuery));
             if (next != null) qs.Add("nextPageId=" + Uri.EscapeDataString(next));
             using var req = new HttpRequestMessage(HttpMethod.Get, BaseUrl(cfg) + path + "?" + string.Join("&", qs));
             req.Headers.Authorization = new("Bearer", token);

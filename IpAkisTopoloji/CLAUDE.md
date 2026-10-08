@@ -30,6 +30,7 @@ topoloji çizer ve şirket içi AI'a etki analizi yaptırır. Canlıda IIS'te, W
 | `Yolculuk.cs` | Uçtan uca yolculuk: dış IP → … → sorgulanan → … → DB |
 | `Erisim.cs` | Erişim sorgula: kaynak IP → hedef IP (port) izin/engel, son görülme (Firewall + Carbon Black) |
 | `Dataskope.cs` | Dataskope/Infraskope DB audit API (token önbellekli, search-by-events → nest/events yedeği, sayfalama) |
+| `DbGelen.cs` | DB'ye gelenler: Dataskope kayıtlarından veritabanı → gelen sunucular |
 | `PortBilgisi.cs` | Port → işlev ve kesilirse duracak iş (AI prompt'u için) |
 | `AuthHelper.cs` | Kullanıcının verdiği DokuPanel yetki helper'ı (namespace `AppRel`), anahtar config'den |
 
@@ -101,6 +102,11 @@ topoloji çizer ve şirket içi AI'a etki analizi yaptırır. Canlıda IIS'te, W
   MachineName, os_user, db_user, db_name, instance_name, client_hostname, client_ip/port, server_ip/port, client_app_name.
   Erişimde DB kullanıcısı + program + DB bazında sayı/ilk/son; karar metnine "Veritabanına X kullanıcısıyla oturum açılmış";
   yalnız Dataskope varsa "Veritabanı oturumu var (firewall kaydı yok)". Tarihler saat dilimsiz yerel (`Dataskope:Utc`).
+- **DB'ye gelenler** (sekme, `DbGelen.cs`, `wwwroot/dbgelen.js`, `/api/dbgelen?filtre=&tur=&start=&end=`): Dataskope kayıtları
+  veritabanı (server_ip + port + instance) bazında; tıklayınca gelen istemciler (client_ip: makine, DB/OS kullanıcıları,
+  programlar, ilk/son, envanterden segment + uygulama) ve "Erişim" bağlantısı (kaynak → DB). Filtre: boş = parametre yok;
+  IP → `server_ip:"x"`; `alan:değer` olduğu gibi; ad → instance_name / db_name / MachineName. En çok `DbGelenMaxKayit`=20000
+  kayıt, aralık en çok `DbGelenMaxSaat`=24; eksikse uyarı. Derin bağlantı `?db=&filtre=&tur=`.
 - **SQL (doku DB)** — tablo adları `Envanter:*` ayarında:
   - `dbo.KonsolideSegmentler4` (SEGMENT=CIDR, VLAN, Tenant, ApplicationProfile, EPGName, BD, GW, Description, Domain):
     IP → en uzun prefix eşleşmesi. Segment adı = EPGName > ApplicationProfile > Description > CIDR.
