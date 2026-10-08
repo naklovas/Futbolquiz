@@ -33,6 +33,8 @@ static class DataskopeService
         // Görünmez karakterler (sıfır genişlikli boşluk, BOM, bölünmez boşluk) ve açılı parantezler
         // ("https://<10.1.1.1>:8443/..." gibi şablondan kalan) atılır.
         string u = System.Text.RegularExpressions.Regex.Replace(cfg["Dataskope:BaseUrl"] ?? "", @"[\u200B-\u200D\uFEFF\u00A0<>\s]", "");
+        // "https//x" / "http//x" (iki nokta unutulmuş) düzeltilir
+        u = System.Text.RegularExpressions.Regex.Replace(u, @"^(https?)/+", "$1://", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
         // Kopyala-yapıştırda gelen biçimler temizlenir: "[https://x](https://x)", tırnak / köşeli parantez, şemasız "10.1.1.1:8443/..."
         var m = System.Text.RegularExpressions.Regex.Match(u, @"https?://[^\s\]\)\(""'<>]+", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
         if (m.Success) u = m.Value;
