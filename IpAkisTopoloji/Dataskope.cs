@@ -30,7 +30,18 @@ static class DataskopeService
     // BaseUrl ".../InfraskopeESApi" olmalı; yanlışlıkla uç yolu da yazılmışsa (".../api/v1/nest/events", ".../token") kesilir.
     static string BaseUrl(IConfiguration cfg)
     {
-        string u = (cfg["Dataskope:BaseUrl"] ?? "").Trim().TrimEnd('/');
+        string u = (cfg["Dataskope:BaseUrl"] ?? "").Trim();
+        // Kopyala-yapıştırda gelen biçimler temizlenir: "[https://x](https://x)", tırnak / köşeli parantez, şemasız "10.1.1.1:8443/..."
+        var m = System.Text.RegularExpressions.Regex.Match(u, @"https?://[^\s\]\)\(""'<>]+", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        if (m.Success) u = m.Value;
+        else
+        {
+            u = u.Trim('[', ']', '(', ')', '"', '\'', '<', '>', ' ');
+            if (u != "") u = "https://" + u;
+        }
+        u = u.TrimEnd('/');
+        if (!Uri.TryCreate(u, UriKind.Absolute, out _))
+            throw new InvalidOperationException($"Dataskope:BaseUrl geçersiz. Örnek: https://<sunucu>:8443/InfraskopeESApi");
         int i = u.IndexOf("/api/", StringComparison.OrdinalIgnoreCase);
         if (i > 0) u = u[..i];
         if (u.EndsWith("/token", StringComparison.OrdinalIgnoreCase)) u = u[..^6];
