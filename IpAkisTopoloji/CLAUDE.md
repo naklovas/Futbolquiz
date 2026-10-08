@@ -28,6 +28,7 @@ topoloji çizer ve şirket içi AI'a etki analizi yaptırır. Canlıda IIS'te, W
 | `AkisTesti.cs` | AppResponse ham bağlantı testi (zaman kapsaması uygun mu) |
 | `Oturum.cs` | Oturum akışı: aynı oturumda gelen → giden (AppResponse, zaman kapsaması) |
 | `Yolculuk.cs` | Uçtan uca yolculuk: dış IP → … → sorgulanan → … → DB |
+| `Erisim.cs` | Erişim sorgula: kaynak IP → hedef IP (port) izin/engel, son görülme (Firewall + Carbon Black) |
 | `PortBilgisi.cs` | Port → işlev ve kesilirse duracak iş (AI prompt'u için) |
 | `AuthHelper.cs` | Kullanıcının verdiği DokuPanel yetki helper'ı (namespace `AppRel`), anahtar config'den |
 
@@ -83,6 +84,13 @@ topoloji çizer ve şirket içi AI'a etki analizi yaptırır. Canlıda IIS'te, W
   (bulunamazsa açıklayıcı mesaj).
   İleri yönde VIP → üye: önce üyeye LB GW'den gelen oturumlar; yoksa VIP'i çağıranın kendi IP'sinden (LB SNAT yapmıyor),
   yoksa üyenin VIP portuna gelen tüm oturumlar; hiçbiri yoksa VIP → üye bağı `Envanter=true` (gri noktalı, üyeden devam yok).
+- **Erişim sorgula** (sekme, `wwwroot/erisim.js`, `/api/erisim?src=&dst=&port=&start=&end=&sources=`): Firewall
+  `FirewallService.AccessAsync` (src = kaynak, dest ya da dest_translated_ip = hedef; port + action bazında sayı, ilk/son,
+  kural, cihaz, App-ID, `session_end_reason` (`Firewall:Alanlar:Reason`), NAT; ayrıca son 20 olay) + Carbon Black
+  (client→server bağlantısı, süreç, son) + envanter (segment, uygulama, VIP üyeliği). Karar: son izin ≥ son engel → "Erişim var";
+  izin sonra engel → "Son durumda engelleniyor"; yalnız engel → "Engelleniyor"; yalnız CB → firewall'dan geçmiyor; hiçbiri → "Kayıt yok"
+  (aynı segment notu). Aralık en fazla `Erisim:MaxGun`=30 gün; sekmeye geçince aralık 1 günden kısaysa son 7 gün yapılır.
+  Derin bağlantı `?src=&dst=&port=`.
 - **SQL (doku DB)** — tablo adları `Envanter:*` ayarında:
   - `dbo.KonsolideSegmentler4` (SEGMENT=CIDR, VLAN, Tenant, ApplicationProfile, EPGName, BD, GW, Description, Domain):
     IP → en uzun prefix eşleşmesi. Segment adı = EPGName > ApplicationProfile > Description > CIDR.

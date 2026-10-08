@@ -19,11 +19,16 @@ function setUiMode(m) {
   $("#ipLabel").hidden = m !== "ip";
   $("#appLabel").hidden = m !== "app";
   $("#hop2Label").hidden = m !== "ip";
+  // Erişim sorgusu Firewall + Carbon Black ile çalışır; AppResponse kutusu ve 2. seviye anlamsız.
+  $("#accLabel").hidden = m !== "erisim";
+  $("#applianceLabel").hidden = m === "erisim";
+  $("#srcArLabel").hidden = m === "erisim";
+  if (m === "erisim") accDefaultRange();
   if (m === "app") loadAppCatalog();
 }
 document.querySelectorAll("#modeTabs button").forEach(b => b.addEventListener("click", () => {
   setUiMode(b.dataset.ui);
-  (b.dataset.ui === "app" ? $("#appName") : $("#ip")).focus();
+  (b.dataset.ui === "app" ? $("#appName") : b.dataset.ui === "erisim" ? $("#accSrc") : $("#ip")).focus();
 }));
 
 async function loadAppCatalog() {

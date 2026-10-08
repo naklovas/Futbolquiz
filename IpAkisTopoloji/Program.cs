@@ -204,6 +204,40 @@ app.MapGet("/api/oturum", async (string? ip, string? start, string? end, int? ap
     }
 });
 
+// Erişim sorgula: kaynak IP'den hedef IP'ye (isteğe bağlı port) erişim olmuş mu — Firewall izin/engel + Carbon Black + envanter.
+// Uzun aralık gerekebildiği için en fazla Erisim:MaxGun (varsayılan 30) gün.
+app.MapGet("/api/erisim", async (string? src, string? dst, string? port, string? start, string? end, string? sources,
+    IConfiguration cfg, IHttpClientFactory factory, EnvanterService envanter, CancellationToken ct) =>
+{
+    var sw = Stopwatch.StartNew();
+    if (!LookupQuery.TryParse(src, start, end, cfg.GetValue("Erisim:MaxGun", 30) * 24, out var q, out var error))
+        return Results.BadRequest(new { error = "Kaynak: " + error });
+    if (!LookupQuery.TryParseIpv4(dst, out string dstIp))
+        return Results.BadRequest(new { error = "Hedef: geçerli bir IPv4 adresi girin." });
+    string? p = string.IsNullOrWhiteSpace(port) ? null : port.Trim();
+    if (p != null && !(int.TryParse(p, out int pn) && pn is > 0 and < 65536))
+        return Results.BadRequest(new { error = "Port 1-65535 arasında bir sayı olmalı." });
+    p = p == null ? null : int.Parse(p).ToString();
+    string wanted = (sources ?? "splunk,firewall").ToLowerInvariant();
+    bool useFw = wanted.Contains("firewall") && FirewallService.Enabled(cfg), useCb = wanted.Contains("splunk");
+
+    var fwTask = useFw ? Capture(async () => { var r = await FirewallService.AccessAsync(q!, q!.Ip, dstIp, p, cfg, factory.CreateClient("splunk"), ct); return new[] { r.summary, r.recent }; }, ct)
+        : Task.FromResult<(SplunkResult[]?, string?)>((null, null));
+    var cbTask = useCb ? Capture(() => Erisim.CarbonBlackAsync(q!, q!.Ip, dstIp, p, cfg, factory.CreateClient("splunk"), ct), ct)
+        : Task.FromResult<(SplunkResult?, string?)>((null, null));
+    var envTask = Capture(() => envanter.GetAsync(false, ct), ct);
+    try { await Task.WhenAll(fwTask, cbTask, envTask); }
+    catch (OperationCanceledException) when (ct.IsCancellationRequested) { return Results.StatusCode(499); }
+
+    var (fw, fwErr) = fwTask.Result;
+    var (cb, cbErr) = cbTask.Result;
+    var (env, envErr) = envTask.Result;
+    var fwSt = FirewallStatus(wanted, cfg, fw?[0], fwErr);
+    var cbSt = !useCb ? SourceStatus.Skipped : new SourceStatus(cbErr == null, cbErr, cb?.Messages ?? [], cb?.ElapsedMs, cb?.Rows.Count ?? 0);
+    var (_, _, envSt) = Statuses(wanted, null, null, null, null, env, envErr);
+    return Results.Ok(Erisim.Build(Erisim.Uc(q!.Ip, env), Erisim.Uc(dstIp, env), p, q!, fw?[0], fw?[1], cb, fwSt, cbSt, envSt, sw.ElapsedMilliseconds));
+});
+
 // Uçtan uca yolculuk: sorgulanan sunucudan geriye (dış IP'ler) ve ileriye (DB) durak durak oturum eşleştirmesi.
 // Her seviye ayrı veri çekimi olduğu için aralık kısa tutulur (Yolculuk:Dakika, varsayılan 5).
 app.MapGet("/api/yolculuk", async (string? ip, string? start, string? end, int? appliance, string? sources, bool? dis,
