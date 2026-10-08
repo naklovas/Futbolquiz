@@ -4,7 +4,8 @@
 //    NAT (hedef çevrilmiş adres olarak da aranır) ve son 20 olay.
 //  - Carbon Black: kaynaktan hedefe bağlantıyı uç nokta ajanı görmüş mü (hangi süreç, son ne zaman).
 //  - Envanter: iki ucun segmenti / uygulamaları, hedef VIP ise üyeleri; aynı segmentteyse trafik firewall'dan geçmeyebilir.
-// Karar özeti bu üçünden çıkarılır.
+//  - Dataskope (DB audit): kaynaktan hedef veritabanına hangi DB / OS kullanıcısı, hangi programla bağlanmış, son ne zaman.
+// Karar özeti bunlardan çıkarılır.
 // ---------------------------------------------------------------------------
 record ErisimUc(string Ip, SegmentInfo? Segment, List<string> Apps, List<string> Vip);
 record ErisimFw(string Port, string Action, bool Denied, long Count, string? First, string? Last,
@@ -12,9 +13,15 @@ record ErisimFw(string Port, string Action, bool Denied, long Count, string? Fir
 record ErisimOlay(string Time, string SrcPort, string DestIp, string DestPort, string? NatIp, string Action, bool Denied,
     string? Rule, string? Reason, string? Device);
 record ErisimCb(string Port, string Process, string Yon, long Count, string? Last);
+record ErisimDb(string? DbType, string? Instance, string? DbName, string? DbUser, string? OsUser, string? ClientHost, string? ClientApp,
+    string? ServerPort, long Count, string? First, string? Last);
 record ErisimSonuc(ErisimUc Kaynak, ErisimUc Hedef, string? Port, string Pencere, string Karar, string KararTur, string KararDetay,
     List<ErisimFw> Firewall, List<ErisimOlay> SonOlaylar, List<ErisimCb> CarbonBlack,
-    SourceStatus FirewallDurum, SourceStatus CarbonBlackDurum, SourceStatus Envanter, long ElapsedMs);
+    SourceStatus FirewallDurum, SourceStatus CarbonBlackDurum, SourceStatus Envanter, long ElapsedMs)
+{
+    public List<ErisimDb> Veritabani { get; init; } = [];
+    public SourceStatus VeritabaniDurum { get; init; } = SourceStatus.Skipped;
+}
 
 static class Erisim
 {
@@ -56,8 +63,19 @@ static class Erisim
     }
 
     public static ErisimSonuc Build(ErisimUc src, ErisimUc dst, string? port, LookupQuery q,
-        SplunkResult? fwSum, SplunkResult? fwRecent, SplunkResult? cb, SourceStatus fwSt, SourceStatus cbSt, SourceStatus envSt, long ms)
+        SplunkResult? fwSum, SplunkResult? fwRecent, SplunkResult? cb, SourceStatus fwSt, SourceStatus cbSt, SourceStatus envSt, long ms,
+        DataskopeSonuc? ds = null, SourceStatus? dsSt = null)
     {
+        // DB oturumları: kullanıcı + program + veritabanı bazında sayı, ilk / son (zaman yerel "yyyy-MM-dd HH:mm:ss")
+        static string? T(string? t) => DateTimeOffset.TryParse(t, out var d) ? d.LocalDateTime.ToString("yyyy-MM-dd HH:mm:ss") : t;
+        var db = (ds?.Kayitlar ?? [])
+            .Where(k => port == null || k.ServerPort == null || k.ServerPort == port)
+            .GroupBy(k => (k.DbType, k.Instance, k.DbName, k.DbUser, k.OsUser, k.ClientHost, k.ClientApp, k.ServerPort))
+            .Select(g => new ErisimDb(g.Key.DbType, g.Key.Instance, g.Key.DbName, g.Key.DbUser, g.Key.OsUser, g.Key.ClientHost, g.Key.ClientApp,
+                g.Key.ServerPort, g.Count(), g.Select(k => T(k.Time)).Min(StringComparer.Ordinal), g.Select(k => T(k.Time)).Max(StringComparer.Ordinal)))
+            .OrderByDescending(x => x.Last, StringComparer.Ordinal).ToList();
+        string? lastDb = db.Select(x => x.Last).Max(StringComparer.Ordinal);
+        string dbOzet = db.Count == 0 ? "" : $" Veritabanına {string.Join(", ", db.Select(x => x.DbUser).Where(u => u != null).Distinct().Take(3))} kullanıcısıyla oturum açılmış (Dataskope, son {lastDb}).";
         var fw = (fwSum?.Rows ?? []).Select(r => new ErisimFw(V(r, "dp") ?? "", V(r, "a") ?? "?", V(r, "denied") == "1",
                 long.TryParse(V(r, "count"), out long c) ? c : 0, V(r, "first"), V(r, "last"),
                 L(r, "rule"), L(r, "device"), L(r, "app"), L(r, "reason"),
@@ -83,7 +101,8 @@ static class Erisim
         {
             (karar, tur) = ("Aynı VLAN — firewall gerekmez", "info");
             detay = $"İki IP aynı segmentte: {segAd}. Aradaki trafik firewall'a uğramaz, firewall kuralı / erişim talebi gerekmez."
-                + (lastCb != null ? $" Carbon Black bağlantıyı görmüş (son {lastCb})." : " Bu aralıkta Carbon Black da bağlantı görmedi (hiç denenmemiş olabilir).")
+                + (lastCb != null ? $" Carbon Black bağlantıyı görmüş (son {lastCb})." : lastDb == null ? " Bu aralıkta Carbon Black da bağlantı görmedi (hiç denenmemiş olabilir)." : "")
+                + dbOzet
                 + " Engel varsa yalnızca sunucunun kendi yerel güvenlik duvarından (Windows Firewall / iptables) olabilir.";
         }
         else if (lastAllow != null && (lastDeny == null || string.CompareOrdinal(lastAllow, lastDeny) >= 0))
@@ -103,6 +122,11 @@ static class Erisim
             detay = $"Firewall'da yalnızca engellenen oturum var: {N(fw.Sum(x => x.Count))} deneme, son {lastDeny}"
                 + $" (kural: {string.Join(", ", fw.SelectMany(x => x.Rules).Distinct().Take(3))}).";
         }
+        else if (lastDb != null)
+        {
+            (karar, tur) = ("Veritabanı oturumu var (firewall kaydı yok)", "ok");
+            detay = dbOzet.Trim() + (sameSeg ? "" : " Firewall logu yok: trafik bu firewall'dan geçmiyor olabilir.");
+        }
         else if (lastCb != null)
         {
             (karar, tur) = ("Bağlantı görülmüş (firewall kaydı yok)", "ok");
@@ -116,8 +140,9 @@ static class Erisim
                 + (sameSeg ? " İki IP aynı segmentte: aradaki trafik firewall'a uğramaz." : "");
         }
 
+        if (lastAllow != null || lastDeny != null) detay += dbOzet;  // firewall kararlarına DB bilgisi eklenir
         if (sameSeg && tur != "info") detay += $" Not: iki IP aynı segmentte ({segAd}); doğrudan erişimde firewall'a uğramaz.";
         return new ErisimSonuc(src, dst, port, $"{q.Start:dd.MM.yyyy HH:mm} - {q.End:dd.MM.yyyy HH:mm}", karar, tur, detay,
-            fw, olay, cbl, fwSt, cbSt, envSt, ms);
+            fw, olay, cbl, fwSt, cbSt, envSt, ms) { Veritabani = db, VeritabaniDurum = dsSt ?? SourceStatus.Skipped };
     }
 }

@@ -21,6 +21,9 @@ builder.Services.AddHttpClient("splunk", c => c.Timeout = TimeSpan.FromMinutes(1
 builder.Services.AddHttpClient("appresponse", c => c.Timeout = TimeSpan.FromMinutes(3))
     .ConfigurePrimaryHttpMessageHandler(() => CreateHandler(builder.Configuration.GetValue("AppResponseIgnoreSslErrors", true)));
 
+builder.Services.AddHttpClient("dataskope", c => c.Timeout = TimeSpan.FromMinutes(3))
+    .ConfigurePrimaryHttpMessageHandler(() => CreateHandler(builder.Configuration.GetValue("Dataskope:IgnoreSslErrors", false)));
+
 builder.Services.AddHttpClient("ai", c => c.Timeout = TimeSpan.FromMinutes(builder.Configuration.GetValue("Ai:TimeoutMinutes", 3)))
     .ConfigurePrimaryHttpMessageHandler(() => CreateHandler(builder.Configuration.GetValue("Ai:IgnoreSslErrors", true)));
 
@@ -227,24 +230,31 @@ app.MapGet("/api/erisim", async (string? src, string? dst, string? port, string?
     if (p != null && !(int.TryParse(p, out int pn) && pn is > 0 and < 65536))
         return Results.BadRequest(new { error = "Port 1-65535 arasında bir sayı olmalı." });
     p = p == null ? null : int.Parse(p).ToString();
-    string wanted = (sources ?? "splunk,firewall").ToLowerInvariant();
+    string wanted = (sources ?? "splunk,firewall,dataskope").ToLowerInvariant();
     bool useFw = wanted.Contains("firewall") && FirewallService.Enabled(cfg), useCb = wanted.Contains("splunk");
 
     var fwTask = useFw ? Capture(async () => { var r = await FirewallService.AccessAsync(q!, q!.Ip, dstIp, p, cfg, factory.CreateClient("splunk"), ct); return new[] { r.summary, r.recent }; }, ct)
         : Task.FromResult<(SplunkResult[]?, string?)>((null, null));
     var cbTask = useCb ? Capture(() => Erisim.CarbonBlackAsync(q!, q!.Ip, dstIp, p, cfg, factory.CreateClient("splunk"), ct), ct)
         : Task.FromResult<(SplunkResult?, string?)>((null, null));
+    bool useDs = wanted.Contains("dataskope") && DataskopeService.Enabled(cfg);
+    var dsTask = useDs ? Capture(() => DataskopeService.SearchAsync(q!, DataskopeService.AccessQuery(cfg, q!.Ip, dstIp), cfg, factory.CreateClient("dataskope"), ct), ct)
+        : Task.FromResult<(DataskopeSonuc?, string?)>((null, null));
     var envTask = Capture(() => envanter.GetAsync(false, ct), ct);
-    try { await Task.WhenAll(fwTask, cbTask, envTask); }
+    try { await Task.WhenAll(fwTask, cbTask, dsTask, envTask); }
     catch (OperationCanceledException) when (ct.IsCancellationRequested) { return Results.StatusCode(499); }
 
     var (fw, fwErr) = fwTask.Result;
     var (cb, cbErr) = cbTask.Result;
     var (env, envErr) = envTask.Result;
+    var (ds, dsErr) = dsTask.Result;
+    var dsSt = !wanted.Contains("dataskope") ? SourceStatus.Skipped
+        : !DataskopeService.Enabled(cfg) ? new SourceStatus(false, "Tanımlı değil (Dataskope:BaseUrl)", [], null, 0)
+        : new SourceStatus(dsErr == null, dsErr, ds?.Mesajlar ?? [], ds?.ElapsedMs, ds?.Kayitlar.Count ?? 0);
     var fwSt = FirewallStatus(wanted, cfg, fw?[0], fwErr);
     var cbSt = !useCb ? SourceStatus.Skipped : new SourceStatus(cbErr == null, cbErr, cb?.Messages ?? [], cb?.ElapsedMs, cb?.Rows.Count ?? 0);
     var (_, _, envSt) = Statuses(wanted, null, null, null, null, env, envErr);
-    return Results.Ok(Erisim.Build(Erisim.Uc(q!.Ip, env), Erisim.Uc(dstIp, env), p, q!, fw?[0], fw?[1], cb, fwSt, cbSt, envSt, sw.ElapsedMilliseconds));
+    return Results.Ok(Erisim.Build(Erisim.Uc(q!.Ip, env), Erisim.Uc(dstIp, env), p, q!, fw?[0], fw?[1], cb, fwSt, cbSt, envSt, sw.ElapsedMilliseconds, ds, dsSt));
 });
 
 // Uçtan uca yolculuk: sorgulanan sunucudan geriye (dış IP'ler) ve ileriye (DB) durak durak oturum eşleştirmesi.

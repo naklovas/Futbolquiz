@@ -38,6 +38,7 @@ function setUiMode(m) {
   $("#accLabel").hidden = m !== "erisim";
   $("#applianceLabel").hidden = m === "erisim";
   $("#srcArLabel").hidden = m === "erisim";
+  $("#srcDsLabel").hidden = m !== "erisim";
   if (m === "app") loadAppCatalog();
 }
 document.querySelectorAll("#modeTabs button").forEach(b => b.addEventListener("click", () => {
