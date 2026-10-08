@@ -1846,7 +1846,7 @@ function wireEnvToggles(onChange) {
 }
 
 fetch("api/me").then(r => r.ok ? r.json() : null).then(me => { if (me?.name) $("#me").textContent = "👤 " + me.name; }).catch(() => {});
-loadAppliances().then(() => { const m = initForm(); if (m === "app") runApp(); else if (m === "erisim") runAccess(); else if (m === "ip") run(); });
+loadAppliances().then(() => { const m = initForm(); if (m) uiMode = m; /* adres çubuğundaki aralık o sekmenin aralığıdır */ if (m === "app") runApp(); else if (m === "erisim") runAccess(); else if (m === "ip") run(); });
 </script>
 <script src="uygulama.js"></script>
 <script src="erisim.js"></script>

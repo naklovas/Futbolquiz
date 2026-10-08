@@ -13,7 +13,22 @@ const appState = {
 };
 
 // ---------- Sekmeler ----------
+// Her sekmenin kendi tarih aralığı: sekmeden çıkarken aralığı saklanır, dönünce geri gelir. İlk girişte varsayılan:
+// IP / uygulama son 1 saat (en fazla 24 saat sorgulanabildiği için), erişim son 7 gün.
+const tabRange = {};
+function switchRange(from, to) {
+  tabRange[from] = { start: $("#start").value, end: $("#end").value };
+  const saved = tabRange[to];
+  if (saved) { $("#start").value = saved.start; $("#end").value = saved.end; return; }
+  if (to === "erisim") { accDefaultRange(); return; }
+  const s = new Date($("#start").value), e = new Date($("#end").value);
+  if (isNaN(s) || isNaN(e) || e - s > 24 * 3600e3) {
+    const end = new Date();
+    $("#end").value = toLocalInput(end); $("#start").value = toLocalInput(new Date(end - 3600e3));
+  }
+}
 function setUiMode(m) {
+  if (m !== uiMode) switchRange(uiMode, m);
   uiMode = m;
   document.querySelectorAll("#modeTabs button").forEach(b => b.classList.toggle("on", b.dataset.ui === m));
   $("#ipLabel").hidden = m !== "ip";
@@ -23,7 +38,6 @@ function setUiMode(m) {
   $("#accLabel").hidden = m !== "erisim";
   $("#applianceLabel").hidden = m === "erisim";
   $("#srcArLabel").hidden = m === "erisim";
-  if (m === "erisim") accDefaultRange();
   if (m === "app") loadAppCatalog();
 }
 document.querySelectorAll("#modeTabs button").forEach(b => b.addEventListener("click", () => {
