@@ -241,7 +241,7 @@
 <div class="modal ip-pick" id="ipPick" hidden>
   <div class="modal-box ip-pick-box" role="dialog" aria-modal="true" aria-labelledby="ipPickTitle">
     <div class="modal-head"><b id="ipPickTitle"></b><button type="button" id="ipPickClose">✕ Kapat</button></div>
-    <div class="modal-body"><div id="ipPickActions" class="ip-pick-actions"></div><div class="small muted" style="margin-bottom:8px">Bir IP'ye tıklayınca topolojisi yeni sekmede açılır.</div><div id="ipPickList"></div></div>
+    <div class="modal-body"><div id="ipPickActions" class="ip-pick-actions"></div><div class="small muted" style="margin-bottom:8px"><span id="ipPickNote"></span> Bir IP'ye tıklayınca topolojisi yeni sekmede açılır.</div><div id="ipPickList"></div></div>
   </div>
 </div>
 <div class="modal" id="flowModal" hidden>
@@ -857,12 +857,16 @@ function wireTopology() {
   svg.querySelectorAll(".sgn").forEach(n => n.addEventListener("click", () => {
     const dir = n.dataset.dir, key = n.dataset.key;
     const g = state.cols[dir].seg.find(x => x.key === key);
-    showIpPicker(segTitle(g), [...g.links.keys()].map(item), [{ label: "Bu segmentle filtrele ve ayrıntıyı göster", fn: () => {
+    // Segmentin kendi IP'leri (2. seviye sorgudan, segment başına en çok trafik yapanlar); "Diğer" kutusunda her IP'nin segmenti yazar.
+    const segs = g.other ?? [g];
+    const segItems = segs.flatMap(x => [...x.ips].map(ip => ({ ip, sub: [segTitle(x), [...x.apps].slice(0, 2).join(", ")].filter(Boolean).join(" · ") })));
+    const note = `${g.other ? `${g.other.length} segment · ` : ""}her segmentten en çok trafik yapan IP'ler; bu IP'ler ${g.links.size} çizili sunucuyla konuşuyor.`;
+    showIpPicker(segTitle(g), segItems, [{ label: "Bu segmentle filtrele ve ayrıntıyı göster", fn: () => {
       const set = new Set(g.links.keys());
       state.selected = { type: "seg", dir, key };
       state.filter = { dir, label: `${segTitle(g)} ile bağlantılı sunucular`, test: e => set.has(e.peerIp) };
       renderTopology(); renderDetail(); renderTables();
-    } }]);
+    } }], note);
   }));
 }
 
@@ -1035,8 +1039,9 @@ function ipTabUrl(ip) {
 }
 function openIpTab(ip) { window.open(ipTabUrl(ip), "_blank", "noopener"); }
 // actions: pencerenin üstünde ek düğmeler (ör. ana sayfada "Bu sunucuyla filtrele").
-function showIpPicker(title, items, actions = []) {
+function showIpPicker(title, items, actions = [], note = "") {
   $("#ipPickTitle").textContent = `${title} · ${items.length} IP`;
+  $("#ipPickNote").textContent = note;
   $("#ipPickActions").innerHTML = actions.map((a, i) => `<button type="button" data-act="${i}">${esc(a.label)}</button>`).join("");
   $("#ipPickActions").querySelectorAll("[data-act]").forEach(b => b.addEventListener("click", () => { $("#ipPick").hidden = true; actions[+b.dataset.act].fn(); }));
   $("#ipPickList").innerHTML = items.map(it => `<a href="${esc(ipTabUrl(it.ip))}" target="_blank" rel="noopener">
