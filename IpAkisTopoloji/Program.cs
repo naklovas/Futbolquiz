@@ -84,6 +84,32 @@ if (authEnabled)
     });
 }
 
+// API yanıtları önce bellekte yazılır: JSON yazılırken hata olursa (ör. veride beklenmeyen bir değer) yanıt yarım kalıp
+// "HTTP 200 ama JSON değil" görünmesin; bunun yerine 500 + hata mesajı döner ve log'a yazılır.
+app.Use(async (context, next) =>
+{
+    if (!context.Request.Path.StartsWithSegments("/api")) { await next(); return; }
+    var original = context.Response.Body;
+    using var buffer = new MemoryStream();
+    context.Response.Body = buffer;
+    try
+    {
+        await next();
+        context.Response.Body = original;
+        buffer.Position = 0;
+        await buffer.CopyToAsync(original, context.RequestAborted);
+    }
+    catch (Exception ex) when (!context.RequestAborted.IsCancellationRequested)
+    {
+        context.Response.Body = original;
+        app.Logger.LogError(ex, "API hatası: {Path}{Query}", context.Request.Path, context.Request.QueryString);
+        context.Response.Clear();
+        context.Response.StatusCode = StatusCodes.Status500InternalServerError;
+        await context.Response.WriteAsJsonAsync(new { error = $"Sunucu hatası: {ex.GetType().Name}: {ex.Message}" });
+    }
+    finally { context.Response.Body = original; }
+});
+
 // Kök adres (/) doğrudan DeltaFlow sayfasını açar.
 var defaultFiles = new DefaultFilesOptions();
 defaultFiles.DefaultFileNames.Clear();
