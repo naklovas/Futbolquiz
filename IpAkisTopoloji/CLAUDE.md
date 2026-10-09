@@ -115,7 +115,7 @@ topoloji çizer ve şirket içi AI'a etki analizi yaptırır. Canlıda IIS'te, W
   attack_type, violations, enforced_by, resp_code. Sonuç sınıfı: engellendi / doğrulama / ihlal (geçti) / bot imzası / geçti.
   Erişim sorgula'da "F5 WAF" kutucuğu: kaynak → hedef VIP olayları; engel varsa karar "… — ama F5 WAF engelliyor" (support ID ile).
   IP görünümünde `/api/f5uri`: sorgulanan IP + üyesi olduğu VIP'ler için URI + metot bazında istek/istemci/sonuç (kayıt yoksa
-  bölüm gizli). Çok değerli Splunk alanları `|||` ile birleştirilir (URL'deki virgül bozulmasın). AppResponse L7 kapalı kalıyor.
+  tek satır "kayıt yok" bilgisi). F5 aramalarında TERM() yok, `dest_ip="x"` alan filtresi (ham satırda ip:port olabilir). Çok değerli Splunk alanları `|||` ile birleştirilir (URL'deki virgül bozulmasın). AppResponse L7 kapalı kalıyor.
 - **SQL (doku DB)** — tablo adları `Envanter:*` ayarında:
   - `dbo.KonsolideSegmentler4` (SEGMENT=CIDR, VLAN, Tenant, ApplicationProfile, EPGName, BD, GW, Description, Domain):
     IP → en uzun prefix eşleşmesi. Segment adı = EPGName > ApplicationProfile > Description > CIDR.

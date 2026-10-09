@@ -432,14 +432,18 @@ async function runF5Uri(params) {
   showF5();
 }
 function showF5() { const el = $("#f5uri"); if (!el) return; const h = f5Html(); el.innerHTML = h; el.hidden = !h; }
-// Kayıt yoksa ya da F5 kapalıysa bölüm hiç görünmez.
+// F5 kapalıysa bölüm görünmez; kayıt yoksa tek satır bilgi.
 function f5Html() {
   const f = state.f5;
   if (!f) return "";
   if (f.status === "loading") return `<div class="small muted"><span class="spinner"></span> F5 (WAF) kayıtlarında URI'ler aranıyor…</div>`;
   if (f.status === "error") return `<div class="small" style="color:var(--err)">F5: ${esc(f.error)}</div>`;
   const b = f.body, rows = b.satirlar;
-  if (!rows.length) return b.f5.ok ? "" : (b.f5.error && b.f5.error !== "Sorgulanmadı" ? `<div class="small" style="color:var(--err)">F5: ${esc(b.f5.error)}</div>` : "");
+  if (!rows.length) {
+    if (!b.f5.ok) return b.f5.error && b.f5.error !== "Sorgulanmadı" ? `<div class="small" style="color:var(--err)">F5: ${esc(b.f5.error)}</div>` : "";
+    return `<div class="small muted">F5 (URI): ${esc(b.vipler.join(", "))} için bu aralıkta F5 kaydı yok (${(b.elapsedMs / 1000).toFixed(1)} sn).
+      F5'te yalnızca internete açık birkaç VIP'in güvenlik olayları loglanıyor; URI görmek için o VIP'lerden birini ya da havuz üyesini sorgulayın.</div>`;
+  }
   const cls = r => r === "engellendi" ? "deny" : r === "geçti" ? "allow" : "";
   const vips = [...new Set(rows.map(r => r.vip))];
   return `<div class="toolbar"><h2 style="margin:0">F5 üzerinden gelen istekler (URI)</h2>

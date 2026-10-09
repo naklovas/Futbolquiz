@@ -36,7 +36,7 @@ static class F5Waf
         // IP ve port çağıran tarafta doğrulanmış (yalnız rakam / nokta)
         string portFilter = port == null ? "" : $" AND '{dport}'=\"{port}\"";
         string bas = $"""
-            search index={index} TERM({srcIp}) TERM({dstIp})
+            search index={index} {dest}="{dstIp}" "{srcIp}"
             | eval cip=coalesce('{cli}', '{cli2}')
             | where (cip="{srcIp}" OR like('{xff}', "%{srcIp}%")) AND '{dest}'="{dstIp}"{portFilter}
             | eval ea=lower(enforcement_action), rs=lower(coalesce(request_status, req_status)), ac=lower(action),
@@ -96,12 +96,11 @@ static class F5Waf
         string index = Name(s["Index"], "f5");
         string cli = Name(f["ClientIp"], "ip_client"), cli2 = Name(f["ClientIp2"], "client_ip");
         string dest = Name(f["DestIp"], "dest_ip"), dport = Name(f["DestPort"], "dest_port");
-        string terms = vips.Count == 1 ? $"TERM({vips[0]})" : "(" + string.Join(" OR ", vips.Select(ip => $"TERM({ip})")) + ")";
-        string list = string.Join(", ", vips.Select(ip => $"\"{ip}\""));
+        // TERM() kullanılmaz: ham satırda IP "1.2.3.4:443" gibi yazılıysa TERM eşleşmez; alan filtresi güvenli.
+        string terms = "(" + string.Join(" OR ", vips.Select(ip => $"{dest}=\"{ip}\"")) + ")";
         int max = s.GetValue("MaxUri", 300);
         string spl = $"""
             search index={index} {terms}
-            | where in('{dest}', {list})
             | eval cip=coalesce('{cli}', '{cli2}'), u=coalesce(uri, url, client_request_uri), m=coalesce(method, http_method),
                    vip='{dest}', port='{dport}', vsn=coalesce(vs_name, virtual_server_name),
                    ea=lower(enforcement_action), rs=lower(coalesce(request_status, req_status)), ac=lower(action),
