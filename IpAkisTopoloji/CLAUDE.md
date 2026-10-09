@@ -139,6 +139,9 @@ topoloji çizer ve şirket içi AI'a etki analizi yaptırır. Canlıda IIS'te, W
 - **ODM / TEST**: karşı IP'nin segment Domain'inde "odm"/"test" geçiyorsa topoloji araç çubuğundaki kutucuk işaretliyken
   gösterilir (varsayılan gizli, tarayıcıda filtre, yeniden sorgu yok). `OrtamFiltreleri` ayarı. Uygulama görünümünde "X · ODM" ayrı grup.
   Karşı IP bir VIP ise ortamı havuz üyelerinden gelir (üyelerin hepsi aynı ortamdaysa; VIP segmenti ortam taşımaz).
+  Sorgulanan IP'nin kendi Domain'i bir ortamdaysa (ör. zbtest → TEST) kartta "zbtest · TEST ortamı", araç çubuğunda
+  "Sorgulanan IP: TEST" rozeti ve o ortamın kutucuğu o sorgu için otomatik işaretli (sonraki sorguda geri alınır).
+  Kutucuktaki sayı karşı IP sayısıdır ("N karşı IP"); VIP havuz üyeleri sayılmaz/filtrelenmez.
   Uygulama görünümünde kutucuklar uygulamanın kendi VIP/sunucularına da uygulanır (`appFiltered`, appState.raw → data).
 - **AI etki analizi** (`/api/ai/etki`): OpenAI uyumlu şirket içi servis, model `zt-ga-small-0`, Bearer ApiKey,
   tek user mesajı, temperature 0.1, `<think>` temizlenir. Etki tablosu kodda hesaplanır (servis → kullanan uygulamalar,
