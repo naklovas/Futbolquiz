@@ -24,6 +24,10 @@ record ErisimSonuc(ErisimUc Kaynak, ErisimUc Hedef, string? Port, string Pencere
     public List<ErisimWaf> Waf { get; init; } = [];
     public List<ErisimWafOlay> WafOlaylar { get; init; } = [];
     public SourceStatus WafDurum { get; init; } = SourceStatus.Skipped;
+    public List<OpinnateYol> Opinnate { get; init; } = [];
+    public string? OpinnateServis { get; init; }
+    public string? OpinnateKarar { get; init; }   // izin / engel / kural yok / yol yok
+    public SourceStatus OpinnateDurum { get; init; } = SourceStatus.Skipped;
 }
 
 static class Erisim
@@ -68,7 +72,8 @@ static class Erisim
     public static ErisimSonuc Build(ErisimUc src, ErisimUc dst, string? port, LookupQuery q,
         SplunkResult? fwSum, SplunkResult? fwRecent, SplunkResult? cb, SourceStatus fwSt, SourceStatus cbSt, SourceStatus envSt, long ms,
         DataskopeSonuc? ds = null, SourceStatus? dsSt = null,
-        SplunkResult? wafSum = null, SplunkResult? wafRecent = null, SourceStatus? wafSt = null)
+        SplunkResult? wafSum = null, SplunkResult? wafRecent = null, SourceStatus? wafSt = null,
+        OpinnateSonuc? op = null, SourceStatus? opSt = null)
     {
         var waf = F5Waf.Summary(wafSum);
         var wafOlay = F5Waf.Recent(wafRecent);
@@ -171,8 +176,51 @@ static class Erisim
             detay += $" F5 WAF kayıtları: {ozet} (son {lastWaf}); engel yok.";
             if (tur == "skip") (karar, tur) = ("F5 üzerinden erişim görülmüş", "ok");
         }
+        // Opinnate: tanımlı kurala göre (trafikten bağımsız). Yol üzerindeki cihazlarda eşleşen kural izin mi engel mi.
+        string? opKarar = null;
+        if (op != null)
+        {
+            var adim = op.Adimlar.ToList();
+            static bool Izin(OpinnateKural k) => k.Aktif && k.Action is "accept" or "allow" or "permit" or "pass";
+            var engel = adim.Where(a => a.Kural != null && a.Kural.Aktif && !Izin(a.Kural)).ToList();
+            var izin = adim.Where(a => a.Kural != null && Izin(a.Kural)).ToList();
+            int bos = adim.Count(a => a.Kural == null || !a.Kural.Aktif);
+            string K(OpinnateAdim a) => $"{a.Kural!.PolicyId ?? a.Kural.Id} @ {a.Cihaz}" + (a.Kural.Comment is { Length: > 0 } c ? $" ({c})" : "");
+            string bosNot = bos > 0 ? $" {bos} cihazda eşleşen kural yok (kural uygulamayan L3 switch / router olabilir)." : "";
+            if (adim.Count == 0)
+            {
+                opKarar = "yol yok";
+                detay += " Opinnate: kaynak ile hedef arasında yol bulunamadı.";
+            }
+            else if (engel.Count > 0)
+            {
+                opKarar = "engel";
+                string m = $" Opinnate: kural engelliyor — {string.Join(", ", engel.Take(3).Select(K))}.";
+                if (tur == "skip") (karar, tur, detay) = ("Kural engelliyor (trafik görülmedi)", "err", m.Trim());
+                else if (tur is "ok") { karar += " — ama Opinnate'te engel kuralı var"; tur = "warn"; detay += m + " Kural sonradan değişmiş ya da trafik başka yoldan geçiyor olabilir."; }
+                else detay += m;
+            }
+            else if (izin.Count > 0)
+            {
+                opKarar = "izin";
+                string m = $" Opinnate: kural izin veriyor — {string.Join(", ", izin.Take(3).Select(K))}.{bosNot}";
+                if (tur == "skip") (karar, tur, detay) = ("Kural açık — bu aralıkta trafik görülmedi", "ok",
+                    m.Trim() + " Kural tanımlı ama seçilen aralıkta kullanılmamış (yeni açılmış ya da kullanılmayan kural olabilir).");
+                else if (tur is "err" or "warn") detay += m + " Kural izin verdiği halde firewall logunda engel var: engel başka cihazda ya da kural sonradan değişmiş olabilir.";
+                else detay += m;
+            }
+            else
+            {
+                opKarar = "kural yok";
+                string m = $" Opinnate: yol üzerindeki {adim.Count} cihazın hiçbirinde bu erişim için kural yok.";
+                if (tur == "skip") (karar, tur, detay) = ("Erişim tanımlı değil", "err", m.Trim() + " Erişim gerekiyorsa kural talebi açılmalı.");
+                else if (tur == "ok" && !sameSeg) detay += m + " Trafik görülmüş: kural daha geniş bir nesneyle (any / ağ grubu) tanımlı olabilir.";
+                else detay += m;
+            }
+        }
         if (sameSeg && tur != "info") detay += $" Not: iki IP aynı segmentte ({segAd}); doğrudan erişimde firewall'a uğramaz.";
         return new ErisimSonuc(src, dst, port, $"{q.Start:dd.MM.yyyy HH:mm} - {q.End:dd.MM.yyyy HH:mm}", karar, tur, detay,
-            fw, olay, cbl, fwSt, cbSt, envSt, ms) { Veritabani = db, VeritabaniDurum = dsSt ?? SourceStatus.Skipped, Waf = waf, WafOlaylar = wafOlay, WafDurum = wafSt ?? SourceStatus.Skipped };
+            fw, olay, cbl, fwSt, cbSt, envSt, ms) { Veritabani = db, VeritabaniDurum = dsSt ?? SourceStatus.Skipped, Waf = waf, WafOlaylar = wafOlay, WafDurum = wafSt ?? SourceStatus.Skipped,
+              Opinnate = op?.Yollar ?? [], OpinnateServis = op?.Servis, OpinnateKarar = opKarar, OpinnateDurum = opSt ?? SourceStatus.Skipped };
     }
 }

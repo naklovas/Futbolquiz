@@ -15,8 +15,8 @@ async function runAccess() {
   setUiMode("erisim");
   const src = $("#accSrc").value.trim(), dst = $("#accDst").value.trim(), port = $("#accPort").value.trim();
   if (!src || !dst) { alert("Kaynak ve hedef IP girin."); return; }
-  const srcs = [$("#srcSplunk").checked && "splunk", $("#srcFw").checked && "firewall", $("#srcDs").checked && "dataskope", $("#srcF5").checked && "f5"].filter(Boolean);
-  if (!srcs.length) { alert("Splunk (Carbon Black), Firewall ya da Dataskope kaynaklarından en az birini seçin."); return; }
+  const srcs = [$("#srcSplunk").checked && "splunk", $("#srcFw").checked && "firewall", $("#srcDs").checked && "dataskope", $("#srcF5").checked && "f5", $("#srcOp").checked && "opinnate"].filter(Boolean);
+  if (!srcs.length) { alert("En az bir kaynak seçin."); return; }
   const params = new URLSearchParams({ src, dst, ...(port ? { port } : {}), start: $("#start").value, end: $("#end").value, sources: srcs.join(",") });
   history.replaceState(null, "", "?" + new URLSearchParams({ src, dst, ...(port ? { port } : {}), start: params.get("start"), end: params.get("end") }));
 
@@ -45,7 +45,7 @@ function renderAccess(d) {
     return `<span class="pill ${cls}" title="${esc(s.error ?? "")}"><b>${name}</b> ${info}</span>`;
   };
   const msgs = [...d.firewallDurum.messages.map(m => "Firewall: " + m), ...d.carbonBlackDurum.messages.map(m => "Carbon Black: " + m),
-    ...(d.veritabaniDurum?.messages ?? []).map(m => "Dataskope: " + m), ...(d.wafDurum?.messages ?? []).map(m => "F5: " + m)];
+    ...(d.veritabaniDurum?.messages ?? []).map(m => "Dataskope: " + m), ...(d.wafDurum?.messages ?? []).map(m => "F5: " + m), ...(d.opinnateDurum?.messages ?? []).map(m => "Opinnate: " + m)];
   const ipLink = ip => `<a class="mono" href="${esc(ipTabUrl(ip))}" target="_blank" rel="noopener" title="Topolojisini yeni sekmede aç">${esc(ip)}</a>`;
   const uc = (title, u) => `<div class="panel" style="margin:0">
       <div class="small muted">${title}</div>
@@ -90,6 +90,24 @@ function renderAccess(d) {
         <td>${esc(x.osUser ?? "")}</td><td>${esc(x.clientHost ?? "")}</td><td>${esc(x.clientApp ?? "")}</td><td class="mono">${esc(x.serverPort ?? "")}</td>
         <td class="num">${fmt(x.count)}</td><td class="mono">${esc(x.first ?? "")}</td><td class="mono"><b>${esc(x.last ?? "")}</b></td></tr>`).join("")}</tbody></table></div>`
     : `<div class="muted">${d.veritabaniDurum?.ok ? "Dataskope'ta bu kaynaktan bu hedefe veritabanı oturumu yok (hedef bir veritabanı değilse beklenen durum)." : "Dataskope sorgulanmadı ya da hata verdi."}</div>`;
+  // Opinnate: yol üzerindeki her cihaz ve eşleşen kural (tanımlı kural, trafikten bağımsız)
+  const opOn = d.opinnateDurum && d.opinnateDurum.error !== "Sorgulanmadı";
+  const opAct = k => !k ? `<span class="badge">kural yok</span>` : !k.aktif ? `<span class="badge">${esc(k.action)} (pasif)</span>`
+    : `<span class="badge ${["accept", "allow", "permit", "pass"].includes(k.action) ? "allow" : "deny"}">${esc(k.action)}</span>`;
+  const opKararTxt = { "izin": "Kural izin veriyor", "engel": "Kural engelliyor", "kural yok": "Kural yok", "yol yok": "Yol bulunamadı" }[d.opinnateKarar] ?? "";
+  const opRows = (d.opinnate ?? []).flatMap(y => y.adimlar);
+  const opTable = opRows.length ? `<div class="small muted" style="margin:-4px 0 8px">Servis: <span class="mono">${esc(d.opinnateServis ?? "")}</span> · ${esc(opKararTxt)} · yol üzerindeki cihazlar sırayla</div>
+    <div class="tbl-wrap"><table>
+      <thead><tr><th>#</th><th>Cihaz</th><th>Giriş → çıkış</th><th>Sonuç</th><th>Kural</th><th>Kaynak</th><th>Hedef</th><th>Servis</th><th>Açıklama</th><th>Diğer</th></tr></thead>
+      <tbody>${opRows.map((a, i) => { const k = a.kural; return `<tr><td class="num">${i + 1}</td><td><b>${esc(a.cihaz)}</b></td>
+        <td class="small">${esc(a.giris.join(", "))} → ${esc(a.cikis.join(", "))}</td><td>${opAct(k)}</td>
+        <td class="mono">${k ? esc(k.policyId ?? k.id ?? "") : ""}</td>
+        <td class="small">${k ? (k.srcNegate ? "<b>DEĞİL</b> " : "") + list(k.source) : ""}</td>
+        <td class="small">${k ? (k.dstNegate ? "<b>DEĞİL</b> " : "") + list(k.destination) : ""}</td>
+        <td class="small">${k ? list(k.service) : ""}</td><td class="small">${k ? esc(k.comment ?? "") : ""}</td>
+        <td class="small muted">${k ? esc([k.schedule && k.schedule !== "always" ? "zaman: " + k.schedule : "", k.nat ? "NAT: " + k.nat : "",
+          k.log ? "log: " + k.log : "", k.direction ?? ""].filter(Boolean).join(" · ")) : ""}</td></tr>`; }).join("")}</tbody></table></div>`
+    : `<div class="muted">${d.opinnateDurum?.ok ? "Opinnate bu kaynak ile hedef arasında yol / kural döndürmedi." : "Opinnate sorgulanmadı ya da hata verdi."}</div>`;
   const cbTable = d.carbonBlack.length ? `<div class="tbl-wrap"><table>
       <thead><tr><th>Port</th><th>Süreç</th><th>Gören ajan</th><th class="num">Olay</th><th>Son</th></tr></thead>
       <tbody>${d.carbonBlack.map(c => `<tr><td class="mono">${esc(c.port)}</td><td>${esc(c.process)}</td>
@@ -97,14 +115,15 @@ function renderAccess(d) {
     : `<div class="muted">${d.carbonBlackDurum.ok ? "Carbon Black bu bağlantıyı görmemiş (ajan yoksa görünmez)." : "Carbon Black sorgulanmadı ya da hata verdi."}</div>`;
 
   $("#main").innerHTML = `
-    <section class="panel"><div class="status">${pill("Firewall", d.firewallDurum)}${pill("Carbon Black", d.carbonBlackDurum)}${d.veritabaniDurum ? pill("Dataskope", d.veritabaniDurum) : ""}${d.wafDurum && d.wafDurum.error !== "Sorgulanmadı" ? pill("F5 WAF", d.wafDurum) : ""}
+    <section class="panel"><div class="status">${pill("Firewall", d.firewallDurum)}${pill("Carbon Black", d.carbonBlackDurum)}${d.veritabaniDurum ? pill("Dataskope", d.veritabaniDurum) : ""}${d.wafDurum && d.wafDurum.error !== "Sorgulanmadı" ? pill("F5 WAF", d.wafDurum) : ""}${opOn ? pill("Opinnate", d.opinnateDurum) : ""}
       ${pill("Envanter", d.envanter)}<span class="pill">Aralık ${esc(d.pencere)}</span><span class="pill">Toplam ${(d.elapsedMs / 1000).toFixed(1)} sn</span></div>
       ${msgs.length ? `<div class="msgs">${esc(msgs.join("\n"))}</div>` : ""}</section>
     <section class="panel">
       <div class="verdict ${esc(d.kararTur)}"><div class="big">${esc(d.karar)}</div><div>${esc(d.kararDetay)}</div></div>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:12px;margin-top:12px">${uc("Kaynak", d.kaynak)}${uc(`Hedef${d.port ? " · port " + esc(d.port) : ""}`, d.hedef)}</div>
     </section>
-    <section class="panel"><h2>Firewall (port ve sonuç bazında)</h2>${fwTable}</section>
+    ${opOn ? `<section class="panel"><h2>Firewall kuralları (Opinnate)</h2>${opTable}</section>` : ""}
+    <section class="panel"><h2>Firewall logu (port ve sonuç bazında)</h2>${fwTable}</section>
     ${olayTable ? `<section class="panel"><h2>Son ${d.sonOlaylar.length} firewall olayı</h2>${olayTable}</section>` : ""}
     <section class="panel"><h2>Carbon Black (uç nokta ajanının gördüğü bağlantılar)</h2>${cbTable}</section>
     ${d.wafDurum && d.wafDurum.error !== "Sorgulanmadı" ? `<section class="panel"><h2>F5 WAF (güvenlik olayları)</h2>${wafTable}</section>` : ""}
