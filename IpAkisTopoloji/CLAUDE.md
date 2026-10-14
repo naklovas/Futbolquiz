@@ -119,7 +119,9 @@ topoloji çizer ve şirket içi AI'a etki analizi yaptırır. Canlıda IIS'te, W
   tek satır "kayıt yok" bilgisi). F5 aramalarında TERM() yok, `dest_ip="x"` alan filtresi (ham satırda ip:port olabilir). Çok değerli Splunk alanları `|||` ile birleştirilir (URL'deki virgül bozulmasın). AppResponse L7 kapalı kalıyor.
 - **Opinnate** (`Opinnate.cs`, Erişim sorgula'da "Opinnate (kural)" kutucuğu): trafikten bağımsız, tanımlı kurala göre erişim.
   Giriş: `Opinnate:Token` doluysa o; değilse `POST {BaseUrl}/login {username,password}` → yanıtta token/access_token/… (iç içe
-  aranır) ya da oturum çerezi; 30 dk önbellek, 401/403'te bir kez yeniden. Başlık `TokenHeader` (Authorization) + `TokenPrefix` ("Bearer ").
+  aranır) ya da oturum çerezi; 30 dk önbellek, 401/403'te bir kez yeniden. Başlık: `TokenHeader`/`TokenPrefix` verilmişse yalnız o;
+  verilmemişse 401/403'te sırayla Authorization Bearer, x-api-key, düz Authorization, X-Auth-Token, token, apikey denenir, çalışan hatırlanır
+  (canlıda ilk deneme `{"message":"Forbidden"}` 403 verdi — API gateway tarzı).
   Sorgu `POST /rule-checker/topology` {source:["ip/32"], destination, service:["tcp_{port}"] (port yoksa "any"), virtualAreaId (1),
   user_base:false, users:[]} → policyResultData[].PathResult[] (src_int, dst_int, device_id, existPolicy = eşleşen kural ya da null).
   Cihaz adları `GET /devices` (esnek okunur). Karar: engel kuralı → "Kural engelliyor"; izin + trafik yok → "Kural açık — bu aralıkta trafik

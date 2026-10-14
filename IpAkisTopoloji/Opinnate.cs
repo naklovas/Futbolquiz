@@ -97,25 +97,48 @@ static class OpinnateService
         return null;
     }
 
+    // Token'ın hangi başlıkla gönderileceği: Opinnate:TokenHeader / TokenPrefix verilmişse yalnızca o; verilmemişse 401 / 403'te
+    // yaygın biçimler sırayla denenir (Bearer, x-api-key, düz Authorization…) ve çalışan, uygulama açık kaldıkça hatırlanır.
+    static readonly (string header, string prefix)[] Variants =
+        [("Authorization", "Bearer "), ("x-api-key", ""), ("Authorization", ""), ("X-Auth-Token", ""), ("token", ""), ("apikey", "")];
+    static readonly ConcurrentDictionary<string, (string header, string prefix)> Working = new();
+    public static string? LastTried;
+
     static async Task<HttpResponseMessage> AuthSendAsync(IConfiguration cfg, HttpClient http, Func<HttpRequestMessage> make, CancellationToken ct)
     {
-        for (int attempt = 0; ; attempt++)
+        bool fixedHeader = !string.IsNullOrWhiteSpace(cfg["Opinnate:TokenHeader"]) || cfg["Opinnate:TokenPrefix"] != null;
+        string key = BaseUrl(cfg);
+        var order = fixedHeader
+            ? new List<(string, string)> { (cfg["Opinnate:TokenHeader"] ?? "Authorization", cfg["Opinnate:TokenPrefix"] ?? "Bearer ") }
+            : (Working.TryGetValue(key, out var w) ? new[] { w } : []).Concat(Variants.Where(v => v != w)).ToList();
+        bool relogged = false;
+        var tried = new List<string>();
+        HttpResponseMessage? last = null;
+        for (int i = 0; i < order.Count; i++)
         {
-            var (token, cookie) = await SessionAsync(cfg, http, ct, force: attempt > 0);
+            var (token, cookie) = await SessionAsync(cfg, http, ct);
+            var (header, prefix) = order[i];
             var req = make();
-            if (token != null)
-            {
-                string header = cfg["Opinnate:TokenHeader"] ?? "Authorization";
-                string prefix = cfg["Opinnate:TokenPrefix"] ?? "Bearer ";
-                req.Headers.TryAddWithoutValidation(header, prefix + token);
-            }
+            if (token != null) req.Headers.TryAddWithoutValidation(header, prefix + token);
             if (cookie != null) req.Headers.TryAddWithoutValidation("Cookie", cookie);
-            var resp = await SendAsync(http, req, ct);
-            bool retry = attempt == 0 && resp.StatusCode is System.Net.HttpStatusCode.Unauthorized or System.Net.HttpStatusCode.Forbidden
-                && string.IsNullOrWhiteSpace(cfg["Opinnate:Token"]);
-            if (!retry) return resp;
-            resp.Dispose();
+            last?.Dispose();
+            last = await SendAsync(http, req, ct);
+            tried.Add($"{header}: {(prefix == "" ? "" : prefix.Trim() + " ")}<token>");
+            if (last.StatusCode is not (System.Net.HttpStatusCode.Unauthorized or System.Net.HttpStatusCode.Forbidden))
+            {
+                if (!fixedHeader) Working[key] = (header, prefix);
+                return last;
+            }
+            // Girişle alınan token süresi dolmuş olabilir: ilk 401 / 403'te bir kez yeniden giriş, aynı biçimle tekrar
+            if (!relogged && string.IsNullOrWhiteSpace(cfg["Opinnate:Token"]))
+            {
+                relogged = true;
+                await SessionAsync(cfg, http, ct, force: true);
+                i--;
+            }
         }
+        LastTried = string.Join(" | ", tried.Distinct());
+        return last!;
     }
 
     public static string Servis(IConfiguration cfg, string? port) =>
@@ -138,8 +161,13 @@ static class OpinnateService
         using var resp = await AuthSendAsync(cfg, http,
             () => new HttpRequestMessage(HttpMethod.Post, BaseUrl(cfg) + "/rule-checker/topology") { Content = Json(body) }, ct);
         string text = await resp.Content.ReadAsStringAsync(ct);
+        string kaynak = string.IsNullOrWhiteSpace(cfg["Opinnate:Token"]) ? "girişle (Username / Password) alındı" : "Opinnate:Token'dan";
         if (!resp.IsSuccessStatusCode)
-            throw new HttpRequestException($"Opinnate rule-checker HTTP {(int)resp.StatusCode}: {Short(text)}");
+            throw new HttpRequestException($"Opinnate rule-checker HTTP {(int)resp.StatusCode}: {Short(text)}" +
+                (resp.StatusCode is System.Net.HttpStatusCode.Unauthorized or System.Net.HttpStatusCode.Forbidden
+                    ? $" — token {kaynak}; denenen başlıklar: {LastTried}. " +
+                      "Token / API anahtarı geçersiz ya da kullanıcının rule-checker yetkisi yok olabilir."
+                    : ""));
         JsonNode? j;
         try { j = JsonNode.Parse(text); } catch { throw new HttpRequestException($"Opinnate rule-checker: JSON olmayan yanıt ({Short(text)})"); }
 
