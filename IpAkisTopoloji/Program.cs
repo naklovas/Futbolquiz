@@ -24,8 +24,14 @@ builder.Services.AddHttpClient("appresponse", c => c.Timeout = TimeSpan.FromMinu
 builder.Services.AddHttpClient("dataskope", c => c.Timeout = TimeSpan.FromMinutes(3))
     .ConfigurePrimaryHttpMessageHandler(() => CreateHandler(builder.Configuration.GetValue("Dataskope:IgnoreSslErrors", false)));
 
+// Opinnate oturum çereziyle çalışıyor: çerezler kodda elle taşınır (havuzdaki handler'ın kendi çerez kabı karışmasın)
 builder.Services.AddHttpClient("opinnate", c => c.Timeout = TimeSpan.FromMinutes(2))
-    .ConfigurePrimaryHttpMessageHandler(() => CreateHandler(builder.Configuration.GetValue("Opinnate:IgnoreSslErrors", false)));
+    .ConfigurePrimaryHttpMessageHandler(() =>
+    {
+        var h = (HttpClientHandler)CreateHandler(builder.Configuration.GetValue("Opinnate:IgnoreSslErrors", false));
+        h.UseCookies = false;
+        return h;
+    });
 
 builder.Services.AddHttpClient("ai", c => c.Timeout = TimeSpan.FromMinutes(builder.Configuration.GetValue("Ai:TimeoutMinutes", 3)))
     .ConfigurePrimaryHttpMessageHandler(() => CreateHandler(builder.Configuration.GetValue("Ai:IgnoreSslErrors", true)));

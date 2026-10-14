@@ -118,7 +118,9 @@ topoloji çizer ve şirket içi AI'a etki analizi yaptırır. Canlıda IIS'te, W
   IP görünümünde `/api/f5uri`: sorgulanan IP + üyesi olduğu VIP'ler için URI + metot bazında istek/istemci/sonuç (kayıt yoksa
   tek satır "kayıt yok" bilgisi). F5 aramalarında TERM() yok, `dest_ip="x"` alan filtresi (ham satırda ip:port olabilir). Çok değerli Splunk alanları `|||` ile birleştirilir (URL'deki virgül bozulmasın). AppResponse L7 kapalı kalıyor.
 - **Opinnate** (`Opinnate.cs`, Erişim sorgula'da "Opinnate (kural)" kutucuğu): trafikten bağımsız, tanımlı kurala göre erişim.
-  Giriş: `Opinnate:Token` doluysa o; değilse `POST {BaseUrl}/login {username,password}` → yanıtta token/access_token/… (iç içe
+  Swagger'da anahtar alanı yok, kullanıcı girişiyle (oturum) yetkilendiriyor. Giriş: `Username` doluysa her zaman
+  `POST {BaseUrl}/login {username,password}` (Token yalnız Username boşsa); `opinnate` HttpClient'ında UseCookies=false, Set-Cookie
+  elle taşınır, csrftoken/XSRF-TOKEN çerezi varsa X-CSRFToken/X-XSRF-TOKEN + Referer eklenir; → yanıtta token/access_token/… (iç içe
   aranır) ya da oturum çerezi; 30 dk önbellek, 401/403'te bir kez yeniden. Başlık: `TokenHeader`/`TokenPrefix` verilmişse yalnız o;
   verilmemişse 401/403'te sırayla Authorization Bearer, x-api-key, düz Authorization, X-Auth-Token, token, apikey denenir, çalışan hatırlanır
   (canlıda ilk deneme `{"message":"Forbidden"}` 403 verdi — API gateway tarzı).

@@ -3,7 +3,7 @@ using System.Text.Json.Nodes;
 
 // ---------------------------------------------------------------------------
 // Opinnate (firewall kural yönetimi) — tanımlı kurala göre erişim: "trafik olmuş mu" değil "kural açık mı".
-//  - Giriş: Opinnate:Token doluysa doğrudan kullanılır; boşsa POST {BaseUrl}/login {username, password} ile alınır.
+//  - Giriş: Username doluysa POST /login ile (oturum çerezi ve/veya token); yalnız Token doluysa o kullanılır. Giriş: POST {BaseUrl}/login {username, password} ile alınır.
 //    Yanıtta token / access_token / accessToken / jwt / api_key / apikey / key alanlarından ilki (iç içe de aranır)
 //    kullanılır; hiçbiri yoksa ve oturum çerezi döndüyse çerezle devam edilir. Bellekte Opinnate:TokenDakika (30) tutulur,
 //    401 / 403'te bir kez yeniden alınır. Başlık: Opinnate:TokenHeader (varsayılan Authorization) + TokenPrefix ("Bearer ").
@@ -51,7 +51,7 @@ static class OpinnateService
     static async Task<(string? token, string? cookie)> SessionAsync(IConfiguration cfg, HttpClient http, CancellationToken ct, bool force = false)
     {
         var s = cfg.GetSection("Opinnate");
-        if (!string.IsNullOrWhiteSpace(s["Token"])) return (s["Token"]!.Trim(), null);
+        if (StaticToken(cfg)) return (s["Token"]!.Trim(), null);
         string key = BaseUrl(cfg) + "|" + s["Username"];
         if (!force && Sessions.TryGetValue(key, out var t) && t.until > DateTimeOffset.UtcNow) return (t.token, t.cookie);
         await LoginLock.WaitAsync(ct);
@@ -84,6 +84,13 @@ static class OpinnateService
         }
         finally { LoginLock.Release(); }
     }
+
+    // Kullanıcı / şifre verilmişse her zaman giriş yapılır (Swagger da oturumla çalışıyor); Token yalnız kullanıcı adı boşsa kullanılır.
+    static bool StaticToken(IConfiguration cfg) =>
+        !string.IsNullOrWhiteSpace(cfg["Opinnate:Token"]) && string.IsNullOrWhiteSpace(cfg["Opinnate:Username"]);
+
+    static string? CookieValue(string cookie, string name) => cookie.Split(';').Select(c => c.Trim())
+        .Where(c => c.StartsWith(name + "=", StringComparison.OrdinalIgnoreCase)).Select(c => c[(name.Length + 1)..]).FirstOrDefault();
 
     static string? FindToken(JsonNode? n, int depth = 0)
     {
@@ -120,7 +127,14 @@ static class OpinnateService
             var (header, prefix) = order[i];
             var req = make();
             if (token != null) req.Headers.TryAddWithoutValidation(header, prefix + token);
-            if (cookie != null) req.Headers.TryAddWithoutValidation("Cookie", cookie);
+            if (cookie != null)
+            {
+                req.Headers.TryAddWithoutValidation("Cookie", cookie);
+                // Oturum çerezli API'lerde POST için CSRF başlığı (Django: csrftoken → X-CSRFToken, Angular/Spring: XSRF-TOKEN → X-XSRF-TOKEN)
+                foreach (var (ck, hd) in new[] { ("csrftoken", "X-CSRFToken"), ("XSRF-TOKEN", "X-XSRF-TOKEN"), ("csrf_token", "X-CSRF-Token") })
+                    if (CookieValue(cookie, ck) is { } cv) req.Headers.TryAddWithoutValidation(hd, Uri.UnescapeDataString(cv));
+                req.Headers.Referrer ??= new Uri(key + "/");
+            }
             last?.Dispose();
             last = await SendAsync(http, req, ct);
             tried.Add($"{header}: {(prefix == "" ? "" : prefix.Trim() + " ")}<token>");
@@ -130,7 +144,7 @@ static class OpinnateService
                 return last;
             }
             // Girişle alınan token süresi dolmuş olabilir: ilk 401 / 403'te bir kez yeniden giriş, aynı biçimle tekrar
-            if (!relogged && string.IsNullOrWhiteSpace(cfg["Opinnate:Token"]))
+            if (!relogged && !StaticToken(cfg))
             {
                 relogged = true;
                 await SessionAsync(cfg, http, ct, force: true);
@@ -161,7 +175,7 @@ static class OpinnateService
         using var resp = await AuthSendAsync(cfg, http,
             () => new HttpRequestMessage(HttpMethod.Post, BaseUrl(cfg) + "/rule-checker/topology") { Content = Json(body) }, ct);
         string text = await resp.Content.ReadAsStringAsync(ct);
-        string kaynak = string.IsNullOrWhiteSpace(cfg["Opinnate:Token"]) ? "girişle (Username / Password) alındı" : "Opinnate:Token'dan";
+        string kaynak = StaticToken(cfg) ? "Opinnate:Token'dan (kullanıcı ile giriş için Username / Password doldurun)" : "girişle (Username / Password) alındı";
         if (!resp.IsSuccessStatusCode)
             throw new HttpRequestException($"Opinnate rule-checker HTTP {(int)resp.StatusCode}: {Short(text)}" +
                 (resp.StatusCode is System.Net.HttpStatusCode.Unauthorized or System.Net.HttpStatusCode.Forbidden
