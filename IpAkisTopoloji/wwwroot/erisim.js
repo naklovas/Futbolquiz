@@ -107,7 +107,8 @@ function renderAccess(d) {
         <td class="small">${k ? list(k.service) : ""}</td><td class="small">${k ? esc(k.comment ?? "") : ""}</td>
         <td class="small muted">${k ? esc([k.schedule && k.schedule !== "always" ? "zaman: " + k.schedule : "", k.nat ? "NAT: " + k.nat : "",
           k.log ? "log: " + k.log : "", k.direction ?? ""].filter(Boolean).join(" · ")) : ""}</td></tr>`; }).join("")}</tbody></table></div>`
-    : `<div class="muted">${d.opinnateDurum?.ok ? "Opinnate bu kaynak ile hedef arasında yol / kural döndürmedi." : "Opinnate sorgulanmadı ya da hata verdi."}</div>`;
+    : d.opinnateDurum?.ok ? `<div class="muted">Opinnate bu kaynak ile hedef arasında yol / kural döndürmedi.</div>`
+    : `<div style="color:var(--err)">Opinnate hatası: ${esc(d.opinnateDurum?.error ?? "bilinmiyor")}</div>`;
   const cbTable = d.carbonBlack.length ? `<div class="tbl-wrap"><table>
       <thead><tr><th>Port</th><th>Süreç</th><th>Gören ajan</th><th class="num">Olay</th><th>Son</th></tr></thead>
       <tbody>${d.carbonBlack.map(c => `<tr><td class="mono">${esc(c.port)}</td><td>${esc(c.process)}</td>
