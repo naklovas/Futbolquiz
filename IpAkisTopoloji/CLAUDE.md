@@ -126,7 +126,7 @@ topoloji çizer ve şirket içi AI'a etki analizi yaptırır. Canlıda IIS'te, W
   (canlıda ilk deneme `{"message":"Forbidden"}` 403 verdi — API gateway tarzı).
   Sorgu `POST /rule-checker/topology` {source:["ip/32"], destination, service:["tcp_{port}"] (port yoksa "any"), virtualAreaId (1),
   user_base:false, users:[]} → policyResultData[].PathResult[] (src_int, dst_int, device_id, existPolicy = eşleşen kural ya da null).
-  Cihaz adları `GET /devices` (esnek okunur). Karar: engel kuralı → "Kural engelliyor"; izin + trafik yok → "Kural açık — bu aralıkta trafik
+  Cihaz adları `GET /devices` (esnek okunur; canlıda parametresiz 400 verdi → `Opinnate:CihazSorgusu` ya da ?virtualAreaId=, ?page=1&per_page=1000 sırayla denenir). Karar: engel kuralı → "Kural engelliyor"; izin + trafik yok → "Kural açık — bu aralıkta trafik
   görülmedi"; hiç kural yok + trafik yok → "Erişim tanımlı değil"; trafikle çelişirse uyarı. Gövde StringContent (Content-Length'lı).
   Swagger'da yalnızca okuma uçları kullanılır (policy/get, rule-history ileride); görev/kural değiştiren uçlar kullanılmaz.
 - **SQL (doku DB)** — tablo adları `Envanter:*` ayarında:

@@ -222,8 +222,22 @@ static class OpinnateService
         var names = new Dictionary<string, string>();
         try
         {
-            using var resp = await AuthSendAsync(cfg, http, () => new HttpRequestMessage(HttpMethod.Get, key + "/devices"), ct);
-            if (resp.IsSuccessStatusCode)
+            // /devices parametresiz 400 verebiliyor: Opinnate:CihazSorgusu (ör. "?virtualAreaId=1") ya da yaygın parametreler sırayla denenir
+            string area = cfg.GetValue("Opinnate:VirtualAreaId", 1).ToString();
+            var queries = new List<string>();
+            if (cfg["Opinnate:CihazSorgusu"] is { Length: > 0 } cq) queries.Add(cq.StartsWith('?') ? cq : "?" + cq);
+            queries.AddRange(["", $"?virtualAreaId={area}", $"?virtual_area_id={area}", "?page=1&per_page=1000", $"?virtualAreaId={area}&page=1&per_page=1000"]);
+            HttpResponseMessage? resp = null;
+            string? err = null;
+            foreach (var qs in queries.Distinct())
+            {
+                resp?.Dispose();
+                resp = await AuthSendAsync(cfg, http, () => new HttpRequestMessage(HttpMethod.Get, key + "/devices" + qs), ct);
+                if (resp.IsSuccessStatusCode || resp.StatusCode != System.Net.HttpStatusCode.BadRequest) break;
+                err ??= Short(await resp.Content.ReadAsStringAsync(ct));
+            }
+            using var _ = resp;
+            if (resp!.IsSuccessStatusCode)
             {
                 var j = JsonNode.Parse(await resp.Content.ReadAsStringAsync(ct));
                 JsonArray? arr = j as JsonArray ?? (j as JsonObject)?.Select(p => p.Value).OfType<JsonArray>().FirstOrDefault()
@@ -236,7 +250,8 @@ static class OpinnateService
                     if (id != null && !string.IsNullOrWhiteSpace(name)) names[id] = name!;
                 }
             }
-            else msgs.Add($"Cihaz adları alınamadı (GET /devices HTTP {(int)resp.StatusCode}); cihazlar numarayla gösteriliyor.");
+            else msgs.Add($"Cihaz adları alınamadı (GET /devices HTTP {(int)resp.StatusCode}{(err != null ? ": " + err : "")}); cihazlar numarayla gösteriliyor.");
+            if (resp.IsSuccessStatusCode && names.Count == 0) msgs.Add("GET /devices yanıtında cihaz adı bulunamadı (alan adları farklı olabilir); cihazlar numarayla gösteriliyor.");
         }
         catch (Exception ex) when (!ct.IsCancellationRequested) { msgs.Add("Cihaz adları alınamadı: " + Short(ex.Message)); }
         Devices[key] = (names, DateTimeOffset.UtcNow.AddMinutes(names.Count > 0 ? 60 : 5));
