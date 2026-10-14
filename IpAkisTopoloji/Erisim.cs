@@ -180,42 +180,74 @@ static class Erisim
         string? opKarar = null;
         if (op != null)
         {
-            var adim = op.Adimlar.ToList();
             static bool Izin(OpinnateKural k) => k.Aktif && k.Action is "accept" or "allow" or "permit" or "pass";
-            var engel = adim.Where(a => a.Kural != null && a.Kural.Aktif && !Izin(a.Kural)).ToList();
-            var izin = adim.Where(a => a.Kural != null && Izin(a.Kural)).ToList();
-            int bos = adim.Count(a => a.Kural == null || !a.Kural.Aktif);
-            string K(OpinnateAdim a) => $"{a.Kural!.PolicyId ?? a.Kural.Id} @ {a.Cihaz}" + (a.Kural.Comment is { Length: > 0 } c ? $" ({c})" : "");
-            string bosNot = bos > 0 ? $" {bos} cihazda eşleşen kural yok (kural uygulamayan L3 switch / router olabilir)." : "";
-            if (adim.Count == 0)
+            static bool Any(List<string> l) => l.Count == 0 || l.Any(x => x.Equals("any", StringComparison.OrdinalIgnoreCase) || x == "all" || x == "0.0.0.0/0");
+            // any/any/any deny = kural tabanının sonundaki varsayılan engel (cleanup): özel izin kuralı yok demek
+            static bool Cleanup(OpinnateKural k) => !Izin(k) && Any(k.Source) && Any(k.Destination) && Any(k.Service);
+            string K(OpinnateAdim a) => $"{a.Kural!.PolicyId ?? a.Kural.Id} @ {a.Cihaz}"
+                + (Cleanup(a.Kural) ? " — varsayılan engel, özel izin kuralı yok" : a.Kural.Comment is { Length: > 0 } c ? $" ({c})" : "");
+            // Port (servis) başına durum
+            var portlar = op.Yollar.GroupBy(y => y.Sorgu).Select(g =>
+            {
+                var adim = g.SelectMany(y => y.Adimlar).ToList();
+                var e = adim.Where(a => a.Kural != null && a.Kural.Aktif && !Izin(a.Kural)).ToList();
+                var i = adim.Where(a => a.Kural != null && Izin(a.Kural)).ToList();
+                string durum = adim.Count == 0 ? "yol yok" : e.Count > 0 ? "engel" : i.Count > 0 ? "izin" : "kural yok";
+                string metin = durum switch
+                {
+                    "engel" => $"{g.Key} engelli ({string.Join(", ", e.Take(2).Select(K))})",
+                    "izin" => $"{g.Key} izinli ({string.Join(", ", i.Take(2).Select(K))})",
+                    "kural yok" => $"{g.Key} için kural yok",
+                    _ => $"{g.Key} için yol bulunamadı"
+                };
+                return (port: g.Key, durum, metin, bos: adim.Count(a => a.Kural == null || !a.Kural.Aktif));
+            }).ToList();
+            var engelP = portlar.Where(x => x.durum == "engel").ToList();
+            // Çelişki yalnızca firewall logunda izinli trafik görülen portta kural engel gösteriyorsa (logda da engelliyse uyumlu)
+            var izinliLog = fw.Where(x => !x.Denied).Select(x => x.Port).Concat(cbl.Select(x => x.Port)).ToHashSet();
+            string PortNo(string sorgu) => new string(sorgu.Reverse().TakeWhile(char.IsDigit).Reverse().ToArray());
+            var celiski = engelP.Where(x => izinliLog.Contains(PortNo(x.port))).ToList();
+            var izinP = portlar.Where(x => x.durum == "izin").ToList();
+            string ozet = " Opinnate: " + string.Join("; ", portlar.Select(x => x.metin)) + "."
+                + (izinP.Any(x => x.bos > 0) ? " Kuralı boş görünen cihazlar kural uygulamayan L3 switch / router olabilir." : "");
+            if (op.PortYok)
+            {
+                opKarar = "port yok";
+                detay += " Opinnate: kural kontrolü için port girin (port yokken Opinnate yalnızca varsayılan engel kuralını döndürüyor).";
+            }
+            else if (portlar.Count == 0 || portlar.All(x => x.durum == "yol yok"))
             {
                 opKarar = "yol yok";
                 detay += " Opinnate: kaynak ile hedef arasında yol bulunamadı.";
             }
-            else if (engel.Count > 0)
+            else if (engelP.Count > 0 && izinP.Count > 0)
+            {
+                opKarar = "kısmi";
+                if (tur == "skip") (karar, tur, detay) = ("Kural kısmen açık — bu aralıkta trafik görülmedi", "warn", ozet.Trim());
+                else if (tur is "ok" && celiski.Count > 0) { karar += $" — ama Opinnate'te {string.Join(", ", celiski.Select(x => x.port))} engelli"; tur = "warn"; detay += ozet; }
+                else detay += ozet;
+            }
+            else if (engelP.Count > 0)
             {
                 opKarar = "engel";
-                string m = $" Opinnate: kural engelliyor — {string.Join(", ", engel.Take(3).Select(K))}.";
-                if (tur == "skip") (karar, tur, detay) = ("Kural engelliyor (trafik görülmedi)", "err", m.Trim());
-                else if (tur is "ok") { karar += " — ama Opinnate'te engel kuralı var"; tur = "warn"; detay += m + " Kural sonradan değişmiş ya da trafik başka yoldan geçiyor olabilir."; }
-                else detay += m;
+                if (tur == "skip") (karar, tur, detay) = ("Kural engelliyor (trafik görülmedi)", "err", ozet.Trim());
+                else if (tur is "ok" && celiski.Count > 0) { karar += " — ama Opinnate'te engel kuralı var"; tur = "warn"; detay += ozet + " Trafik geçtiği halde kural engel gösteriyor: kural sonradan değişmiş ya da trafik başka yoldan / NAT'lı adresten geçiyor olabilir."; }
+                else detay += ozet;
             }
-            else if (izin.Count > 0)
+            else if (izinP.Count > 0)
             {
                 opKarar = "izin";
-                string m = $" Opinnate: kural izin veriyor — {string.Join(", ", izin.Take(3).Select(K))}.{bosNot}";
                 if (tur == "skip") (karar, tur, detay) = ("Kural açık — bu aralıkta trafik görülmedi", "ok",
-                    m.Trim() + " Kural tanımlı ama seçilen aralıkta kullanılmamış (yeni açılmış ya da kullanılmayan kural olabilir).");
-                else if (tur is "err" or "warn") detay += m + " Kural izin verdiği halde firewall logunda engel var: engel başka cihazda ya da kural sonradan değişmiş olabilir.";
-                else detay += m;
+                    ozet.Trim() + " Kural tanımlı ama seçilen aralıkta kullanılmamış (yeni açılmış ya da kullanılmayan kural olabilir).");
+                else if (tur is "err" or "warn") detay += ozet + " Kural izin verdiği halde firewall logunda engel var: engel başka cihazda ya da kural sonradan değişmiş olabilir.";
+                else detay += ozet;
             }
             else
             {
                 opKarar = "kural yok";
-                string m = $" Opinnate: yol üzerindeki {adim.Count} cihazın hiçbirinde bu erişim için kural yok.";
-                if (tur == "skip") (karar, tur, detay) = ("Erişim tanımlı değil", "err", m.Trim() + " Erişim gerekiyorsa kural talebi açılmalı.");
-                else if (tur == "ok" && !sameSeg) detay += m + " Trafik görülmüş: kural daha geniş bir nesneyle (any / ağ grubu) tanımlı olabilir.";
-                else detay += m;
+                if (tur == "skip") (karar, tur, detay) = ("Erişim tanımlı değil", "err", ozet.Trim() + " Erişim gerekiyorsa kural talebi açılmalı.");
+                else if (tur == "ok" && !sameSeg) detay += ozet + " Trafik görülmüş: kural daha geniş bir nesneyle (any / ağ grubu) tanımlı olabilir.";
+                else detay += ozet;
             }
         }
         if (sameSeg && tur != "info") detay += $" Not: iki IP aynı segmentte ({segAd}); doğrudan erişimde firewall'a uğramaz.";

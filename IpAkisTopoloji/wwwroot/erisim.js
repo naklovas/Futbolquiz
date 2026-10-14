@@ -92,14 +92,22 @@ function renderAccess(d) {
     : `<div class="muted">${d.veritabaniDurum?.ok ? "Dataskope'ta bu kaynaktan bu hedefe veritabanı oturumu yok (hedef bir veritabanı değilse beklenen durum)." : "Dataskope sorgulanmadı ya da hata verdi."}</div>`;
   // Opinnate: yol üzerindeki her cihaz ve eşleşen kural (tanımlı kural, trafikten bağımsız)
   const opOn = d.opinnateDurum && d.opinnateDurum.error !== "Sorgulanmadı";
+  const isAny = l => !l.length || l.some(x => ["any", "all", "0.0.0.0/0"].includes(String(x).toLowerCase()));
+  const izinAct = a => ["accept", "allow", "permit", "pass"].includes(a);
   const opAct = k => !k ? `<span class="badge">kural yok</span>` : !k.aktif ? `<span class="badge">${esc(k.action)} (pasif)</span>`
-    : `<span class="badge ${["accept", "allow", "permit", "pass"].includes(k.action) ? "allow" : "deny"}">${esc(k.action)}</span>`;
-  const opKararTxt = { "izin": "Kural izin veriyor", "engel": "Kural engelliyor", "kural yok": "Kural yok", "yol yok": "Yol bulunamadı" }[d.opinnateKarar] ?? "";
-  const opRows = (d.opinnate ?? []).flatMap(y => y.adimlar);
-  const opTable = opRows.length ? `<div class="small muted" style="margin:-4px 0 8px">Servis: <span class="mono">${esc(d.opinnateServis ?? "")}</span> · ${esc(opKararTxt)} · yol üzerindeki cihazlar sırayla</div>
+    : izinAct(k.action) ? `<span class="badge allow">${esc(k.action)}</span>`
+    : `<span class="badge deny">${esc(k.action)}</span>${isAny(k.source) && isAny(k.destination) && isAny(k.service)
+        ? `<div class="small muted" title="Kural tabanının sonundaki any/any/any engel: bu trafiğe izin veren özel bir kural yok">varsayılan engel</div>` : ""}`;
+  const opKararTxt = { "izin": "Kural izin veriyor", "engel": "Kural engelliyor", "kısmi": "Bazı portlar izinli, bazıları engelli",
+    "kural yok": "Kural yok", "yol yok": "Yol bulunamadı", "port yok": "Kural kontrolü için port girin" }[d.opinnateKarar] ?? "";
+  const opRows = (d.opinnate ?? []).flatMap(y => y.adimlar.map(a => ({ ...a, sorgu: y.sorgu })));
+  const opMulti = new Set(opRows.map(a => a.sorgu)).size > 1;
+  const opTable = opRows.length ? `<div class="small muted" style="margin:-4px 0 8px">Servis: <span class="mono">${esc(d.opinnateServis ?? "")}</span>${!d.port ? " (port girilmediği için firewall / Carbon Black'te görülen portlar)" : ""} · ${esc(opKararTxt)} · yol üzerindeki cihazlar sırayla</div>
     <div class="tbl-wrap"><table>
-      <thead><tr><th>#</th><th>Cihaz</th><th>Giriş → çıkış</th><th>Sonuç</th><th>Kural</th><th>Kaynak</th><th>Hedef</th><th>Servis</th><th>Açıklama</th><th>Diğer</th></tr></thead>
-      <tbody>${opRows.map((a, i) => { const k = a.kural; return `<tr><td class="num">${i + 1}</td><td><b>${esc(a.cihaz)}</b></td>
+      <thead><tr>${opMulti ? "<th>Servis</th>" : ""}<th>#</th><th>Cihaz</th><th>Giriş → çıkış</th><th>Sonuç</th><th>Kural</th><th>Kaynak</th><th>Hedef</th><th>Servis</th><th>Açıklama</th><th>Diğer</th></tr></thead>
+      <tbody>${opRows.map((a, i) => { const k = a.kural; const first = i === 0 || opRows[i - 1].sorgu !== a.sorgu;
+        const n = opRows.slice(0, i + 1).filter(x => x.sorgu === a.sorgu).length;
+        return `<tr${opMulti && first && i ? ` style="border-top:2px solid var(--line)"` : ""}>${opMulti ? `<td class="mono">${first ? esc(a.sorgu) : ""}</td>` : ""}<td class="num">${n}</td><td><b>${esc(a.cihaz)}</b></td>
         <td class="small">${esc(a.giris.join(", "))} → ${esc(a.cikis.join(", "))}</td><td>${opAct(k)}</td>
         <td class="mono">${k ? esc(k.policyId ?? k.id ?? "") : ""}</td>
         <td class="small">${k ? (k.srcNegate ? "<b>DEĞİL</b> " : "") + list(k.source) : ""}</td>
@@ -107,6 +115,8 @@ function renderAccess(d) {
         <td class="small">${k ? list(k.service) : ""}</td><td class="small">${k ? esc(k.comment ?? "") : ""}</td>
         <td class="small muted">${k ? esc([k.schedule && k.schedule !== "always" ? "zaman: " + k.schedule : "", k.nat ? "NAT: " + k.nat : "",
           k.log ? "log: " + k.log : "", k.direction ?? ""].filter(Boolean).join(" · ")) : ""}</td></tr>`; }).join("")}</tbody></table></div>`
+    : d.opinnateKarar === "port yok" ? `<div class="muted">Port girilmedi ve firewall / Carbon Black kayıtlarında da port görülmedi. Kural kontrolü için port girin
+        (port olmadan Opinnate yalnızca kural tabanının sonundaki varsayılan engel kuralını döndürüyor).</div>`
     : d.opinnateDurum?.ok ? `<div class="muted">Opinnate bu kaynak ile hedef arasında yol / kural döndürmedi.</div>`
     : `<div style="color:var(--err)">Opinnate hatası: ${esc(d.opinnateDurum?.error ?? "bilinmiyor")}</div>`;
   const cbTable = d.carbonBlack.length ? `<div class="tbl-wrap"><table>

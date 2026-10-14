@@ -321,7 +321,22 @@ app.MapGet("/api/erisim", async (string? src, string? dst, string? port, string?
     var wafTask = useWaf ? Capture(async () => { var r = await F5Waf.AccessAsync(q!, q!.Ip, dstIp, p, cfg, factory.CreateClient("splunk"), ct); return new[] { r.summary, r.recent }; }, ct)
         : Task.FromResult<(SplunkResult[]?, string?)>((null, null));
     bool useOp = wanted.Contains("opinnate") && OpinnateService.Enabled(cfg);
-    var opTask = useOp ? Capture(() => OpinnateService.CheckAsync(q!.Ip, dstIp, p, cfg, factory.CreateClient("opinnate"), ct), ct)
+    // Port verilmediyse Opinnate'e "any" sorulmaz (hep cleanup kuralı döner): firewall / Carbon Black'te görülen portlar sorgulanır.
+    var opTask = useOp ? Capture(async () =>
+        {
+            var ports = new List<string>();
+            if (p != null) ports.Add(p);
+            else
+            {
+                var (fwr, _) = await fwTask;
+                var (cbr, _) = await cbTask;
+                long Cnt(Dictionary<string, string> r) => long.TryParse(r.GetValueOrDefault("count"), out long n) ? n : 0;
+                ports.AddRange((fwr?[0].Rows ?? []).OrderByDescending(Cnt).Select(r => r.GetValueOrDefault("dp")).OfType<string>());
+                ports.AddRange((cbr?.Rows ?? []).OrderByDescending(Cnt).Select(r => r.GetValueOrDefault("server_port")).OfType<string>());
+                ports = ports.Where(x => int.TryParse(x, out int n) && n is > 0 and < 65536).Distinct().ToList();
+            }
+            return await OpinnateService.CheckManyAsync(q!.Ip, dstIp, ports, cfg, factory.CreateClient("opinnate"), ct);
+        }, ct)
         : Task.FromResult<(OpinnateSonuc?, string?)>((null, null));
     var envTask = Capture(() => envanter.GetAsync(false, ct), ct);
     try { await Task.WhenAll(fwTask, cbTask, dsTask, wafTask, opTask, envTask); }

@@ -124,7 +124,10 @@ topoloji çizer ve şirket içi AI'a etki analizi yaptırır. Canlıda IIS'te, W
   aranır) ya da oturum çerezi; 30 dk önbellek, 401/403'te bir kez yeniden. Başlık: `TokenHeader`/`TokenPrefix` verilmişse yalnız o;
   verilmemişse 401/403'te sırayla Authorization Bearer, x-api-key, düz Authorization, X-Auth-Token, token, apikey denenir, çalışan hatırlanır
   (canlıda ilk deneme `{"message":"Forbidden"}` 403 verdi — API gateway tarzı).
-  Sorgu `POST /rule-checker/topology` {source:["ip/32"], destination, service:["tcp_{port}"] (port yoksa "any"), virtualAreaId (1),
+  Port boşken "any" SORULMAZ (hep sondaki CLEANUP-DROP any/any/any deny döner — canlıda görüldü): firewall + CB'de görülen portlar
+  (en çok `MaxPort`=5) ayrı ayrı sorgulanır (`CheckManyAsync`), port başına izin/engel; hiç port yoksa "port girin" (`PortYok`).
+  any/any/any deny = "varsayılan engel, özel izin kuralı yok". Çelişki uyarısı yalnız logda izinli trafik görülen port engelliyse.
+  Sorgu `POST /rule-checker/topology` {source:["ip/32"], destination, service:["tcp_{port}"], virtualAreaId (1),
   user_base:false, users:[]} → policyResultData[].PathResult[] (src_int, dst_int, device_id, existPolicy = eşleşen kural ya da null).
   Cihaz adları `GET /devices` (esnek okunur; canlıda parametresiz 400 verdi → `Opinnate:CihazSorgusu` ya da ?virtualAreaId=, ?page=1&per_page=1000 sırayla denenir). Karar: engel kuralı → "Kural engelliyor"; izin + trafik yok → "Kural açık — bu aralıkta trafik
   görülmedi"; hiç kural yok + trafik yok → "Erişim tanımlı değil"; trafikle çelişirse uyarı. Gövde StringContent (Content-Length'lı).

@@ -18,9 +18,11 @@ record OpinnateKural(string? Id, string? PolicyId, string Action, bool Aktif, Li
     List<string> Source, List<string> Destination, List<string> Service, bool SrcNegate, bool DstNegate,
     string? Comment, string? Schedule, string? Direction, string? Nat, string? Log, List<string> Users, string? Application, string? ProfileGroup);
 record OpinnateAdim(string? DeviceId, string Cihaz, List<string> Giris, List<string> Cikis, OpinnateKural? Kural);
-record OpinnateYol(string? Kaynak, string? Hedef, List<string> Servis, List<OpinnateAdim> Adimlar);
+// Sorgu: gönderilen servis (tcp_445). Port verilmezse firewall / Carbon Black'te görülen portlar ayrı ayrı sorgulanır.
+record OpinnateYol(string Sorgu, string? Kaynak, string? Hedef, List<string> Servis, List<OpinnateAdim> Adimlar);
 record OpinnateSonuc(List<OpinnateYol> Yollar, string Servis, List<string> Mesajlar, long ElapsedMs)
 {
+    public bool PortYok { get; init; }
     public IEnumerable<OpinnateAdim> Adimlar => Yollar.SelectMany(y => y.Adimlar);
 }
 
@@ -155,14 +157,33 @@ static class OpinnateService
         return last!;
     }
 
-    public static string Servis(IConfiguration cfg, string? port) =>
-        port == null ? (cfg["Opinnate:ServisHepsi"] ?? "any") : (cfg["Opinnate:ServisFormat"] ?? "tcp_{port}").Replace("{port}", port);
+    // Port yokken "any" sorgusu her zaman en sondaki cleanup (any/any/any deny) kuralını döndürüyor (tüm portlara izin veren kural
+    // olmadığı için); bu yüzden "any" yalnızca Opinnate:ServisHepsi açıkça verilmişse kullanılır.
+    public static string? Servis(IConfiguration cfg, string? port) =>
+        port == null ? (string.IsNullOrWhiteSpace(cfg["Opinnate:ServisHepsi"]) ? null : cfg["Opinnate:ServisHepsi"])
+            : (cfg["Opinnate:ServisFormat"] ?? "tcp_{port}").Replace("{port}", port);
+
+    // Birden çok port (en çok Opinnate:MaxPort = 5) paralel sorgulanır, sonuçlar birleştirilir.
+    public static async Task<OpinnateSonuc> CheckManyAsync(string src, string dst, IReadOnlyList<string> ports, IConfiguration cfg, HttpClient http, CancellationToken ct)
+    {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var list = ports.Distinct().Take(cfg.GetValue("Opinnate:MaxPort", 5)).ToList();
+        if (list.Count == 0)
+        {
+            if (Servis(cfg, null) == null)
+                return new OpinnateSonuc([], "", ["Port girilmedi ve firewall / Carbon Black kayıtlarında port görülmedi; kural kontrolü için port girin."], 0) { PortYok = true };
+            return await CheckAsync(src, dst, null, cfg, http, ct);
+        }
+        var results = await Task.WhenAll(list.Select(pt => CheckAsync(src, dst, pt, cfg, http, ct)));
+        return new OpinnateSonuc(results.SelectMany(r => r.Yollar).ToList(), string.Join(", ", results.Select(r => r.Servis)),
+            results.SelectMany(r => r.Mesajlar).Distinct().ToList(), sw.ElapsedMilliseconds);
+    }
 
     public static async Task<OpinnateSonuc> CheckAsync(string src, string dst, string? port, IConfiguration cfg, HttpClient http, CancellationToken ct)
     {
         var sw = System.Diagnostics.Stopwatch.StartNew();
         var msgs = new List<string>();
-        string servis = Servis(cfg, port);
+        string servis = Servis(cfg, port) ?? "any";
         var body = new
         {
             source = new[] { src + "/32" },
@@ -196,9 +217,9 @@ static class OpinnateService
                 string cihaz = id != null && names.TryGetValue(id, out var nm) ? nm : id != null ? $"Cihaz #{id}" : "?";
                 adimlar.Add(new OpinnateAdim(id, cihaz, Lst(h?["src_int"]), Lst(h?["dst_int"]), ToKural(h?["existPolicy"])));
             }
-            yollar.Add(new OpinnateYol(Str(pr?["source"]), Str(pr?["destination"]), Lst(pr?["service"]), adimlar));
+            yollar.Add(new OpinnateYol(servis, Str(pr?["source"]), Str(pr?["destination"]), Lst(pr?["service"]), adimlar));
         }
-        if (yollar.Count == 0) msgs.Add("Opinnate yanıtında policyResultData boş (yol bulunamadı ya da virtualAreaId yanlış olabilir).");
+        if (yollar.Count == 0) msgs.Add($"{servis}: Opinnate yanıtında policyResultData boş (yol bulunamadı ya da virtualAreaId yanlış olabilir).");
         return new OpinnateSonuc(yollar, servis, msgs, sw.ElapsedMilliseconds);
     }
 
