@@ -15,7 +15,7 @@ async function runAccess() {
   setUiMode("erisim");
   const src = $("#accSrc").value.trim(), dst = $("#accDst").value.trim(), port = $("#accPort").value.trim();
   if (!src || !dst) { alert("Kaynak ve hedef IP girin."); return; }
-  const srcs = [$("#srcSplunk").checked && "splunk", $("#srcFw").checked && "firewall", $("#srcDs").checked && "dataskope", $("#srcF5").checked && "f5", $("#srcOp").checked && "opinnate"].filter(Boolean);
+  const srcs = [$("#srcSplunk").checked && "splunk", $("#srcFw").checked && "firewall", $("#srcF5").checked && "f5", $("#srcOp").checked && "opinnate"].filter(Boolean);
   if (!srcs.length) { alert("En az bir kaynak seçin."); return; }
   const params = new URLSearchParams({ src, dst, ...(port ? { port } : {}), start: $("#start").value, end: $("#end").value, sources: srcs.join(",") });
   history.replaceState(null, "", "?" + new URLSearchParams({ src, dst, ...(port ? { port } : {}), start: params.get("start"), end: params.get("end") }));
@@ -45,7 +45,7 @@ function renderAccess(d) {
     return `<span class="pill ${cls}" title="${esc(s.error ?? "")}"><b>${name}</b> ${info}</span>`;
   };
   const msgs = [...d.firewallDurum.messages.map(m => "Firewall: " + m), ...d.carbonBlackDurum.messages.map(m => "Carbon Black: " + m),
-    ...(d.veritabaniDurum?.messages ?? []).map(m => "Dataskope: " + m), ...(d.wafDurum?.messages ?? []).map(m => "F5: " + m), ...(d.opinnateDurum?.messages ?? []).map(m => "Opinnate: " + m)];
+    ...(d.wafDurum?.messages ?? []).map(m => "F5: " + m), ...(d.opinnateDurum?.messages ?? []).map(m => "Opinnate: " + m)];
   const ipLink = ip => `<a class="mono" href="${esc(ipTabUrl(ip))}" target="_blank" rel="noopener" title="Topolojisini yeni sekmede aç">${esc(ip)}</a>`;
   const uc = (title, u) => `<div class="panel" style="margin:0">
       <div class="small muted">${title}</div>
@@ -83,13 +83,6 @@ function renderAccess(d) {
           <td class="mono small">${esc(o.uri ?? "")}</td><td class="mono">${esc(o.destPort ?? "")}</td><td>${esc(o.vsName ?? "")}</td><td>${esc(o.attackType ?? "")}</td>
           <td>${esc(o.violations ?? "")}</td><td>${esc(o.respCode ?? "")}</td><td class="mono">${esc(o.supportId ?? "")}</td></tr>`).join("")}</tbody></table></div></details>` : ""}`
     : `<div class="muted">${d.wafDurum?.ok ? "F5'te bu kaynaktan bu hedefe güvenlik kaydı yok (hedef WAF arkasındaki bir VIP değilse beklenen durum)." : "F5 sorgulanmadı ya da hata verdi."}</div>`;
-  const vt = d.veritabani ?? [];
-  const dbTable = vt.length ? `<div class="tbl-wrap"><table>
-      <thead><tr><th>DB</th><th>Instance / DB adı</th><th>DB kullanıcısı</th><th>OS kullanıcısı</th><th>İstemci makine</th><th>Program</th><th>Port</th><th class="num">Kayıt</th><th>İlk</th><th>Son</th></tr></thead>
-      <tbody>${vt.map(x => `<tr><td>${esc(x.dbType ?? "")}</td><td>${esc([x.instance, x.dbName].filter(Boolean).join(" / "))}</td><td><b>${esc(x.dbUser ?? "")}</b></td>
-        <td>${esc(x.osUser ?? "")}</td><td>${esc(x.clientHost ?? "")}</td><td>${esc(x.clientApp ?? "")}</td><td class="mono">${esc(x.serverPort ?? "")}</td>
-        <td class="num">${fmt(x.count)}</td><td class="mono">${esc(x.first ?? "")}</td><td class="mono"><b>${esc(x.last ?? "")}</b></td></tr>`).join("")}</tbody></table></div>`
-    : `<div class="muted">${d.veritabaniDurum?.ok ? "Dataskope'ta bu kaynaktan bu hedefe veritabanı oturumu yok (hedef bir veritabanı değilse beklenen durum)." : "Dataskope sorgulanmadı ya da hata verdi."}</div>`;
   // Opinnate: yol üzerindeki her cihaz ve eşleşen kural (tanımlı kural, trafikten bağımsız)
   const opOn = d.opinnateDurum && d.opinnateDurum.error !== "Sorgulanmadı";
   const isAny = l => !l.length || l.some(x => ["any", "all", "0.0.0.0/0"].includes(String(x).toLowerCase()));
@@ -126,7 +119,7 @@ function renderAccess(d) {
     : `<div class="muted">${d.carbonBlackDurum.ok ? "Carbon Black bu bağlantıyı görmemiş (ajan yoksa görünmez)." : "Carbon Black sorgulanmadı ya da hata verdi."}</div>`;
 
   $("#main").innerHTML = `
-    <section class="panel"><div class="status">${pill("Firewall", d.firewallDurum)}${pill("Carbon Black", d.carbonBlackDurum)}${d.veritabaniDurum ? pill("Dataskope", d.veritabaniDurum) : ""}${d.wafDurum && d.wafDurum.error !== "Sorgulanmadı" ? pill("F5 WAF", d.wafDurum) : ""}${opOn ? pill("Opinnate", d.opinnateDurum) : ""}
+    <section class="panel"><div class="status">${pill("Firewall", d.firewallDurum)}${pill("Carbon Black", d.carbonBlackDurum)}${d.wafDurum && d.wafDurum.error !== "Sorgulanmadı" ? pill("F5 WAF", d.wafDurum) : ""}${opOn ? pill("Opinnate", d.opinnateDurum) : ""}
       ${pill("Envanter", d.envanter)}<span class="pill">Aralık ${esc(d.pencere)}</span><span class="pill">Toplam ${(d.elapsedMs / 1000).toFixed(1)} sn</span></div>
       ${msgs.length ? `<div class="msgs">${esc(msgs.join("\n"))}</div>` : ""}</section>
     <section class="panel">
@@ -137,6 +130,5 @@ function renderAccess(d) {
     <section class="panel"><h2>Firewall logu (port ve sonuç bazında)</h2>${fwTable}</section>
     ${olayTable ? `<section class="panel"><h2>Son ${d.sonOlaylar.length} firewall olayı</h2>${olayTable}</section>` : ""}
     <section class="panel"><h2>Carbon Black (uç nokta ajanının gördüğü bağlantılar)</h2>${cbTable}</section>
-    ${d.wafDurum && d.wafDurum.error !== "Sorgulanmadı" ? `<section class="panel"><h2>F5 WAF (güvenlik olayları)</h2>${wafTable}</section>` : ""}
-    ${d.veritabaniDurum && d.veritabaniDurum.error !== "Sorgulanmadı" ? `<section class="panel"><h2>Veritabanı oturumları (Dataskope)</h2>${dbTable}</section>` : ""}`;
+    ${d.wafDurum && d.wafDurum.error !== "Sorgulanmadı" ? `<section class="panel"><h2>F5 WAF (güvenlik olayları)</h2>${wafTable}</section>` : ""}`;
 }

@@ -29,8 +29,6 @@ topoloji çizer ve şirket içi AI'a etki analizi yaptırır. Canlıda IIS'te, W
 | `Oturum.cs` | Oturum akışı: aynı oturumda gelen → giden (AppResponse, zaman kapsaması) |
 | `Yolculuk.cs` | Uçtan uca yolculuk: dış IP → … → sorgulanan → … → DB |
 | `Erisim.cs` | Erişim sorgula: kaynak IP → hedef IP (port) izin/engel, son görülme (Firewall + Carbon Black) |
-| `Dataskope.cs` | Dataskope/Infraskope DB audit API (token önbellekli, search-by-events → nest/events yedeği, sayfalama) |
-| `DbGelen.cs` | DB'ye gelenler: Dataskope kayıtlarından veritabanı → gelen sunucular |
 | `Opinnate.cs` | Opinnate firewall kural kontrolü (rule-checker/topology): tanımlı kurala göre erişim, yol üzerindeki cihazlar |
 | `F5Waf.cs` | F5 ASM / Bot Defense güvenlik logları (Splunk index=f5): erişimde engel kararı, IP görünümünde URI listesi |
 | `PortBilgisi.cs` | Port → işlev ve kesilirse duracak iş (AI prompt'u için) |
@@ -96,19 +94,8 @@ topoloji çizer ve şirket içi AI'a etki analizi yaptırır. Canlıda IIS'te, W
   (aynı segment notu). İki IP aynı segmentte (aynı CIDR) ve firewall kaydı yoksa karar "Aynı VLAN — firewall gerekmez" (mavi);
   firewall kaydı varsa normal karar + aynı segment notu. Aralık en fazla `Erisim:MaxGun`=30 gün; sekmeye geçince aralık 1 günden kısaysa son 7 gün yapılır.
   Derin bağlantı `?src=&dst=&port=`.
-- **Dataskope** (`Dataskope.cs`, Erişim sekmesinde "Dataskope (DB)" kutucuğu): Infraskope API v26.2, `POST /token`
-  (password grant, `expires_in`'e göre bellekte), `GET /api/v1/third-party/search-by-events` (rol izni yoksa bir kez
-  403/400/404 → `nest/events`, uygulama açık kaldıkça hatırlanır), `fullTextQuery` = `Dataskope:ErisimSorgusu`
-  (varsayılan `client_ip:"{src}" AND server_ip:"{dst}"`), `NextPageId` olduğu gibi, en çok `MaxKayit`=5000. Başarı =
-  HTTP 200 + StatusCode 200 + IsValid. Kayıt alanları (değiştirilebilir `Dataskope:Alanlar`): TimeCreated, db_type,
-  MachineName, os_user, db_user, db_name, instance_name, client_hostname, client_ip/port, server_ip/port, client_app_name.
-  Erişimde DB kullanıcısı + program + DB bazında sayı/ilk/son; karar metnine "Veritabanına X kullanıcısıyla oturum açılmış";
-  yalnız Dataskope varsa "Veritabanı oturumu var (firewall kaydı yok)". Tarihler saat dilimsiz yerel (`Dataskope:Utc`).
-- **DB'ye gelenler** (menüde gizli — sekme düğmesi `hidden`; `?db=` adresiyle açılır; `DbGelen.cs`, `wwwroot/dbgelen.js`, `/api/dbgelen?filtre=&tur=&start=&end=`): Dataskope kayıtları
-  veritabanı (server_ip + port + instance) bazında; tıklayınca gelen istemciler (client_ip: makine, DB/OS kullanıcıları,
-  programlar, ilk/son, envanterden segment + uygulama) ve "Erişim" bağlantısı (kaynak → DB). Filtre: boş = parametre yok;
-  IP → `server_ip:"x"`; `alan:değer` olduğu gibi; ad → instance_name / db_name / MachineName. En çok `DbGelenMaxKayit`=20000
-  kayıt, aralık en çok `DbGelenMaxSaat`=24; eksikse uyarı. Derin bağlantı `?db=&filtre=&tur=`.
+- **Dataskope (KALDIRILDI)**: Infraskope DB audit API entegrasyonu ve "DB'ye gelenler" sekmesi kullanıcı isteğiyle tamamen
+  kaldırıldı (Dataskope.cs, DbGelen.cs, dbgelen.js, /api/dbgelen, Erişim'deki kutucuk ve DB bölümü, appsettings bölümü). Geri istenirse git geçmişinde.
 - **F5 (WAF)** (`F5Waf.cs`, Splunk `index=f5`, sourcetype f5:bigip:syslog): yalnızca güvenlik olayları loglanıyor
   (15 dk'da ~83 bin olay; ~13 bin ASM: request_status illegal(+action alarm = geçti)/challenged/legal/bot_signature;
   ~12 bin Bot Defense/DoS: enforcement_action block/none, durum `req_status`; ~58 bin bilinmeyen türde) ve birkaç internete

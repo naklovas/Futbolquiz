@@ -21,9 +21,6 @@ builder.Services.AddHttpClient("splunk", c => c.Timeout = TimeSpan.FromMinutes(1
 builder.Services.AddHttpClient("appresponse", c => c.Timeout = TimeSpan.FromMinutes(3))
     .ConfigurePrimaryHttpMessageHandler(() => CreateHandler(builder.Configuration.GetValue("AppResponseIgnoreSslErrors", true)));
 
-builder.Services.AddHttpClient("dataskope", c => c.Timeout = TimeSpan.FromMinutes(3))
-    .ConfigurePrimaryHttpMessageHandler(() => CreateHandler(builder.Configuration.GetValue("Dataskope:IgnoreSslErrors", false)));
-
 // Opinnate oturum çereziyle çalışıyor: çerezler kodda elle taşınır (havuzdaki handler'ın kendi çerez kabı karışmasın)
 builder.Services.AddHttpClient("opinnate", c => c.Timeout = TimeSpan.FromMinutes(2))
     .ConfigurePrimaryHttpMessageHandler(() =>
@@ -251,29 +248,6 @@ app.MapGet("/api/oturum", async (string? ip, string? start, string? end, int? ap
     }
 });
 
-// DB'ye gelenler: Dataskope kayıtlarından veritabanları ve her birine bağlanan istemciler (segment / uygulama ile).
-// Hacim yüksek olabildiği için aralık en fazla Dataskope:DbGelenMaxSaat (varsayılan 24) saat.
-app.MapGet("/api/dbgelen", async (string? filtre, string? tur, string? start, string? end,
-    IConfiguration cfg, IHttpClientFactory factory, EnvanterService envanter, CancellationToken ct) =>
-{
-    var sw = Stopwatch.StartNew();
-    if (!LookupQuery.TryParse("0.0.0.0", start, end, cfg.GetValue("Dataskope:DbGelenMaxSaat", 24), out var q, out var error))
-        return Results.BadRequest(new { error });
-    if (!DataskopeService.Enabled(cfg))
-        return Results.BadRequest(new { error = "Dataskope tanımlı değil (appsettings.Production.json: Dataskope:BaseUrl, Username, Password)." });
-    string sorgu = DbGelen.Query(filtre, tur);
-    var dsTask = Capture(() => DataskopeService.SearchAsync(q!, sorgu, cfg, factory.CreateClient("dataskope"), ct,
-        cfg.GetValue("Dataskope:DbGelenMaxKayit", 20000)), ct);
-    var envTask = Capture(() => envanter.GetAsync(false, ct), ct);
-    try { await Task.WhenAll(dsTask, envTask); }
-    catch (OperationCanceledException) when (ct.IsCancellationRequested) { return Results.StatusCode(499); }
-    var (ds, dsErr) = dsTask.Result;
-    var (env, envErr) = envTask.Result;
-    var dsSt = new SourceStatus(dsErr == null, dsErr, ds?.Mesajlar ?? [], ds?.ElapsedMs, ds?.Kayitlar.Count ?? 0);
-    var (_, _, envSt) = Statuses("", null, null, null, null, env, envErr);
-    return Results.Ok(DbGelen.Build(q!, sorgu, ds, env, dsSt, envSt, sw.ElapsedMilliseconds));
-});
-
 // F5 URI'leri: sorgulanan IP'nin kendisi + VIP ise kendisi, havuz üyesiyse üyesi olduğu VIP'ler için F5 güvenlik
 // loglarındaki URI'ler (IP görünümünde ayrı bölüm). F5:Enabled kapalıysa boş döner.
 app.MapGet("/api/f5uri", async (string? ip, string? start, string? end,
@@ -307,16 +281,13 @@ app.MapGet("/api/erisim", async (string? src, string? dst, string? port, string?
     if (p != null && !(int.TryParse(p, out int pn) && pn is > 0 and < 65536))
         return Results.BadRequest(new { error = "Port 1-65535 arasında bir sayı olmalı." });
     p = p == null ? null : int.Parse(p).ToString();
-    string wanted = (sources ?? "splunk,firewall,dataskope,f5,opinnate").ToLowerInvariant();
+    string wanted = (sources ?? "splunk,firewall,f5,opinnate").ToLowerInvariant();
     bool useFw = wanted.Contains("firewall") && FirewallService.Enabled(cfg), useCb = wanted.Contains("splunk");
 
     var fwTask = useFw ? Capture(async () => { var r = await FirewallService.AccessAsync(q!, q!.Ip, dstIp, p, cfg, factory.CreateClient("splunk"), ct); return new[] { r.summary, r.recent }; }, ct)
         : Task.FromResult<(SplunkResult[]?, string?)>((null, null));
     var cbTask = useCb ? Capture(() => Erisim.CarbonBlackAsync(q!, q!.Ip, dstIp, p, cfg, factory.CreateClient("splunk"), ct), ct)
         : Task.FromResult<(SplunkResult?, string?)>((null, null));
-    bool useDs = wanted.Contains("dataskope") && DataskopeService.Enabled(cfg);
-    var dsTask = useDs ? Capture(() => DataskopeService.SearchAsync(q!, DataskopeService.AccessQuery(cfg, q!.Ip, dstIp), cfg, factory.CreateClient("dataskope"), ct), ct)
-        : Task.FromResult<(DataskopeSonuc?, string?)>((null, null));
     bool useWaf = wanted.Contains("f5") && F5Waf.Enabled(cfg);
     var wafTask = useWaf ? Capture(async () => { var r = await F5Waf.AccessAsync(q!, q!.Ip, dstIp, p, cfg, factory.CreateClient("splunk"), ct); return new[] { r.summary, r.recent }; }, ct)
         : Task.FromResult<(SplunkResult[]?, string?)>((null, null));
@@ -339,13 +310,12 @@ app.MapGet("/api/erisim", async (string? src, string? dst, string? port, string?
         }, ct)
         : Task.FromResult<(OpinnateSonuc?, string?)>((null, null));
     var envTask = Capture(() => envanter.GetAsync(false, ct), ct);
-    try { await Task.WhenAll(fwTask, cbTask, dsTask, wafTask, opTask, envTask); }
+    try { await Task.WhenAll(fwTask, cbTask, wafTask, opTask, envTask); }
     catch (OperationCanceledException) when (ct.IsCancellationRequested) { return Results.StatusCode(499); }
 
     var (fw, fwErr) = fwTask.Result;
     var (cb, cbErr) = cbTask.Result;
     var (env, envErr) = envTask.Result;
-    var (ds, dsErr) = dsTask.Result;
     var (wf, wfErr) = wafTask.Result;
     var (op, opErr) = opTask.Result;
     var opSt = !wanted.Contains("opinnate") ? SourceStatus.Skipped
@@ -354,13 +324,10 @@ app.MapGet("/api/erisim", async (string? src, string? dst, string? port, string?
     var wafSt = !wanted.Contains("f5") ? SourceStatus.Skipped
         : !F5Waf.Enabled(cfg) ? new SourceStatus(false, "Kapalı (F5:Enabled = false)", [], null, 0)
         : new SourceStatus(wfErr == null, wfErr, wf?[0].Messages ?? [], wf?[0].ElapsedMs, wf?[0].Rows.Count ?? 0);
-    var dsSt = !wanted.Contains("dataskope") ? SourceStatus.Skipped
-        : !DataskopeService.Enabled(cfg) ? new SourceStatus(false, "Tanımlı değil (Dataskope:BaseUrl)", [], null, 0)
-        : new SourceStatus(dsErr == null, dsErr, ds?.Mesajlar ?? [], ds?.ElapsedMs, ds?.Kayitlar.Count ?? 0);
     var fwSt = FirewallStatus(wanted, cfg, fw?[0], fwErr);
     var cbSt = !useCb ? SourceStatus.Skipped : new SourceStatus(cbErr == null, cbErr, cb?.Messages ?? [], cb?.ElapsedMs, cb?.Rows.Count ?? 0);
     var (_, _, envSt) = Statuses(wanted, null, null, null, null, env, envErr);
-    return Results.Ok(Erisim.Build(Erisim.Uc(q!.Ip, env), Erisim.Uc(dstIp, env), p, q!, fw?[0], fw?[1], cb, fwSt, cbSt, envSt, sw.ElapsedMilliseconds, ds, dsSt, wf?[0], wf?[1], wafSt, op, opSt));
+    return Results.Ok(Erisim.Build(Erisim.Uc(q!.Ip, env), Erisim.Uc(dstIp, env), p, q!, fw?[0], fw?[1], cb, fwSt, cbSt, envSt, sw.ElapsedMilliseconds, wf?[0], wf?[1], wafSt, op, opSt));
 });
 
 // Uçtan uca yolculuk: sorgulanan sunucudan geriye (dış IP'ler) ve ileriye (DB) durak durak oturum eşleştirmesi.
