@@ -29,6 +29,8 @@ DOKU iki bileşenle tek soruyu iki uçtan cevaplıyor: **Kahin** bir IP/port'un 
 
 Ziraat IT Kahini ve DeltaFlow, büyük ölçekli bankacılık altyapısında iki temel operasyon sorusunu saniyeler içinde, kanıtıyla cevaplayan kurum içi yapay zeka platformudur: **"Bu IP ve port hangi uygulamanın, hangi ekibin?"** ve **"Bu sunucu ya da uygulama kiminle konuşuyor, bir değişiklikte ne etkilenir, erişim gerçekten açık mı?"**
 
+Platformun merkezinde bir **yapay zeka karar motoru** vardır. Kod, kaynaklardan kanıtı toplar, temizler ve puanlar; kurum içi büyük dil modeli bu kanıtları bir uzman gibi tartarak **kararı verir**: varlığın hangi iş uygulamasına ve hangi ekibe ait olduğu, bir değişiklikte hangi işlerin duracağı ve kimin etkileneceği. Her karar bir güven skoru ve gerekçesiyle, dayandığı kanıtlar gösterilerek sunulur; kullanıcı kararı sorgulayabilir, takip sorusu sorabilir.
+
 **Ziraat IT Kahini (REC.AI)** sahipliği bulur. Envanter (Entropi/UCMDB), Service Manager biletleri, Cisco ACI segmentleri, DNS, AppResponse, Splunk/Carbon Black ve VIP/cluster ilişkilerini eşzamanlı sorgular. Kurum içi LLM bu kanıtları sentezleyerek gerçek iş uygulamasını, sorumlu ekibi ve güven skorunu verir; log toplayıcı ajanları, ara yazılımları ve sistem portlarını "iş uygulaması" sanmamak için tuzak filtresi uygular.
 
 **DeltaFlow** bağımlılığı ve erişimi gösterir. Carbon Black, Riverbed AppResponse (tüm kutular paralel), Palo Alto firewall logları, F5 WAF logları ve Opinnate firewall kural kontrolünü kurum envanteriyle (ACI segment, uygulama, VIP havuzu) birleştirir. Bir IP ya da uygulama için gelen/giden topolojiyi, dış IP'den veritabanına uçtan uca veri akışını, sunucu içi süreç akışını ve iki IP arasında erişimin hem *trafikte* hem *tanımlı kuralda* açık olup olmadığını çizer. Kurum içi LLM, bu tablodan "bu sunucuda bakım yapılırsa hangi iş durur?" etki analizini üretir.
@@ -46,7 +48,8 @@ Proje, binlerce sunucu, VIP ve uygulamanın 7/24 çalıştığı Ziraat ekosiste
 **Kurum hedefleriyle ilişkisi:**
 
 - **Sıfır Güven (Zero Trust):** Her akışın sahibini, amacını ve kural karşılığını görünür kılar.
-- **Otonom BT Operasyonları (AIOps):** Kanıt toplama ve korelasyonu insandan alıp makineye verir; karar insanda kalır.
+- **Otonom BT Operasyonları (AIOps):** Kanıt toplama, korelasyon ve ilk kararı yapay zeka verir; insan kararı onaylar ya da düzeltir.
+- **Yapay zeka ile karar desteği:** Uzman bilgisi gerektiren "bu kimin, bu kapanırsa ne olur" kararları, kurum hafızasıyla beslenen yapay zeka tarafından saniyeler içinde ve tutarlı biçimde verilir; uzmanlık birkaç kişiye bağımlı kalmaz.
 - **Hizmet sürekliliği ve müşteri deneyimi:** Değişiklik öncesi etki analizi plansız kesintiyi, hızlı teşhis de kesinti süresini azaltır.
 - **Veri odaklı dönüşüm ve yerli üretim:** Kurum içi LLM ve %100 iç kaynakla geliştirilmiştir.
 
@@ -74,11 +77,22 @@ Platformu farklı kılan, statik envanter yerine **çok kaynaklı canlı kanıt�
 5. **Yapay zeka ile etki analizi.** Etki tablosu (servis → kullanan uygulamalar, bağımlılıklar) kodla hesaplanır. Her port için "kesilirse duracak iş" bilgisi eklenir ve kurum içi LLM, port adı yerine etkilenen işi ve kimin etkileneceğini yazar (ör. 3389 → "kaynaklardan uzak masaüstü kurulamaz").
 6. **Ortam ayırma.** ODM (DR) ve TEST ortamları segment bilgisinden tanınır ve tek tıkla ayrılır; sorgulanan sunucunun kendi ortamı da işaretlenir.
 
+### Yapay zeka nasıl karar veriyor
+
+DOKU'da yapay zeka bir sohbet eklentisi değil, kararı veren bileşendir. Karar dört adımda oluşur:
+
+1. **Kanıt toplama (kod).** Tüm kaynaklar paralel sorgulanır; her kayıt kaynağı, zamanı ve sayısıyla kanıt olarak tutulur.
+2. **Kanıt eleme ve puanlama (kod + kurallar).** Tuzak filtresi log ajanlarını, ara yazılımları ve sistem portlarını ayıklar; altyapı portları ve izleme trafiği ayrı işaretlenir, ODM/TEST ortamları ayrılır. Yapay zekaya temiz, önceliklendirilmiş kanıt gider.
+3. **Yapay zeka muhakemesi ve karar.** Kurum içi LLM kanıtları kurum hafızasıyla (isimlendirme standartları, port → iş anlamı, ekip eşlemeleri) birlikte tartar ve kararı verir: Kahin'de sahip uygulama, sorumlu ekip ve güven skoru; DeltaFlow'da hangi işin duracağı, hangi uygulama ve kullanıcıların etkileneceği.
+4. **Açıklanabilir sonuç ve insan kontrolü.** Her karar gerekçesi ve dayandığı kanıtlarla gösterilir. Kullanıcı "neden bu ekip?", "bu port kapanırsa kim etkilenir?" diye sorabilir; yapay zeka aynı kanıt bağlamında cevaplar. Düşük güvenli kararlar işaretlenir, son onay insandadır.
+
+Bu yapı yapay zekanın en zayıf yanını, uydurmayı, sınırlar: model ham log görmez, yalnızca kodun doğruladığı kanıt üzerinden karar verir. Topoloji, etki tablosu ve erişim kararı gibi hesaplanabilen her şey koddan gelir; model bunların iş anlamını kurar ve kararı gerekçelendirir.
+
 ### İkisi birlikte
 
 - **Ortak, kurum içi yapay zeka.** Hassas ağ ve varlık verisi kurum dışına çıkmaz; dış CDN, dış servis ya da bulut modeli kullanılmaz.
-- **Kanıt önce, karar sonra.** Hesaplanabilen her şey (topoloji, etki tablosu, erişim kararı) kodla üretilir; LLM yalnızca yorumlar. Bu, yapay zekanın uydurma riskini düşürür.
-- **Kim + neye bağlı + açık mı.** Kahin'in bulduğu sahip ile DeltaFlow'un gösterdiği bağımlılık ve erişim bir araya gelince, bir olay ya da değişiklikte "kimi aramalıyım, ne etkilenir, erişim var mı" soruları tek akışta cevaplanır.
+- **Hibrit karar motoru.** Kod kanıtı toplar ve doğrular, yapay zeka kararı verir ve gerekçelendirir; bu ayrım uydurma riskini düşürür ve her kararı denetlenebilir kılar.
+- **Kim + neye bağlı + açık mı.** Kahin'in yapay zekasının bulduğu sahip ile DeltaFlow'un gösterdiği bağımlılık ve erişim bir araya gelince, bir olay ya da değişiklikte "kimi aramalıyım, ne etkilenir, erişim var mı" soruları tek akışta cevaplanır.
 
 ## Kullanım Alanları
 
@@ -87,8 +101,8 @@ DOKU tek bir ekran değil, aynı kanıt tabanını farklı işlere uygulayan bir
 ### Veri merkezi taşıma ve konsolidasyon
 
 1. **Taşıma öncesi bağımlılık haritası.** Taşınacak her sunucu ve uygulama için gelen/giden tüm bağlantılar, VIP havuzları ve veritabanı bağlantıları çıkarılır; envanterde görünmeyen ama canlı trafikte olan bağımlılıklar yakalanır.
-2. **Taşıma grupları (move group).** Yoğun konuşan sunucular ve uygulamalar birlikte taşınır; ayrı taşınmaları durumunda veri merkezleri arası gecikme ve kesinti riski önceden görülür.
-3. **Sahiplik ve onay.** Kahin her varlığın uygulamasını ve sorumlu ekibini verir; taşıma takvimi doğru ekiplerle planlanır, sahipsiz sunucular taşımadan önce netleşir.
+2. **Taşıma grupları (move group).** Yoğun konuşan sunucular ve uygulamalar birlikte taşınır. Yapay zeka etki analizi her sunucu için "ayrı taşınırsa hangi iş bozulur, kim etkilenir" kararını verir; veri merkezleri arası gecikme ve kesinti riski önceden görülür.
+3. **Sahiplik ve onay.** Kahin'in yapay zekası her varlığın uygulamasına, sorumlu ekibine ve güven skoruna karar verir; taşıma takvimi doğru ekiplerle planlanır, sahipsiz sunucular taşımadan önce netleşir.
 4. **Firewall ve erişim hazırlığı.** Yeni ortamda açılması gereken erişimler bugünkü gerçek trafikten listelenir; Opinnate ile yeni yolun kuralları taşımadan önce kontrol edilir.
 5. **Taşıma sonrası doğrulama.** Taşımadan sonra aynı akışların oluşup oluşmadığı, engellenen bağlantı olup olmadığı Erişim sorgula ile dakikalar içinde kontrol edilir.
 6. **EVM / ODM (DR) ayrımı.** Birincil ve olağanüstü durum merkezi bağlantıları ayrı görülür; DR testinde trafiğin hangi merkeze gittiği doğrulanır.
@@ -97,13 +111,13 @@ DOKU tek bir ekran değil, aynı kanıt tabanını farklı işlere uygulayan bir
 
 | Senaryo | Soru | DOKU ne veriyor |
 | --- | --- | --- |
-| Bakım ve değişiklik yönetimi | Bu sunucu kapanırsa ne durur? | Bağımlı uygulamalar + AI etki analizi (etkilenen iş ve kullanıcı) |
+| Bakım ve değişiklik yönetimi | Bu sunucu kapanırsa ne durur? | Yapay zeka kararı: duracak işler, etkilenecek uygulama ve kullanıcılar |
 | Sunucu kapatma (decommission) | Bu sunucu gerçekten kullanılıyor mu? | Seçilen aralıkta gelen/giden trafik var mı, kim kullanıyor |
-| Olay müdahalesi | Bu IP kimin, kimi aramalıyım? | Kahin: uygulama + ekip; DeltaFlow: o an kiminle konuşuyor |
+| Olay müdahalesi | Bu IP kimin, kimi aramalıyım? | Kahin yapay zeka kararı: uygulama, ekip, güven skoru; DeltaFlow: o an kiminle konuşuyor |
 | Firewall erişim talepleri | A, B'ye erişebiliyor mu, kural var mı? | Trafik (izin/engel), Opinnate kuralı, F5 WAF, aynı VLAN durumu |
 | Kural temizliği ve denetim | Bu kural kullanılıyor mu, hangi işe hizmet ediyor? | Kural açık ama trafik yok / trafik var ama kural engel çelişkileri |
 | Siber güvenlik | İnternetten gelen istek içeride nereye kadar iniyor? | Dıştan içe veri akışı, F5 WAF engelleri ve URL'ler |
-| Envanter doğrulama | CMDB'deki kayıt gerçekle uyumlu mu? | Envanterde olmayan bağımlılıklar ve sahipsiz varlıklar |
+| Envanter doğrulama | CMDB'deki kayıt gerçekle uyumlu mu? | Envanterde olmayan bağımlılıklar; sahipsiz varlıklar için yapay zekanın karar verdiği sahip |
 | Uygulama mimarisi | Uygulamamız gerçekte hangi sistemlere bağlı? | Uygulama görünümü: kullananlar → uygulama → bağımlılıklar |
 
 ## Elde Edilen Sonuçlar ve Ölçülebilir Faydalar
@@ -122,8 +136,9 @@ En büyük kazanç zamandır: birden çok ekip ve ekranla dakikalar-saatler sür
 
 **Niteliksel faydalar:**
 
-- **Daha kısa MTTR, daha az "ping-pong".** Kayıtlar doğru ekibe ilk seferde yönlenir; bağımlılık resmi olay anında hazırdır.
-- **Daha güvenli değişiklik.** Kapatma, taşıma ve bakım öncesinde etkilenecek uygulamalar ve işler görülür; plansız kesinti riski azalır.
+- **Açıklanabilir ve tutarlı yapay zeka kararları.** Aynı soruya her seferinde aynı kanıtla, gerekçeli karar verilir; sonuç kişiye ve vardiyaya göre değişmez, uzman bilgisi birkaç kişiye bağımlı kalmaz.
+- **Daha kısa MTTR, daha az "ping-pong".** Yapay zekanın sahiplik kararı sayesinde kayıtlar doğru ekibe ilk seferde yönlenir; bağımlılık resmi olay anında hazırdır.
+- **Daha güvenli değişiklik.** Kapatma, taşıma ve bakım öncesinde yapay zeka etkilenecek uygulamalara ve işlere karar verir; plansız kesinti riski azalır.
 - **Şeffaf erişim ve denetim.** Firewall kurallarının hangi iş servisine hizmet ettiği, kural ile gerçek trafiğin çeliştiği yerler ve kullanılmayan açık kurallar görünür hale gelir.
 - **Lisans ve dış kaynak tasarrufu.** Service mapping / AIOps modülleri ya da dış danışmanlık gerekmeden, mevcut araçların verisi iç kaynakla birleştirildi.
 
@@ -144,8 +159,10 @@ Platform, teknik birimlerin ortak "tek doğruluk kaynağı" olacak şekilde tasa
 
 **Gelecek adımlar:**
 
-- **Kendini iyileştiren CMDB.** Kahin'in yüksek güvenle bulduğu sahiplik ve DeltaFlow'un gözlediği bağımlılıklar, insan onayıyla envantere geri yazılır.
-- **Proaktif anomali tespiti.** Canlı akışlar SM erişim talepleri ve Opinnate kurallarıyla karşılaştırılır; bileti olmayan akışlar ve hiç kullanılmayan açık kurallar raporlanır.
+- **Kendini iyileştiren CMDB.** Yapay zekanın yüksek güvenle verdiği sahiplik kararları ve DeltaFlow'un gözlediği bağımlılıklar, insan onayıyla envantere geri yazılır.
+- **Yapay zeka ile taşıma grubu önerisi.** Veri merkezi taşımalarında yapay zeka, trafik yoğunluğu ve sahiplikten taşıma gruplarına ve sırasına karar verip önerir.
+- **Yapay zeka ile erişim talebi ön değerlendirmesi.** Yeni bir firewall talebi geldiğinde yapay zeka mevcut trafik, kural ve sahiplik bilgisine bakarak talebi gerekçeli olarak "gerekli / zaten açık / riskli" diye değerlendirir.
+- **Proaktif anomali tespiti.** Yapay zeka canlı akışları SM erişim talepleri ve Opinnate kurallarıyla karşılaştırır; bileti olmayan akışları ve hiç kullanılmayan açık kuralları raporlayıp önceliklendirir.
 - **Tek arayüz.** Kahin'in sahiplik kartı DeltaFlow topolojisindeki her kutuya bağlanır; tek tıkla "kimin" ve "kime bağlı" birlikte görülür.
 - **Kural tarihçesi.** Opinnate kural geçmişiyle "bu erişim ne zaman, hangi taleple açıldı" bilgisi eklenir.
 
@@ -156,7 +173,7 @@ Platform, teknik birimlerin ortak "tek doğruluk kaynağı" olacak şekilde tasa
 **Projede yer alan teknoloji ve çözüm ortakları:**
 
 1. **Ziraat Teknoloji (iç kaynak):** Mimari tasarım, istem (prompt) mühendisliği, veri korelasyon algoritmaları ve tam yığın geliştirme (.NET / C#, web arayüzü) tamamen iç kaynakla yapıldı.
-2. **Kurum içi yapay zeka altyapısı:** Kurum içinde barındırılan büyük dil modeli servisleri; bilet madenciliği, çoklu kanıt muhakemesi ve etki yorumu için.
+2. **Kurum içi yapay zeka altyapısı:** Kurum içinde barındırılan büyük dil modeli; sahiplik kararı (uygulama, ekip, güven skoru), bilet madenciliği, değişiklik etki kararı ve kanıt bağlamında soru-cevap için. Model ham veriyi değil, kodun doğruladığı kanıtı görür.
 3. **Entegre kurumsal veri kaynakları:** Micro Focus UCMDB (Entropi), Service Manager (SM9), Cisco ACI segment envanteri, DNS, Riverbed AppResponse, Splunk ve Carbon Black, Palo Alto firewall logları, F5 BIG-IP (ASM / Bot Defense) logları, Opinnate firewall kural yönetimi, VIP / yük dengeleyici envanteri.
 
 **Başvuruya eklenecek ekran görüntüleri (önerilen 6):**
@@ -183,6 +200,7 @@ Jüri rakamları sorgulayabilir; ölçülmemiş bir iddia tüm başvurunun güve
 - [ ] Kullanıcı sayısı ya da kullanan birim sayısı eklenebilirse eklenmeli; somut bir olay hikayesi (örn. bir bakım öncesi etki analizinin önlediği kesinti) çok güçlü olur.
 - [ ] Ekip üyeleri ve proje sahiplerinin adları eklenmeli.
 - [ ] Ekran görüntülerinde gerçek IP, sunucu adı ve kullanıcı bilgisi maskelendi mi?
+- [ ] Yapay zeka kararlarının doğruluğu ölçülebilirse eklenmeli (örn. 100 örnek IP'de yapay zekanın bulduğu ekibin doğru çıkma oranı); jüri için en güçlü yapay zeka kanıtıdır.
 '@
 
 # ---------------- Mimari şema (PNG, base64) ----------------
