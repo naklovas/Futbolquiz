@@ -122,17 +122,17 @@ DOKU tek bir ekran değil, aynı kanıt tabanını farklı işlere uygulayan bir
 
 ## Elde Edilen Sonuçlar ve Ölçülebilir Faydalar
 
-En büyük kazanç zamandır: birden çok ekip ve ekranla dakikalar-saatler süren inceleme, tek sorguda saniyelere iner. Tablodaki köşeli parantezli değerler başvurudan önce gerçek ölçümle doldurulmalıdır. DeltaFlow her sorgunun süresini ekranda gösterdiği için "sonra" sütunu birkaç örnek sorguyla kolayca ölçülür.
+En büyük kazanç zamandır: birden çok ekip ve ekranla dakikalar-saatler süren inceleme, tek sorguda saniyelere iner. Bir sunucunun tüm bağımlılık resmi artık yaklaşık 20 saniyede çıkıyor; aynı iş elle saatler sürüyordu. "Ölçülen" değerler DeltaFlow ekranında görünen gerçek sorgu süresidir; "tahmini" değerler ekip deneyimine dayanır ve ölçüm yapıldıkça güncellenecektir.
 
-| İş | Önce (manuel) | Sonra | Araç |
+| İş | Önce (manuel) | Sonra (DOKU) | Araç |
 | --- | --- | --- | --- |
-| IP/port'un uygulamasını ve sorumlu ekibi bulmak | [30–90 dk, 4-5 ekran] | [Hızlı mod < 2 sn, derin analiz 8–12 sn] | Kahin |
-| Veri merkezi taşıması için bağımlılık analizi ve taşıma grupları | [__ hafta, atölye + anket + log] | [__ gün, gerçek trafikten] | DOKU |
-| Bir sunucunun gelen/giden bağımlılıklarını çıkarmak | [__ saat, ağ + sistem ekibi] | [__ sn, tek sorgu] | DeltaFlow |
-| Bakım/değişiklik öncesi "ne etkilenir" analizi | [__ saat/gün, toplantı + log] | [__ sn + AI yorumu] | DeltaFlow |
-| "A, B'ye erişebiliyor mu?" (log + kural + WAF) | [__ dk, firewall ekibine talep] | [__ sn] | DeltaFlow |
-| Bir isteğin dış IP'den veritabanına yolunu bulmak | [genelde yapılamıyor] | [__ sn] | DeltaFlow |
-| Envanterde "bilinmiyor/NA" kayıtların sahipliğini bulmak | [__ kayıt açıkta] | [__ kayıt, %__ güvenle] | Kahin |
+| IP/port'un uygulamasını ve sorumlu ekibi bulmak | 30–90 dk, 4-5 ekran (tahmini) | Hızlı mod 2 sn altı, derin analiz 8–12 sn (tahmini) | Kahin |
+| Veri merkezi taşıması için bağımlılık analizi ve taşıma grupları | 2–4 hafta: atölye, anket, log inceleme (tahmini) | 1–2 gün, gerçek trafikten (tahmini) | DOKU |
+| Bir sunucunun gelen/giden bağımlılıklarını çıkarmak | 2–4 saat, ağ + sistem ekibi (tahmini) | ~20 sn, tek sorgu (ölçülen) | DeltaFlow |
+| Bakım/değişiklik öncesi "ne etkilenir" analizi | 1–2 gün, toplantı + log (tahmini) | 1 dk altı, sorgu + yapay zeka kararı (tahmini) | DeltaFlow |
+| "A, B'ye erişebiliyor mu?" (log + kural + WAF) | 30 dk – 1 gün, firewall ekibine talep (tahmini) | 15–30 sn (tahmini) | DeltaFlow |
+| Bir isteğin dış IP'den veritabanına yolunu bulmak | Pratikte yapılamıyordu | ~1 dk, Veri Akışı (tahmini) | DeltaFlow |
+| Envanterde "bilinmiyor/NA" kayıtların sahipliğini bulmak | Kayıt başına 30–90 dk, çoğu hiç çözülmeden kalıyordu (tahmini) | Kayıt başına saniyeler, yapay zeka kararı + güven skoru | Kahin |
 
 **Niteliksel faydalar:**
 
@@ -195,7 +195,7 @@ Jüri rakamları sorgulayabilir; ölçülmemiş bir iddia tüm başvurunun güve
 - [ ] "30–90 dakika manuel inceleme" bir ekip görüşü ya da örnek olayla destekleniyor mu?
 - [ ] "%95+ zaman kazanımı" ve "%85–100 güven aralığı" gerçek sayılara dayanıyor mu? Dayanmıyorsa çıkarılmalı.
 - [ ] "Binlerce kaydın sahipliği aydınlatıldı" için gerçek kayıt sayısı yazılmalı.
-- [ ] DeltaFlow satırları: 3–5 gerçek sorgunun ekranda görünen süresi tabloya girilmeli.
+- [ ] "Tahmini" yazan süreler 3–5 gerçek sorguyla ölçülüp "ölçülen" olarak güncellenmeli (DeltaFlow süreyi ekranda gösteriyor).
 - [ ] İştiraklerde (Ziraat Katılım, Ziraat Pay vb.) gerçekten kullanılıyor mu, yoksa hedef mi? Hedefse "kullanılabilir" diye yazılmalı.
 - [ ] Kullanıcı sayısı ya da kullanan birim sayısı eklenebilirse eklenmeli; somut bir olay hikayesi (örn. bir bakım öncesi etki analizinin önlediği kesinti) çok güçlü olur.
 - [ ] Ekip üyeleri ve proje sahiplerinin adları eklenmeli.
