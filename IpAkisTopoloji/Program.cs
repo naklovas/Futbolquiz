@@ -480,7 +480,7 @@ app.MapGet("/api/app", async (string? name, string? start, string? end, int? app
     if (tag != null)
     {
         if (env.TagIps(tag).Count == 0)
-            return Results.BadRequest(new { error = $"Bu etikette sunucu yok: {tag} (ERT tablosunun TAG kolonunda ya da DOKU_SERVER_TAG tablosunda bu etiket var mı?)" });
+            return Results.BadRequest(new { error = $"Bu etikette sunucu yok: {tag} (ERT tablosunun TAG kolonunda bu etiket var mı? Sunucu etiketleme sekmesinden eklenebilir.)" });
     }
     else if (string.IsNullOrWhiteSpace(name) || env.AppRows(name.Trim()).Count == 0)
         return Results.BadRequest(new { error = $"Uygulama envanterde bulunamadı: {name}" });
@@ -537,6 +537,40 @@ app.MapGet("/api/etiketler", async (EnvanterService envanter, CancellationToken 
     {
         return Results.Json(new { error = ex.Message }, statusCode: 502);
     }
+});
+
+// Sunucu etiketleme: ERT sunucuları (arama / etiket / etiketsiz filtresi) ve ERT TAG kolonuna yazma.
+app.MapGet("/api/etiket/sunucular", async (string? q, string? etiket, bool? etiketsiz, HttpContext ctx,
+    IConfiguration cfg, EnvanterService envanter, CancellationToken ct) =>
+{
+    try
+    {
+        var env = await envanter.GetAsync(false, ct);
+        var list = EtiketService.List(env, q, string.IsNullOrWhiteSpace(etiket) ? null : etiket.Trim(), etiketsiz == true, cfg.GetValue("Etiket:MaxSatir", 500));
+        return Results.Ok(new { list.Sunucular, list.Toplam, list.Etiketler, yazabilir = EtiketService.CanWrite(cfg, ctx.User?.Identity?.Name) });
+    }
+    catch (Exception ex) { return Results.Json(new { error = ex.Message }, statusCode: 502); }
+});
+
+app.MapPost("/api/etiket", async (EtiketIstek req, HttpContext ctx, IConfiguration cfg, EnvanterService envanter, CancellationToken ct) =>
+{
+    string user = ctx.User?.Identity?.Name ?? "?";
+    if (!EtiketService.CanWrite(cfg, ctx.User?.Identity?.Name))
+        return Results.Json(new { error = $"Etiket yazma yetkiniz yok ({user})." }, statusCode: 403);
+    var ips = (req.Ips ?? []).Select(i => i?.Trim()).Where(i => LookupQuery.TryParseIpv4(i, out _)).Select(i => i!).Distinct().ToList();
+    if (ips.Count == 0 || ips.Count > 500) return Results.BadRequest(new { error = "1–500 arası geçerli IP seçin." });
+    string? add = EtiketService.NormalizeTag(req.Ekle), remove = EtiketService.NormalizeTag(req.Kaldir);
+    if (add == null && remove == null)
+        return Results.BadRequest(new { error = "Etiket geçersiz: harf, rakam, _ - . ve boşluk; en çok 50 karakter." });
+    try
+    {
+        int n = await EtiketService.ApplyAsync(cfg, ips, add, remove, user, app.Logger, ct);
+        var env = await envanter.GetAsync(true, ct);   // yeni etiketler hemen görünsün
+        var rows = EtiketService.List(env, null, null, false, int.MaxValue).Sunucular.Where(s => ips.Contains(s.Ip)).ToList();
+        return Results.Ok(new EtiketSonuc(n, rows));
+    }
+    catch (InvalidOperationException ex) { return Results.BadRequest(new { error = ex.Message }); }
+    catch (Microsoft.Data.SqlClient.SqlException ex) { return Results.Json(new { error = "SQL: " + ex.Message }, statusCode: 502); }
 });
 
 // 2. seviye: sorgulanan IP'nin karşısındaki sunucuların kendi trafiği (tek sorguda, tüm sunucular için).

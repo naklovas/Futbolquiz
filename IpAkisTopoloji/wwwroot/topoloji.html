@@ -207,6 +207,10 @@
   .badge.weak { border-color: var(--warn); color: var(--warn); }
   details summary { cursor: pointer; color: var(--muted); }
   .small { font-size: 11.5px; }
+  .tagrow { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 4px 0 8px; }
+  .tagrow .badge a, .tagchip a { color: inherit; text-decoration: none; margin-left: 2px; opacity: .7; }
+  button.ghost { background: transparent; border: 1px dashed var(--line); color: var(--muted); padding: 2px 10px; border-radius: 999px; cursor: pointer; }
+  button.ghost:hover { color: var(--text); border-color: var(--muted); }
   .empty { padding: 30px; text-align: center; color: var(--muted); }
   .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--line); border-top-color: var(--in); border-radius: 50%; animation: spin 1s linear infinite; vertical-align: middle; }
   @keyframes spin { to { transform: rotate(360deg); } }
@@ -229,21 +233,29 @@
   <div class="seg modetabs" id="modeTabs">
     <button type="button" data-ui="ip" class="on">IP sorgula</button>
     <button type="button" data-ui="app">Uygulama sorgula</button>
+    <button type="button" data-ui="topo">Topoloji</button>
     <button type="button" data-ui="erisim">Erişim sorgula</button>
+    <button type="button" data-ui="etiket">Sunucu etiketleme</button>
     <!-- DB'ye gelenler: menüde gizli; kod duruyor, adresle açılabilir: ?db= (geri getirmek için hidden'ı kaldırın) -->
   </div>
   <form id="f">
     <label id="ipLabel">IP adresi <input type="text" id="ip" placeholder="10.50.20.15"></label>
     <label id="appLabel" hidden>Uygulama <input type="text" id="appName" list="appList" placeholder="Uygulama adı yazın…" autocomplete="off" style="width:280px"></label>
     <datalist id="appList"></datalist>
+    <label id="topoLabel" hidden title="Envanterde (ERT, TAG kolonu) bu etiketi taşıyan sunucuların topolojisi">Etiket <select id="topoTag" style="min-width:220px"></select></label>
+    <span id="etqLabel" class="acc-fields" hidden>
+      <label>Ara <input type="text" id="etqQ" placeholder="IP, sunucu adı ya da uygulama" style="width:280px"></label>
+      <label>Etiket <select id="etqTag"><option value="">tümü</option></select></label>
+      <label style="flex-direction:row;align-items:center;gap:6px"><input type="checkbox" id="etqNone"> Yalnız etiketsizler</label>
+    </span>
     <span id="accLabel" class="acc-fields" hidden>
       <label>Kaynak IP <input type="text" id="accSrc" placeholder="10.50.20.15"></label>
       <span class="acc-arrow">→</span>
       <label>Hedef IP <input type="text" id="accDst" placeholder="10.40.0.9"></label>
       <label>Port <input type="text" id="accPort" placeholder="tümü" style="width:80px"></label>
     </span>
-    <label>Başlangıç <input type="datetime-local" id="start"></label>
-    <label>Bitiş <input type="datetime-local" id="end"></label>
+    <label id="startLabel">Başlangıç <input type="datetime-local" id="start"></label>
+    <label id="endLabel">Bitiş <input type="datetime-local" id="end"></label>
     <label id="applianceLabel">AppResponse kutusu <select id="appliance"></select></label>
     <div class="checks" id="srcChecks">
       <label><input type="checkbox" id="srcSplunk" checked> Splunk</label>
@@ -366,10 +378,12 @@ function initForm() {
     const end = isNaN(e) ? now : e;
     $("#end").value = toLocalInput(end); $("#start").value = toLocalInput(new Date(end - 3600e3));
   }
+  if (p.get("etiket") != null) { $("#etqQ").value = p.get("etiket"); return "etiket"; }
+  if (p.get("topo")) { topoWanted = p.get("topo"); return "topo"; }
   return p.get("app") ? "app" : p.get("ip") ? "ip" : null;
 }
 
-$("#f").addEventListener("submit", ev => { ev.preventDefault(); uiMode === "app" ? runApp() : uiMode === "erisim" ? runAccess() : run(); });
+$("#f").addEventListener("submit", ev => { ev.preventDefault(); uiMode === "app" ? runApp() : uiMode === "topo" ? runTopo() : uiMode === "erisim" ? runAccess() : uiMode === "etiket" ? runEtiket() : run(); });
 $("#cancel").addEventListener("click", () => abort?.abort());
 
 async function run() {
@@ -628,7 +642,7 @@ function renderTarget(d) {
     : `<div class="unk">Bu IP için uygulama envanterinde kayıt yok.</div>`;
 
   return `<div class="target-grid">
-      <div><div class="bigip">${esc(t.ip)}</div>${(tagMap?.[t.ip] ?? []).map(x => `<span class="badge" title="Envanter etiketi">${esc(x)}</span> `).join("")}${segDl}</div>
+      <div><div class="bigip">${esc(t.ip)}</div><div class="tagrow">${(tagMap?.[t.ip] ?? []).map(x => `<span class="badge" title="Envanter etiketi (ERT · TAG)">${esc(x)} <a href="#" data-untag="${esc(x)}" data-ip="${esc(t.ip)}" title="Etiketi kaldır">×</a></span> `).join("")}<button type="button" class="ghost small" data-tagip="${esc(t.ip)}" title="Bu sunucuya etiket ekle (ERT TAG kolonuna yazılır)">+ Etiket</button></div>${segDl}</div>
       <div>
         <div class="kpis" style="margin-bottom:12px">
           <div class="kpi"><b style="color:var(--in)">${fmt(inPeers)}</b><span>gelen IP · ${fmt(inSegs)} segment</span></div>
@@ -1724,7 +1738,7 @@ function exportImage(kind) {
   clone.setAttribute("width", w); clone.setAttribute("height", h);
   clone.querySelector("*") && clone.insertAdjacentHTML("afterbegin", `<rect width="${w}" height="${h}" fill="${getComputedStyle(document.body).backgroundColor}"></rect>`);
   const xml = new XMLSerializer().serializeToString(clone);
-  const name = `DeltaFlow_${uiMode === "app" ? appState.data.name.replace(/[^\w.-]+/g, "_") : state.data.target.ip}_topoloji`;
+  const name = `DeltaFlow_${uiMode === "app" || uiMode === "topo" ? appState.data.name.replace(/[^\w.-]+/g, "_") : state.data.target.ip}_topoloji`;
   const save = (blob, ext) => { const l = document.createElement("a"); l.href = URL.createObjectURL(blob); l.download = `${name}.${ext}`; l.click(); setTimeout(() => URL.revokeObjectURL(l.href), 1000); };
   if (kind === "svg") { save(new Blob([xml], { type: "image/svg+xml" }), "svg"); return; }
   const img = new Image();
@@ -1915,9 +1929,10 @@ function wireEnvToggles(onChange) {
 }
 
 fetch("api/me").then(r => r.ok ? r.json() : null).then(me => { if (me?.name) $("#me").textContent = "👤 " + me.name; }).catch(() => {});
-loadAppliances().then(() => { const m = initForm(); if (m) uiMode = m; /* adres çubuğundaki aralık o sekmenin aralığıdır */ if (m === "app") runApp(); else if (m === "erisim") runAccess(); else if (m === "ip") run(); });
+loadAppliances().then(() => { const m = initForm(); if (m) uiMode = m; /* adres çubuğundaki aralık o sekmenin aralığıdır */ if (m === "app") runApp(); else if (m === "topo") runTopo(); else if (m === "erisim") runAccess(); else if (m === "etiket") runEtiket(); else if (m === "ip") run(); });
 </script>
 <script src="uygulama.js"></script>
 <script src="erisim.js"></script>
+<script src="etiket.js"></script>
 </body>
 </html>

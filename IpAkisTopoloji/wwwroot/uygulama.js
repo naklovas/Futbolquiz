@@ -33,51 +33,80 @@ function setUiMode(m) {
   document.querySelectorAll("#modeTabs button").forEach(b => b.classList.toggle("on", b.dataset.ui === m));
   $("#ipLabel").hidden = m !== "ip";
   $("#appLabel").hidden = m !== "app";
+  $("#topoLabel").hidden = m !== "topo";
+  $("#etqLabel").hidden = m !== "etiket";
+  // Etiketleme trafik sorgulamaz: tarih, kutu ve kaynak seçimleri gizli
+  $("#startLabel").hidden = $("#endLabel").hidden = $("#srcChecks").hidden = m === "etiket";
+  $("#go").textContent = m === "etiket" ? "Ara" : "Sorgula";
   $("#hop2Label").hidden = m !== "ip";
   // Erişim sorgusu Firewall + Carbon Black ile çalışır; AppResponse kutusu ve 2. seviye anlamsız.
   $("#accLabel").hidden = m !== "erisim";
-  $("#applianceLabel").hidden = m === "erisim";
+  $("#applianceLabel").hidden = m === "erisim" || m === "etiket";
   $("#srcArLabel").hidden = m === "erisim";
   $("#srcF5Label").hidden = m !== "erisim";
   $("#srcOpLabel").hidden = m !== "erisim";
   if (m === "app") loadAppCatalog();
+  if (m === "topo") loadTopoTags();
 }
 document.querySelectorAll("#modeTabs button").forEach(b => b.addEventListener("click", () => {
   setUiMode(b.dataset.ui);
-  (b.dataset.ui === "app" ? $("#appName") : b.dataset.ui === "erisim" ? $("#accSrc") : $("#ip")).focus();
+  const u = b.dataset.ui;
+  (u === "app" ? $("#appName") : u === "topo" ? $("#topoTag") : u === "erisim" ? $("#accSrc") : u === "etiket" ? $("#etqQ") : $("#ip")).focus();
+  if (u === "etiket") runEtiket();
 }));
+
+// ---------- Topoloji sekmesi: etikete göre (ERT TAG) sunucuların topolojisi ----------
+let topoWanted = null;
+async function loadTopoTags(force) {
+  if ($("#topoTag").options.length && !force) return;
+  try {
+    const r = await fetch("api/etiketler");
+    const b = r.ok ? await r.json() : null;
+    const tags = b?.etiketler ?? [];
+    const cur = topoWanted ?? $("#topoTag").value;
+    $("#topoTag").innerHTML = tags.length
+      ? tags.map(t => `<option value="${esc(t.ad)}"${t.ad === cur ? " selected" : ""}>${esc(t.ad)} · ${t.sunucu} sunucu</option>`).join("")
+      : `<option value="">(henüz etiket yok)</option>`;
+    if (b?.ipler) tagMap = b.ipler;
+  } catch { /* liste gelmezse boş */ }
+}
+async function runTopo() {
+  await loadTopoTags();
+  const tag = topoWanted ?? $("#topoTag").value;
+  topoWanted = null;
+  if (!tag) { alert("Henüz etiketli sunucu yok. Sunucu etiketleme sekmesinden sunuculara etiket ekleyin."); return; }
+  runApp("etiket:" + tag, "topo");
+}
 
 async function loadAppCatalog() {
   if (appState.catalog) return;
   try {
-    const [r, rt] = await Promise.all([fetch("api/apps"), fetch("api/etiketler").catch(() => null)]);
+    const r = await fetch("api/apps");
     if (!r.ok) return;
     appState.catalog = await r.json();
-    // Etiketler (ör. VERIAMBARI) listenin başında: "etiket:<ad>" etiketli sunucuların topolojisini açar
-    const tags = rt?.ok ? ((await rt.json()).etiketler ?? []) : [];
-    $("#appList").innerHTML = tags.map(t => `<option value="etiket:${esc(t.ad)}">Etiket · ${t.sunucu} sunucu</option>`).join("") + appState.catalog.map(a =>
+    $("#appList").innerHTML = appState.catalog.map(a =>
       `<option value="${esc(a.name)}">${a.servers} sunucu${a.vips ? ` · ${a.vips} VIP` : ""}${a.owner ? " · " + esc(a.owner) : ""}</option>`).join("");
   } catch { /* liste gelmezse elle yazılabilir */ }
 }
 
 // ---------- Sorgu ----------
-async function runApp(name) {
-  if (name) $("#appName").value = name;
-  name = $("#appName").value.trim();
+async function runApp(name, mode = "app") {
+  if (mode === "app" && name) $("#appName").value = name;
+  name = mode === "app" ? $("#appName").value.trim() : name;
   if (!name) { alert("Bir uygulama seçin."); return; }
-  setUiMode("app");
+  setUiMode(mode);
   const srcs = selectedSources();
   if (!srcs.length) { alert("En az bir kaynak seçin."); return; }
   const params = new URLSearchParams({
     name, start: $("#start").value, end: $("#end").value,
     appliance: $("#appliance").value || "0", sources: srcs.join(",")
   });
-  history.replaceState(null, "", "?" + new URLSearchParams({ app: name, start: params.get("start"), end: params.get("end") }));
+  history.replaceState(null, "", "?" + new URLSearchParams({ ...(mode === "topo" ? { topo: name.slice(7) } : { app: name }), start: params.get("start"), end: params.get("end") }));
 
   abort?.abort(); hopAbort?.abort(); aiAbort?.abort();
   abort = new AbortController();
   $("#go").disabled = true; $("#cancel").hidden = false;
-  $("#main").innerHTML = `<div class="panel empty"><span class="spinner"></span> "${esc(name)}" uygulamasının sunucuları ve VIP'leri sorgulanıyor…</div>`;
+  $("#main").innerHTML = `<div class="panel empty"><span class="spinner"></span> ${mode === "topo" ? `"${esc(name.slice(7))}" etiketli sunucular ve VIP'leri sorgulanıyor…` : `"${esc(name)}" uygulamasının sunucuları ve VIP'leri sorgulanıyor…`}</div>`;
   try {
     const r = await fetch("api/app?" + params, { signal: abort.signal });
     const body = await r.json().catch(() => ({ error: `HTTP ${r.status}: sunucu JSON yerine başka bir yanıt döndü (zaman aşımı, yetki ya da sunucu hata sayfası olabilir)` }));

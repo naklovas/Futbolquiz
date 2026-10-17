@@ -122,45 +122,26 @@ sealed class EnvanterService(IConfiguration cfg, ILogger<EnvanterService> log)
         return new EnvanterSnapshot(segments, hosts, vips, vipGws, marker, tags);
     }
 
-    // Sunucu etiketleri (ör. VERIAMBARI): ERT tablosundaki etiket kolonu (Envanter:EtiketKolonu, varsayılan TAG; Entropi'den gelecek asıl kaynak) ve/veya
-    // ayrı etiket tablosu (Envanter:EtiketTablosu, varsayılan dbo.DOKU_SERVER_TAG: IPADDRESS, TAG, EXPL, INSERTEDBY, DATE). Virgül / noktalı virgülle birden çok etiket.
-    // Kolon ya da tablo yoksa etiketsiz devam edilir (uygulama hata vermez).
+    // Sunucu etiketleri (ör. VERIAMBARI): yalnızca ERT tablosunun etiket kolonu (Envanter:EtiketKolonu, varsayılan TAG).
+    // Etiketleme ekranı aynı kolona yazar. Virgül / noktalı virgülle birden çok etiket. Kolon yoksa etiketsiz devam edilir.
     async Task<Dictionary<string, List<string>>> LoadTagsAsync(SqlConnection conn, string hostTable, CancellationToken ct)
     {
         var map = new Dictionary<string, List<string>>();
-        void Add(string? ip, string? raw)
+        string col = EtiketService.Column(cfg);
+        try
         {
-            if (ip == null || raw == null) return;
-            foreach (var t in raw.Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            await using var cmd = new SqlCommand($"SELECT IPADDRESS, [{col}] FROM {hostTable} WHERE [{col}] IS NOT NULL", conn);
+            await using var r = await cmd.ExecuteReaderAsync(ct);
+            while (await r.ReadAsync(ct))
             {
+                string? ip = Clean(r, 0), raw = Clean(r, 1);
+                if (ip == null || raw == null) continue;
                 if (!map.TryGetValue(ip, out var l)) map[ip] = l = [];
-                if (!l.Contains(t, StringComparer.OrdinalIgnoreCase)) l.Add(t);
+                foreach (var t in EtiketService.Split(raw))
+                    if (!l.Contains(t, StringComparer.OrdinalIgnoreCase)) l.Add(t);
             }
         }
-        var safe = new System.Text.RegularExpressions.Regex(@"^[A-Za-z_][A-Za-z0-9_]*$");
-        string col = cfg["Envanter:EtiketKolonu"] ?? "TAG";
-        if (col != "" && safe.IsMatch(col))
-        {
-            try
-            {
-                await using var cmd = new SqlCommand($"SELECT IPADDRESS, [{col}] FROM {hostTable} WHERE [{col}] IS NOT NULL", conn);
-                await using var r = await cmd.ExecuteReaderAsync(ct);
-                while (await r.ReadAsync(ct)) Add(Clean(r, 0), Clean(r, 1));
-            }
-            catch (SqlException ex) { log.LogInformation("Etiket kolonu okunamadı ({Col}): {Msg}", col, ex.Message); }
-        }
-        string? tbl = cfg["Envanter:EtiketTablosu"] ?? "dbo.DOKU_SERVER_TAG";
-        string tcol = cfg["Envanter:EtiketTablosuKolonu"] ?? "TAG";
-        if (!string.IsNullOrWhiteSpace(tbl) && System.Text.RegularExpressions.Regex.IsMatch(tbl, @"^[A-Za-z0-9_.\[\]]+$") && safe.IsMatch(tcol))
-        {
-            try
-            {
-                await using var cmd = new SqlCommand($"SELECT IPADDRESS, [{tcol}] FROM {tbl}", conn);
-                await using var r = await cmd.ExecuteReaderAsync(ct);
-                while (await r.ReadAsync(ct)) Add(Clean(r, 0), Clean(r, 1));
-            }
-            catch (SqlException ex) { log.LogWarning("Etiket tablosu okunamadı ({Tbl}): {Msg}", tbl, ex.Message); }
-        }
+        catch (SqlException ex) { log.LogInformation("Etiket kolonu okunamadı ({Col}): {Msg}", col, ex.Message); }
         return map;
     }
 
@@ -217,6 +198,8 @@ sealed class EnvanterSnapshot
     readonly Dictionary<string, List<HostApp>> _byApp = new(StringComparer.OrdinalIgnoreCase);
     readonly string _systemMarker;
     readonly Dictionary<string, List<string>> _tagsByIp = new();
+    // Envanterdeki (ERT) tüm sunucu IP'leri
+    public IEnumerable<string> HostIps => _byIp.Keys;
     readonly Dictionary<string, List<string>> _ipsByTag = new(StringComparer.OrdinalIgnoreCase);
 
     // Sunucu etiketleri (VERIAMBARI vb.)

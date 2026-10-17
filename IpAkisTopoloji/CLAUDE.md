@@ -30,6 +30,7 @@ topoloji çizer ve şirket içi AI'a etki analizi yaptırır. Canlıda IIS'te, W
 | `Yolculuk.cs` | Uçtan uca yolculuk: dış IP → … → sorgulanan → … → DB |
 | `Erisim.cs` | Erişim sorgula: kaynak IP → hedef IP (port) izin/engel, son görülme (Firewall + Carbon Black) |
 | `Opinnate.cs` | Opinnate firewall kural kontrolü (rule-checker/topology): tanımlı kurala göre erişim, yol üzerindeki cihazlar |
+| `Etiket.cs` | Sunucu etiketleme: ERT TAG kolonu okuma/yazma (Topoloji ve Sunucu etiketleme sekmeleri) |
 | `F5Waf.cs` | F5 ASM / Bot Defense güvenlik logları (Splunk index=f5): erişimde engel kararı, IP görünümünde URI listesi |
 | `PortBilgisi.cs` | Port → işlev ve kesilirse duracak iş (AI prompt'u için) |
 | `AuthHelper.cs` | Kullanıcının verdiği DokuPanel yetki helper'ı (namespace `AppRel`), anahtar config'den |
@@ -126,11 +127,14 @@ topoloji çizer ve şirket içi AI'a etki analizi yaptırır. Canlıda IIS'te, W
   - `dbo.ERT_HOSTIPADDRESS` (IPADDRESS, PORT, VIP_IP, VIP_PORT, APPNAME, WEBSITE, UNIXNAME, SERVICENAME, VARLIKMUHAFIZI,
     SUNUCUISLETENBIRIM, UYGULAMAVARLIKSAHIBI): uygulama eşleşmesi sırası IP+PORT → VIP_IP+VIP_PORT → IP → VIP_IP.
     APPNAME "Sistem Portudur" → "Sistem Portudur: RDP" gibi (SystemPorts; `Envanter:SistemPortlari` ile ek/override).
-  - **Etiket** (veri ambarı işi için): ERT tablosuna `TAG NVARCHAR(200)` kolonu (`Envanter:EtiketKolonu`, varsayılan TAG — ileride Entropi'den dolacak ASIL kaynak, kolon yoksa sessizce atlanır; virgülle
-    birden çok) ve/veya ayrı tablo `Envanter:EtiketTablosu` (canlıda `dbo.DOKU_SERVER_TAG`: IPADDRESS, TAG, EXPL, INSERTEDBY, DATE; PK IP+TAG — kullanıcının seçtiği yol). Yoksa sessizce etiketsiz. `TagsOf/TagIps/TagCatalog`,
-    `/api/etiketler`; uygulama listesinde `etiket:VERIAMBARI` → `AppTopology.TagEndpoints` (etiketli sunucular + üyesi oldukları VIP'ler),
-    aynı uygulama çizimi; IP kartında etiket rozeti. Plan: Faz 1 AI rol sınıflaması (Exadata, ETL, rapor…), Faz 1.5 aktarım takibi,
-    Faz 2 DB→tablo→kolon.
+  - **Etiket** (veri ambarı işi için; kullanıcı kararı: HER ŞEY ERT tablosunda, ayrı tablo YOK): `ERT_HOSTIPADDRESS.TAG NVARCHAR(200)`
+    (`Envanter:EtiketKolonu`, varsayılan TAG; virgülle birden çok, büyük harfe çevrilir; kolon yoksa sessizce etiketsiz). İleride
+    Entropi'den dolacak. `Etiket.cs` (EtiketService): liste (`/api/etiket/sunucular?q=&etiket=&etiketsiz=`) ve yazma
+    (`POST /api/etiket {ips, ekle|kaldir}`: IP'nin mevcut TAG'i DB'den okunur, IP'nin TÜM satırları UPDATE, sonra envanter zorla
+    yeniden yüklenir; kolon yoksa ALTER önerisiyle hata). Yetki `Etiket:Yazanlar` (boş = herkes), her değişiklik loglanır.
+    Arayüz: **Topoloji** sekmesi (etiket seç → `etiket:<ad>` ile uygulama çizimi, `?topo=`), **Sunucu etiketleme** sekmesi
+    (`wwwroot/etiket.js`: ara, toplu ekle/kaldır, satırda + Etiket, × ile kaldır; `?etiket=`), IP kartında rozet + "+ Etiket".
+    Plan: Faz 1 AI rol sınıflaması (Exadata, ETL, rapor…; AI kararı ayrı tutulacak), Faz 1.5 aktarım takibi, Faz 2 DB→tablo→kolon.
   - `dbo.vip_envanteri` (hostname, server_ip, server_port, server_type, loadbalancer_ip, loadbalancer_port, loadbalancer_pool)
   - `dbo.vipgw` (GWIP, FW, Segment=CIDR): LB havuz üyelerine kendi segmentindeki GW IP'sinden gider.
 
