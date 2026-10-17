@@ -122,8 +122,8 @@ sealed class EnvanterService(IConfiguration cfg, ILogger<EnvanterService> log)
         return new EnvanterSnapshot(segments, hosts, vips, vipGws, marker, tags);
     }
 
-    // Sunucu etiketleri (ör. VERIAMBARI): ERT tablosundaki etiket kolonu (Envanter:EtiketKolonu, varsayılan TAG) ve/veya
-    // ayrı etiket tablosu (Envanter:EtiketTablosu: IPADDRESS, ETIKET). Virgül / noktalı virgülle birden çok etiket.
+    // Sunucu etiketleri (ör. VERIAMBARI): ERT tablosundaki etiket kolonu (Envanter:EtiketKolonu, varsayılan boş) ve/veya
+    // ayrı etiket tablosu (Envanter:EtiketTablosu, varsayılan dbo.DOKU_SERVER_TAG: IPADDRESS, TAG, EXPL, INSERTEDBY, DATE). Virgül / noktalı virgülle birden çok etiket.
     // Kolon ya da tablo yoksa etiketsiz devam edilir (uygulama hata vermez).
     async Task<Dictionary<string, List<string>>> LoadTagsAsync(SqlConnection conn, string hostTable, CancellationToken ct)
     {
@@ -138,7 +138,7 @@ sealed class EnvanterService(IConfiguration cfg, ILogger<EnvanterService> log)
             }
         }
         var safe = new System.Text.RegularExpressions.Regex(@"^[A-Za-z_][A-Za-z0-9_]*$");
-        string col = cfg["Envanter:EtiketKolonu"] ?? "TAG";
+        string col = cfg["Envanter:EtiketKolonu"] ?? "";
         if (col != "" && safe.IsMatch(col))
         {
             try
@@ -149,12 +149,13 @@ sealed class EnvanterService(IConfiguration cfg, ILogger<EnvanterService> log)
             }
             catch (SqlException ex) { log.LogInformation("Etiket kolonu okunamadı ({Col}): {Msg}", col, ex.Message); }
         }
-        string? tbl = cfg["Envanter:EtiketTablosu"];
-        if (!string.IsNullOrWhiteSpace(tbl) && System.Text.RegularExpressions.Regex.IsMatch(tbl, @"^[A-Za-z0-9_.\[\]]+$"))
+        string? tbl = cfg["Envanter:EtiketTablosu"] ?? "dbo.DOKU_SERVER_TAG";
+        string tcol = cfg["Envanter:EtiketTablosuKolonu"] ?? "TAG";
+        if (!string.IsNullOrWhiteSpace(tbl) && System.Text.RegularExpressions.Regex.IsMatch(tbl, @"^[A-Za-z0-9_.\[\]]+$") && safe.IsMatch(tcol))
         {
             try
             {
-                await using var cmd = new SqlCommand($"SELECT IPADDRESS, ETIKET FROM {tbl}", conn);
+                await using var cmd = new SqlCommand($"SELECT IPADDRESS, [{tcol}] FROM {tbl}", conn);
                 await using var r = await cmd.ExecuteReaderAsync(ct);
                 while (await r.ReadAsync(ct)) Add(Clean(r, 0), Clean(r, 1));
             }

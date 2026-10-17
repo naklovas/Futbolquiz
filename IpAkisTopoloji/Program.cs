@@ -480,7 +480,7 @@ app.MapGet("/api/app", async (string? name, string? start, string? end, int? app
     if (tag != null)
     {
         if (env.TagIps(tag).Count == 0)
-            return Results.BadRequest(new { error = $"Bu etikette sunucu yok: {tag} (envanterde {cfg["Envanter:EtiketKolonu"] ?? "TAG"} kolonu dolu mu?)" });
+            return Results.BadRequest(new { error = $"Bu etikette sunucu yok: {tag} (DOKU_SERVER_TAG tablosunda bu etiket var mı?)" });
     }
     else if (string.IsNullOrWhiteSpace(name) || env.AppRows(name.Trim()).Count == 0)
         return Results.BadRequest(new { error = $"Uygulama envanterde bulunamadı: {name}" });
