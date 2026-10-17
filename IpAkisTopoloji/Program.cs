@@ -612,6 +612,20 @@ app.MapPost("/api/islev/durdur", (HttpContext ctx, IConfiguration cfg, IslevServ
     return Results.Ok(islev.Durum);
 });
 
+app.MapPost("/api/islev/yeniden-adlandir", async (IslevAd req, HttpContext ctx, IConfiguration cfg, IslevService islev, CancellationToken ct) =>
+{
+    string user = ctx.User?.Identity?.Name ?? "?";
+    if (!EtiketService.CanWrite(cfg, ctx.User?.Identity?.Name))
+        return Results.Json(new { error = $"Yeniden adlandırma yetkiniz yok ({user})." }, statusCode: 403);
+    string? eski = req.Eski?.Trim(), yeni = req.Yeni?.Trim(), tag = req.Etiket?.Trim();
+    if (string.IsNullOrEmpty(tag) || string.IsNullOrEmpty(eski) || string.IsNullOrEmpty(yeni))
+        return Results.BadRequest(new { error = "Etiket, eski ve yeni küme adı gerekli." });
+    if (yeni.Length > 100 || yeni.Any(char.IsControl) || yeni == "Sınıflanmamış") return Results.BadRequest(new { error = "Geçersiz küme adı (en çok 100 karakter)." });
+    try { return Results.Ok(new { guncellenen = await islev.RenameAsync(tag, eski, yeni, user, ct) }); }
+    catch (InvalidOperationException ex) { return Results.BadRequest(new { error = ex.Message }); }
+    catch (Microsoft.Data.SqlClient.SqlException ex) { return Results.Json(new { error = "SQL: " + ex.Message }, statusCode: 502); }
+});
+
 app.MapPost("/api/islev/duzelt", async (IslevDuzelt req, HttpContext ctx, IConfiguration cfg, IslevService islev, CancellationToken ct) =>
 {
     string user = ctx.User?.Identity?.Name ?? "?";

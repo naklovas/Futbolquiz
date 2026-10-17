@@ -26,10 +26,12 @@ const iv = { tag: "", data: null, q: "", poll: null, sel: null, seq: 0 };
   .iv-card header { all:unset; display:block; padding:10px 14px 8px; border-bottom:1px solid var(--line); }
   .iv-card h3 { margin:0; font-size:15px; display:flex; justify-content:space-between; gap:8px; align-items:baseline; }
   .iv-card h3 span { font-size:12px; color:var(--muted); font-weight:500; white-space:nowrap; }
-  .iv-merge { color:var(--muted); }
+  .iv-acts { display:flex; gap:12px; margin-top:3px; font-size:11.5px; }
+  .iv-merge { color:var(--muted); text-decoration:none; }
   .iv-merge:hover { color:var(--in); }
   .iv-mergebox { display:flex; gap:6px; margin-top:8px; }
-  .iv-mergebox select { flex:1; min-width:0; }
+  .iv-mergebox select, .iv-mergebox input { flex:1; min-width:0; }
+  .iv-mergebox button { padding:5px 10px; }
   .iv-card p { margin:4px 0 0; color:var(--muted); font-size:12.5px; line-height:1.4; }
   .iv-body { overflow:auto; padding:6px 10px 10px; }
   .iv-seg { margin-top:8px; }
@@ -150,7 +152,7 @@ function ivGrid() {
     if (!segs) return "";
     const none = k.ad === "Sınıflanmamış";
     return `<article class="iv-card${none ? " none" : ""}" style="--h:${tagHue(k.ad)}">
-      <header><h3>${esc(k.ad)}<span>${k.sunucu} sunucu${!none && iv.data.yazabilir && iv.data.kumeler.length > 2 ? ` · <a href="#" class="iv-merge" data-merge="${esc(k.ad)}" title="Bu kümedeki tüm sunucuları başka bir kümeye taşır (elle atanmış sayılır)">birleştir</a>` : ""}</span></h3>${k.aciklama ? `<p>${esc(k.aciklama)}</p>` : none ? `<p>AI henüz sınıflandırmadı. "AI ile sınıflandır" ile başlatın.</p>` : ""}</header>
+      <header><h3>${esc(k.ad)}<span>${k.sunucu} sunucu</span></h3>${!none && iv.data.yazabilir ? `<div class="iv-acts"><a href="#" class="iv-merge" data-rename="${esc(k.ad)}" title="Kümenin adını değiştirir; yeniden kümelemede de bu ad korunur">✎ yeniden adlandır</a>${iv.data.kumeler.length > 2 ? `<a href="#" class="iv-merge" data-merge="${esc(k.ad)}" title="Bu kümedeki tüm sunucuları başka bir kümeye taşır (elle atanmış sayılır)">⇢ birleştir</a>` : ""}</div>` : ""}${k.aciklama ? `<p>${esc(k.aciklama)}</p>` : none ? `<p>AI henüz sınıflandırmadı. "AI ile sınıflandır" ile başlatın.</p>` : ""}</header>
       <div class="iv-body">${segs}</div></article>`;
   }).join("");
   $("#ivGrid").innerHTML = cards || `<div class="eg-empty">${iv.data.toplam ? "Aramaya uyan sunucu yok." : `"${esc(iv.tag)}" etiketli sunucu yok.`}</div>`;
@@ -275,7 +277,7 @@ document.addEventListener("click", e => {
 });
 // Kümeyi başka bir kümeyle birleştir: kartın tüm sunucuları hedef kümeye elle atanır.
 document.addEventListener("click", e => {
-  const a = e.target.closest?.(".iv-merge");
+  const a = e.target.closest?.(".iv-merge[data-merge]");
   if (!a || uiMode !== "topo") return;
   e.preventDefault();
   const from = a.dataset.merge, head = a.closest("header");
@@ -297,5 +299,34 @@ document.addEventListener("click", e => {
       await ivLoad();
     } catch (err) { alert(err.message); go.disabled = false; }
   });
+});
+// Kümeyi yeniden adlandır
+document.addEventListener("click", e => {
+  const a = e.target.closest?.(".iv-merge[data-rename]");
+  if (!a || uiMode !== "topo") return;
+  e.preventDefault();
+  const from = a.dataset.rename, head = a.closest("header");
+  if (head.querySelector(".iv-mergebox")) return;
+  head.insertAdjacentHTML("beforeend", `<div class="iv-mergebox"><input maxlength="100" value="${esc(from)}">
+    <button class="primary">Kaydet</button><button>Vazgeç</button></div>`);
+  const box = head.querySelector(".iv-mergebox"), [inp] = box.getElementsByTagName("input"), [go, no] = box.getElementsByTagName("button");
+  inp.focus(); inp.select();
+  no.addEventListener("click", () => box.remove());
+  const save = async () => {
+    const yeni = inp.value.trim();
+    if (!yeni || yeni === from) { box.remove(); return; }
+    if (iv.data.kumeler.some(k => k.ad.toLocaleLowerCase("tr") === yeni.toLocaleLowerCase("tr")) &&
+        !confirm(`"${yeni}" adlı bir küme zaten var; iki küme birleşecek. Devam edilsin mi?`)) return;
+    go.disabled = true;
+    try {
+      const r = await fetch("api/islev/yeniden-adlandir", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ etiket: iv.tag, eski: from, yeni }) });
+      const b = await r.json().catch(() => ({ error: `HTTP ${r.status}` }));
+      if (!r.ok) throw new Error(b.error || `HTTP ${r.status}`);
+      await ivLoad();
+    } catch (err) { alert(err.message); go.disabled = false; }
+  };
+  go.addEventListener("click", save);
+  inp.addEventListener("keydown", ev => { if (ev.key === "Enter") save(); else if (ev.key === "Escape") { ev.stopPropagation(); box.remove(); } });
 });
 document.addEventListener("keydown", e => { if (e.key === "Escape" && iv.sel) ivCloseDrawer(); });

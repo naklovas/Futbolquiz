@@ -14,7 +14,9 @@ using Microsoft.Data.SqlClient;
 // Sonuç ERT tablosunda: Islev:KumeKolonu (AI_KUME) ve Islev:DetayKolonu (AI_DETAY, JSON). Elle düzeltilenler AI'ca ezilmez.
 // Arayüz: Topoloji sekmesi → küme → segment → VIP → sunucu.
 // ---------------------------------------------------------------------------
-record IslevDetay(string? Islev, string? Rol, int Guven, string? Gerekce, string? KumeAciklama, string? Tarih, string? Kaynak);
+// Takma / TakmaKaynak: kullanıcı kümeyi yeniden adlandırdıysa yeni ad ve AI'ın verdiği asıl küme adı (yeniden kümelemede korunur).
+record IslevDetay(string? Islev, string? Rol, int Guven, string? Gerekce, string? KumeAciklama, string? Tarih, string? Kaynak,
+    string? Takma = null, string? TakmaKaynak = null);
 record IslevSunucu(string Ip, string? Hostname, List<string> Apps, string? Muhafiz, string? Rol, int? Guven, bool Elle);
 record IslevVip(string Vip, string? Pool, string? App, List<IslevSunucu> Sunucular);
 record IslevSegment(string Ad, string? Cidr, List<IslevVip> Vipler, List<IslevSunucu> Sunucular);
@@ -24,6 +26,7 @@ record IslevDurum(bool Calisiyor, string? Asama, int Toplam, int Biten, int Hata
 record IslevHarita(string Etiket, int Toplam, int Siniflanan, List<IslevKume> Kumeler, IslevDurum Durum, bool Yazabilir, string? Uyari);
 record IslevCalistir(string? Etiket, bool Hepsi, bool SadeceKumele);
 record IslevDuzelt(List<string>? Ips, string? Kume);
+record IslevAd(string? Etiket, string? Eski, string? Yeni);
 record SmKayit(string No, string? Tarih, string? Tur, string? Baslik, string? Aciklama, string? Kaynak, string? Hedef,
     string? Birim, string? Yon, string? Link);
 record IslevProfil(string Ip, string Metin, List<string> Msy, List<string> Csy, List<string> Kahin, List<SmKayit> Kurulum,
@@ -229,6 +232,29 @@ sealed class IslevService(IConfiguration cfg, IHttpClientFactory factory, Envant
         return ips.Count;
     }
 
+    // ---------------- Küme yeniden adlandırma ----------------
+    // Kümedeki tüm sunucuların AI_KUME'si değişir. AI'ın atadığı sunucular AI'lı kalır (elle sayılmaz); asıl küme adı
+    // TakmaKaynak'ta tutulur, böylece "Yeniden kümele" / yeni sınıflandırmada o kümeye düşen sunucular da yeni adı alır.
+    public async Task<int> RenameAsync(string tag, string eski, string yeni, string user, CancellationToken ct)
+    {
+        var env = await envanter.GetAsync(false, ct);
+        var (res, uyari) = await ResultsAsync(true, ct);
+        if (uyari != null) throw new InvalidOperationException(uyari);
+        var ips = env.TagIps(tag).Where(ip => res.TryGetValue(ip, out var x) && string.Equals(x.Kume, eski, StringComparison.OrdinalIgnoreCase)).ToList();
+        if (ips.Count == 0) throw new InvalidOperationException($"\"{eski}\" kümesinde sunucu yok.");
+        await using var conn = new SqlConnection(ConnStr);
+        await conn.OpenAsync(ct);
+        foreach (var ip in ips)
+        {
+            var d = res[ip].Detay;
+            if (d != null && d.Kaynak?.StartsWith("Elle") != true) d = d with { Takma = yeni, TakmaKaynak = d.TakmaKaynak ?? eski };
+            await WriteAsync(conn, ip, yeni, d, ct);
+        }
+        log.LogInformation("İşlev: {User} {Tag} kümesi [{Old}] -> [{New}] ({N} sunucu)", user, tag, eski, yeni, ips.Count);
+        await ResultsAsync(true, ct);
+        return ips.Count;
+    }
+
     // ---------------- Arka plan işi ----------------
     public bool Start(IslevCalistir req, string tag, string user)
     {
@@ -366,7 +392,11 @@ sealed class IslevService(IConfiguration cfg, IHttpClientFactory factory, Envant
         var aciklamalar = kat.ToDictionary(k => k.Ad, k => (string?)k.Aciklama, StringComparer.OrdinalIgnoreCase);
         var elle = ips.Where(ip => res.TryGetValue(ip, out var x) && x.Detay?.Kaynak?.StartsWith("Elle") == true)
             .Select(ip => res[ip].Kume).OfType<string>().Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-        var hedefler = elle.Concat(kat.Select(k => k.Ad)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        // Kullanıcının yeniden adlandırdığı kümeler: asıl ad → yeni ad
+        var takma = res.Values.Where(x => x.Detay?.TakmaKaynak != null && x.Detay.Takma != null)
+            .GroupBy(x => x.Detay!.TakmaKaynak!, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.First().Detay!.Takma!, StringComparer.OrdinalIgnoreCase);
+        var hedefler = elle.Concat(kat.Select(k => k.Ad)).Concat(takma.Keys).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
 
         // işlev → küme
         var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -437,7 +467,11 @@ sealed class IslevService(IConfiguration cfg, IHttpClientFactory factory, Envant
         {
             var d = res[ip].Detay!;
             string ad = yeniden[map[d.Islev!]];
-            await WriteAsync(conn, ip, ad, d with { KumeAciklama = aciklamalar.GetValueOrDefault(ad) }, ct);
+            string? yeniAd = takma.GetValueOrDefault(ad);
+            await WriteAsync(conn, ip, yeniAd ?? ad, d with
+            {
+                KumeAciklama = aciklamalar.GetValueOrDefault(ad), Takma = yeniAd, TakmaKaynak = yeniAd == null ? null : ad
+            }, ct);
         }
     }
 
