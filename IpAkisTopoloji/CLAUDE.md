@@ -165,9 +165,14 @@ topoloji çizer ve şirket içi AI'a etki analizi yaptırır. Canlıda IIS'te, W
     `TopolojiParca`=80'erli parçalarla Splunk/AR/FW sırayla, sonuçlar birleşir. IP düzeyinde akış: hedef sorgulandıysa yalnız
     gelen tarafından sayılır; LB GW → üye ve aynı eleman içi atlanır; etiket dışı trafik eleman başına DisGelen/DisGiden (ilk 8).
     Çıktı: Kumeler/Elemanlar/Uyeler, Baglar (eleman→eleman, portlar, hits, engel, altyapı), Akislar (IP düzeyi, ilk 5000).
-    Arayüz: küme kutuları katmanlı sütunlarda (baskın yönle en uzun yol; bağlantıyı açan solda, karşılayan sağda; sütun içi barycenter),
-    elemanlar kutuda satır; oklar kutu kenarından eleman hizasından, 1 sütun = düz eğri, aynı sütun = sağa kıvrım, >1 sütun =
-    üst/alt kanal (CH yüksekliği ayrılır). Kalınlık log(hits), kırmızı kesik = tamamı engellenen, altyapı portları varsayılan gizli,
+    Arayüz (canlıda katmanlı sütun düzeni 355 sunucuda kutuları aşağı uzattı, çizgiler karıştı → yeniden yapıldı): kümeler 3–4
+    sütunluk ızgara (net akış sırası, "Sütun" seçici), kutu içinde 2 sütunlu karolar; trafiksiz sunucular "+N trafiksiz" karosunda
+    (tıkla → açılır). Oklar YALNIZ kutular arası yatay/dikey kanallardan, köşeleri yuvarlatılmış: aşağı satıra = alt kenar → alt kanal
+    → (gerekirse hedef sütunun sol kanalında dikey) → hedefin üst kenarı; yukarı tersi; aynı satır alt kenardan alt kanal. Her
+    kanalda her oka şerit; kanal genişliği şerit sayısıyla (en çok 170/260) büyür, şerit aralığı kanala sığar. Varsayılan "Küme bağları"
+    (küme çifti başına tek ok; kenar noktaları karşı uca göre yayılır); "Tüm eleman bağları" eleman → eleman (kenar noktası karonun x'i).
+    Elemanın üstüne gelince yalnız onun bağları turuncu üst katmanda; küme adının üstüne gelince kümenin bağları. Kutu içinden çizgi
+    geçmediği Playwright'ta yol üzerinden örnekleyerek doğrulandı.
     "Küme bağları" modu kümeler arası toplam. Hover vurgusu, ok üzerinde ipucu. Elemana tıkla → ortada pencere (VIP: üyeler,
     kümelerden gelen/giden, etiket dışı; üyeye tıkla → sunucu: AI rolü, /api/islev/profil gerekçe ve kanıtlar, IP düzeyi akışlar,
     "IP topolojisini aç"), "← geri" yığını, Esc kapatır. Backend `KtTest` benzeri sahte envanterle doğrulandı (scratch, repoda yok).

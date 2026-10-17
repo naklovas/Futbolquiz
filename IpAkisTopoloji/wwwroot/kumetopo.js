@@ -6,7 +6,7 @@
 // ayrıntısı (AI rolü / gerekçesi, IP düzeyinde akışlar). Veri: /api/islev/topoloji (KumeTopoloji.cs).
 // ============================================================================
 
-const kt = { tag: "", data: null, scale: 1, mode: "eleman", infra: false, abort: null, hover: null, pos: null, stack: [] };
+const kt = { tag: "", data: null, scale: 1, mode: "kume", expanded: new Set(), cols: 0, infra: false, abort: null, hover: null, pos: null, stack: [] };
 
 (function ktStyle() {
   const css = `
@@ -21,6 +21,12 @@ const kt = { tag: "", data: null, scale: 1, mode: "eleman", infra: false, abort:
   .kt-svg .box .bt { font-size:14px; font-weight:700; fill:var(--text); }
   .kt-svg .box .bs { font-size:11px; fill:var(--muted); }
   .kt-svg .el { cursor:pointer; }
+  .kt-svg .el .tile { fill:var(--panel); stroke:var(--line); }
+  .kt-svg .el.vip .tile { fill:hsl(var(--h, 210) 60% 50% / .07); }
+  .kt-svg .el:hover .tile, .kt-svg .el.hl .tile { stroke:var(--in); fill:var(--in-soft); }
+  .kt-svg .el.idle .tile { fill:transparent; stroke-dasharray:4 3; }
+  .kt-svg .el.idle .nm { fill:var(--muted); font-weight:500; }
+  .kt-svg .lk.over { stroke:var(--out); stroke-opacity:.95; }
   .kt-svg .el .hit { fill:transparent; }
   .kt-svg .el:hover .hit, .kt-svg .el.on .hit { fill:var(--in-soft); }
   .kt-svg .el .nm { font-size:11.5px; font-weight:600; fill:var(--text); }
@@ -35,9 +41,10 @@ const kt = { tag: "", data: null, scale: 1, mode: "eleman", infra: false, abort:
   .kt-svg .lk.deny { stroke:var(--err); stroke-dasharray:6 4; stroke-opacity:.7; }
   .kt-svg .lk.infra { stroke:var(--unknown); stroke-dasharray:2 4; }
   .kt-svg .lk.intra { stroke-opacity:.3; }
-  .kt-svg.dim .lk { stroke-opacity:.06; } .kt-svg.dim .el { opacity:.35; }
-  .kt-svg.dim .lk.hl { stroke-opacity:.9; } .kt-svg.dim .el.hl { opacity:1; }
-  .kt-svg .lkh { fill:none; stroke:transparent; stroke-width:12; cursor:pointer; }
+  .kt-svg.dim .lk { stroke-opacity:.07; } .kt-svg.dim .el { opacity:.4; }
+  .kt-svg.dim .lk.hl { stroke-opacity:.95; } .kt-svg.dim .el.hl { opacity:1; }
+  .kt-svg .lkh { fill:none; stroke:transparent; stroke-width:10; cursor:pointer; pointer-events:stroke; }
+  .kt-svg .lk { pointer-events:none; }
   .kt-tip { position:fixed; pointer-events:none; background:var(--text); color:var(--panel); font-size:12px; padding:6px 9px; border-radius:6px; z-index:60; max-width:360px; }
   .kt-modal-bg { position:fixed; inset:0; background:rgba(10,14,22,.45); z-index:70; display:flex; align-items:center; justify-content:center; padding:16px; }
   .kt-modal { background:var(--panel); border:1px solid var(--line); border-radius:12px; box-shadow:0 20px 60px rgba(0,0,0,.3);
@@ -103,7 +110,8 @@ function ktShell() {
     </div>
     <div class="kt-bar">
       <button id="ktBack">← İşlev haritası</button>
-      <div class="seg"><button data-ktm="eleman" class="${kt.mode === "eleman" ? "on" : ""}">Eleman bağları</button><button data-ktm="kume" class="${kt.mode === "kume" ? "on" : ""}">Küme bağları</button></div>
+      <div class="seg"><button data-ktm="kume" class="${kt.mode === "kume" ? "on" : ""}" title="Kümeler arası toplam trafik; elemanın üstüne gelince kendi bağları çizilir">Küme bağları</button><button data-ktm="eleman" class="${kt.mode === "eleman" ? "on" : ""}" title="Bütün VIP / sunucu bağları kanallardan">Tüm eleman bağları</button></div>
+      <label>Sütun <select id="ktCols">${[["0", "Otomatik"], ["2", "2"], ["3", "3"], ["4", "4"], ["5", "5"]].map(([v, t]) => `<option value="${v}"${+v === kt.cols ? " selected" : ""}>${t}</option>`).join("")}</select></label>
       <label><input type="checkbox" id="ktInfra" ${kt.infra ? "checked" : ""}> Altyapı portları (DNS, AD, RDP…)</label>
       <span class="sp"></span>
       <button id="ktZo" title="Uzaklaştır">−</button><button id="ktFit">Sığdır</button><button id="ktZi" title="Yakınlaştır">+</button>
@@ -112,11 +120,12 @@ function ktShell() {
     <div class="kt-src">${pill("Carbon Black", d.splunk)}${pill("AppResponse", d.appResponse)}${pill("Firewall", d.firewall)}
       <span>${d.sorgulanan} IP sorgulandı${d.sorgulanan < d.toplam ? ` (etikette ${d.toplam} sunucu; üst sınır Islev:TopolojiMaxIp)` : ""} · ${(d.elapsedMs / 1000).toFixed(1)} sn</span></div>
     <div class="kt-wrap" id="ktWrap"></div>
-    <div class="legend" style="margin-top:8px"><span>◯ VIP</span><span>▭ sunucu</span><span>— trafik (kalınlık = hacim)</span><span style="color:var(--err)">- - engellenen</span><span>Elemana tıklayın: ayrıntı</span></div>
+    <div class="legend" style="margin-top:8px"><span>◯ VIP</span><span>▭ sunucu</span><span>— trafik (kalınlık = hacim)</span><span style="color:var(--err)">- - engellenen</span><span>Elemanın üstüne gelin: kendi bağları · tıklayın: ayrıntı</span><span>Küme adının üstüne gelin: kümenin bağları</span></div>
   </section>`;
   $("#ktBack").addEventListener("click", () => runIslev(kt.tag));
   $("#ktAgain").addEventListener("click", () => ktRun(kt.tag));
   document.querySelectorAll("[data-ktm]").forEach(b => b.addEventListener("click", () => { kt.mode = b.dataset.ktm; ktShell(); }));
+  $("#ktCols").addEventListener("change", e => { kt.cols = +e.target.value; ktDraw(); kt.scale = Math.min(1, ($("#ktWrap").clientWidth - 4) / kt.pos.W); ktDraw(); });
   $("#ktInfra").addEventListener("change", e => { kt.infra = e.target.checked; ktDraw(); });
   $("#ktZi").addEventListener("click", () => { kt.scale = Math.min(2.5, kt.scale * 1.2); ktDraw(); });
   $("#ktZo").addEventListener("click", () => { kt.scale = Math.max(0.3, kt.scale / 1.2); ktDraw(); });
@@ -126,76 +135,261 @@ function ktShell() {
   ktDraw();
 }
 
-// Yerleşim: kümeler sütunlara dizilir (katmanlı): bağlantıyı başlatanlar solda, karşılayanlar sağda (TCP yönü).
-// Kutunun içinde elemanlar alt alta satırdır; oklar kutu kenarından, elemanın satır hizasından çıkar / girer.
-function ktLayout() {
-  const d = kt.data, RH = 56, HEAD = 50, PAD = 10, BW = 250, GX = 230, GY = 36;
-  const elemKume = {};
-  d.kumeler.forEach(k => k.elemanlar.forEach(e => elemKume[e.id] = k.ad));
-  // küme düzeyinde yönlü ağırlıklar
-  const w = {};
-  d.baglar.forEach(b => { const f = elemKume[b.from], t = elemKume[b.to]; if (f && t && f !== t) w[f + "\u0000" + t] = (w[f + "\u0000" + t] || 0) + b.hits; });
-  const names = d.kumeler.map(k => k.ad);
-  // Döngüleri kırmak için yalnız baskın yön alınır (A→B > B→A ise A→B), sonra en uzun yol katmanı
-  const out = Object.fromEntries(names.map(n => [n, []]));
-  for (const key in w) { const [f, t] = key.split("\u0000"); if (w[key] > (w[t + "\u0000" + f] || 0) || (w[key] === w[t + "\u0000" + f] && f < t)) out[f].push(t); }
-  const layer = Object.fromEntries(names.map(n => [n, 0]));
-  const state = {};
-  const visit = n => { if (state[n] === 2) return; if (state[n] === 1) return; state[n] = 1; for (const t of out[n]) { visit(t); } state[n] = 2; };
-  names.forEach(visit);
-  // Kahn benzeri gevşetme (döngü kalırsa sınırlı tur)
-  for (let it = 0; it < names.length; it++) {
-    let changed = false;
-    for (const f of names) for (const t of out[f]) if (layer[t] < layer[f] + 1 && layer[f] + 1 < names.length) { layer[t] = layer[f] + 1; changed = true; }
-    if (!changed) break;
+// Yerleşim: kümeler 3–4 sütunluk ızgarada (veri akış sırasına göre okuma düzeninde); kutu içinde elemanlar 2 sütunlu karo.
+// Trafiği olmayan sunucular "+N trafiksiz" karosunda toplanır (tıklayınca açılır). Oklar yalnız kutular arasındaki yatay /
+// dikey boşluklardan (kanal) gider; her kanalda her oka ayrı şerit verilir, kanal genişliği şerit sayısına göre büyür.
+const KT = { TW: 158, TH: 44, TG: 6, PAD: 10, HEAD: 46 };
+KT.BW = KT.PAD * 2 + KT.TW * 2 + KT.TG;
+
+function ktVisible(k) {
+  const busy = new Set();
+  kt.data.baglar.forEach(b => { busy.add(b.from); busy.add(b.to); });
+  const show = [], idle = [];
+  for (const e of k.elemanlar) {
+    const active = e.tur === "vip" || busy.has(e.id) || e.gelen + e.giden > 0 || e.disGelen.length || e.disGiden.length;
+    (active || kt.expanded.has(k.ad) ? show : idle).push(e);
   }
-  const maxL = Math.max(0, ...Object.values(layer));
-  const cols = Array.from({ length: maxL + 1 }, () => []);
-  d.kumeler.forEach(k => cols[layer[k.ad]].push(k));
-  // Sütun içinde: önceki sütundaki bağlı kümelerin ortalama sırasına göre (kesişmeleri azaltır)
-  const rank = {};
-  cols.forEach((col, ci) => {
-    if (ci > 0) col.sort((a, b) => bary(a) - bary(b));
-    col.forEach((k, i) => rank[k.ad] = i);
-    function bary(k) {
-      const ns = names.filter(n => layer[n] < ci && (w[n + "\u0000" + k.ad] || w[k.ad + "\u0000" + n]));
-      return ns.length ? ns.reduce((s, n) => s + rank[n], 0) / ns.length : 99;
-    }
-  });
-  // Birden çok sütun atlayan oklar kutuların üstündeki / altındaki kanaldan geçer: kanal yüksekliği ayrılır
-  const nLong = d.baglar.filter(b => elemKume[b.from] && elemKume[b.to] && Math.abs(layer[elemKume[b.from]] - layer[elemKume[b.to]]) > 1).length;
-  const CH = nLong ? 14 + Math.min(nLong, 24) * 5 : 0;
-  const boxes = {}, elems = {};
-  let H = 0;
-  cols.forEach((col, ci) => {
-    let y = 24 + CH;
-    const x = 24 + ci * (BW + GX);
-    for (const k of col) {
-      const h = HEAD + k.elemanlar.length * RH + PAD;
-      boxes[k.ad] = { x, y, w: BW, h, k, col: ci };
-      k.elemanlar.forEach((e, j) => elems[e.id] = { x, y: y + HEAD + j * RH, cx: x + 30, cy: y + HEAD + j * RH + RH / 2, e, k: k.ad, col: ci });
-      y += h + GY;
-    }
-    H = Math.max(H, y - GY + 24);
-  });
-  H += CH;
-  kt.pos = { boxes, elems, W: Math.max(24 + cols.length * (BW + GX) - GX + 24, 600), H, elemKume, BW, CH };
+  return { show, idle };
 }
 
+// Hangi bağlar çizilecek: küme modunda kümeler arası toplam, eleman modunda eleman → eleman (aynı kutu içi hariç)
 function ktLinks() {
-  const { elems, elemKume } = kt.pos;
-  let links = kt.data.baglar.filter(b => elems[b.from] && elems[b.to] && (kt.infra || !b.altyapi));
-  if (kt.mode === "kume") {
-    const agg = {};
-    for (const b of links) {
-      const f = elemKume[b.from], t = elemKume[b.to];
-      if (f === t) continue;
-      const a = agg[f + "→" + t] ??= { from: "k:" + f, to: "k:" + t, hits: 0, engel: 0, portlar: new Set(), n: 0 };
-      a.hits += b.hits; a.engel += b.engel; a.n++; b.portlar.forEach(p => a.portlar.add(p));
-    }
-    links = Object.values(agg).map(a => ({ ...a, portlar: [...a.portlar] }));
+  const ek = kt.pos?.elemKume || {};
+  const base = kt.data.baglar.filter(b => (kt.infra || !b.altyapi) && ek[b.from] && ek[b.to] && ek[b.from] !== ek[b.to]);
+  if (kt.mode !== "kume") return base;
+  const agg = {};
+  for (const b of base) {
+    const f = ek[b.from], t = ek[b.to];
+    const a = agg[f + "\u0000" + t] ??= { from: "k:" + f, to: "k:" + t, hits: 0, engel: 0, portlar: new Set(), n: 0 };
+    a.hits += b.hits; a.engel += b.engel; a.n++; b.portlar.forEach(p => a.portlar.add(p));
   }
-  return links;
+  return Object.values(agg).map(a => ({ ...a, portlar: [...a.portlar] }));
+}
+
+function ktLayout() {
+  const d = kt.data, { TW, TH, TG, PAD, HEAD, BW } = KT;
+  const elemKume = {};
+  d.kumeler.forEach(k => k.elemanlar.forEach(e => elemKume[e.id] = k.ad));
+  // akış sırası: kümeler arası net giden trafiği fazla olan önce
+  const net = {};
+  d.baglar.forEach(b => { const f = elemKume[b.from], t = elemKume[b.to]; if (f && t && f !== t) { net[f] = (net[f] || 0) + b.hits; net[t] = (net[t] || 0) - b.hits; } });
+  const order = [...d.kumeler].sort((a, b) => (net[b.ad] || 0) - (net[a.ad] || 0) || b.elemanlar.length - a.elemanlar.length);
+  const C = Math.min(order.length, kt.cols || (order.length <= 2 ? order.length : order.length <= 6 ? 3 : 4)), R = Math.ceil(order.length / C);
+  const cell = {};
+  order.forEach((k, i) => cell[k.ad] = { r: Math.floor(i / C), c: i % C });
+  kt.pos = { elemKume, cell, C, R };
+
+  // 1) güzergâhlar ızgara düzeyinde (hangi kanallar) → şerit sayıları → kanal genişlikleri
+  const links = ktLinks();
+  const hUse = Array.from({ length: R + 1 }, () => []), vUse = Array.from({ length: C + 1 }, () => []);
+  const routes = links.map((l, i) => {
+    const A = cell[elemKume[l.from] || l.from.slice(2)], B = cell[elemKume[l.to] || l.to.slice(2)];
+    const rt = { A, B, i };
+    if (B.r > A.r) { rt.h1 = A.r + 1; rt.exit = "bot"; rt.enter = "top"; if (B.r > A.r + 1) { rt.v = B.c; rt.h2 = B.r; } }
+    else if (B.r < A.r) { rt.h1 = A.r; rt.exit = "top"; rt.enter = "bot"; if (B.r < A.r - 1) { rt.v = B.c; rt.h2 = B.r + 1; } }
+    else { rt.h1 = A.r + 1; rt.exit = "bot"; rt.enter = "bot"; }
+    rt.l1 = hUse[rt.h1].push(i) - 1;
+    if (rt.v != null) { rt.lv = vUse[rt.v].push(i) - 1; rt.l2 = hUse[rt.h2].push(i) - 1; }
+    return rt;
+  });
+  const LANE = 4;
+  const cap = kt.mode === "kume" ? 170 : 260;
+  const gH = hUse.map(u => Math.min(cap, Math.max(44, 26 + u.length * LANE)));
+  const gV = vUse.map(u => Math.min(cap, Math.max(48, 26 + u.length * LANE)));
+
+  // 2) kutu ve karo konumları
+  const boxes = {}, elems = {};
+  const rowH = Array(R).fill(0);
+  const vis = {};
+  order.forEach(k => {
+    vis[k.ad] = ktVisible(k);
+    const n = vis[k.ad].show.length + (vis[k.ad].idle.length ? 1 : 0);
+    rowH[cell[k.ad].r] = Math.max(rowH[cell[k.ad].r], HEAD + Math.ceil(Math.max(1, n) / 2) * (TH + TG) + PAD);
+  });
+  const colX = [], rowY = [];
+  let x = gV[0];
+  for (let c = 0; c < C; c++) { colX[c] = x; x += BW + gV[c + 1]; }
+  let y = gH[0];
+  for (let r = 0; r < R; r++) { rowY[r] = y; y += rowH[r] + gH[r + 1]; }
+  const W = x, H = y;
+  order.forEach(k => {
+    const { r, c } = cell[k.ad], v = vis[k.ad];
+    const tiles = [...v.show.map(e => ({ e })), ...(v.idle.length ? [{ idle: v.idle, id: "idle:" + k.ad }] : [])];
+    const h = HEAD + Math.ceil(Math.max(1, tiles.length) / 2) * (TH + TG) + PAD;
+    const b = boxes[k.ad] = { x: colX[c], y: rowY[r], w: BW, h, k, idle: v.idle, tiles: [] };
+    tiles.forEach((t, j) => {
+      const tx = b.x + PAD + (j % 2) * (TW + TG), ty = b.y + HEAD + Math.floor(j / 2) * (TH + TG);
+      const p = { x: tx, y: ty, cx: tx + TW / 2, e: t.e, idle: t.idle, id: t.e?.id || t.id, k: k.ad };
+      b.tiles.push(p);
+      if (t.e) elems[t.e.id] = p;
+    });
+  });
+  // gizli (trafiksiz) elemanlar kutunun "+N" karosuna bağlanır
+  order.forEach(k => vis[k.ad].idle.forEach(e => elems[e.id] = boxes[k.ad].tiles.find(t => t.idle)));
+
+  // kanal merkezleri
+  const hY = i => i === 0 ? gH[0] / 2 : rowY[i - 1] + rowH[i - 1] + gH[i] / 2;
+  const vX = j => j === 0 ? gV[0] / 2 : colX[j - 1] + BW + gV[j] / 2;
+  Object.assign(kt.pos, { boxes, elems, W, H, links, routes, hUse, vUse, gH, gV, hY, vX, rowY, rowH, colX, LANE });
+}
+
+// Rota noktaları → köşeleri yuvarlatılmış yol
+function ktRound(pts, r = 8) {
+  let d = `M${pts[0][0]},${pts[0][1]}`;
+  for (let i = 1; i < pts.length - 1; i++) {
+    const [px, py] = pts[i - 1], [x, y] = pts[i], [nx, ny] = pts[i + 1];
+    const d1 = Math.hypot(x - px, y - py), d2 = Math.hypot(nx - x, ny - y), rr = Math.min(r, d1 / 2, d2 / 2);
+    const ax = x - (x - px) / (d1 || 1) * rr, ay = y - (y - py) / (d1 || 1) * rr;
+    const bx = x + (nx - x) / (d2 || 1) * rr, by = y + (ny - y) / (d2 || 1) * rr;
+    d += ` L${ax.toFixed(1)},${ay.toFixed(1)} Q${x},${y} ${bx.toFixed(1)},${by.toFixed(1)}`;
+  }
+  const [lx, ly] = pts[pts.length - 1];
+  return d + ` L${lx},${ly}`;
+}
+
+// Bir bağın rota noktaları. ax/bx: kutu kenarında çıkış / giriş x'i; lane: kanal içi şerit kaydırması
+function ktPoints(rt, ax, bx, off1, offV, off2, fromTile, toTile) {
+  const P = kt.pos, A = P.boxes[P.cellName[rt.A.r + "," + rt.A.c]], B = P.boxes[P.cellName[rt.B.r + "," + rt.B.c]];
+  const ay = rt.exit === "bot" ? A.y + A.h : A.y, by = rt.enter === "bot" ? B.y + B.h : B.y;
+  const sy = fromTile ? (rt.exit === "bot" ? fromTile.y + KT.TH : fromTile.y) : ay;
+  const ey = toTile ? (rt.enter === "bot" ? toTile.y + KT.TH : toTile.y) : by;
+  const g1 = P.hY(rt.h1) + off1;
+  const pts = [[ax, sy], [ax, g1]];
+  if (rt.v != null) {
+    const vx = P.vX(rt.v) + offV, g2 = P.hY(rt.h2) + off2;
+    pts.push([vx, g1], [vx, g2], [bx, g2]);
+  } else pts.push([bx, g1]);
+  pts.push([bx, ey + (rt.enter === "bot" ? 3 : -3)]);
+  return pts;
+}
+
+function ktDraw() {
+  ktLayout();
+  const P = kt.pos, { boxes, elems, W, H, links, routes, hUse, vUse, LANE } = P;
+  P.cellName = {};
+  Object.entries(P.cell).forEach(([n, c]) => P.cellName[c.r + "," + c.c] = n);
+  const max = Math.max(1, ...links.map(l => l.hits));
+  // şerit kaydırması kanalın içinde kalır: şerit aralığı = min(4px, kanal / şerit sayısı)
+  const laneOff = (arr, idx, size) => (idx - (arr.length - 1) / 2) * Math.min(LANE, (size - 16) / Math.max(1, arr.length));
+  const hOff = (i, idx) => laneOff(hUse[i], idx, P.gH[i]), vOff = (j, idx) => laneOff(vUse[j], idx, P.gV[j]);
+  // kutu kenarında çıkış / giriş noktaları: aynı kenardaki bağlar karşı ucun x'ine göre sıralanıp yayılır
+  const side = {};
+  const pushSide = (box, s, i, otherX) => (side[box + "|" + s] ??= []).push({ i, otherX });
+  const cx = id => id.startsWith("k:") ? boxes[id.slice(2)].x + KT.BW / 2 : elems[id].cx;
+  routes.forEach(rt => {
+    const l = links[rt.i];
+    pushSide(P.cellName[rt.A.r + "," + rt.A.c], rt.exit, rt.i, cx(l.to));
+    pushSide(P.cellName[rt.B.r + "," + rt.B.c], rt.enter, rt.i, cx(l.from));
+  });
+  const anchor = {};
+  for (const [key, arr] of Object.entries(side)) {
+    const box = boxes[key.split("|")[0]];
+    arr.sort((a, b) => a.otherX - b.otherX);
+    arr.forEach((a, j) => (anchor[a.i] ??= {})[key] = box.x + 18 + (KT.BW - 36) * (arr.length === 1 ? 0.5 : j / (arr.length - 1)));
+  }
+  const paths = routes.map(rt => {
+    const l = links[rt.i];
+    const elemMode = !l.from.startsWith("k:");
+    const ft = elemMode ? elems[l.from] : null, tt = elemMode ? elems[l.to] : null;
+    let ax, bx;
+    if (elemMode) { ax = ft.cx; bx = tt.cx; }
+    else {
+      const an = anchor[rt.i];
+      ax = an[P.cellName[rt.A.r + "," + rt.A.c] + "|" + rt.exit]; bx = an[P.cellName[rt.B.r + "," + rt.B.c] + "|" + rt.enter];
+    }
+    // eleman modunda da ok kutu kenarında başlar / biter (karonun x hizasında); kutunun içinden çizgi geçmez
+    const pts = ktPoints(rt, ax, bx, hOff(rt.h1, rt.l1), rt.v != null ? vOff(rt.v, rt.lv) : 0,
+      rt.v != null ? hOff(rt.h2, rt.l2) : 0, null, null);
+    const dAttr = ktRound(pts);
+    const w = (1.4 + 5 * Math.log10(1 + l.hits) / Math.log10(1 + max)).toFixed(1);
+    const deny = l.engel > 0 && l.engel >= l.hits;
+    return `<path class="lk${deny ? " deny" : ""}${l.altyapi ? " infra" : ""}" d="${dAttr}" stroke-width="${w}" marker-end="url(#ktArr${deny ? "D" : ""})" data-f="${esc(l.from)}" data-t="${esc(l.to)}" data-fk="${esc(P.elemKume[l.from] || l.from.slice(2))}" data-tk="${esc(P.elemKume[l.to] || l.to.slice(2))}"/>
+      <path class="lkh" d="${dAttr}" data-li="${rt.i}"/>`;
+  }).join("");
+
+  const boxSvg = Object.values(boxes).map(b => {
+    const h = tagHue(b.k.ad), nVip = b.k.elemanlar.filter(e => e.tur === "vip").length;
+    return `<g class="box" data-box="${esc(b.k.ad)}" style="--h:${h}"><rect class="bg" x="${b.x}" y="${b.y}" width="${b.w}" height="${b.h}" rx="10"/>
+      <path d="M${b.x} ${b.y + 10} a10 10 0 0 1 10 -10 h${b.w - 20} a10 10 0 0 1 10 10 v26 h${-b.w} z" style="fill:hsl(${h} 60% 50% / .15)"/>
+      <text class="bt" x="${b.x + 12}" y="${b.y + 17}">${esc(ktCut(b.k.ad, 38))}</text>
+      <text class="bs" x="${b.x + 12}" y="${b.y + 31}">${b.k.sunucu} sunucu · ${nVip} VIP${b.idle.length ? ` · ${b.idle.length} trafiksiz` : ""}</text>
+      ${b.tiles.map(t => t.idle
+        ? `<g class="el idle" data-idle="${esc(b.k.ad)}"><rect class="tile" x="${t.x}" y="${t.y}" width="${KT.TW}" height="${KT.TH}" rx="7"/>
+            <text class="nm" x="${t.cx}" y="${t.y + 19}" text-anchor="middle">+${t.idle.length} trafiksiz sunucu</text>
+            <text class="ip" x="${t.cx}" y="${t.y + 33}" text-anchor="middle">göstermek için tıklayın</text></g>`
+        : `<g class="el${t.e.tur === "vip" ? " vip" : ""}" data-el="${esc(t.e.id)}"><rect class="tile" x="${t.x}" y="${t.y}" width="${KT.TW}" height="${KT.TH}" rx="7"/>
+            ${ktIcon(t.e, t.x + 20, t.y + KT.TH / 2, h)}
+            <text class="nm" x="${t.x + 38}" y="${t.y + 19}">${esc(ktCut(t.e.ad, 17))}</text>
+            <text class="ip" x="${t.x + 38}" y="${t.y + 33}">${esc(t.e.ip)}${t.e.tur === "vip" ? ` · ${t.e.uyeler.length} üye` : ""}</text>
+            <title>${esc(t.e.tur === "vip" ? `VIP ${t.e.ip}:${t.e.port || ""} · ${t.e.ad} · ${t.e.uyeler.length} üye` : `${t.e.ad} · ${t.e.ip} · ${t.e.alt || ""}`)}</title></g>`).join("")}</g>`;
+  }).join("");
+  const s = kt.scale;
+  $("#ktWrap").innerHTML = `<svg class="kt-svg" id="ktSvg" viewBox="0 0 ${W} ${H}" width="${(W * s).toFixed(0)}" height="${(H * s).toFixed(0)}" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <marker id="ktArr" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="9" markerHeight="9" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="var(--in)"/></marker>
+      <marker id="ktArrD" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="9" markerHeight="9" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="var(--err)"/></marker>
+      <marker id="ktArrH" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="var(--out)"/></marker>
+    </defs>
+    ${boxSvg}<g id="ktLinks">${paths}</g><g id="ktOver"></g></svg>`;
+  ktWire(links);
+}
+
+function ktWire(links) {
+  const svg = $("#ktSvg"), P = kt.pos;
+  const tip = document.querySelector(".kt-tip") || document.body.appendChild(Object.assign(document.createElement("div"), { className: "kt-tip", hidden: true }));
+  const name = id => id.startsWith("k:") ? id.slice(2) : P.elems[id]?.e?.ad || id;
+  const clear = () => { svg.classList.remove("dim"); svg.querySelectorAll(".hl").forEach(x => x.classList.remove("hl")); $("#ktOver").innerHTML = ""; };
+  // Elemanın üstüne gelince: kendi eleman bağları (küme modunda üstte ayrı katmanda, kanallardan) çizilir, gerisi soluklaşır
+  const lightElem = id => {
+    clear();
+    const mine = kt.data.baglar.filter(b => (b.from === id || b.to === id) && (kt.infra || !b.altyapi) && P.elems[b.from]?.e && P.elems[b.to]?.e);
+    svg.classList.add("dim");
+    svg.querySelector(`.el[data-el="${CSS.escape(id)}"]`)?.classList.add("hl");
+    const max = Math.max(1, ...mine.map(b => b.hits));
+    $("#ktOver").innerHTML = mine.map(b => {
+      const fk = P.elemKume[b.from], tk = P.elemKume[b.to];
+      svg.querySelector(`.el[data-el="${CSS.escape(b.from === id ? b.to : b.from)}"]`)?.classList.add("hl");
+      if (fk === tk) {   // aynı kutu içi: kısa yay
+        const a = P.elems[b.from], c = P.elems[b.to];
+        return `<path class="lk hl over" d="M${a.cx},${a.y + KT.TH / 2} Q${(a.cx + c.cx) / 2 + 30},${(a.y + c.y) / 2 + KT.TH / 2} ${c.cx},${c.y + KT.TH / 2}" stroke-width="2.5" marker-end="url(#ktArrH)"/>`;
+      }
+      const A = P.cell[fk], B = P.cell[tk];
+      const rt = { A, B };
+      if (B.r > A.r) { rt.h1 = A.r + 1; rt.exit = "bot"; rt.enter = "top"; if (B.r > A.r + 1) { rt.v = B.c; rt.h2 = B.r; } }
+      else if (B.r < A.r) { rt.h1 = A.r; rt.exit = "top"; rt.enter = "bot"; if (B.r < A.r - 1) { rt.v = B.c; rt.h2 = B.r + 1; } }
+      else { rt.h1 = A.r + 1; rt.exit = "bot"; rt.enter = "bot"; }
+      const pts = ktPoints(rt, P.elems[b.from].cx, P.elems[b.to].cx, 0, 0, 0, null, null);
+      const w = (2 + 4 * Math.log10(1 + b.hits) / Math.log10(1 + max)).toFixed(1);
+      return `<path class="lk hl over" d="${ktRound(pts)}" stroke-width="${w}" marker-end="url(#ktArrH)"/>`;
+    }).join("");
+  };
+  const lightBox = name => {
+    clear(); svg.classList.add("dim");
+    svg.querySelectorAll(".lk").forEach(p => { if (p.dataset.fk === name || p.dataset.tk === name) p.classList.add("hl"); });
+    svg.querySelectorAll(`.box[data-box="${CSS.escape(name)}"] .el`).forEach(e => e.classList.add("hl"));
+  };
+  svg.querySelectorAll(".el[data-el]").forEach(g => {
+    g.addEventListener("mouseenter", () => lightElem(g.dataset.el));
+    g.addEventListener("mouseleave", clear);
+    g.addEventListener("click", () => ktOpen(g.dataset.el));
+  });
+  svg.querySelectorAll(".el[data-idle]").forEach(g => g.addEventListener("click", () => { kt.expanded.add(g.dataset.idle); ktDraw(); }));
+  svg.querySelectorAll(".box text.bt").forEach(t => {
+    const n = t.closest(".box").dataset.box;
+    t.style.cursor = "pointer";
+    t.addEventListener("mouseenter", () => lightBox(n));
+    t.addEventListener("mouseleave", clear);
+    t.addEventListener("click", () => { if (kt.expanded.has(n)) { kt.expanded.delete(n); ktDraw(); } });
+  });
+  svg.querySelectorAll(".lkh").forEach(p => {
+    const l = links[+p.dataset.li];
+    p.addEventListener("mousemove", ev => {
+      tip.hidden = false; tip.style.left = ev.clientX + 14 + "px"; tip.style.top = ev.clientY + 12 + "px";
+      tip.innerHTML = `<b>${esc(name(l.from))}</b> → <b>${esc(name(l.to))}</b><br>${fmt(l.hits)} bağlantı${l.engel ? ` · <span style="color:#ff9a9a">${fmt(l.engel)} engellendi</span>` : ""}<br>Port: ${esc(l.portlar.slice(0, 12).join(", ") || "—")}${l.n ? `<br>${l.n} eleman bağı (elemanların üstüne gelin)` : ""}`;
+      p.previousElementSibling?.classList.add("hl"); svg.classList.add("dim");
+    });
+    p.addEventListener("mouseleave", () => { tip.hidden = true; clear(); });
+  });
 }
 
 function ktIcon(e, cx, cy, h) {
@@ -209,109 +403,6 @@ function ktIcon(e, cx, cy, h) {
 }
 
 const ktCut = (s, n) => (s = s || "").length > n ? s.slice(0, n - 1) + "…" : s;
-
-function ktDraw() {
-  const { boxes, elems, W, H } = kt.pos;
-  const links = ktLinks();
-  const max = Math.max(1, ...links.map(l => l.hits));
-  const BW = kt.pos.BW;
-  // Uç noktası: elemanın satır hizasında kutunun sağ / sol kenarı; küme bağında kutunun ortası
-  const pt = (id, side) => {
-    if (id.startsWith("k:")) { const bx = boxes[id.slice(2)]; return { x: side === "r" ? bx.x + bx.w : bx.x, y: bx.y + Math.min(bx.h / 2, 60), col: bx.col }; }
-    const p = elems[id]; return { x: side === "r" ? p.x + BW : p.x, y: p.cy, col: p.col };
-  };
-  const colOf = id => id.startsWith("k:") ? boxes[id.slice(2)].col : elems[id].col;
-  // Aynı kenar noktasından çıkan birden çok ok hafifçe aralansın
-  const used = {};
-  const spread = (key) => { used[key] = (used[key] || 0) + 1; return (used[key] - 1) % 5 * 3 - 6; };
-  const lanes = { top: 0, bot: 0 };
-  const paths = links.map((l, i) => {
-    const cf = colOf(l.from), ct = colOf(l.to);
-    let x1, y1, x2, y2, dAttr;
-    if (Math.abs(ct - cf) > 1) {   // uzun ok: sütun boşluğundan kanala çık, kanalda ilerle, hedef sütun boşluğundan in
-      const fwd = ct > cf, a = pt(l.from, fwd ? "r" : "l"), b = pt(l.to, fwd ? "l" : "r");
-      x1 = a.x; y1 = a.y + spread(l.from + (fwd ? "r" : "l")); x2 = b.x + (fwd ? -2 : 2); y2 = b.y + spread(l.to + (fwd ? "l" : "r"));
-      const top = (y1 + y2) / 2 < kt.pos.H / 2, lane = top ? lanes.top++ : lanes.bot++;
-      const cy = top ? 10 + (lane % 24) * 5 : kt.pos.H - 10 - (lane % 24) * 5;
-      const s1 = fwd ? 1 : -1, g = 50 + (lane % 6) * 8;
-      dAttr = `M${x1},${y1} C${x1 + s1 * g},${y1} ${x1 + s1 * g},${cy} ${x1 + s1 * (g + 50)},${cy} L${x2 - s1 * (g + 50)},${cy} C${x2 - s1 * g},${cy} ${x2 - s1 * g},${y2} ${x2},${y2}`;
-    } else if (ct > cf) {          // sağa: kaynağın sağ kenarı → hedefin sol kenarı
-      const a = pt(l.from, "r"), b = pt(l.to, "l");
-      x1 = a.x; y1 = a.y + spread(l.from + "r"); x2 = b.x - 2; y2 = b.y + spread(l.to + "l");
-      const m = (x2 - x1) * 0.5;
-      dAttr = `M${x1},${y1} C${x1 + m},${y1} ${x2 - m},${y2} ${x2},${y2}`;
-    } else if (ct < cf) {   // sola (geri yön): kaynağın sol kenarı → hedefin sağ kenarı
-      const a = pt(l.from, "l"), b = pt(l.to, "r");
-      x1 = a.x; y1 = a.y + spread(l.from + "l"); x2 = b.x + 2; y2 = b.y + spread(l.to + "r");
-      const m = (x1 - x2) * 0.5;
-      dAttr = `M${x1},${y1} C${x1 - m},${y1} ${x2 + m},${y2} ${x2},${y2}`;
-    } else {                // aynı sütun: sağ kenardan çıkıp sağ kenara döner
-      const a = pt(l.from, "r"), b = pt(l.to, "r");
-      x1 = a.x; y1 = a.y + spread(l.from + "r"); x2 = b.x + 2; y2 = b.y + spread(l.to + "r");
-      const bulge = 40 + Math.min(120, Math.abs(y2 - y1) * 0.35);
-      dAttr = `M${x1},${y1} C${x1 + bulge},${y1} ${x2 + bulge},${y2} ${x2},${y2}`;
-    }
-    const w = (1.2 + 4 * Math.log10(1 + l.hits) / Math.log10(1 + max)).toFixed(1);
-    const cls = ["lk", l.engel > 0 && l.engel >= l.hits ? "deny" : "", l.altyapi ? "infra" : "",
-      !l.from.startsWith("k:") && kt.pos.elemKume[l.from] === kt.pos.elemKume[l.to] ? "intra" : ""].join(" ");
-    return `<path class="${cls}" d="${dAttr}" stroke-width="${w}" marker-end="url(#ktArr${l.engel > 0 && l.engel >= l.hits ? "D" : ""})" data-f="${esc(l.from)}" data-t="${esc(l.to)}"/>
-      <path class="lkh" d="${dAttr}" data-li="${i}"/>`;
-  }).join("");
-  const boxSvg = Object.values(boxes).map(b => {
-    const h = tagHue(b.k.ad);
-    return `<g class="box" style="--h:${h}"><rect class="bg" x="${b.x}" y="${b.y}" width="${b.w}" height="${b.h}" rx="10"/>
-      <path d="M${b.x} ${b.y + 10} a10 10 0 0 1 10 -10 h${b.w - 20} a10 10 0 0 1 10 10 v30 h${-b.w} z" style="fill:hsl(${h} 60% 50% / .14)"/>
-      <text class="bt" x="${b.x + 12}" y="${b.y + 19}">${esc(ktCut(b.k.ad, 27))}</text>
-      <text class="bs" x="${b.x + 12}" y="${b.y + 34}">${b.k.sunucu} sunucu · ${b.k.elemanlar.filter(e => e.tur === "vip").length} VIP</text>
-      ${b.k.elemanlar.map(e => {
-        const p = elems[e.id];
-        return `<g class="el" data-el="${esc(e.id)}"><rect class="hit" x="${p.x + 4}" y="${p.y + 3}" width="${b.w - 8}" height="50" rx="7"/>
-          ${ktIcon(e, p.cx, p.cy, h)}
-          <text class="nm" x="${p.x + 56}" y="${p.cy - 3}">${esc(ktCut(e.ad, 24))}</text>
-          <text class="ip" x="${p.x + 56}" y="${p.cy + 12}">${esc(e.ip + (e.port ? ":" + e.port : ""))}${e.tur === "vip" ? ` · ${e.uyeler.length} üye` : ""}</text>
-          <title>${esc(e.tur === "vip" ? `VIP ${e.ip}:${e.port || ""} · ${e.ad} · ${e.uyeler.length} üye` : `${e.ad} · ${e.alt || ""}`)}</title></g>`;
-      }).join("")}</g>`;
-  }).join("");
-  const s = kt.scale;
-  $("#ktWrap").innerHTML = `<svg class="kt-svg" id="ktSvg" viewBox="0 0 ${W} ${kt.pos.H}" width="${(W * s).toFixed(0)}" height="${(kt.pos.H * s).toFixed(0)}" xmlns="http://www.w3.org/2000/svg">
-    <defs>
-      <marker id="ktArr" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="var(--in)" fill-opacity=".8"/></marker>
-      <marker id="ktArrD" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="var(--err)"/></marker>
-    </defs>
-    ${boxSvg}<g>${paths}</g></svg>`;
-  ktWire(links);
-}
-
-function ktWire(links) {
-  const svg = $("#ktSvg");
-  const tip = document.querySelector(".kt-tip") || document.body.appendChild(Object.assign(document.createElement("div"), { className: "kt-tip", hidden: true }));
-  const name = id => id.startsWith("k:") ? id.slice(2) : kt.pos.elems[id]?.e.ad || id;
-  const light = id => {
-    svg.classList.toggle("dim", !!id);
-    svg.querySelectorAll(".hl").forEach(x => x.classList.remove("hl"));
-    if (!id) return;
-    svg.querySelectorAll(`.lk`).forEach(p => {
-      if (p.dataset.f === id || p.dataset.t === id) {
-        p.classList.add("hl");
-        svg.querySelector(`.el[data-el="${CSS.escape(p.dataset.f === id ? p.dataset.t : p.dataset.f)}"]`)?.classList.add("hl");
-      }
-    });
-    svg.querySelector(`.el[data-el="${CSS.escape(id)}"]`)?.classList.add("hl");
-  };
-  svg.querySelectorAll(".el").forEach(g => {
-    g.addEventListener("mouseenter", () => light(g.dataset.el));
-    g.addEventListener("mouseleave", () => light(null));
-    g.addEventListener("click", () => ktOpen(g.dataset.el));
-  });
-  svg.querySelectorAll(".lkh").forEach(p => {
-    const l = links[+p.dataset.li];
-    p.addEventListener("mousemove", ev => {
-      tip.hidden = false; tip.style.left = ev.clientX + 14 + "px"; tip.style.top = ev.clientY + 12 + "px";
-      tip.innerHTML = `<b>${esc(name(l.from))}</b> → <b>${esc(name(l.to))}</b><br>${fmt(l.hits)} bağlantı${l.engel ? ` · <span style="color:#ff9a9a">${fmt(l.engel)} engellendi</span>` : ""}<br>Port: ${esc(l.portlar.slice(0, 12).join(", ") || "—")}${l.n ? `<br>${l.n} eleman bağı` : ""}`;
-    });
-    p.addEventListener("mouseleave", () => tip.hidden = true);
-  });
-}
 
 // ---------- Ayrıntı penceresi ----------
 function ktModal(html) {
@@ -328,14 +419,16 @@ function ktModal(html) {
 function ktClose() { kt.stack = []; document.querySelector(".kt-modal-bg")?.remove(); }
 document.addEventListener("keydown", e => { if (e.key === "Escape" && document.querySelector(".kt-modal-bg")) ktClose(); });
 
-function ktElemName(id) { const p = kt.pos.elems[id]; return p ? `${p.e.tur === "vip" ? "VIP " : ""}${p.e.ad}` : id; }
+// Eleman ve kümesi (gizli / trafiksiz olanlar dahil)
+function ktFind(id) { for (const k of kt.data.kumeler) for (const e of k.elemanlar) if (e.id === id) return { e, k: k.ad }; return null; }
+function ktElemName(id) { const p = ktFind(id); return p ? `${p.e.tur === "vip" ? "VIP " : ""}${p.e.ad}` : id; }
 function ktHead(title, sub, back) {
   return `<div class="mh"><div>${back ? `<a href="#" data-ktback style="font-size:12px">← geri</a>` : ""}<h3>${title}</h3><div class="eg-sub">${sub}</div></div>
     <button data-ktclose>Kapat</button></div>`;
 }
 
 function ktOpen(id) {
-  const p = kt.pos.elems[id];
+  const p = ktFind(id);
   if (!p) return;
   if (p.e.tur !== "vip") return ktServer(p.e.uyeler[0].ip);
   kt.stack.push(() => ktOpen(id));
