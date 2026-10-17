@@ -242,7 +242,7 @@
     <label id="ipLabel">IP adresi <input type="text" id="ip" placeholder="10.50.20.15"></label>
     <label id="appLabel" hidden>Uygulama <input type="text" id="appName" list="appList" placeholder="Uygulama adı yazın…" autocomplete="off" style="width:280px"></label>
     <datalist id="appList"></datalist>
-    <label id="topoLabel" hidden title="Envanterde (ERT, TAG kolonu) bu etiketi taşıyan sunucuların topolojisi">Etiket <select id="topoTag" style="min-width:220px"></select></label>
+    <label id="topoLabel" hidden title="Bu etiketi taşıyan sunucuların AI işlev haritası (küme → segment → VIP → sunucu)">Etiket <select id="topoTag" style="min-width:220px"></select></label>
     <span id="accLabel" class="acc-fields" hidden>
       <label>Kaynak IP <input type="text" id="accSrc" placeholder="10.50.20.15"></label>
       <span class="acc-arrow">→</span>
@@ -1929,5 +1929,6 @@ loadAppliances().then(() => { const m = initForm(); if (m) uiMode = m; /* adres 
 <script src="uygulama.js"></script>
 <script src="erisim.js"></script>
 <script src="etiket.js"></script>
+<script src="islev.js"></script>
 </body>
 </html>

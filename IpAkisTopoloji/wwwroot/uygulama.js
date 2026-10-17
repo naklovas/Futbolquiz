@@ -31,6 +31,8 @@ function setUiMode(m) {
   if (m !== uiMode) switchRange(uiMode, m);
   // Etiketleme tablosu başka sekmede kalmasın: sekmeden çıkınca içerik temizlenir
   if (uiMode === "etiket" && m !== "etiket") { $("#main").innerHTML = ""; etq.shell = false; }
+  // İşlev haritası da başka sekmede kalmasın; ilerleme yoklaması durur
+  if (uiMode === "topo" && m !== "topo") { $("#main").innerHTML = ""; ivStopPoll(); iv.sel = null; }
   uiMode = m;
   document.querySelectorAll("#modeTabs button").forEach(b => b.classList.toggle("on", b.dataset.ui === m));
   $("#ipLabel").hidden = m !== "ip";
@@ -55,7 +57,7 @@ document.querySelectorAll("#modeTabs button").forEach(b => b.addEventListener("c
   if (u === "etiket") runEtiket();
 }));
 
-// ---------- Topoloji sekmesi: etikete göre (ERT TAG) sunucuların topolojisi ----------
+// ---------- Topoloji sekmesi: etiketli sunucuların işlev haritası (islev.js); bağımlılık çizimi oradaki düğmeyle ----------
 let topoWanted = null;
 async function loadTopoTags(force) {
   if ($("#topoTag").options.length && !force) return;
@@ -75,7 +77,7 @@ async function runTopo() {
   const tag = topoWanted ?? $("#topoTag").value;
   topoWanted = null;
   if (!tag) { alert("Henüz etiketli sunucu yok. Sunucu etiketleme sekmesinden sunuculara etiket ekleyin."); return; }
-  runApp("etiket:" + tag, "topo");
+  runIslev(tag);
 }
 
 async function loadAppCatalog() {

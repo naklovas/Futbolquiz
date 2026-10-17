@@ -34,6 +34,7 @@ builder.Services.AddHttpClient("ai", c => c.Timeout = TimeSpan.FromMinutes(build
     .ConfigurePrimaryHttpMessageHandler(() => CreateHandler(builder.Configuration.GetValue("Ai:IgnoreSslErrors", true)));
 
 builder.Services.AddSingleton<EnvanterService>();
+builder.Services.AddSingleton<IslevService>();
 builder.Services.AddMemoryCache();
 
 // Windows Authentication: IIS'te IIS'in Windows Auth'u, Kestrel'de Negotiate kullanılır.
@@ -572,6 +573,55 @@ app.MapPost("/api/etiket", async (EtiketIstek req, HttpContext ctx, IConfigurati
         var rows = ips.Select(ip => EtiketService.Row(env, ip)).OfType<EtiketSunucu>().ToList();
         return Results.Ok(new EtiketSonuc(n, rows));
     }
+    catch (InvalidOperationException ex) { return Results.BadRequest(new { error = ex.Message }); }
+    catch (Microsoft.Data.SqlClient.SqlException ex) { return Results.Json(new { error = "SQL: " + ex.Message }, statusCode: 502); }
+});
+
+// İşlev haritası (Topoloji sekmesi): etiketli sunucular AI ile işlev kümelerine ayrılır (Islev.cs).
+app.MapGet("/api/islev", async (string etiket, HttpContext ctx, IConfiguration cfg, IslevService islev, CancellationToken ct) =>
+{
+    try { return Results.Ok(await islev.MapAsync(etiket.Trim(), EtiketService.CanWrite(cfg, ctx.User?.Identity?.Name), ct)); }
+    catch (Exception ex) { return Results.Json(new { error = ex.Message }, statusCode: 502); }
+});
+
+app.MapGet("/api/islev/durum", (IslevService islev) => Results.Ok(islev.Durum));
+
+// Bir sunucunun AI'a giden bilgi özeti + ham kayıtlar (SM talepleri bağlantılarıyla).
+app.MapGet("/api/islev/profil", async (string ip, IslevService islev, CancellationToken ct) =>
+{
+    if (!LookupQuery.TryParseIpv4(ip, out string v)) return Results.BadRequest(new { error = "Geçersiz IP." });
+    try { return Results.Ok(await islev.ProfileAsync(v, ct)); }
+    catch (Exception ex) { return Results.Json(new { error = ex.Message }, statusCode: 502); }
+});
+
+app.MapPost("/api/islev/calistir", (IslevCalistir req, HttpContext ctx, IConfiguration cfg, IslevService islev) =>
+{
+    string user = ctx.User?.Identity?.Name ?? "?";
+    if (!EtiketService.CanWrite(cfg, ctx.User?.Identity?.Name))
+        return Results.Json(new { error = $"Sınıflandırma başlatma yetkiniz yok ({user})." }, statusCode: 403);
+    if (string.IsNullOrWhiteSpace(req.Etiket)) return Results.BadRequest(new { error = "Etiket seçin." });
+    return islev.Start(req, req.Etiket.Trim(), user)
+        ? Results.Ok(islev.Durum)
+        : Results.Json(new { error = "Bir sınıflandırma zaten çalışıyor.", durum = islev.Durum }, statusCode: 409);
+});
+
+app.MapPost("/api/islev/durdur", (HttpContext ctx, IConfiguration cfg, IslevService islev) =>
+{
+    if (!EtiketService.CanWrite(cfg, ctx.User?.Identity?.Name)) return Results.Json(new { error = "Yetkiniz yok." }, statusCode: 403);
+    islev.Stop();
+    return Results.Ok(islev.Durum);
+});
+
+app.MapPost("/api/islev/duzelt", async (IslevDuzelt req, HttpContext ctx, IConfiguration cfg, IslevService islev, CancellationToken ct) =>
+{
+    string user = ctx.User?.Identity?.Name ?? "?";
+    if (!EtiketService.CanWrite(cfg, ctx.User?.Identity?.Name))
+        return Results.Json(new { error = $"Düzeltme yetkiniz yok ({user})." }, statusCode: 403);
+    var ips = (req.Ips ?? []).Select(i => i?.Trim()).Where(i => LookupQuery.TryParseIpv4(i, out _)).Select(i => i!).Distinct().ToList();
+    string? kume = string.IsNullOrWhiteSpace(req.Kume) ? null : req.Kume.Trim();
+    if (ips.Count == 0 || ips.Count > 500) return Results.BadRequest(new { error = "1–500 arası geçerli IP seçin." });
+    if (kume is { Length: > 100 } || (kume?.Any(char.IsControl) ?? false)) return Results.BadRequest(new { error = "Küme adı en çok 100 karakter." });
+    try { return Results.Ok(new { guncellenen = await islev.FixAsync(ips, kume, user, ct) }); }
     catch (InvalidOperationException ex) { return Results.BadRequest(new { error = ex.Message }); }
     catch (Microsoft.Data.SqlClient.SqlException ex) { return Results.Json(new { error = "SQL: " + ex.Message }, statusCode: 502); }
 });
