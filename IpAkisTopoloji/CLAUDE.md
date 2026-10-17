@@ -141,7 +141,14 @@ topoloji çizer ve şirket içi AI'a etki analizi yaptırır. Canlıda IIS'te, W
     `dbo.CsyEnvanter` (Folder, VM, CPU/RAM/disk), Kahin `dbo.SONUCLAR`, SM kurulum (`ZTSUNUCUKURULUMUOPTIONSM1` + `CM3RM1` + `REQUESTM1`,
     SUNUCU_IP / UYGULAMA_BILGISI), SM iş istekleri (`REQUESTM1` + `DEPTM1`; ZT_KAYNAK/ZT_HEDEF IP, hostname, ZT_ERISIM_KAYNAK/HEDEF
     blob'u `ParseHexOrBinary`; son `SmYil` yıl, 25'er IP'lik toplu LIKE sorgusu, eşleşme C#'ta regex ile). Kullanıcı: veri maskelenmez.
-    AI 1. aşama `Paket`=4 sunucu/istek, `Paralel`=2: {ip, islev, rol, guven, gerekce}; 2. aşama tüm işlevler tek istekte 5–15 kümeye.
+    AI 1. aşama `Paket`=4 sunucu/istek, `Paralel`=2: {ip, islev, rol, guven, gerekce}; islev SABİT KATALOGDAN seçilir
+    (`DefaultKategoriler`, `Islev:Kategoriler` [{Ad, Aciklama}] ile değişir; uymazsa "Diğer: …"). Canlıda katalogsuz sürüm
+    "ETL ve Veri Entegrasyonu / ETL / Veri Entegrasyonu / ETL ve Entegrasyon" gibi ayrı kümeler üretti → kodda yazım-bağımsız
+    eşleme (`Tokens`: Türkçe harf sadeleştirme, bağlaç/“sunucu” atma, kısaltma açma db/dwh/sftp, 5 harf kök; `Similar`/`Snap`:
+    aynı kök kümesi, %60+ örtüşme, ≥2 kelimelik içerme, tek kelime yalnız tek hedefte geçiyorsa). 2. aşama: katalog + elle
+    kümelere eşlenemeyen işlevler AI'a "listeden birine ata ya da yeni küme" diye sorulur, sonunda benzer küme adları yine kodda
+    birleşir. "Yeniden kümele" sunuculara yeniden sormadan eski sonuçları da toplar. Kartta "birleştir": kümenin tüm sunucularını
+    başka kümeye elle atar.
     Sonuç ERT'de `AI_KUME NVARCHAR(100)` + `AI_DETAY NVARCHAR(MAX)` (JSON IslevDetay). Elle düzeltme (`/api/islev/duzelt`, Kaynak "Elle: kullanıcı")
     AI'ca ezilmez. Arka plan işi (tek seferde bir tane): `/api/islev/calistir {etiket, hepsi, sadeceKumele}`, `/api/islev/durum`, `/durdur`;
     `/api/islev?etiket=` harita, `/api/islev/profil?ip=` AI'a giden metin + SM kayıtları (link şablonları `Islev:SmTalepLinki` {NUMBER},

@@ -26,6 +26,10 @@ const iv = { tag: "", data: null, q: "", poll: null, sel: null, seq: 0 };
   .iv-card header { all:unset; display:block; padding:10px 14px 8px; border-bottom:1px solid var(--line); }
   .iv-card h3 { margin:0; font-size:15px; display:flex; justify-content:space-between; gap:8px; align-items:baseline; }
   .iv-card h3 span { font-size:12px; color:var(--muted); font-weight:500; white-space:nowrap; }
+  .iv-merge { color:var(--muted); }
+  .iv-merge:hover { color:var(--in); }
+  .iv-mergebox { display:flex; gap:6px; margin-top:8px; }
+  .iv-mergebox select { flex:1; min-width:0; }
   .iv-card p { margin:4px 0 0; color:var(--muted); font-size:12.5px; line-height:1.4; }
   .iv-body { overflow:auto; padding:6px 10px 10px; }
   .iv-seg { margin-top:8px; }
@@ -146,7 +150,7 @@ function ivGrid() {
     if (!segs) return "";
     const none = k.ad === "Sınıflanmamış";
     return `<article class="iv-card${none ? " none" : ""}" style="--h:${tagHue(k.ad)}">
-      <header><h3>${esc(k.ad)}<span>${k.sunucu} sunucu</span></h3>${k.aciklama ? `<p>${esc(k.aciklama)}</p>` : none ? `<p>AI henüz sınıflandırmadı. "AI ile sınıflandır" ile başlatın.</p>` : ""}</header>
+      <header><h3>${esc(k.ad)}<span>${k.sunucu} sunucu${!none && iv.data.yazabilir && iv.data.kumeler.length > 2 ? ` · <a href="#" class="iv-merge" data-merge="${esc(k.ad)}" title="Bu kümedeki tüm sunucuları başka bir kümeye taşır (elle atanmış sayılır)">birleştir</a>` : ""}</span></h3>${k.aciklama ? `<p>${esc(k.aciklama)}</p>` : none ? `<p>AI henüz sınıflandırmadı. "AI ile sınıflandır" ile başlatın.</p>` : ""}</header>
       <div class="iv-body">${segs}</div></article>`;
   }).join("");
   $("#ivGrid").innerHTML = cards || `<div class="eg-empty">${iv.data.toplam ? "Aramaya uyan sunucu yok." : `"${esc(iv.tag)}" etiketli sunucu yok.`}</div>`;
@@ -268,5 +272,30 @@ function ivCloseDrawer() {
 document.addEventListener("click", e => {
   const el = e.target.closest?.("[data-ivip]");
   if (el && uiMode === "topo") ivDrawer(el.dataset.ivip);
+});
+// Kümeyi başka bir kümeyle birleştir: kartın tüm sunucuları hedef kümeye elle atanır.
+document.addEventListener("click", e => {
+  const a = e.target.closest?.(".iv-merge");
+  if (!a || uiMode !== "topo") return;
+  e.preventDefault();
+  const from = a.dataset.merge, head = a.closest("header");
+  if (head.querySelector(".iv-mergebox")) return;
+  const others = iv.data.kumeler.map(k => k.ad).filter(x => x !== from && x !== "Sınıflanmamış");
+  head.insertAdjacentHTML("beforeend", `<div class="iv-mergebox"><select>${others.map(o => `<option>${esc(o)}</option>`).join("")}</select>
+    <button class="primary">Taşı</button><button>Vazgeç</button></div>`);
+  const box = head.querySelector(".iv-mergebox"), [sel] = box.getElementsByTagName("select"), [go, no] = box.getElementsByTagName("button");
+  no.addEventListener("click", () => box.remove());
+  go.addEventListener("click", async () => {
+    const k = iv.data.kumeler.find(x => x.ad === from);
+    const ips = [...new Set(k.segmentler.flatMap(sg => [...sg.sunucular, ...sg.vipler.flatMap(v => v.sunucular)]).map(s => s.ip))];
+    if (!confirm(`"${from}" kümesindeki ${ips.length} sunucu "${sel.value}" kümesine taşınsın mı?`)) return;
+    go.disabled = true;
+    try {
+      const r = await fetch("api/islev/duzelt", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ips, kume: sel.value }) });
+      const b = await r.json().catch(() => ({ error: `HTTP ${r.status}` }));
+      if (!r.ok) throw new Error(b.error || `HTTP ${r.status}`);
+      await ivLoad();
+    } catch (err) { alert(err.message); go.disabled = false; }
+  });
 });
 document.addEventListener("keydown", e => { if (e.key === "Escape" && iv.sel) ivCloseDrawer(); });

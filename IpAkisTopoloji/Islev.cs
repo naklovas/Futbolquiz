@@ -44,6 +44,87 @@ sealed class IslevService(IConfiguration cfg, IHttpClientFactory factory, Envant
 
     public IslevDurum Durum { get { lock (_gate) return _durum; } }
 
+    // Sabit işlev kataloğu: AI 1. aşamada bunlardan birini seçer, böylece "ETL / Veri entegrasyonu" ile "ETL ve Entegrasyon"
+    // ayrı küme olmaz. Islev:Kategoriler ([{ "Ad": "…", "Aciklama": "…" }]) ile değiştirilebilir.
+    static readonly (string Ad, string Aciklama)[] DefaultKategoriler =
+    [
+        ("Kaynak sistem veritabanı", "Veri ambarına veri sağlayan operasyonel sistemlerin (core banking, kart, kredi…) veritabanları."),
+        ("ETL / Veri entegrasyonu", "Kaynaklardan veriyi çekip dönüştüren ve yükleyen ETL / ELT sunucuları (ODI, Informatica, DataStage, SSIS, GoldenGate)."),
+        ("Staging / Ara katman", "Yükleme öncesi verinin geçici tutulduğu ara veritabanları ve dosya alanları."),
+        ("Veri ambarı veritabanı", "Veri ambarının ana veritabanı düğümleri (Exadata, Oracle, Teradata, SQL Server)."),
+        ("Raporlama / BI", "Rapor ve analiz sunucuları (OBIEE, Tableau, Power BI, Qlik, SSRS, Cognos)."),
+        ("Analitik / Veri bilimi", "Analitik model, veri bilimi ve büyük veri sunucuları (SAS, Python/R, Hadoop, Spark)."),
+        ("Dosya aktarımı", "Dosya alıp gönderen SFTP / FTP / MFT sunucuları."),
+        ("Uygulama / Web", "Ekosistemdeki uygulama, web ve API sunucuları."),
+        ("İş zamanlama / Orkestrasyon", "Batch işlerini zamanlayan ve tetikleyen sunucular (Control-M, Automic, cron)."),
+        ("İzleme / Yönetim", "İzleme, yönetim, yedekleme ve altyapı hizmeti veren sunucular."),
+        ("Test / Geliştirme", "Test, geliştirme ve ODM ortamı sunucuları."),
+        ("Belirsiz", "Mevcut kanıtla işlevi belirlenemeyen sunucular.")
+    ];
+
+    List<(string Ad, string Aciklama)> Kategoriler()
+    {
+        var list = cfg.GetSection("Islev:Kategoriler").GetChildren()
+            .Select(c => (Ad: c["Ad"] ?? c.Value, Aciklama: c["Aciklama"] ?? ""))
+            .Where(k => !string.IsNullOrWhiteSpace(k.Ad)).Select(k => (k.Ad!.Trim(), k.Aciklama)).ToList();
+        return list.Count > 0 ? list : [.. DefaultKategoriler];
+    }
+
+    static readonly HashSet<string> StopWords = ["ve", "ile", "veya", "icin", "sunucu", "sunucusu", "sunuculari", "sistem", "sistemi",
+        "sistemleri", "katman", "katmani", "hizmet", "hizmeti", "hizmetleri", "islem", "islemleri", "ortam", "ortami", "ortamlari", "the", "and", "server", "servers"];
+
+    // Yazım farkını yok eden anahtar: Türkçe harfler sadeleşir, noktalama ve bağlaçlar atılır, kelimeler 5 harfe kısalır
+    // ("ETL ve Veri Entegrasyonu", "ETL / Veri entegrasyonu", "ETL Veri Entegrasyon" → {etl, veri, enteg}).
+    static HashSet<string> Tokens(string? s)
+    {
+        if (string.IsNullOrWhiteSpace(s)) return [];
+        var sb = new StringBuilder();
+        foreach (char ch in s.ToLower(new System.Globalization.CultureInfo("tr-TR")))
+            sb.Append(ch switch { 'ı' => 'i', 'ş' => 's', 'ğ' => 'g', 'ü' => 'u', 'ö' => 'o', 'ç' => 'c', 'â' => 'a', 'î' => 'i', _ => char.IsLetterOrDigit(ch) ? ch : ' ' });
+        return sb.ToString().Split(' ', StringSplitOptions.RemoveEmptyEntries)
+            .Where(w => !StopWords.Contains(w)).SelectMany(w => Synonyms.TryGetValue(w, out var e) ? e : [w])
+            .Select(w => w.Length > 5 ? w[..5] : w).ToHashSet();
+    }
+
+    // Kısaltmalar karşılıklarına açılır
+    static readonly Dictionary<string, string[]> Synonyms = new()
+    {
+        ["db"] = ["veritabani"], ["database"] = ["veritabani"], ["dwh"] = ["veri", "ambari"], ["edw"] = ["veri", "ambari"],
+        ["sftp"] = ["dosya", "aktarim"], ["ftp"] = ["dosya", "aktarim"], ["mft"] = ["dosya", "aktarim"],
+        ["reporting"] = ["raporlama"], ["rapor"] = ["raporlama"], ["monitoring"] = ["izleme"], ["batch"] = ["zamanlama"]
+    };
+
+    // İki ad aynı işi mi anlatıyor? Aynı kelime kümesi, %60+ örtüşme ya da en az iki kelimelik adın tamamen diğerinin içinde olması.
+    static double Similar(HashSet<string> a, HashSet<string> b)
+    {
+        if (a.Count == 0 || b.Count == 0) return 0;
+        int common = a.Count(b.Contains);
+        if (common == 0) return 0;
+        double jac = (double)common / (a.Count + b.Count - common);
+        bool contained = common == Math.Min(a.Count, b.Count) && Math.Min(a.Count, b.Count) >= 2;
+        return contained ? Math.Max(jac, 0.8) : jac;
+    }
+
+    // Adı listedeki en benzer ada eşler (eşik altıysa null). "Diğer: X" önekleri atılır.
+    static string? Snap(string? name, IEnumerable<string> targets, double min = 0.6)
+    {
+        if (string.IsNullOrWhiteSpace(name)) return null;
+        name = Regex.Replace(name, @"^\s*di[gğ]er\s*[:\-]\s*", "", RegexOptions.IgnoreCase);
+        var t = Tokens(name);
+        var list = targets.ToList();
+        string? best = null; double bs = 0;
+        foreach (var x in list)
+        {
+            if (string.Equals(x, name.Trim(), StringComparison.OrdinalIgnoreCase)) return x;
+            double sc = Similar(t, Tokens(x));
+            if (sc > bs) { bs = sc; best = x; }
+        }
+        if (bs >= min) return best;
+        // Tek anlamlı kelime ("Raporlama sunucusu" → rapor) yalnızca TEK hedefte geçiyorsa o hedefe gider
+        if (t.Count == 1 && list.Where(x => Tokens(x).Overlaps(t)).Take(2).ToList() is [var only]) return only;
+        return null;
+    }
+
     string Col(string key, string def) => cfg[$"Islev:{key}"] is { } c && SafeName.IsMatch(c) ? c : def;
     string Tbl(string key, string def) => cfg[$"Islev:Tablolar:{key}"] is { } t && SafeTable.IsMatch(t) ? t : def;
     string HostTable => cfg["Envanter:HostTablosu"] ?? "dbo.ERT_HOSTIPADDRESS";
@@ -232,6 +313,8 @@ sealed class IslevService(IConfiguration cfg, IHttpClientFactory factory, Envant
     // ---------------- 1. aşama: sunucu başına işlev ----------------
     async Task<Dictionary<string, IslevDetay>> ClassifyAsync(string tag, string[] ips, Dictionary<string, IslevProfil> profiles, CancellationToken ct)
     {
+        var kat = Kategoriler();
+        string katalog = string.Join("\n", kat.Select(k => $"- {k.Ad}: {k.Aciklama}"));
         var sb = new StringBuilder();
         sb.AppendLine($$"""
             Bir bankanın veri merkezinde çalışan kıdemli bir altyapı mimarısın. Aşağıdaki sunucular kullanıcı tarafından "{{tag}}" olarak
@@ -243,8 +326,12 @@ sealed class IslevService(IConfiguration cfg, IHttpClientFactory factory, Envant
             iş istekleri) bakarak sunucunun İŞLEVİNİ belirle. Port numarasından çok iş isteklerindeki açıklamalara ve uygulama
             adlarına ağırlık ver. Kanıt yetersizse islev "Belirsiz" ve güveni düşük yaz; uydurma.
 
+            "islev" alanına AŞAĞIDAKİ LİSTEDEN BİRİNİ, yazımını HARFİ HARFİNE koruyarak yaz. Hiçbiri gerçekten uymuyorsa
+            "Diğer: <2–3 kelimelik ad>" yaz. Ayrıntıyı "rol" alanına koy.
+            {{katalog}}
+
             Yalnızca JSON dizi döndür, başka metin yazma. Her sunucu için bir eleman:
-            {"ip":"…","islev":"2–4 kelimelik genel kategori","rol":"daha özel rol (ör. Informatica PowerCenter iş sunucusu)","guven":0-100,"gerekce":"tek cümle; hangi kanıta dayandığın"}
+            {"ip":"…","islev":"listeden biri","rol":"daha özel rol (ör. Informatica PowerCenter iş sunucusu)","guven":0-100,"gerekce":"tek cümle; hangi kanıta dayandığın"}
             """);
         foreach (var ip in ips) sb.AppendLine().AppendLine(profiles.TryGetValue(ip, out var p) ? p.Metin : $"### Sunucu {ip}\n(bilgi yok)");
         string answer = await ChatAsync(sb.ToString(), ct);
@@ -260,58 +347,88 @@ sealed class IslevService(IConfiguration cfg, IHttpClientFactory factory, Envant
             if (ip == null) { if (ips.Length == 1) ip = ips[0]; else continue; }
             ip = ips.FirstOrDefault(x => x == ip.Trim());
             if (ip == null) continue;
-            outp[ip] = new IslevDetay(Cut(Str(e, "islev"), 80) ?? "Belirsiz", Cut(Str(e, "rol"), 200), Math.Clamp(Int(e, "guven"), 0, 100),
+            string islev = Cut(Str(e, "islev"), 80) ?? "Belirsiz";
+            outp[ip] = new IslevDetay(Snap(islev, kat.Select(k => k.Ad)) ?? Regex.Replace(islev, @"^\s*di[gğ]er\s*[:\-]\s*", "", RegexOptions.IgnoreCase), Cut(Str(e, "rol"), 200), Math.Clamp(Int(e, "guven"), 0, 100),
                 Cut(Str(e, "gerekce"), 600), null, now, "AI");
         }
         return outp;
     }
 
     // ---------------- 2. aşama: işlevleri kümelere birleştir ----------------
+    // Önce kodda: katalogdaki ada (ve elle tanımlanmış kümelere) benzeyen işlevler doğrudan eşlenir. Kalanlar AI'a sorulur
+    // (kataloğa mı girer, yeni küme mi). Sonunda benzer adlı kümeler yine kodda tek kümede toplanır.
     async Task ClusterAsync(string tag, List<string> ips, CancellationToken ct)
     {
         var (res, _) = await ResultsAsync(true, ct);
         var ai = ips.Where(ip => res.TryGetValue(ip, out var x) && x.Detay?.Islev != null && x.Detay.Kaynak?.StartsWith("Elle") != true).ToList();
         if (ai.Count == 0) return;
-        var islevler = ai.GroupBy(ip => res[ip].Detay!.Islev!, StringComparer.OrdinalIgnoreCase)
-            .Select(g => (Ad: g.Key, Sayi: g.Count(), Roller: g.Select(ip => res[ip].Detay!.Rol).OfType<string>().Distinct().Take(3).ToList()))
-            .OrderByDescending(x => x.Sayi).ToList();
+        var kat = Kategoriler();
+        var aciklamalar = kat.ToDictionary(k => k.Ad, k => (string?)k.Aciklama, StringComparer.OrdinalIgnoreCase);
         var elle = ips.Where(ip => res.TryGetValue(ip, out var x) && x.Detay?.Kaynak?.StartsWith("Elle") == true)
             .Select(ip => res[ip].Kume).OfType<string>().Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        var hedefler = elle.Concat(kat.Select(k => k.Ad)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
 
-        string elleNot = elle.Count > 0 ? "Kullanıcının elle tanımladığı kümeler (uygunsa bu adları kullan): " + string.Join(", ", elle) : "";
-        var sb = new StringBuilder();
-        sb.AppendLine($$"""
-            "{{tag}}" etiketli sunucular tek tek sınıflandırıldı. Aşağıda bulunan işlevler (sunucu sayısı ve örnek rollerle) var.
-            Bunları mimari olarak anlamlı 5–15 KÜMEYE birleştir (ör. "Kaynak sistemler", "ETL / Veri entegrasyonu", "Veri ambarı
-            veritabanı", "Raporlama / BI"). Aynı işi anlatan farklı yazımları tek kümede topla. "Belirsiz" ayrı küme kalabilir.
-            Küme adları kısa (2–4 kelime) ve Türkçe olsun. Her işlev tam olarak bir kümeye girmeli; işlev adlarını AYNEN yaz.
-            {{elleNot}}
-
-            Yalnızca JSON döndür:
-            {"kumeler":[{"ad":"…","aciklama":"tek cümle: bu kümedeki sunucular ne iş yapar","islevler":["…"]}]}
-
-            İşlevler:
-            """);
-        foreach (var x in islevler)
-            sb.AppendLine($"- {x.Ad} ({x.Sayi} sunucu){(x.Roller.Count > 0 ? " — örn: " + string.Join("; ", x.Roller) : "")}");
-
-        var map = new Dictionary<string, (string Ad, string? Aciklama)>(StringComparer.OrdinalIgnoreCase);
-        try
+        // işlev → küme
+        var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var kalan = new List<(string Ad, int Sayi, List<string> Roller)>();
+        foreach (var g in ai.GroupBy(ip => res[ip].Detay!.Islev!, StringComparer.OrdinalIgnoreCase))
         {
-            string answer = await ChatAsync(sb.ToString(), ct);
-            var root = ExtractJson(answer);
-            if (root is { } r && Prop(r, "kumeler") is { ValueKind: JsonValueKind.Array } ks)
-                foreach (var k in ks.EnumerateArray())
-                {
-                    string? ad = Cut(Str(k, "ad"), 100);
-                    if (ad == null || Prop(k, "islevler") is not { ValueKind: JsonValueKind.Array } il) continue;
-                    foreach (var i in il.EnumerateArray())
-                        if (i.ValueKind == JsonValueKind.String && i.GetString() is { } s) map[s.Trim()] = (ad, Cut(Str(k, "aciklama"), 300));
-                }
+            if (Snap(g.Key, hedefler) is { } h) map[g.Key] = h;
+            else kalan.Add((g.Key, g.Count(), g.Select(ip => res[ip].Detay!.Rol).OfType<string>().Distinct().Take(3).ToList()));
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+
+        if (kalan.Count > 0)
         {
-            Fail("Kümeleme: " + ex.Message + " (kümeler işlev adlarıyla bırakıldı)");
+            var sb = new StringBuilder();
+            sb.AppendLine($$"""
+                "{{tag}}" etiketli sunucular sınıflandırıldı. Aşağıdaki işlevler standart küme listesine otomatik eşlenemedi.
+                Her birini ya listedeki bir kümeye ata (adı HARFİ HARFİNE yaz) ya da gerçekten farklı bir işse yeni bir küme aç.
+                Aynı işi anlatan işlevleri AYNI yeni kümeye koy; yeni küme açmaktan kaçın, yeni küme adları 2–4 kelime ve Türkçe olsun.
+
+                Küme listesi:
+                {{string.Join("\n", hedefler.Select(h => $"- {h}"))}}
+
+                Yalnızca JSON döndür:
+                {"eslesme":[{"islev":"…","kume":"…","aciklama":"yalnız yeni kümeyse tek cümle"}]}
+
+                Eşlenecek işlevler:
+                """);
+            foreach (var x in kalan)
+                sb.AppendLine($"- {x.Ad} ({x.Sayi} sunucu){(x.Roller.Count > 0 ? " — örn: " + string.Join("; ", x.Roller) : "")}");
+            try
+            {
+                var root = ExtractJson(await ChatAsync(sb.ToString(), ct));
+                var arr = root is { } r ? (r.ValueKind == JsonValueKind.Array ? r : Prop(r, "eslesme") ?? default) : default;
+                if (arr.ValueKind == JsonValueKind.Array)
+                    foreach (var e in arr.EnumerateArray())
+                    {
+                        string? islev = Str(e, "islev"), kume = Cut(Str(e, "kume"), 100);
+                        if (islev == null || kume == null) continue;
+                        string? src = kalan.Select(k => k.Ad).FirstOrDefault(k => string.Equals(k, islev, StringComparison.OrdinalIgnoreCase))
+                            ?? Snap(islev, kalan.Select(k => k.Ad), 0.75);
+                        if (src == null) continue;
+                        kume = Snap(kume, hedefler) ?? kume;
+                        map[src] = kume;
+                        if (!aciklamalar.ContainsKey(kume) && Cut(Str(e, "aciklama"), 300) is { } ac) aciklamalar[kume] = ac;
+                    }
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                Fail("Kümeleme: " + ex.Message + " (eşlenemeyen işlevler kendi adlarıyla bırakıldı)");
+            }
+            // AI'ın eşlemediği işlevler kendi adıyla küme olur
+            foreach (var x in kalan) map.TryAdd(x.Ad, x.Ad);
+        }
+
+        // Yeni küme adlarını da birbirine benzerse birleştir (büyük küme adını korur)
+        var sayac = ai.GroupBy(ip => map[res[ip].Detay!.Islev!], StringComparer.OrdinalIgnoreCase).ToDictionary(g => g.Key, g => g.Count(), StringComparer.OrdinalIgnoreCase);
+        var kanonik = new List<string>(hedefler);
+        var yeniden = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var k in sayac.OrderByDescending(x => x.Value).Select(x => x.Key))
+        {
+            string c = Snap(k, kanonik) ?? k;
+            if (!kanonik.Contains(c, StringComparer.OrdinalIgnoreCase)) kanonik.Add(c);
+            yeniden[k] = c;
         }
 
         await using var conn = new SqlConnection(ConnStr);
@@ -319,8 +436,8 @@ sealed class IslevService(IConfiguration cfg, IHttpClientFactory factory, Envant
         foreach (var ip in ai)
         {
             var d = res[ip].Detay!;
-            var (ad, aciklama) = map.TryGetValue(d.Islev!, out var m) ? m : (d.Islev!, null);
-            await WriteAsync(conn, ip, ad, d with { KumeAciklama = aciklama }, ct);
+            string ad = yeniden[map[d.Islev!]];
+            await WriteAsync(conn, ip, ad, d with { KumeAciklama = aciklamalar.GetValueOrDefault(ad) }, ct);
         }
     }
 
