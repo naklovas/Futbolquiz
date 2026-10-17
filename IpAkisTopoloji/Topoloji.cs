@@ -122,7 +122,7 @@ sealed class EnvanterService(IConfiguration cfg, ILogger<EnvanterService> log)
         return new EnvanterSnapshot(segments, hosts, vips, vipGws, marker, tags);
     }
 
-    // Sunucu etiketleri (ör. VERIAMBARI): ERT tablosundaki etiket kolonu (Envanter:EtiketKolonu, varsayılan boş) ve/veya
+    // Sunucu etiketleri (ör. VERIAMBARI): ERT tablosundaki etiket kolonu (Envanter:EtiketKolonu, varsayılan TAG; Entropi'den gelecek asıl kaynak) ve/veya
     // ayrı etiket tablosu (Envanter:EtiketTablosu, varsayılan dbo.DOKU_SERVER_TAG: IPADDRESS, TAG, EXPL, INSERTEDBY, DATE). Virgül / noktalı virgülle birden çok etiket.
     // Kolon ya da tablo yoksa etiketsiz devam edilir (uygulama hata vermez).
     async Task<Dictionary<string, List<string>>> LoadTagsAsync(SqlConnection conn, string hostTable, CancellationToken ct)
@@ -138,7 +138,7 @@ sealed class EnvanterService(IConfiguration cfg, ILogger<EnvanterService> log)
             }
         }
         var safe = new System.Text.RegularExpressions.Regex(@"^[A-Za-z_][A-Za-z0-9_]*$");
-        string col = cfg["Envanter:EtiketKolonu"] ?? "";
+        string col = cfg["Envanter:EtiketKolonu"] ?? "TAG";
         if (col != "" && safe.IsMatch(col))
         {
             try
