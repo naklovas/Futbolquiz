@@ -578,7 +578,7 @@ app.MapPost("/api/etiket", async (EtiketIstek req, HttpContext ctx, IConfigurati
 });
 
 // İşlev haritası (Topoloji sekmesi): etiketli sunucular AI ile işlev kümelerine ayrılır (Islev.cs).
-// tenant: virgülle kurum adları (KonsolideSegmentler4.Tenant); boş = tümü
+// tenant: virgülle kurum adları (KonsolideSegmentler4.Domain); boş = tümü
 static List<string>? TenantList(string? tenant) =>
     string.IsNullOrWhiteSpace(tenant) ? null : tenant.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
 

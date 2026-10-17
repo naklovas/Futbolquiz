@@ -1,5 +1,5 @@
 // ============================================================================
-// DeltaFlow · Kurum (tenant) seçimi — KonsolideSegmentler4.Tenant
+// DeltaFlow · Kurum seçimi — KonsolideSegmentler4.Domain (değişken adları "tenant" kaldı)
 // Topoloji sekmesinde çoklu seçimli açılır kutu: arama, "Tümü", kurum başına sunucu sayısı. Seçim tarayıcıda hatırlanır.
 // Boş seçim = tümü. İşlev haritası ve küme topolojisi tenant parametresiyle süzülür; birden çok kurum gösterilirse
 // ekranlar kurum bazında gruplar, tek kurum seçiliyse gruplama yapılmaz.
@@ -48,7 +48,7 @@ async function tnLoad(tag) {
 function tnRender() {
   const host = $("#tenantBox");
   if (!host) return;
-  host.innerHTML = `<button type="button" class="tn-btn" id="tnBtn" title="KonsolideSegmentler4 · Tenant">${esc(tnLabel())}</button>
+  host.innerHTML = `<button type="button" class="tn-btn" id="tnBtn" title="KonsolideSegmentler4 · Domain">${esc(tnLabel())}</button>
     ${tn.open ? `<div class="tn-pop" id="tnPop">
       <input type="search" id="tnQ" placeholder="Kurum ara…">
       <div class="tn-list" id="tnList"></div>

@@ -178,9 +178,10 @@ sealed class IslevService(IConfiguration cfg, IHttpClientFactory factory, Envant
 
     // ---------------- Harita: küme → segment → VIP → sunucu ----------------
     public const string TenantYok = "(kurum yok)";
-    public static string TenantOf(EnvanterSnapshot env, string ip) => env.FindSegment(ip)?.Tenant ?? TenantYok;
+    // Kurum = sunucunun segmentinin Domain değeri (KonsolideSegmentler4.Domain; kullanıcı kararı: Tenant değil Domain)
+    public static string TenantOf(EnvanterSnapshot env, string ip) => env.FindSegment(ip)?.Domain ?? TenantYok;
 
-    // tenants: boş / null = tümü; doluysa yalnız o kurumların (KonsolideSegmentler4.Tenant) sunucuları
+    // tenants: boş / null = tümü; doluysa yalnız o kurumların (KonsolideSegmentler4.Domain) sunucuları
     public async Task<IslevHarita> MapAsync(string tag, bool yazabilir, CancellationToken ct, IReadOnlyCollection<string>? tenants = null)
     {
         var env = await envanter.GetAsync(false, ct);
