@@ -188,7 +188,23 @@ function ktLayout() {
     : [{ t: null, ks: [...d.kumeler].sort(flow) }];
   const maxSec = Math.max(...sections.map(s => s.ks.length));
   // kutu ızgarası: kutu içi karo sütunu 4+ ise kutular geniş, otomatikte 3 sütun
-  const C = Math.max(1, Math.min(maxSec, kt.cols || (maxSec <= 2 ? maxSec : kt.per >= 4 ? 3 : maxSec <= 6 ? 3 : 4)));
+  // Otomatik: ekran genişliğine sığan en çok kutu sütunu (kutu genişliği = karo sayısı × kutu içi sütun); seçiciyle sabitlenebilir
+  const fitCols = () => {
+    // %15'e kadar küçültmeye izin verilir (yazılar hâlâ okunur)
+    const avail = Math.max(600, ($("#ktWrap")?.clientWidth || 1600) - 8) * 1.15;
+    const bw = k => { const v = ktVisible(k), n = Math.max(1, v.show.length + (v.idle.length ? 1 : 0)), tc = Math.min(kt.per, n);
+      return Math.max(KT.PAD * 2 + tc * TW + (tc - 1) * TG, 250); };
+    for (let c = maxSec; c > 1; c--) {
+      const ok = sections.every(sec => {
+        const w = Array(c).fill(0);
+        sec.ks.forEach((k, i) => w[i % c] = Math.max(w[i % c], bw(k)));
+        return w.reduce((a, b) => a + b, 0) + (c + 1) * 50 <= avail;
+      });
+      if (ok) return c;
+    }
+    return 1;
+  };
+  const C = Math.max(1, Math.min(maxSec, kt.cols || fitCols()));
   const cell = {}, order = [], secRows = [];
   let R = 0;
   for (const sec of sections) {
