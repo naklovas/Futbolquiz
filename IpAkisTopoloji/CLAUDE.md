@@ -178,7 +178,8 @@ topoloji çizer ve şirket içi AI'a etki analizi yaptırır. Canlıda IIS'te, W
     GÖRÜNÜM: varsayılan "Özet" (kullanıcı: "küçük çizilsin, ekrana sığsın, aşağı çok iniyor anlaşılmıyor"): kutuda karo yok, uygulama
     başına tek satır (`ktGroups`: ad · VIP · sunucu · trafiksiz), kutu 300px; satıra / küme başlığına tıkla → `ktGroupModal` (kart
     listesi → ktOpen/ktServer, geri yığını). "Ayrıntılı" = karolar. Çizim alanı pencere altına kadar (`ktWrapH`), ölçek genişlik VE
-    yüksekliğe sığar (`ktFitScale`, Sığdır düğmesi de). Varsayılan "Küme bağları"
+    yüksekliğe sığar (`ktFitScale`, Sığdır düğmesi de). Özette ikinci düğme "Uygulama bağları": eleman bağları (küme)×(APPNAME) satır çiftine toplanır,
+    uçlar o satırın hizasından; Ayrıntılı'da aynı düğme "Tüm eleman bağları" (karo karo). Varsayılan "Küme bağları"
     (küme çifti başına tek ok; kenar noktaları karşı uca göre yayılır); "Tüm eleman bağları" eleman → eleman (kenar noktası karonun x'i).
     Elemanın üstüne gelince yalnız onun bağları turuncu üst katmanda; küme adının üstüne gelince kümenin bağları. Kutu içinden çizgi
     geçmediği Playwright'ta yol üzerinden örnekleyerek doğrulandı.

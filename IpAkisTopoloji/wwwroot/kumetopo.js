@@ -141,7 +141,7 @@ function ktShell() {
     </div>
     <div class="kt-bar">
       <button id="ktBack">← İşlev haritası</button>
-      <div class="seg"><button data-ktm="kume" class="${kt.mode === "kume" ? "on" : ""}" title="Kümeler arası toplam trafik; elemanın üstüne gelince kendi bağları çizilir">Küme bağları</button><button data-ktm="eleman" class="${kt.mode === "eleman" ? "on" : ""}" title="Bütün VIP / sunucu bağları kanallardan">Tüm eleman bağları</button></div>
+      <div class="seg"><button data-ktm="kume" class="${kt.mode === "kume" ? "on" : ""}" title="Kümeler arası toplam trafik; elemanın üstüne gelince kendi bağları çizilir">Küme bağları</button><button data-ktm="eleman" class="${kt.mode === "eleman" ? "on" : ""}" title="Özette uygulama → uygulama, ayrıntılıda VIP / sunucu → VIP / sunucu bağları">${kt.view === "ozet" ? "Uygulama bağları" : "Tüm eleman bağları"}</button></div>
       <div class="seg"><button data-ktv="ozet" class="${kt.view === "ozet" ? "on" : ""}" title="Kutuda uygulama başına tek satır; tıklayınca o kutu ayrıntılı açılır">Özet</button><button data-ktv="detay" class="${kt.view !== "ozet" ? "on" : ""}" title="Bütün VIP ve sunucu karoları">Ayrıntılı</button></div>
       <label>Kutu içi grup <select id="ktAlt"><option value="uygulama"${kt.alt === "uygulama" ? " selected" : ""}>Uygulama (ERT)</option><option value="yok"${kt.alt !== "uygulama" ? " selected" : ""}>Yok</option></select></label>
       <label>Kutu içi <select id="ktPer">${[2, 3, 4, 5, 6].map(v => `<option${v === kt.per ? " selected" : ""}>${v}</option>`).join("")}</select></label>
@@ -162,6 +162,8 @@ function ktShell() {
   document.querySelectorAll("[data-ktv]").forEach(b => b.addEventListener("click", () => {
     kt.view = b.dataset.ktv; kt.open.clear();
     document.querySelectorAll("[data-ktv]").forEach(x => x.classList.toggle("on", x === b));
+    const eb = document.querySelector('[data-ktm="eleman"]');
+    if (eb) eb.textContent = kt.view === "ozet" ? "Uygulama bağları" : "Tüm eleman bağları";
     ktDraw(); kt.scale = ktFitScale(); ktDraw();
   }));
   $("#ktAlt").addEventListener("change", e => { kt.alt = e.target.value; ktDraw(); });
@@ -197,6 +199,18 @@ function ktVisible(k) {
 function ktLinks() {
   const ek = kt.pos?.elemKume || {};
   const base = kt.data.baglar.filter(b => (kt.infra || !b.altyapi) && ek[b.from] && ek[b.to] && ek[b.from] !== ek[b.to]);
+  // Özet görünümde eleman bağları uygulama satırları arasında toplanır (uygulama → uygulama); uçlar satırın ilk elemanı
+  if (kt.mode !== "kume" && kt.view === "ozet") {
+    const row = {};
+    kt.data.kumeler.forEach(k => k.elemanlar.forEach(e => row[e.id] = k.ad + "\u0001" + (kt.alt === "uygulama" ? (e.uygulama || "Uygulama kaydı yok") : "")));
+    const agg = {};
+    for (const b of base) {
+      const a = agg[row[b.from] + "\u0000" + row[b.to]] ??= { from: b.from, to: b.to, hits: 0, engel: 0, portlar: new Set(), n: 0, altyapi: true };
+      a.hits += b.hits; a.engel += b.engel; a.n++; a.altyapi = a.altyapi && b.altyapi; b.portlar.forEach(p => a.portlar.add(p));
+    }
+    return Object.values(agg).map(a => ({ ...a, portlar: [...a.portlar],
+      ad: [row[a.from].replace("\u0001", " · "), row[a.to].replace("\u0001", " · ")] }));
+  }
   if (kt.mode !== "kume") return base;
   const agg = {};
   for (const b of base) {
@@ -498,7 +512,7 @@ function ktWire(links) {
     const l = links[+p.dataset.li];
     p.addEventListener("mousemove", ev => {
       tip.hidden = false; tip.style.left = ev.clientX + 14 + "px"; tip.style.top = ev.clientY + 12 + "px";
-      tip.innerHTML = `<b>${esc(name(l.from))}</b> → <b>${esc(name(l.to))}</b><br>${fmt(l.hits)} bağlantı${l.engel ? ` · <span style="color:#ff9a9a">${fmt(l.engel)} engellendi</span>` : ""}<br>Port: ${esc(l.portlar.slice(0, 12).join(", ") || "—")}${l.n ? `<br>${l.n} eleman bağı (elemanların üstüne gelin)` : ""}`;
+      tip.innerHTML = `<b>${esc(l.ad ? l.ad[0] : name(l.from))}</b> → <b>${esc(l.ad ? l.ad[1] : name(l.to))}</b><br>${fmt(l.hits)} bağlantı${l.engel ? ` · <span style="color:#ff9a9a">${fmt(l.engel)} engellendi</span>` : ""}<br>Port: ${esc(l.portlar.slice(0, 12).join(", ") || "—")}${l.n ? `<br>${l.n} eleman bağı (elemanların üstüne gelin)` : ""}`;
       p.previousElementSibling?.classList.add("hl"); svg.classList.add("dim");
     });
     p.addEventListener("mouseleave", () => { tip.hidden = true; clear(); });
