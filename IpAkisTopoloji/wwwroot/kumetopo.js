@@ -6,7 +6,7 @@
 // ayrıntısı (AI rolü / gerekçesi, IP düzeyinde akışlar). Veri: /api/islev/topoloji (KumeTopoloji.cs).
 // ============================================================================
 
-const kt = { tag: "", data: null, scale: 1, mode: "kume", expanded: new Set(), cols: 0, infra: false, abort: null, hover: null, pos: null, stack: [] };
+const kt = { tag: "", data: null, scale: 1, mode: "kume", expanded: new Set(), cols: 0, per: 5, infra: false, abort: null, hover: null, pos: null, stack: [] };
 
 (function ktStyle() {
   const css = `
@@ -117,6 +117,7 @@ function ktShell() {
     <div class="kt-bar">
       <button id="ktBack">← İşlev haritası</button>
       <div class="seg"><button data-ktm="kume" class="${kt.mode === "kume" ? "on" : ""}" title="Kümeler arası toplam trafik; elemanın üstüne gelince kendi bağları çizilir">Küme bağları</button><button data-ktm="eleman" class="${kt.mode === "eleman" ? "on" : ""}" title="Bütün VIP / sunucu bağları kanallardan">Tüm eleman bağları</button></div>
+      <label>Kutu içi <select id="ktPer">${[2, 3, 4, 5, 6].map(v => `<option${v === kt.per ? " selected" : ""}>${v}</option>`).join("")}</select></label>
       <label>Sütun <select id="ktCols">${[["0", "Otomatik"], ["2", "2"], ["3", "3"], ["4", "4"], ["5", "5"]].map(([v, t]) => `<option value="${v}"${+v === kt.cols ? " selected" : ""}>${t}</option>`).join("")}</select></label>
       <label><input type="checkbox" id="ktInfra" ${kt.infra ? "checked" : ""}> Altyapı portları (DNS, AD, RDP…)</label>
       <span class="sp"></span>
@@ -131,6 +132,7 @@ function ktShell() {
   $("#ktBack").addEventListener("click", () => runIslev(kt.tag));
   $("#ktAgain").addEventListener("click", () => ktRun(kt.tag));
   document.querySelectorAll("[data-ktm]").forEach(b => b.addEventListener("click", () => { kt.mode = b.dataset.ktm; ktShell(); }));
+  $("#ktPer").addEventListener("change", e => { kt.per = +e.target.value; ktDraw(); kt.scale = Math.min(1, ($("#ktWrap").clientWidth - 4) / kt.pos.W); ktDraw(); });
   $("#ktCols").addEventListener("change", e => { kt.cols = +e.target.value; ktDraw(); kt.scale = Math.min(1, ($("#ktWrap").clientWidth - 4) / kt.pos.W); ktDraw(); });
   $("#ktInfra").addEventListener("change", e => { kt.infra = e.target.checked; ktDraw(); });
   $("#ktZi").addEventListener("click", () => { kt.scale = Math.min(2.5, kt.scale * 1.2); ktDraw(); });
@@ -185,7 +187,8 @@ function ktLayout() {
     ? [...new Set(d.kumeler.map(k => k.tenant))].sort((a, b) => a.localeCompare(b, "tr")).map(t => ({ t, ks: d.kumeler.filter(k => k.tenant === t).sort(flow) }))
     : [{ t: null, ks: [...d.kumeler].sort(flow) }];
   const maxSec = Math.max(...sections.map(s => s.ks.length));
-  const C = Math.max(1, Math.min(maxSec, kt.cols || (maxSec <= 2 ? maxSec : maxSec <= 6 ? 3 : 4)));
+  // kutu ızgarası: kutu içi karo sütunu 4+ ise kutular geniş, otomatikte 3 sütun
+  const C = Math.max(1, Math.min(maxSec, kt.cols || (maxSec <= 2 ? maxSec : kt.per >= 4 ? 3 : maxSec <= 6 ? 3 : 4)));
   const cell = {}, order = [], secRows = [];
   let R = 0;
   for (const sec of sections) {
@@ -221,25 +224,34 @@ function ktLayout() {
   // 2) kutu ve karo konumları
   const boxes = {}, elems = {};
   const rowH = Array(R).fill(0);
-  const vis = {};
+  const vis = {}, nTiles = {};
+  // kutu içi karo sütunu: sütundaki en kalabalık kutuya göre (en çok kt.per); sütundaki kutular aynı genişlikte
+  const colTc = Array(C).fill(1);
   order.forEach(k => {
     vis[k.ad] = ktVisible(k);
-    const n = vis[k.ad].show.length + (vis[k.ad].idle.length ? 1 : 0);
-    rowH[cell[k.ad].r] = Math.max(rowH[cell[k.ad].r], HEAD + Math.ceil(Math.max(1, n) / 2) * (TH + TG) + PAD);
+    nTiles[k.ad] = Math.max(1, vis[k.ad].show.length + (vis[k.ad].idle.length ? 1 : 0));
+    const c = cell[k.ad].c;
+    colTc[c] = Math.max(colTc[c], Math.min(kt.per, nTiles[k.ad]));
+  });
+  const colW = colTc.map(tc => Math.max(KT.PAD * 2 + tc * TW + (tc - 1) * TG, 250));
+  order.forEach(k => {
+    const tc = colTc[cell[k.ad].c];
+    rowH[cell[k.ad].r] = Math.max(rowH[cell[k.ad].r], HEAD + Math.ceil(nTiles[k.ad] / tc) * (TH + TG) + PAD);
   });
   const colX = [], rowY = [];
   let x = gV[0];
-  for (let c = 0; c < C; c++) { colX[c] = x; x += BW + gV[c + 1]; }
+  for (let c = 0; c < C; c++) { colX[c] = x; x += colW[c] + gV[c + 1]; }
   let y = gH[0];
   for (let r = 0; r < R; r++) { rowY[r] = y; y += rowH[r] + gH[r + 1]; }
   const W = x, H = y;
   order.forEach(k => {
     const { r, c } = cell[k.ad], v = vis[k.ad];
     const tiles = [...v.show.map(e => ({ e })), ...(v.idle.length ? [{ idle: v.idle, id: "idle:" + k.ad }] : [])];
-    const h = HEAD + Math.ceil(Math.max(1, tiles.length) / 2) * (TH + TG) + PAD;
-    const b = boxes[k.ad] = { x: colX[c], y: rowY[r], w: BW, h, k, idle: v.idle, tiles: [] };
+    const tc = colTc[c];
+    const h = HEAD + Math.ceil(Math.max(1, tiles.length) / tc) * (TH + TG) + PAD;
+    const b = boxes[k.ad] = { x: colX[c], y: rowY[r], w: colW[c], h, k, idle: v.idle, tiles: [] };
     tiles.forEach((t, j) => {
-      const tx = b.x + PAD + (j % 2) * (TW + TG), ty = b.y + HEAD + Math.floor(j / 2) * (TH + TG);
+      const tx = b.x + PAD + (j % tc) * (TW + TG), ty = b.y + HEAD + Math.floor(j / tc) * (TH + TG);
       const p = { x: tx, y: ty, cx: tx + TW / 2, e: t.e, idle: t.idle, id: t.e?.id || t.id, k: k.ad };
       b.tiles.push(p);
       if (t.e) elems[t.e.id] = p;
@@ -250,7 +262,7 @@ function ktLayout() {
 
   // kanal merkezleri
   const hY = i => (i === 0 ? gH[0] / 2 : rowY[i - 1] + rowH[i - 1] + gH[i] / 2) + hPad[i] / 2;
-  const vX = j => j === 0 ? gV[0] / 2 : colX[j - 1] + BW + gV[j] / 2;
+  const vX = j => j === 0 ? gV[0] / 2 : colX[j - 1] + colW[j - 1] + gV[j] / 2;
   // kurum çerçeveleri: kurumun satırlarını çevreler, başlık kanalın üst kısmında
   const frames = d.coklu ? secRows.map(sr => ({ t: sr.t, x: 6, y: rowY[sr.r0] - gH[sr.r0] + 6, w: W - 12,
     h: rowY[sr.r1] + rowH[sr.r1] + 10 - (rowY[sr.r0] - gH[sr.r0] + 6),
@@ -300,7 +312,7 @@ function ktDraw() {
   // kutu kenarında çıkış / giriş noktaları: aynı kenardaki bağlar karşı ucun x'ine göre sıralanıp yayılır
   const side = {};
   const pushSide = (box, s, i, otherX) => (side[box + "|" + s] ??= []).push({ i, otherX });
-  const cx = id => id.startsWith("k:") ? boxes[id.slice(2)].x + KT.BW / 2 : elems[id].cx;
+  const cx = id => id.startsWith("k:") ? boxes[id.slice(2)].x + boxes[id.slice(2)].w / 2 : elems[id].cx;
   routes.forEach(rt => {
     const l = links[rt.i];
     pushSide(P.cellName[rt.A.r + "," + rt.A.c], rt.exit, rt.i, cx(l.to));
@@ -310,7 +322,7 @@ function ktDraw() {
   for (const [key, arr] of Object.entries(side)) {
     const box = boxes[key.split("|")[0]];
     arr.sort((a, b) => a.otherX - b.otherX);
-    arr.forEach((a, j) => (anchor[a.i] ??= {})[key] = box.x + 18 + (KT.BW - 36) * (arr.length === 1 ? 0.5 : j / (arr.length - 1)));
+    arr.forEach((a, j) => (anchor[a.i] ??= {})[key] = box.x + 18 + (box.w - 36) * (arr.length === 1 ? 0.5 : j / (arr.length - 1)));
   }
   const paths = routes.map(rt => {
     const l = links[rt.i];
