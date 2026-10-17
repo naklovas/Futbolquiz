@@ -175,11 +175,10 @@ topoloji çizer ve şirket içi AI'a etki analizi yaptırır. Canlıda IIS'te, W
     ekrana sığan. Oklar kutunun YAN kenarından (başlığın altından itibaren 9px aralıkla, karşı ucun y'sine göre sıralı; eleman
     modunda karonun y'si) çıkar: komşu sütun → aradaki dikey kanal, aynı sütun → sağdaki kanal, uzak sütun → kendi yanındaki
     kanal → en üst ya da en alt yatay kanal → hedefin yanındaki kanal. Her kanalda her oka şerit; kanal genişliği şerit sayısıyla büyür.
-    GÖRÜNÜM: varsayılan "Özet" (kullanıcı: "küçük çizilsin, ekrana sığsın, aşağı çok iniyor anlaşılmıyor"): kutuda karo yok, uygulama
-    başına tek satır (`ktGroups`: ad · VIP · sunucu · trafiksiz), kutu 300px; satıra / küme başlığına tıkla → `ktGroupModal` (kart
-    listesi → ktOpen/ktServer, geri yığını). "Ayrıntılı" = karolar. Çizim alanı pencere altına kadar (`ktWrapH`), ölçek genişlik VE
-    yüksekliğe sığar (`ktFitScale`, Sığdır düğmesi de). Özette ikinci düğme "Uygulama bağları": eleman bağları (küme)×(APPNAME) satır çiftine toplanır,
-    uçlar o satırın hizasından; Ayrıntılı'da aynı düğme "Tüm eleman bağları" (karo karo). Varsayılan "Küme bağları"
+    ÖZET görünüm denendi, kullanıcı BEĞENMEDİ ("sunucu görünmüyor, geri al") → kaldırıldı. Bunun yerine: kompakt karo (TW 128 × TH 32),
+    en yüksek küme SOL üst sütunda, diğerleri büyükten küçüğe sağdaki sütunlara (sağdakiler soldakini aşarsa sola da), otomatik sütun =
+    ekrana (genişlik VE yükseklik) en büyük ölçekle sığan (`stack(C)` denemesi), açılışta `ktFitScale` ile tamamı ekranda; Ctrl+tekerlek
+    imleç noktasında yakınlaştırır (`ktSetScale`, yalnız svg boyutu), boş yerde sürükle = kaydır (`ktZoomPan`). Varsayılan "Küme bağları"
     (küme çifti başına tek ok; kenar noktaları karşı uca göre yayılır); "Tüm eleman bağları" eleman → eleman (kenar noktası karonun x'i).
     Elemanın üstüne gelince yalnız onun bağları turuncu üst katmanda; küme adının üstüne gelince kümenin bağları. Kutu içinden çizgi
     geçmediği Playwright'ta yol üzerinden örnekleyerek doğrulandı.
