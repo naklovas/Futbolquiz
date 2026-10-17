@@ -540,14 +540,17 @@ app.MapGet("/api/etiketler", async (EnvanterService envanter, CancellationToken 
 });
 
 // Sunucu etiketleme: ERT sunucuları (arama / etiket / etiketsiz filtresi) ve ERT TAG kolonuna yazma.
-app.MapGet("/api/etiket/sunucular", async (string? q, string? etiket, bool? etiketsiz, HttpContext ctx,
+app.MapGet("/api/etiket/sunucular", async (string? ip, string? sunucu, string? uygulama, string? muhafiz, string? segment,
+    string? etiket, string? sirala, string? yon, int? sayfa, int? boyut, HttpContext ctx,
     IConfiguration cfg, EnvanterService envanter, CancellationToken ct) =>
 {
     try
     {
         var env = await envanter.GetAsync(false, ct);
-        var list = EtiketService.List(env, q, string.IsNullOrWhiteSpace(etiket) ? null : etiket.Trim(), etiketsiz == true, cfg.GetValue("Etiket:MaxSatir", 500));
-        return Results.Ok(new { list.Sunucular, list.Toplam, list.Etiketler, yazabilir = EtiketService.CanWrite(cfg, ctx.User?.Identity?.Name) });
+        var list = EtiketService.List(env, new EtiketFiltre(ip, sunucu, uygulama, muhafiz, segment, etiket?.Trim(), sirala,
+            yon == "desc", sayfa ?? 1, boyut ?? 100));
+        return Results.Ok(new { list.Sunucular, list.Toplam, list.Tum, list.Etiketli, list.Etiketler,
+            yazabilir = EtiketService.CanWrite(cfg, ctx.User?.Identity?.Name) });
     }
     catch (Exception ex) { return Results.Json(new { error = ex.Message }, statusCode: 502); }
 });
@@ -566,7 +569,7 @@ app.MapPost("/api/etiket", async (EtiketIstek req, HttpContext ctx, IConfigurati
     {
         int n = await EtiketService.ApplyAsync(cfg, ips, add, remove, user, app.Logger, ct);
         var env = await envanter.GetAsync(true, ct);   // yeni etiketler hemen görünsün
-        var rows = EtiketService.List(env, null, null, false, int.MaxValue).Sunucular.Where(s => ips.Contains(s.Ip)).ToList();
+        var rows = ips.Select(ip => EtiketService.Row(env, ip)).OfType<EtiketSunucu>().ToList();
         return Results.Ok(new EtiketSonuc(n, rows));
     }
     catch (InvalidOperationException ex) { return Results.BadRequest(new { error = ex.Message }); }

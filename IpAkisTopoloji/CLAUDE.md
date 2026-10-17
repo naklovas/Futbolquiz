@@ -129,11 +129,11 @@ topoloji çizer ve şirket içi AI'a etki analizi yaptırır. Canlıda IIS'te, W
     APPNAME "Sistem Portudur" → "Sistem Portudur: RDP" gibi (SystemPorts; `Envanter:SistemPortlari` ile ek/override).
   - **Etiket** (veri ambarı işi için; kullanıcı kararı: HER ŞEY ERT tablosunda, ayrı tablo YOK): `ERT_HOSTIPADDRESS.TAG NVARCHAR(200)`
     (`Envanter:EtiketKolonu`, varsayılan TAG; virgülle birden çok, büyük harfe çevrilir; kolon yoksa sessizce etiketsiz). İleride
-    Entropi'den dolacak. `Etiket.cs` (EtiketService): liste (`/api/etiket/sunucular?q=&etiket=&etiketsiz=`) ve yazma
+    Entropi'den dolacak. `Etiket.cs` (EtiketService): liste (`/api/etiket/sunucular?ip=&sunucu=&uygulama=&muhafiz=&segment=&etiket=&sirala=&yon=&sayfa=&boyut=`; etiket: "" tümü, "-" etiketsiz, "*" etiketli; filtre/sıralama/sayfalama sunucuda, liste envanter anlık görüntüsü başına önbellekli) ve yazma
     (`POST /api/etiket {ips, ekle|kaldir}`: IP'nin mevcut TAG'i DB'den okunur, IP'nin TÜM satırları UPDATE, sonra envanter zorla
     yeniden yüklenir; kolon yoksa ALTER önerisiyle hata). Yetki `Etiket:Yazanlar` (boş = herkes), her değişiklik loglanır.
     Arayüz: **Topoloji** sekmesi (etiket seç → `etiket:<ad>` ile uygulama çizimi, `?topo=`), **Sunucu etiketleme** sekmesi
-    (`wwwroot/etiket.js`: ara, toplu ekle/kaldır, satırda + Etiket, × ile kaldır; `?etiket=`), IP kartında rozet + "+ Etiket".
+    (`wwwroot/etiket.js`: istatistik kartları, hızlı filtre hapları, kolon başına filtre satırı (IP, sunucu, uygulama, VARLIKMUHAFIZI, segment, etiket), sıralanabilir başlıklar, sayfalama, seçim çubuğu ile toplu ekle/kaldır, satırda + Etiket, × ile kaldır; `?etiket=`; başka sekmeye geçince `setUiMode` #main'i temizler), IP kartında rozet + "+ Etiket".
     Plan: Faz 1 AI rol sınıflaması (Exadata, ETL, rapor…; AI kararı ayrı tutulacak), Faz 1.5 aktarım takibi, Faz 2 DB→tablo→kolon.
   - `dbo.vip_envanteri` (hostname, server_ip, server_port, server_type, loadbalancer_ip, loadbalancer_port, loadbalancer_pool)
   - `dbo.vipgw` (GWIP, FW, Segment=CIDR): LB havuz üyelerine kendi segmentindeki GW IP'sinden gider.

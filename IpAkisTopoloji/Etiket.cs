@@ -7,8 +7,12 @@ using Microsoft.Data.SqlClient;
 // ekle / kaldır uygulanır, IP'nin bütün satırları güncellenir; ardından envanter yeniden yüklenir.
 // Yetki: Etiket:Yazanlar listesi doluysa yalnız o kullanıcılar yazar (boş = sayfaya girebilen herkes). Her değişiklik loglanır.
 // ---------------------------------------------------------------------------
-record EtiketSunucu(string Ip, string? Hostname, List<string> Apps, string? Segment, List<string> Tags);
-record EtiketListe(List<EtiketSunucu> Sunucular, int Toplam, List<string> Etiketler);
+record EtiketSunucu(string Ip, string? Hostname, List<string> Apps, string? Muhafiz, string? Segment, List<string> Tags);
+record EtiketSayi(string Ad, int Sunucu);
+// Sunucular = istenen sayfa; Toplam = filtreye uyan; Tum / Etiketli = envanterin geneli; Etiketler = etiket başına sunucu sayısı
+record EtiketListe(List<EtiketSunucu> Sunucular, int Toplam, int Tum, int Etiketli, List<EtiketSayi> Etiketler);
+record EtiketFiltre(string? Ip, string? Sunucu, string? Uygulama, string? Muhafiz, string? Segment, string? Etiket,
+    string? Sirala, bool Azalan, int Sayfa, int Boyut);
 record EtiketIstek(List<string>? Ips, string? Ekle, string? Kaldir);
 record EtiketSonuc(int Guncellenen, List<EtiketSunucu> Sunucular);
 
@@ -41,27 +45,55 @@ static class EtiketService
                                 || string.Equals(a, u.Split('\\').Last(), StringComparison.OrdinalIgnoreCase));
     }
 
-    // Envanterdeki sunucular: arama (IP / hostname / uygulama içinde geçen), etiket filtresi, yalnız etiketsizler.
-    public static EtiketListe List(EnvanterSnapshot env, string? q, string? tag, bool untagged, int max)
+    // Envanterdeki tüm sunucular (IP başına bir satır); envanter anlık görüntüsü başına bir kez hesaplanır.
+    static readonly System.Runtime.CompilerServices.ConditionalWeakTable<EnvanterSnapshot, List<EtiketSunucu>> Cache = new();
+    static List<EtiketSunucu> All(EnvanterSnapshot env) => Cache.GetValue(env, e => e.HostIps
+        .Select(ip =>
+        {
+            var hosts = e.AppsOnIp(ip);
+            string? muh = string.Join(", ", hosts.Select(h => h.VarlikMuhafizi).OfType<string>().Distinct(StringComparer.OrdinalIgnoreCase).Take(3));
+            return new EtiketSunucu(ip, hosts.Select(h => h.UnixName).OfType<string>().FirstOrDefault(),
+                e.AppNamesOnIp(ip).Take(5).ToList(), muh == "" ? null : muh, e.FindSegment(ip)?.Label, e.TagsOf(ip));
+        })
+        .ToList());
+
+    public static EtiketSunucu? Row(EnvanterSnapshot env, string ip) => All(env).FirstOrDefault(s => s.Ip == ip);
+
+    static bool Has(string? value, string? q) => string.IsNullOrWhiteSpace(q) || (value?.Contains(q.Trim(), StringComparison.CurrentCultureIgnoreCase) ?? false);
+
+    // Kolon filtreleri (içinde geçen, büyük/küçük harf duyarsız), etiket filtresi ("" tümü, "-" etiketsiz, "*" etiketli, ad),
+    // sıralama ve sayfalama.
+    public static EtiketListe List(EnvanterSnapshot env, EtiketFiltre f)
     {
-        q = q?.Trim();
-        var rows = env.HostIps
-            .Select(ip =>
+        var all = All(env);
+        IEnumerable<EtiketSunucu> q = all
+            .Where(s => Has(s.Ip, f.Ip) && Has(s.Hostname, f.Sunucu) && Has(string.Join(" ", s.Apps), f.Uygulama)
+                        && Has(s.Muhafiz, f.Muhafiz) && Has(s.Segment, f.Segment))
+            .Where(s => f.Etiket switch
             {
-                var hosts = env.AppsOnIp(ip);
-                return new EtiketSunucu(ip, hosts.Select(h => h.UnixName).OfType<string>().FirstOrDefault(),
-                    env.AppNamesOnIp(ip).Take(4).ToList(), env.FindSegment(ip)?.Label, env.TagsOf(ip));
-            })
-            .Where(s => string.IsNullOrEmpty(q)
-                        || s.Ip.Contains(q, StringComparison.OrdinalIgnoreCase)
-                        || (s.Hostname?.Contains(q, StringComparison.OrdinalIgnoreCase) ?? false)
-                        || s.Apps.Any(a => a.Contains(q, StringComparison.OrdinalIgnoreCase)))
-            .Where(s => string.IsNullOrEmpty(tag) || s.Tags.Contains(tag, StringComparer.OrdinalIgnoreCase))
-            .Where(s => !untagged || s.Tags.Count == 0)
-            .OrderBy(s => s.Tags.Count == 0).ThenBy(s => s.Ip, StringComparer.Ordinal)
-            .ToList();
-        return new EtiketListe(rows.Take(max).ToList(), rows.Count, env.TagCatalog().Select(t => t.Tag).ToList());
+                null or "" => true,
+                "-" => s.Tags.Count == 0,
+                "*" => s.Tags.Count > 0,
+                var t => s.Tags.Contains(t, StringComparer.OrdinalIgnoreCase)
+            });
+        var cmp = StringComparer.Create(new System.Globalization.CultureInfo("tr-TR"), true);
+        Func<EtiketSunucu, string> key = f.Sirala switch
+        {
+            "sunucu" => s => s.Hostname ?? "\uffff",
+            "uygulama" => s => s.Apps.FirstOrDefault() ?? "\uffff",
+            "muhafiz" => s => s.Muhafiz ?? "\uffff",
+            "segment" => s => s.Segment ?? "\uffff",
+            "etiket" => s => s.Tags.Count == 0 ? "\uffff" : string.Join(",", s.Tags),
+            _ => s => IpKey(s.Ip)
+        };
+        var sorted = (f.Azalan ? q.OrderByDescending(key, cmp) : q.OrderBy(key, cmp)).ToList();
+        int size = Math.Clamp(f.Boyut, 10, 500), page = Math.Max(1, f.Sayfa);
+        var tags = env.TagCatalog().Select(t => new EtiketSayi(t.Tag, t.Count)).ToList();
+        return new EtiketListe(sorted.Skip((page - 1) * size).Take(size).ToList(), sorted.Count, all.Count, all.Count(s => s.Tags.Count > 0), tags);
     }
+
+    // IP'ler sayısal sırayla: "010.001.002.003"
+    static string IpKey(string ip) => string.Join(".", ip.Split('.').Select(p => p.PadLeft(3, '0')));
 
     // Seçilen IP'lere etiket ekler / kaldırır. Döner: güncellenen satır sayısı.
     public static async Task<int> ApplyAsync(IConfiguration cfg, List<string> ips, string? add, string? remove, string user,

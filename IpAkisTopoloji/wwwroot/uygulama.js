@@ -29,15 +29,15 @@ function switchRange(from, to) {
 }
 function setUiMode(m) {
   if (m !== uiMode) switchRange(uiMode, m);
+  // Etiketleme tablosu başka sekmede kalmasın: sekmeden çıkınca içerik temizlenir
+  if (uiMode === "etiket" && m !== "etiket") { $("#main").innerHTML = ""; etq.shell = false; }
   uiMode = m;
   document.querySelectorAll("#modeTabs button").forEach(b => b.classList.toggle("on", b.dataset.ui === m));
   $("#ipLabel").hidden = m !== "ip";
   $("#appLabel").hidden = m !== "app";
   $("#topoLabel").hidden = m !== "topo";
-  $("#etqLabel").hidden = m !== "etiket";
-  // Etiketleme trafik sorgulamaz: tarih, kutu ve kaynak seçimleri gizli
-  $("#startLabel").hidden = $("#endLabel").hidden = $("#srcChecks").hidden = m === "etiket";
-  $("#go").textContent = m === "etiket" ? "Ara" : "Sorgula";
+  // Etiketleme trafik sorgulamaz: tarih, kutu, kaynak seçimleri ve Sorgula gizli (filtreler tablonun içinde)
+  $("#startLabel").hidden = $("#endLabel").hidden = $("#srcChecks").hidden = $("#go").hidden = m === "etiket";
   $("#hop2Label").hidden = m !== "ip";
   // Erişim sorgusu Firewall + Carbon Black ile çalışır; AppResponse kutusu ve 2. seviye anlamsız.
   $("#accLabel").hidden = m !== "erisim";
@@ -51,7 +51,7 @@ function setUiMode(m) {
 document.querySelectorAll("#modeTabs button").forEach(b => b.addEventListener("click", () => {
   setUiMode(b.dataset.ui);
   const u = b.dataset.ui;
-  (u === "app" ? $("#appName") : u === "topo" ? $("#topoTag") : u === "erisim" ? $("#accSrc") : u === "etiket" ? $("#etqQ") : $("#ip")).focus();
+  (u === "app" ? $("#appName") : u === "topo" ? $("#topoTag") : u === "erisim" ? $("#accSrc") : u === "etiket" ? $("#modeTabs") : $("#ip")).focus();
   if (u === "etiket") runEtiket();
 }));
 

@@ -243,11 +243,6 @@
     <label id="appLabel" hidden>Uygulama <input type="text" id="appName" list="appList" placeholder="Uygulama adı yazın…" autocomplete="off" style="width:280px"></label>
     <datalist id="appList"></datalist>
     <label id="topoLabel" hidden title="Envanterde (ERT, TAG kolonu) bu etiketi taşıyan sunucuların topolojisi">Etiket <select id="topoTag" style="min-width:220px"></select></label>
-    <span id="etqLabel" class="acc-fields" hidden>
-      <label>Ara <input type="text" id="etqQ" placeholder="IP, sunucu adı ya da uygulama" style="width:280px"></label>
-      <label>Etiket <select id="etqTag"><option value="">tümü</option></select></label>
-      <label style="flex-direction:row;align-items:center;gap:6px"><input type="checkbox" id="etqNone"> Yalnız etiketsizler</label>
-    </span>
     <span id="accLabel" class="acc-fields" hidden>
       <label>Kaynak IP <input type="text" id="accSrc" placeholder="10.50.20.15"></label>
       <span class="acc-arrow">→</span>
@@ -378,7 +373,7 @@ function initForm() {
     const end = isNaN(e) ? now : e;
     $("#end").value = toLocalInput(end); $("#start").value = toLocalInput(new Date(end - 3600e3));
   }
-  if (p.get("etiket") != null) { $("#etqQ").value = p.get("etiket"); return "etiket"; }
+  if (p.get("etiket") != null) return "etiket";
   if (p.get("topo")) { topoWanted = p.get("topo"); return "topo"; }
   return p.get("app") ? "app" : p.get("ip") ? "ip" : null;
 }
@@ -642,7 +637,7 @@ function renderTarget(d) {
     : `<div class="unk">Bu IP için uygulama envanterinde kayıt yok.</div>`;
 
   return `<div class="target-grid">
-      <div><div class="bigip">${esc(t.ip)}</div><div class="tagrow">${(tagMap?.[t.ip] ?? []).map(x => `<span class="badge" title="Envanter etiketi (ERT · TAG)">${esc(x)} <a href="#" data-untag="${esc(x)}" data-ip="${esc(t.ip)}" title="Etiketi kaldır">×</a></span> `).join("")}<button type="button" class="ghost small" data-tagip="${esc(t.ip)}" title="Bu sunucuya etiket ekle (ERT TAG kolonuna yazılır)">+ Etiket</button></div>${segDl}</div>
+      <div><div class="bigip">${esc(t.ip)}</div><div class="tagrow">${(tagMap?.[t.ip] ?? []).map(x => tagChip(x, t.ip, true)).join("")}<button type="button" class="eg-add" data-tagip="${esc(t.ip)}" title="Bu sunucuya etiket ekle (ERT TAG kolonuna yazılır)">+ Etiket</button></div>${segDl}</div>
       <div>
         <div class="kpis" style="margin-bottom:12px">
           <div class="kpi"><b style="color:var(--in)">${fmt(inPeers)}</b><span>gelen IP · ${fmt(inSegs)} segment</span></div>
