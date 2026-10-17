@@ -31,6 +31,7 @@ topoloji çizer ve şirket içi AI'a etki analizi yaptırır. Canlıda IIS'te, W
 | `Erisim.cs` | Erişim sorgula: kaynak IP → hedef IP (port) izin/engel, son görülme (Firewall + Carbon Black) |
 | `Opinnate.cs` | Opinnate firewall kural kontrolü (rule-checker/topology): tanımlı kurala göre erişim, yol üzerindeki cihazlar |
 | `Islev.cs` | İşlev haritası: etiketli sunucuların AI ile işlev kümelemesi (ERT AI_KUME / AI_DETAY), SM / MSY / ÇSY kanıtları |
+| `KumeTopoloji.cs` | Küme topolojisi: işlev kümeleri kutu, içinde VIP / VIP'siz sunucu elemanları, aralarındaki trafik |
 | `Etiket.cs` | Sunucu etiketleme: ERT TAG kolonu okuma/yazma (Topoloji ve Sunucu etiketleme sekmeleri) |
 | `F5Waf.cs` | F5 ASM / Bot Defense güvenlik logları (Splunk index=f5): erişimde engel kararı, IP görünümünde URI listesi |
 | `PortBilgisi.cs` | Port → işlev ve kesilirse duracak iş (AI prompt'u için) |
@@ -158,6 +159,18 @@ topoloji çizer ve şirket içi AI'a etki analizi yaptırır. Canlıda IIS'te, W
     AI'ca ezilmez. Arka plan işi (tek seferde bir tane): `/api/islev/calistir {etiket, hepsi, sadeceKumele}`, `/api/islev/durum`, `/durdur`;
     `/api/islev?etiket=` harita, `/api/islev/profil?ip=` AI'a giden metin + SM kayıtları (link şablonları `Islev:SmTalepLinki` {NUMBER},
     `SmGorevLinki` {CMTASKID}; iç adresler repoya girmez). Yetki `Etiket:Yazanlar`. "Bağımlılık çizimi" düğmesi eski etiket topolojisini açar.
+  - **Küme topolojisi** (`KumeTopoloji.cs`, `wwwroot/kumetopo.js`; işlev haritasında "Topoloji çiz", `?topo=X&ciz=1`):
+    `/api/islev/topoloji?etiket=&start=&end=&appliance=&sources=`. Eleman = haritadaki VIP (`v:ip:port`) ya da VIP üyesi olmayan
+    sunucu (`s:ip`); havuz üyesinin trafiği VIP elemanına yazılır. Sorgu: VIP IP'leri + sunucular (`Islev:TopolojiMaxIp`=400),
+    `TopolojiParca`=80'erli parçalarla Splunk/AR/FW sırayla, sonuçlar birleşir. IP düzeyinde akış: hedef sorgulandıysa yalnız
+    gelen tarafından sayılır; LB GW → üye ve aynı eleman içi atlanır; etiket dışı trafik eleman başına DisGelen/DisGiden (ilk 8).
+    Çıktı: Kumeler/Elemanlar/Uyeler, Baglar (eleman→eleman, portlar, hits, engel, altyapı), Akislar (IP düzeyi, ilk 5000).
+    Arayüz: küme kutuları katmanlı sütunlarda (baskın yönle en uzun yol; bağlantıyı açan solda, karşılayan sağda; sütun içi barycenter),
+    elemanlar kutuda satır; oklar kutu kenarından eleman hizasından, 1 sütun = düz eğri, aynı sütun = sağa kıvrım, >1 sütun =
+    üst/alt kanal (CH yüksekliği ayrılır). Kalınlık log(hits), kırmızı kesik = tamamı engellenen, altyapı portları varsayılan gizli,
+    "Küme bağları" modu kümeler arası toplam. Hover vurgusu, ok üzerinde ipucu. Elemana tıkla → ortada pencere (VIP: üyeler,
+    kümelerden gelen/giden, etiket dışı; üyeye tıkla → sunucu: AI rolü, /api/islev/profil gerekçe ve kanıtlar, IP düzeyi akışlar,
+    "IP topolojisini aç"), "← geri" yığını, Esc kapatır. Backend `KtTest` benzeri sahte envanterle doğrulandı (scratch, repoda yok).
     Plan: Faz 1 AI rol sınıflaması (Exadata, ETL, rapor…; AI kararı ayrı tutulacak), Faz 1.5 aktarım takibi, Faz 2 DB→tablo→kolon.
   - `dbo.vip_envanteri` (hostname, server_ip, server_port, server_type, loadbalancer_ip, loadbalancer_port, loadbalancer_pool)
   - `dbo.vipgw` (GWIP, FW, Segment=CIDR): LB havuz üyelerine kendi segmentindeki GW IP'sinden gider.

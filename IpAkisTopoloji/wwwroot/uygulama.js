@@ -32,7 +32,7 @@ function setUiMode(m) {
   // Etiketleme tablosu başka sekmede kalmasın: sekmeden çıkınca içerik temizlenir
   if (uiMode === "etiket" && m !== "etiket") { $("#main").innerHTML = ""; etq.shell = false; }
   // İşlev haritası da başka sekmede kalmasın; ilerleme yoklaması durur
-  if (uiMode === "topo" && m !== "topo") { $("#main").innerHTML = ""; ivStopPoll(); iv.sel = null; }
+  if (uiMode === "topo" && m !== "topo") { $("#main").innerHTML = ""; ivStopPoll(); iv.sel = null; kt.abort?.abort(); ktClose(); }
   uiMode = m;
   document.querySelectorAll("#modeTabs button").forEach(b => b.classList.toggle("on", b.dataset.ui === m));
   $("#ipLabel").hidden = m !== "ip";
@@ -77,7 +77,8 @@ async function runTopo() {
   const tag = topoWanted ?? $("#topoTag").value;
   topoWanted = null;
   if (!tag) { alert("Henüz etiketli sunucu yok. Sunucu etiketleme sekmesinden sunuculara etiket ekleyin."); return; }
-  runIslev(tag);
+  // ?topo=X&ciz=1: doğrudan küme topolojisi
+  if (new URLSearchParams(location.search).get("ciz") === "1") ktRun(tag); else runIslev(tag);
 }
 
 async function loadAppCatalog() {

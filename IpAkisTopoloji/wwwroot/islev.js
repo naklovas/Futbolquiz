@@ -117,7 +117,8 @@ function ivRender() {
       <button id="ivAll" ${run || d.uyari ? "disabled" : ""} title="Elle düzeltilenler hariç tüm sunucuları yeniden sınıflar">Hepsini yeniden</button>
       <button id="ivClu" ${run || d.uyari || !d.siniflanan ? "disabled" : ""} title="Sunucuları yeniden sormadan yalnız kümeleri yeniden oluşturur">Yeniden kümele</button>` : ""}
       ${w ? `<button id="ivPick" class="${iv.pick ? "on" : ""}" title="Sunucuları seçip yeni bir kümeye ya da var olan bir kümeye taşıyın">${iv.pick ? "Seçimi bitir" : "+ Yeni küme / taşı"}</button>` : ""}
-      <button id="ivDep" title="Etiketli sunucuların trafik bağımlılık çizimi (seçili tarih aralığı)">Bağımlılık çizimi</button>
+      <button id="ivTopo" class="primary" title="Kümeleri kutu kutu, içlerinde VIP'ler ve sunucularla; aralarındaki trafikle çizer (seçili tarih aralığı)">Topoloji çiz</button>
+      <button id="ivDep" title="Etiketli sunucuların uygulama görünümündeki eski bağımlılık çizimi">Eski çizim</button>
     </div>
     <div id="ivRunBox"></div>
     <div id="ivPickBar"></div>
@@ -132,6 +133,7 @@ function ivRender() {
   });
   $("#ivClu")?.addEventListener("click", () => ivStart({ sadeceKumele: true }));
   $("#ivPick")?.addEventListener("click", () => { iv.pick = iv.pick ? null : new Set(); ivCloseDrawer(); ivRender(); });
+  $("#ivTopo").addEventListener("click", () => ktRun(iv.tag));
   $("#ivDep").addEventListener("click", () => { ivStopPoll(); runApp("etiket:" + iv.tag, "topo"); });
   if (iv.sel) ivDrawer(iv.sel);
 }

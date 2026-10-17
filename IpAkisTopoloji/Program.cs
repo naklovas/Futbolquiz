@@ -584,6 +584,56 @@ app.MapGet("/api/islev", async (string etiket, HttpContext ctx, IConfiguration c
     catch (Exception ex) { return Results.Json(new { error = ex.Message }, statusCode: 502); }
 });
 
+// Küme topolojisi: kümeler kutu, içlerinde VIP'ler ve VIP'siz sunucular; aralarındaki trafik (KumeTopoloji.cs).
+app.MapGet("/api/islev/topoloji", async (string etiket, string? start, string? end, int? appliance, string? sources, HttpContext ctx,
+    IConfiguration cfg, IHttpClientFactory factory, EnvanterService envanter, IslevService islev, CancellationToken ct) =>
+{
+    var sw = Stopwatch.StartNew();
+    var (env, envErr) = await Capture(() => envanter.GetAsync(false, ct), ct);
+    if (env == null) return Results.Json(new { error = "Envanter okunamadı: " + envErr }, statusCode: 502);
+    var map = await islev.MapAsync(etiket.Trim(), false, ct);
+    if (map.Toplam == 0) return Results.BadRequest(new { error = $"Bu etikette sunucu yok: {etiket}" });
+    var queried = KumeTopoloji.Queried(map, cfg.GetValue("Islev:TopolojiMaxIp", 400));
+    if (!LookupQuery.TryParse(queried[0], start, end, cfg.GetValue("MaxRangeHours", 24), out var q, out var error))
+        return Results.BadRequest(new { error });
+
+    var wanted = (sources ?? "splunk,appresponse,firewall").ToLowerInvariant();
+    // Yüzlerce IP tek filtreye sığmasın diye parçalara bölünür (Islev:TopolojiParca), parçalar sırayla sorgulanıp birleştirilir.
+    var parts = queried.Chunk(Math.Clamp(cfg.GetValue("Islev:TopolojiParca", 80), 10, 400)).Select(c => (IReadOnlyList<string>)c).ToList();
+    async Task<SplunkResult> SpAll(Func<IReadOnlyList<string>, Task<SplunkResult>> one)
+    {
+        var rs = new List<SplunkResult>();
+        foreach (var part in parts) rs.Add(await one(part));
+        return new SplunkResult(rs.SelectMany(r => r.Rows).ToList(), rs.SelectMany(r => r.Messages).Distinct().ToList(), rs.Sum(r => r.ElapsedMs));
+    }
+    async Task<AppResponseResult> ArAll()
+    {
+        var rs = new List<AppResponseResult>();
+        foreach (var part in parts) rs.Add(await AppResponseService.QueryAnyAsync(q!, appliance ?? 0, cfg, factory.CreateClient("appresponse"), ct, part));
+        return new AppResponseResult(rs[0].Appliance, rs.Max(r => r.VifgCount), rs.Sum(r => r.RawL4), rs.Sum(r => r.RawL7),
+            rs.SelectMany(r => r.L4).ToList(), rs.SelectMany(r => r.L7).ToList(), rs.SelectMany(r => r.Messages).Distinct().ToList(), rs.Sum(r => r.ElapsedMs));
+    }
+    var spTask = wanted.Contains("splunk")
+        ? Capture(() => SpAll(part => SplunkService.QueryAsync(q!, cfg, factory.CreateClient("splunk"), ct, part)), ct)
+        : Task.FromResult<(SplunkResult?, string?)>((null, null));
+    var arTask = wanted.Contains("appresponse")
+        ? Capture(ArAll, ct)
+        : Task.FromResult<(AppResponseResult?, string?)>((null, null));
+    var fwTask = wanted.Contains("firewall") && FirewallService.Enabled(cfg)
+        ? Capture(() => SpAll(part => FirewallService.QueryAsync(q!, cfg, factory.CreateClient("splunk"), ct, part)), ct)
+        : Task.FromResult<(SplunkResult?, string?)>((null, null));
+    try { await Task.WhenAll(spTask, arTask, fwTask); }
+    catch (OperationCanceledException) when (ct.IsCancellationRequested) { return Results.StatusCode(499); }
+    if (ct.IsCancellationRequested) return Results.StatusCode(499);
+
+    var (sp, spErr) = spTask.Result;
+    var (ar, arErr) = arTask.Result;
+    var (fw, fwErr) = fwTask.Result;
+    var (spSt, arSt, envSt) = Statuses(wanted, sp, spErr, ar, arErr, env, envErr);
+    return Results.Ok(KumeTopoloji.Build(map, queried, sp, ar, fw, env, AppTopology.InfraPorts(cfg), spSt, arSt, envSt, sw.ElapsedMilliseconds)
+        with { Firewall = FirewallStatus(wanted, cfg, fw, fwErr) });
+});
+
 app.MapGet("/api/islev/durum", (IslevService islev) => Results.Ok(islev.Durum));
 
 // Bir sunucunun AI'a giden bilgi özeti + ham kayıtlar (SM talepleri bağlantılarıyla).
