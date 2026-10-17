@@ -170,9 +170,11 @@ topoloji çizer ve şirket içi AI'a etki analizi yaptırır. Canlıda IIS'te, W
     sütunluk ızgara (net akış sırası, "Sütun" seçici), kutu içinde varsayılan 5 sütunlu karolar ("Kutu içi" seçici 2–6; ızgara sütunundaki
     kutular aynı genişlikte, karo sütunu sütundaki en kalabalık kutuya göre; otomatik ızgara sütunu = ekran genişliğine (%15 küçültme payıyla) sığan en çok kutu; kullanıcı "kutu içi 4–5 sütun, sayfayı doldursun" dedi); "Kutu içi grup" = Uygulama (ERT, varsayılan): kutu içinde karolar ERT APPNAME alt başlıkları
     altında (`KtEleman.Uygulama`: VIP'in uygulaması ya da üyelerinin ilk uygulaması; sunucuda ilk sistem-dışı APPNAME; `ktPlan`), "Yok" = düz ızgara; trafiksiz sunucular "+N trafiksiz" karosunda
-    (tıkla → açılır). Oklar YALNIZ kutular arası yatay/dikey kanallardan, köşeleri yuvarlatılmış: aşağı satıra = alt kenar → alt kanal
-    → (gerekirse hedef sütunun sol kanalında dikey) → hedefin üst kenarı; yukarı tersi; aynı satır alt kenardan alt kanal. Her
-    kanalda her oka şerit; kanal genişliği şerit sayısıyla (en çok 170/260) büyür, şerit aralığı kanala sığar. Varsayılan "Küme bağları"
+    (tıkla → açılır). YERLEŞİM (canlıda satır hizalı ızgara uzun ETL kutusu yüzünden boşluklu/şekilsiz kaldı → değişti): SÜTUN
+    YIĞMA — kümeler akış sırasıyla "en kısa sütuna" üst üste dizilir (satır hizası yok); otomatik sütun sayısı en geniş kutuya göre
+    ekrana sığan. Oklar kutunun YAN kenarından (başlığın altından itibaren 9px aralıkla, karşı ucun y'sine göre sıralı; eleman
+    modunda karonun y'si) çıkar: komşu sütun → aradaki dikey kanal, aynı sütun → sağdaki kanal, uzak sütun → kendi yanındaki
+    kanal → en üst ya da en alt yatay kanal → hedefin yanındaki kanal. Her kanalda her oka şerit; kanal genişliği şerit sayısıyla büyür. Varsayılan "Küme bağları"
     (küme çifti başına tek ok; kenar noktaları karşı uca göre yayılır); "Tüm eleman bağları" eleman → eleman (kenar noktası karonun x'i).
     Elemanın üstüne gelince yalnız onun bağları turuncu üst katmanda; küme adının üstüne gelince kümenin bağları. Kutu içinden çizgi
     geçmediği Playwright'ta yol üzerinden örnekleyerek doğrulandı.

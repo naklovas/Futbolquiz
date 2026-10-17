@@ -199,115 +199,98 @@ function ktPlan(k, tc) {
   return { h: y + KT.PAD, items, idle: v.idle };
 }
 
+// Yerleşim (canlıda satır hizalı ızgara uzun kutular yüzünden boşluklu / şekilsiz kaldı → sütun yığma):
+// kümeler C sütuna "en kısa sütuna koy" kuralıyla üst üste dizilir (akış sırası korunur). Oklar kutunun YAN kenarından çıkar,
+// sütunlar arası dikey kanaldan gider; komşu sütun → aradaki kanal, aynı sütun → sağdaki kanal, uzak sütun → en üst ya da
+// en alt yatay kanal üzerinden. Her kanalda her oka ayrı şerit.
 function ktLayout() {
-  const d = kt.data, { TW, TH, TG, PAD, HEAD, BW } = KT;
+  const d = kt.data, { TW, TG, PAD } = KT;
   const elemKume = {};
   d.kumeler.forEach(k => k.elemanlar.forEach(e => elemKume[e.id] = k.ad));
-  // akış sırası: kümeler arası net giden trafiği fazla olan önce
   const net = {};
   d.baglar.forEach(b => { const f = elemKume[b.from], t = elemKume[b.to]; if (f && t && f !== t) { net[f] = (net[f] || 0) + b.hits; net[t] = (net[t] || 0) - b.hits; } });
   const flow = (a, b) => (net[b.ad] || 0) - (net[a.ad] || 0) || b.elemanlar.length - a.elemanlar.length;
-  // Birden çok kurum: her kurum kendi satırlarından başlar (kurum çerçevesi), kurum içinde akış sırası
   const sections = d.coklu
     ? [...new Set(d.kumeler.map(k => k.tenant))].sort((a, b) => a.localeCompare(b, "tr")).map(t => ({ t, ks: d.kumeler.filter(k => k.tenant === t).sort(flow) }))
     : [{ t: null, ks: [...d.kumeler].sort(flow) }];
   const maxSec = Math.max(...sections.map(s => s.ks.length));
-  // kutu ızgarası: kutu içi karo sütunu 4+ ise kutular geniş, otomatikte 3 sütun
-  // Otomatik: ekran genişliğine sığan en çok kutu sütunu (kutu genişliği = karo sayısı × kutu içi sütun); seçiciyle sabitlenebilir
+  const tiles = k => { const v = ktVisible(k); return Math.max(1, v.show.length + (v.idle.length ? 1 : 0)); };
+  const bw = k => { const tc = Math.min(kt.per, tiles(k)); return Math.max(PAD * 2 + tc * TW + (tc - 1) * TG, 250); };
   const fitCols = () => {
-    // %15'e kadar küçültmeye izin verilir (yazılar hâlâ okunur)
     const avail = Math.max(600, ($("#ktWrap")?.clientWidth || 1600) - 8) * 1.15;
-    const bw = k => { const v = ktVisible(k), n = Math.max(1, v.show.length + (v.idle.length ? 1 : 0)), tc = Math.min(kt.per, n);
-      return Math.max(KT.PAD * 2 + tc * TW + (tc - 1) * TG, 250); };
-    for (let c = maxSec; c > 1; c--) {
-      const ok = sections.every(sec => {
-        const w = Array(c).fill(0);
-        sec.ks.forEach((k, i) => w[i % c] = Math.max(w[i % c], bw(k)));
-        return w.reduce((a, b) => a + b, 0) + (c + 1) * 50 <= avail;
-      });
-      if (ok) return c;
-    }
-    return 1;
+    const widest = Math.max(...d.kumeler.map(bw));
+    return Math.max(1, Math.min(maxSec, Math.floor((avail - 50) / (widest + 60))));
   };
   const C = Math.max(1, Math.min(maxSec, kt.cols || fitCols()));
-  const cell = {}, order = [], secRows = [];
-  let R = 0;
-  for (const sec of sections) {
-    const r0 = R;
-    sec.ks.forEach((k, i) => { cell[k.ad] = { r: R + Math.floor(i / C), c: i % C }; order.push(k); });
-    R += Math.ceil(sec.ks.length / C);
-    secRows.push({ t: sec.t, r0, r1: R - 1 });
-  }
-  kt.pos = { elemKume, cell, C, R };
+  const GAPY = 34;
 
-  // 1) güzergâhlar ızgara düzeyinde (hangi kanallar) → şerit sayıları → kanal genişlikleri
+  // 1) kutu planları ve sütun yığma (sütun içi y, bölüme göre)
+  const plan = {}, cell = {}, secH = [], colW = Array(C).fill(250);
+  sections.forEach((sec, si) => {
+    const colH = Array(C).fill(0);
+    for (const k of sec.ks) {
+      plan[k.ad] = ktPlan(k, Math.min(kt.per, tiles(k)));
+      const c = colH.indexOf(Math.min(...colH));
+      cell[k.ad] = { c, s: si, yRel: colH[c] };
+      colH[c] += plan[k.ad].h + GAPY;
+      colW[c] = Math.max(colW[c], bw(k));
+    }
+    secH[si] = Math.max(...colH) - GAPY;
+  });
+  kt.pos = { elemKume, cell, C };
+
+  // 2) güzergâh tipleri ve kanal kullanımı (uzak sütunlar için üst / alt kanal, bölüm içi göreli y'ye göre)
   const links = ktLinks();
-  const hUse = Array.from({ length: R + 1 }, () => []), vUse = Array.from({ length: C + 1 }, () => []);
+  const kOf = id => elemKume[id] || id.slice(2);
+  const vUse = Array.from({ length: C + 1 }, () => []), chUse = { top: [], bot: [] };
   const routes = links.map((l, i) => {
-    const A = cell[elemKume[l.from] || l.from.slice(2)], B = cell[elemKume[l.to] || l.to.slice(2)];
-    const rt = { A, B, i };
-    if (B.r > A.r) { rt.h1 = A.r + 1; rt.exit = "bot"; rt.enter = "top"; if (B.r > A.r + 1) { rt.v = B.c; rt.h2 = B.r; } }
-    else if (B.r < A.r) { rt.h1 = A.r; rt.exit = "top"; rt.enter = "bot"; if (B.r < A.r - 1) { rt.v = B.c; rt.h2 = B.r + 1; } }
-    else { rt.h1 = A.r + 1; rt.exit = "bot"; rt.enter = "bot"; }
-    rt.l1 = hUse[rt.h1].push(i) - 1;
-    if (rt.v != null) { rt.lv = vUse[rt.v].push(i) - 1; rt.l2 = hUse[rt.h2].push(i) - 1; }
+    const A = cell[kOf(l.from)], B = cell[kOf(l.to)], rt = { i, A, B, ka: kOf(l.from), kb: kOf(l.to) };
+    if (A.c === B.c) { rt.out = "R"; rt.in = "R"; rt.g1 = A.c + 1; }
+    else if (B.c === A.c + 1) { rt.out = "R"; rt.in = "L"; rt.g1 = A.c + 1; }
+    else if (B.c === A.c - 1) { rt.out = "L"; rt.in = "R"; rt.g1 = A.c; }
+    else if (B.c > A.c) { rt.out = "R"; rt.in = "L"; rt.g1 = A.c + 1; rt.g2 = B.c; }
+    else { rt.out = "L"; rt.in = "R"; rt.g1 = A.c; rt.g2 = B.c + 1; }
+    rt.l1 = vUse[rt.g1].push(i) - 1;
+    if (rt.g2 != null) {
+      const mid = (A.yRel + plan[rt.ka].h / 2 + B.yRel + plan[rt.kb].h / 2) / 2, tot = secH[A.s] || 1;
+      rt.ch = A.s !== B.s ? (A.s < B.s ? "bot" : "top") : mid < tot / 2 ? "top" : "bot";
+      rt.lc = chUse[rt.ch].push(i) - 1;
+      rt.l2 = vUse[rt.g2].push(i) - 1;
+    }
     return rt;
   });
-  const LANE = 4;
-  const cap = kt.mode === "kume" ? 170 : 260;
-  const gH = hUse.map(u => Math.min(cap, Math.max(44, 26 + u.length * LANE)));
-  // kurum başlığı için kurumun ilk satırının üstündeki kanala yer
-  // (başlık bandı hPad kadar; şeritler bandın altındaki kısımda kalır)
-  const hPad = Array(R + 1).fill(0);
-  if (d.coklu) secRows.forEach(sr => { hPad[sr.r0] = 34; gH[sr.r0] += 34; });
-  const gV = vUse.map(u => Math.min(cap, Math.max(48, 26 + u.length * LANE)));
+  const LANE = 4, cap = kt.mode === "kume" ? 170 : 260;
+  const gV = vUse.map(u => Math.min(cap, Math.max(44, 24 + u.length * LANE)));
+  const chH = { top: chUse.top.length ? Math.min(140, 22 + chUse.top.length * 3.5) : 16, bot: chUse.bot.length ? Math.min(140, 22 + chUse.bot.length * 3.5) : 16 };
 
-  // 2) kutu ve karo konumları
-  const boxes = {}, elems = {};
-  const rowH = Array(R).fill(0);
-  const vis = {}, nTiles = {};
-  // kutu içi karo sütunu: sütundaki en kalabalık kutuya göre (en çok kt.per); sütundaki kutular aynı genişlikte
-  const colTc = Array(C).fill(1);
-  order.forEach(k => {
-    vis[k.ad] = ktVisible(k);
-    nTiles[k.ad] = Math.max(1, vis[k.ad].show.length + (vis[k.ad].idle.length ? 1 : 0));
-    const c = cell[k.ad].c;
-    colTc[c] = Math.max(colTc[c], Math.min(kt.per, nTiles[k.ad]));
-  });
-  const colW = colTc.map(tc => Math.max(KT.PAD * 2 + tc * TW + (tc - 1) * TG, 250));
-  const plan = {};
-  order.forEach(k => {
-    plan[k.ad] = ktPlan(k, colTc[cell[k.ad].c]);
-    rowH[cell[k.ad].r] = Math.max(rowH[cell[k.ad].r], plan[k.ad].h);
-  });
-  const colX = [], rowY = [];
+  // 3) konumlar
+  const colX = [];
   let x = gV[0];
   for (let c = 0; c < C; c++) { colX[c] = x; x += colW[c] + gV[c + 1]; }
-  let y = gH[0];
-  for (let r = 0; r < R; r++) { rowY[r] = y; y += rowH[r] + gH[r + 1]; }
-  const W = x, H = y;
-  order.forEach(k => {
-    const { r, c } = cell[k.ad], pl = plan[k.ad];
-    const b = boxes[k.ad] = { x: colX[c], y: rowY[r], w: colW[c], h: pl.h, k, idle: pl.idle, tiles: [], hdrs: [] };
+  const W = x;
+  const TITLE = d.coklu ? 34 : 0, SECGAP = 44;
+  const secY = [];
+  let y = chH.top + 8;
+  sections.forEach((sec, si) => { secY[si] = y + TITLE; y += TITLE + secH[si] + SECGAP; });
+  const H = y - SECGAP + 8 + chH.bot;
+  const boxes = {}, elems = {};
+  sections.forEach((sec, si) => sec.ks.forEach(k => {
+    const { c, yRel } = cell[k.ad], pl = plan[k.ad];
+    const b = boxes[k.ad] = { x: colX[c], y: secY[si] + yRel, w: bw(k), h: pl.h, k, idle: pl.idle, tiles: [], hdrs: [], c };
     for (const it of pl.items) {
       if (it.hdr != null) { b.hdrs.push({ t: it.hdr, n: it.n, y: b.y + it.y }); continue; }
       const tx = b.x + PAD + it.col * (TW + TG), ty = b.y + it.y;
-      const p = { x: tx, y: ty, cx: tx + TW / 2, e: it.e, idle: it.idle, id: it.e?.id || "idle:" + k.ad, k: k.ad };
+      const p = { x: tx, y: ty, cx: tx + TW / 2, cy: ty + KT.TH / 2, e: it.e, idle: it.idle, id: it.e?.id || "idle:" + k.ad, k: k.ad };
       b.tiles.push(p);
       if (it.e) elems[it.e.id] = p;
     }
-  });
-  // gizli (trafiksiz) elemanlar kutunun "+N" karosuna bağlanır
-  order.forEach(k => vis[k.ad].idle.forEach(e => elems[e.id] = boxes[k.ad].tiles.find(t => t.idle)));
-
-  // kanal merkezleri
-  const hY = i => (i === 0 ? gH[0] / 2 : rowY[i - 1] + rowH[i - 1] + gH[i] / 2) + hPad[i] / 2;
+    pl.idle.forEach(e => elems[e.id] = b.tiles.find(t => t.idle));
+  }));
   const vX = j => j === 0 ? gV[0] / 2 : colX[j - 1] + colW[j - 1] + gV[j] / 2;
-  // kurum çerçeveleri: kurumun satırlarını çevreler, başlık kanalın üst kısmında
-  const frames = d.coklu ? secRows.map(sr => ({ t: sr.t, x: 6, y: rowY[sr.r0] - gH[sr.r0] + 6, w: W - 12,
-    h: rowY[sr.r1] + rowH[sr.r1] + 10 - (rowY[sr.r0] - gH[sr.r0] + 6),
-    n: d.kumeler.filter(k => k.tenant === sr.t).reduce((a, k) => a + k.sunucu, 0) })) : [];
-  Object.assign(kt.pos, { boxes, elems, W, H, links, routes, hUse, vUse, gH, gV, hY, vX, rowY, rowH, colX, LANE, frames, hPad });
+  const chY = ch => ch === "top" ? chH.top / 2 + 2 : H - chH.bot / 2 - 2;
+  const frames = d.coklu ? sections.map((sec, si) => ({ t: sec.t, x: 6, y: secY[si] - TITLE - 4, w: W - 12, h: secH[si] + TITLE + 14,
+    n: sec.ks.reduce((a, k) => a + k.sunucu, 0) })) : [];
+  Object.assign(kt.pos, { boxes, elems, W, H, links, routes, vUse, chUse, gV, chH, vX, chY, colX, colW, LANE, frames });
 }
 
 // Rota noktaları → köşeleri yuvarlatılmış yol
@@ -324,63 +307,47 @@ function ktRound(pts, r = 8) {
   return d + ` L${lx},${ly}`;
 }
 
-// Bir bağın rota noktaları. ax/bx: kutu kenarında çıkış / giriş x'i; lane: kanal içi şerit kaydırması
-function ktPoints(rt, ax, bx, off1, offV, off2, fromTile, toTile) {
-  const P = kt.pos, A = P.boxes[P.cellName[rt.A.r + "," + rt.A.c]], B = P.boxes[P.cellName[rt.B.r + "," + rt.B.c]];
-  const ay = rt.exit === "bot" ? A.y + A.h : A.y, by = rt.enter === "bot" ? B.y + B.h : B.y;
-  const sy = fromTile ? (rt.exit === "bot" ? fromTile.y + KT.TH : fromTile.y) : ay;
-  const ey = toTile ? (rt.enter === "bot" ? toTile.y + KT.TH : toTile.y) : by;
-  const g1 = P.hY(rt.h1) + off1;
-  const pts = [[ax, sy], [ax, g1]];
-  if (rt.v != null) {
-    const vx = P.vX(rt.v) + offV, g2 = P.hY(rt.h2) + off2;
-    pts.push([vx, g1], [vx, g2], [bx, g2]);
-  } else pts.push([bx, g1]);
-  pts.push([bx, ey + (rt.enter === "bot" ? 3 : -3)]);
-  return pts;
+// Bir bağın noktaları: ay/by kutu kenarındaki çıkış / giriş y'si; o1/o2/oc şerit kaydırmaları
+function ktPoints(rt, ay, by, o1 = 0, o2 = 0, oc = 0) {
+  const P = kt.pos, A = P.boxes[rt.ka], B = P.boxes[rt.kb];
+  const ax = rt.out === "R" ? A.x + A.w : A.x;
+  const bx = rt.in === "R" ? B.x + B.w + 2 : B.x - 2;
+  const g1 = P.vX(rt.g1) + o1;
+  if (rt.g2 == null) return [[ax, ay], [g1, ay], [g1, by], [bx, by]];
+  const g2 = P.vX(rt.g2) + o2, cy = P.chY(rt.ch) + oc;
+  return [[ax, ay], [g1, ay], [g1, cy], [g2, cy], [g2, by], [bx, by]];
 }
 
 function ktDraw() {
   ktLayout();
-  const P = kt.pos, { boxes, elems, W, H, links, routes, hUse, vUse, LANE } = P;
-  P.cellName = {};
-  Object.entries(P.cell).forEach(([n, c]) => P.cellName[c.r + "," + c.c] = n);
+  const P = kt.pos, { boxes, elems, W, H, links, routes, vUse, chUse, LANE } = P;
   const max = Math.max(1, ...links.map(l => l.hits));
-  // şerit kaydırması kanalın içinde kalır: şerit aralığı = min(4px, kanal / şerit sayısı)
-  const laneOff = (arr, idx, size) => (idx - (arr.length - 1) / 2) * Math.min(LANE, (size - 16) / Math.max(1, arr.length));
-  const hOff = (i, idx) => laneOff(hUse[i], idx, P.gH[i] - P.hPad[i]), vOff = (j, idx) => laneOff(vUse[j], idx, P.gV[j]);
-  // kutu kenarında çıkış / giriş noktaları: aynı kenardaki bağlar karşı ucun x'ine göre sıralanıp yayılır
+  const laneOff = (n, idx, size) => (idx - (n - 1) / 2) * Math.min(LANE, (size - 14) / Math.max(1, n));
+  // küme modunda kenar noktaları: aynı kenara düşen bağlar karşı ucun y'sine göre sıralanıp başlığın altından itibaren dizilir
   const side = {};
-  const pushSide = (box, s, i, otherX) => (side[box + "|" + s] ??= []).push({ i, otherX });
-  const cx = id => id.startsWith("k:") ? boxes[id.slice(2)].x + boxes[id.slice(2)].w / 2 : elems[id].cx;
+  const otherY = id => id.startsWith("k:") ? boxes[id.slice(2)].y : elems[id].cy;
   routes.forEach(rt => {
     const l = links[rt.i];
-    pushSide(P.cellName[rt.A.r + "," + rt.A.c], rt.exit, rt.i, cx(l.to));
-    pushSide(P.cellName[rt.B.r + "," + rt.B.c], rt.enter, rt.i, cx(l.from));
+    (side[rt.ka + "|" + rt.out] ??= []).push({ i: rt.i, oy: otherY(l.to), end: "a" });
+    (side[rt.kb + "|" + rt.in] ??= []).push({ i: rt.i, oy: otherY(l.from), end: "b" });
   });
   const anchor = {};
   for (const [key, arr] of Object.entries(side)) {
-    const box = boxes[key.split("|")[0]];
-    arr.sort((a, b) => a.otherX - b.otherX);
-    arr.forEach((a, j) => (anchor[a.i] ??= {})[key] = box.x + 18 + (box.w - 36) * (arr.length === 1 ? 0.5 : j / (arr.length - 1)));
+    const b = boxes[key.split("|")[0]];
+    arr.sort((p, q) => p.oy - q.oy);
+    const top = b.y + 22, room = Math.max(10, b.h - 32), step = Math.min(9, room / Math.max(1, arr.length));
+    arr.forEach((a, j) => (anchor[a.i] ??= {})[a.end] = top + j * step);
   }
   const paths = routes.map(rt => {
-    const l = links[rt.i];
-    const elemMode = !l.from.startsWith("k:");
-    const ft = elemMode ? elems[l.from] : null, tt = elemMode ? elems[l.to] : null;
-    let ax, bx;
-    if (elemMode) { ax = ft.cx; bx = tt.cx; }
-    else {
-      const an = anchor[rt.i];
-      ax = an[P.cellName[rt.A.r + "," + rt.A.c] + "|" + rt.exit]; bx = an[P.cellName[rt.B.r + "," + rt.B.c] + "|" + rt.enter];
-    }
-    // eleman modunda da ok kutu kenarında başlar / biter (karonun x hizasında); kutunun içinden çizgi geçmez
-    const pts = ktPoints(rt, ax, bx, hOff(rt.h1, rt.l1), rt.v != null ? vOff(rt.v, rt.lv) : 0,
-      rt.v != null ? hOff(rt.h2, rt.l2) : 0, null, null);
+    const l = links[rt.i], elemMode = !l.from.startsWith("k:");
+    const ay = elemMode ? elems[l.from].cy : anchor[rt.i].a, by = elemMode ? elems[l.to].cy : anchor[rt.i].b;
+    const pts = ktPoints(rt, ay, by, laneOff(vUse[rt.g1].length, rt.l1, P.gV[rt.g1]),
+      rt.g2 != null ? laneOff(vUse[rt.g2].length, rt.l2, P.gV[rt.g2]) : 0,
+      rt.g2 != null ? laneOff(chUse[rt.ch].length, rt.lc, P.chH[rt.ch]) : 0);
     const dAttr = ktRound(pts);
-    const w = (1.4 + 5 * Math.log10(1 + l.hits) / Math.log10(1 + max)).toFixed(1);
+    const w = (1.4 + 4.5 * Math.log10(1 + l.hits) / Math.log10(1 + max)).toFixed(1);
     const deny = l.engel > 0 && l.engel >= l.hits;
-    return `<path class="lk${deny ? " deny" : ""}${l.altyapi ? " infra" : ""}" d="${dAttr}" stroke-width="${w}" marker-end="url(#ktArr${deny ? "D" : ""})" data-f="${esc(l.from)}" data-t="${esc(l.to)}" data-fk="${esc(P.elemKume[l.from] || l.from.slice(2))}" data-tk="${esc(P.elemKume[l.to] || l.to.slice(2))}"/>
+    return `<path class="lk${deny ? " deny" : ""}${l.altyapi ? " infra" : ""}" d="${dAttr}" stroke-width="${w}" marker-end="url(#ktArr${deny ? "D" : ""})" data-f="${esc(l.from)}" data-t="${esc(l.to)}" data-fk="${esc(rt.ka)}" data-tk="${esc(rt.kb)}"/>
       <path class="lkh" d="${dAttr}" data-li="${rt.i}"/>`;
   }).join("");
 
@@ -434,12 +401,14 @@ function ktWire(links) {
         const a = P.elems[b.from], c = P.elems[b.to];
         return `<path class="lk hl over" d="M${a.cx},${a.y + KT.TH / 2} Q${(a.cx + c.cx) / 2 + 30},${(a.y + c.y) / 2 + KT.TH / 2} ${c.cx},${c.y + KT.TH / 2}" stroke-width="2.5" marker-end="url(#ktArrH)"/>`;
       }
-      const A = P.cell[fk], B = P.cell[tk];
-      const rt = { A, B };
-      if (B.r > A.r) { rt.h1 = A.r + 1; rt.exit = "bot"; rt.enter = "top"; if (B.r > A.r + 1) { rt.v = B.c; rt.h2 = B.r; } }
-      else if (B.r < A.r) { rt.h1 = A.r; rt.exit = "top"; rt.enter = "bot"; if (B.r < A.r - 1) { rt.v = B.c; rt.h2 = B.r + 1; } }
-      else { rt.h1 = A.r + 1; rt.exit = "bot"; rt.enter = "bot"; }
-      const pts = ktPoints(rt, P.elems[b.from].cx, P.elems[b.to].cx, 0, 0, 0, null, null);
+      const A = P.cell[fk], B = P.cell[tk], rt = { A, B, ka: fk, kb: tk };
+      if (A.c === B.c) { rt.out = "R"; rt.in = "R"; rt.g1 = A.c + 1; }
+      else if (B.c === A.c + 1) { rt.out = "R"; rt.in = "L"; rt.g1 = A.c + 1; }
+      else if (B.c === A.c - 1) { rt.out = "L"; rt.in = "R"; rt.g1 = A.c; }
+      else if (B.c > A.c) { rt.out = "R"; rt.in = "L"; rt.g1 = A.c + 1; rt.g2 = B.c; }
+      else { rt.out = "L"; rt.in = "R"; rt.g1 = A.c; rt.g2 = B.c + 1; }
+      if (rt.g2 != null) rt.ch = (P.elems[b.from].cy + P.elems[b.to].cy) / 2 < P.H / 2 ? "top" : "bot";
+      const pts = ktPoints(rt, P.elems[b.from].cy, P.elems[b.to].cy);
       const w = (2 + 4 * Math.log10(1 + b.hits) / Math.log10(1 + max)).toFixed(1);
       return `<path class="lk hl over" d="${ktRound(pts)}" stroke-width="${w}" marker-end="url(#ktArrH)"/>`;
     }).join("");
