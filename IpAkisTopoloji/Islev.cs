@@ -25,7 +25,7 @@ record IslevDurum(bool Calisiyor, string? Asama, int Toplam, int Biten, int Hata
     string? Baslatan, DateTimeOffset? Baslangic, DateTimeOffset? Bitis, List<string> Hatalar);
 record IslevHarita(string Etiket, int Toplam, int Siniflanan, List<IslevKume> Kumeler, IslevDurum Durum, bool Yazabilir, string? Uyari);
 record IslevCalistir(string? Etiket, bool Hepsi, bool SadeceKumele);
-record IslevDuzelt(List<string>? Ips, string? Kume);
+record IslevDuzelt(List<string>? Ips, string? Kume, string? Aciklama = null);
 record IslevAd(string? Etiket, string? Eski, string? Yeni);
 record SmKayit(string No, string? Tarih, string? Tur, string? Baslik, string? Aciklama, string? Kaynak, string? Hedef,
     string? Birim, string? Yon, string? Link);
@@ -211,7 +211,7 @@ sealed class IslevService(IConfiguration cfg, IHttpClientFactory factory, Envant
     }
 
     // ---------------- Elle düzeltme ----------------
-    public async Task<int> FixAsync(List<string> ips, string? kume, string user, CancellationToken ct)
+    public async Task<int> FixAsync(List<string> ips, string? kume, string? aciklama, string user, CancellationToken ct)
     {
         var (res, uyari) = await ResultsAsync(true, ct);
         if (uyari != null) throw new InvalidOperationException(uyari);
@@ -222,7 +222,11 @@ sealed class IslevService(IConfiguration cfg, IHttpClientFactory factory, Envant
             res.TryGetValue(ip, out var x);
             var d = (x.Detay ?? new IslevDetay(null, null, 100, null, null, null, null)) with
             {
-                Guven = 100, Tarih = DateTime.Now.ToString("yyyy-MM-dd HH:mm"), Kaynak = "Elle: " + user
+                Guven = 100, Tarih = DateTime.Now.ToString("yyyy-MM-dd HH:mm"), Kaynak = "Elle: " + user,
+                Takma = null, TakmaKaynak = null,
+                // Yeni kümeye açıklama verildiyse o; aynı adlı mevcut kümeye taşınıyorsa onun açıklaması korunur
+                KumeAciklama = aciklama ?? res.Values.Where(v => string.Equals(v.Kume, kume, StringComparison.OrdinalIgnoreCase))
+                    .Select(v => v.Detay?.KumeAciklama).OfType<string>().FirstOrDefault()
             };
             // Küme boş = elle atamayı kaldır; sunucu bir sonraki çalıştırmada yeniden sınıflanır.
             await WriteAsync(conn, ip, kume, kume == null ? null : d, ct);

@@ -6,7 +6,7 @@
 // çekmecesi: AI gerekçesi, küme düzeltme, AI'a giden kanıtlar. topoloji.html / etiket.js yardımcılarını kullanır.
 // ============================================================================
 
-const iv = { tag: "", data: null, q: "", poll: null, sel: null, seq: 0 };
+const iv = { tag: "", data: null, q: "", poll: null, sel: null, seq: 0, pick: null };
 
 (function ivStyle() {
   const css = `
@@ -42,6 +42,12 @@ const iv = { tag: "", data: null, q: "", poll: null, sel: null, seq: 0 };
   .iv-vip .vh b { font-family:Consolas, ui-monospace, monospace; color:var(--text); font-weight:600; }
   .iv-srv { display:grid; grid-template-columns:10px 1fr auto; gap:2px 8px; align-items:center; padding:5px 6px; border-radius:6px; cursor:pointer; }
   .iv-srv:hover, .iv-srv.on { background:var(--in-soft); }
+  .iv-srv.pk { grid-template-columns:16px 10px 1fr auto; }
+  .iv-srv.pk::before { content:""; width:12px; height:12px; border:1.5px solid var(--muted); border-radius:3px; grid-row:1; }
+  .iv-srv.pk .rl { grid-column:3 / 5; }
+  .iv-srv.picked { background:var(--in-soft); }
+  .iv-srv.picked::before { background:var(--in); border-color:var(--in); box-shadow:inset 0 0 0 2px var(--panel); }
+  .iv-tools button.on { background:var(--text); color:var(--panel); }
   .iv-srv .dot { width:8px; height:8px; border-radius:50%; background:var(--line); }
   .iv-srv .dot.g3 { background:#2e9e6a; } .iv-srv .dot.g2 { background:#d9a33c; } .iv-srv .dot.g1 { background:#d4553f; }
   .iv-srv .nm { font-size:13px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
@@ -110,19 +116,22 @@ function ivRender() {
       ${w ? `<button class="ai" id="ivRun" ${run || d.uyari ? "disabled" : ""} title="Henüz sınıflanmamış sunucuları AI'a gönderir, sonra kümeler">AI ile sınıflandır${d.toplam - d.siniflanan ? ` (${fmt(d.toplam - d.siniflanan)} yeni)` : ""}</button>
       <button id="ivAll" ${run || d.uyari ? "disabled" : ""} title="Elle düzeltilenler hariç tüm sunucuları yeniden sınıflar">Hepsini yeniden</button>
       <button id="ivClu" ${run || d.uyari || !d.siniflanan ? "disabled" : ""} title="Sunucuları yeniden sormadan yalnız kümeleri yeniden oluşturur">Yeniden kümele</button>` : ""}
+      ${w ? `<button id="ivPick" class="${iv.pick ? "on" : ""}" title="Sunucuları seçip yeni bir kümeye ya da var olan bir kümeye taşıyın">${iv.pick ? "Seçimi bitir" : "+ Yeni küme / taşı"}</button>` : ""}
       <button id="ivDep" title="Etiketli sunucuların trafik bağımlılık çizimi (seçili tarih aralığı)">Bağımlılık çizimi</button>
     </div>
     <div id="ivRunBox"></div>
+    <div id="ivPickBar"></div>
     <div class="iv-grid" id="ivGrid"></div>
   </section>
   <div id="ivDrawerHost"></div>`;
-  ivGrid(); ivRunBox();
+  ivGrid(); ivRunBox(); ivPickBar();
   $("#ivQ").addEventListener("input", e => { iv.q = e.target.value; ivGrid(); });
   $("#ivRun")?.addEventListener("click", () => ivStart({ hepsi: false }));
   $("#ivAll")?.addEventListener("click", () => {
     if (confirm(`"${iv.tag}" etiketli ${d.toplam} sunucunun hepsi (elle düzeltilenler hariç) AI'a yeniden gönderilsin mi? Uzun sürebilir.`)) ivStart({ hepsi: true });
   });
   $("#ivClu")?.addEventListener("click", () => ivStart({ sadeceKumele: true }));
+  $("#ivPick")?.addEventListener("click", () => { iv.pick = iv.pick ? null : new Set(); ivCloseDrawer(); ivRender(); });
   $("#ivDep").addEventListener("click", () => { ivStopPoll(); runApp("etiket:" + iv.tag, "topo"); });
   if (iv.sel) ivDrawer(iv.sel);
 }
@@ -132,7 +141,7 @@ function ivGrid() {
   const hit = s => !q || [s.ip, s.hostname, s.rol, s.muhafiz, ...(s.apps || [])].some(v => v && v.toLocaleLowerCase("tr").includes(q));
   const srv = s => {
     const g = s.guven == null ? "" : s.guven >= 75 ? "g3" : s.guven >= 50 ? "g2" : "g1";
-    return `<div class="iv-srv${iv.sel === s.ip ? " on" : ""}" data-ivip="${esc(s.ip)}" title="${s.guven != null ? `AI güveni %${s.guven}` : "Sınıflanmamış"}">
+    return `<div class="iv-srv${iv.sel === s.ip ? " on" : ""}${iv.pick ? " pk" : ""}${iv.pick?.has(s.ip) ? " picked" : ""}" data-ivip="${esc(s.ip)}" title="${s.guven != null ? `AI güveni %${s.guven}` : "Sınıflanmamış"}">
       <span class="dot ${g}"></span><span class="nm">${esc(s.hostname || s.ip)}${s.elle ? `<span class="el">elle</span>` : ""}</span><span class="ip">${esc(s.ip)}</span>
       <span class="rl">${esc(s.rol || (s.apps || []).join(", ") || "—")}</span></div>`;
   };
@@ -273,8 +282,58 @@ function ivCloseDrawer() {
 
 document.addEventListener("click", e => {
   const el = e.target.closest?.("[data-ivip]");
-  if (el && uiMode === "topo") ivDrawer(el.dataset.ivip);
+  if (!el || uiMode !== "topo") return;
+  if (iv.pick) {   // seçim modunda tıklama seçer / bırakır (aynı sunucu birden çok VIP altında olabilir)
+    const ip = el.dataset.ivip;
+    iv.pick.has(ip) ? iv.pick.delete(ip) : iv.pick.add(ip);
+    document.querySelectorAll(`.iv-srv[data-ivip="${CSS.escape(ip)}"]`).forEach(x => x.classList.toggle("picked", iv.pick.has(ip)));
+    ivPickBar();
+    return;
+  }
+  ivDrawer(el.dataset.ivip);
 });
+// Seçim çubuğu: seçilen sunucuları yeni bir kümeye (adı + isteğe bağlı açıklama) ya da var olan kümeye taşır.
+function ivPickBar() {
+  const box = $("#ivPickBar");
+  if (!box) return;
+  if (!iv.pick) { box.innerHTML = ""; return; }
+  const n = iv.pick.size, names = iv.data.kumeler.map(k => k.ad).filter(a => a !== "Sınıflanmamış");
+  if (!box.firstChild) {
+    box.innerHTML = `<div class="eg-bar">
+      <span><b id="ivPickN">0</b> sunucu seçili</span>
+      <input id="ivPickName" list="ivPickList" placeholder="Yeni küme adı ya da var olan küme" maxlength="100">
+      <datalist id="ivPickList">${names.map(k => `<option value="${esc(k)}">`).join("")}</datalist>
+      <input id="ivPickDesc" placeholder="Açıklama (yeni küme için, isteğe bağlı)" maxlength="300" style="width:300px">
+      <button class="add" id="ivPickGo">Kümeyi oluştur</button>
+      <button class="clr" id="ivPickClr">Seçimi temizle</button>
+    </div>`;
+    const upd = () => {
+      const v = $("#ivPickName").value.trim(), ex = names.some(k => k.toLocaleLowerCase("tr") === v.toLocaleLowerCase("tr"));
+      $("#ivPickGo").textContent = ex ? "Bu kümeye taşı" : "Kümeyi oluştur";
+      $("#ivPickDesc").hidden = ex;
+    };
+    $("#ivPickName").addEventListener("input", upd);
+    $("#ivPickClr").addEventListener("click", () => { iv.pick.clear(); document.querySelectorAll(".iv-srv.picked").forEach(x => x.classList.remove("picked")); ivPickBar(); });
+    $("#ivPickGo").addEventListener("click", async () => {
+      const kume = $("#ivPickName").value.trim(), aciklama = $("#ivPickDesc").hidden ? "" : $("#ivPickDesc").value.trim();
+      if (!iv.pick.size) { alert("Önce sunuculara tıklayarak seçin."); return; }
+      if (!kume) { alert("Küme adı yazın."); $("#ivPickName").focus(); return; }
+      if (kume === "Sınıflanmamış") { alert("Bu ad kullanılamaz."); return; }
+      $("#ivPickGo").disabled = true;
+      try {
+        const r = await fetch("api/islev/duzelt", { method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ips: [...iv.pick], kume, aciklama: aciklama || null }) });
+        const b = await r.json().catch(() => ({ error: `HTTP ${r.status}` }));
+        if (!r.ok) throw new Error(b.error || `HTTP ${r.status}`);
+        iv.pick = null;
+        await ivLoad();
+      } catch (err) { alert(err.message); $("#ivPickGo").disabled = false; }
+    });
+    upd();
+  }
+  $("#ivPickN").textContent = n;
+}
+
 // Kümeyi başka bir kümeyle birleştir: kartın tüm sunucuları hedef kümeye elle atanır.
 document.addEventListener("click", e => {
   const a = e.target.closest?.(".iv-merge[data-merge]");

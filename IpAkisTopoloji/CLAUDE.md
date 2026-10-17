@@ -151,6 +151,9 @@ topoloji çizer ve şirket içi AI'a etki analizi yaptırır. Canlıda IIS'te, W
     başka kümeye elle atar.
     Kartta "yeniden adlandır" (`/api/islev/yeniden-adlandir {etiket, eski, yeni}`): AI_KUME değişir, AI'lı sunucular AI'lı kalır;
     IslevDetay.TakmaKaynak (asıl küme) → Takma (yeni ad) tutulur, ClusterAsync bu eşlemeyi uygular (yeniden kümelemede ad korunur).
+    "+ Yeni küme / taşı" düğmesi seçim modu açar (sunucuya tıklamak seçer); çubukta küme adı (+ yeni küme için açıklama) →
+    `/api/islev/duzelt {ips, kume, aciklama}` (elle atama; KumeAciklama verilmezse aynı adlı kümenin açıklaması alınır). Küme
+    ayrı kayıt değil, sunuculardaki AI_KUME değeridir; boş küme olmaz.
     Sonuç ERT'de `AI_KUME NVARCHAR(100)` + `AI_DETAY NVARCHAR(MAX)` (JSON IslevDetay). Elle düzeltme (`/api/islev/duzelt`, Kaynak "Elle: kullanıcı")
     AI'ca ezilmez. Arka plan işi (tek seferde bir tane): `/api/islev/calistir {etiket, hepsi, sadeceKumele}`, `/api/islev/durum`, `/durdur`;
     `/api/islev?etiket=` harita, `/api/islev/profil?ip=` AI'a giden metin + SM kayıtları (link şablonları `Islev:SmTalepLinki` {NUMBER},

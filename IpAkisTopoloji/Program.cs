@@ -635,7 +635,9 @@ app.MapPost("/api/islev/duzelt", async (IslevDuzelt req, HttpContext ctx, IConfi
     string? kume = string.IsNullOrWhiteSpace(req.Kume) ? null : req.Kume.Trim();
     if (ips.Count == 0 || ips.Count > 500) return Results.BadRequest(new { error = "1–500 arası geçerli IP seçin." });
     if (kume is { Length: > 100 } || (kume?.Any(char.IsControl) ?? false)) return Results.BadRequest(new { error = "Küme adı en çok 100 karakter." });
-    try { return Results.Ok(new { guncellenen = await islev.FixAsync(ips, kume, user, ct) }); }
+    string? aciklama = string.IsNullOrWhiteSpace(req.Aciklama) ? null : req.Aciklama.Trim();
+    if (aciklama is { Length: > 300 }) return Results.BadRequest(new { error = "Açıklama en çok 300 karakter." });
+    try { return Results.Ok(new { guncellenen = await islev.FixAsync(ips, kume, aciklama, user, ct) }); }
     catch (InvalidOperationException ex) { return Results.BadRequest(new { error = ex.Message }); }
     catch (Microsoft.Data.SqlClient.SqlException ex) { return Results.Json(new { error = "SQL: " + ex.Message }, statusCode: 502); }
 });
