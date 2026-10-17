@@ -578,21 +578,39 @@ app.MapPost("/api/etiket", async (EtiketIstek req, HttpContext ctx, IConfigurati
 });
 
 // İşlev haritası (Topoloji sekmesi): etiketli sunucular AI ile işlev kümelerine ayrılır (Islev.cs).
-app.MapGet("/api/islev", async (string etiket, HttpContext ctx, IConfiguration cfg, IslevService islev, CancellationToken ct) =>
+// tenant: virgülle kurum adları (KonsolideSegmentler4.Tenant); boş = tümü
+static List<string>? TenantList(string? tenant) =>
+    string.IsNullOrWhiteSpace(tenant) ? null : tenant.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+
+// Kurum listesi: etiket verilirse o etiketli sunucuların kurumları (sunucu sayısıyla), yoksa segment tablosundaki tüm kurumlar.
+app.MapGet("/api/tenantlar", async (string? etiket, EnvanterService envanter, CancellationToken ct) =>
 {
-    try { return Results.Ok(await islev.MapAsync(etiket.Trim(), EtiketService.CanWrite(cfg, ctx.User?.Identity?.Name), ct)); }
+    try
+    {
+        var env = await envanter.GetAsync(false, ct);
+        var ips = string.IsNullOrWhiteSpace(etiket) ? env.HostIps.ToList() : env.TagIps(etiket.Trim());
+        var list = ips.GroupBy(ip => IslevService.TenantOf(env, ip), StringComparer.OrdinalIgnoreCase)
+            .Select(g => new { ad = g.Key, sunucu = g.Count() }).OrderByDescending(x => x.sunucu).ToList();
+        return Results.Ok(list);
+    }
+    catch (Exception ex) { return Results.Json(new { error = ex.Message }, statusCode: 502); }
+});
+
+app.MapGet("/api/islev", async (string etiket, string? tenant, HttpContext ctx, IConfiguration cfg, IslevService islev, CancellationToken ct) =>
+{
+    try { return Results.Ok(await islev.MapAsync(etiket.Trim(), EtiketService.CanWrite(cfg, ctx.User?.Identity?.Name), ct, TenantList(tenant))); }
     catch (Exception ex) { return Results.Json(new { error = ex.Message }, statusCode: 502); }
 });
 
 // Küme topolojisi: kümeler kutu, içlerinde VIP'ler ve VIP'siz sunucular; aralarındaki trafik (KumeTopoloji.cs).
-app.MapGet("/api/islev/topoloji", async (string etiket, string? start, string? end, int? appliance, string? sources, HttpContext ctx,
+app.MapGet("/api/islev/topoloji", async (string etiket, string? tenant, string? start, string? end, int? appliance, string? sources, HttpContext ctx,
     IConfiguration cfg, IHttpClientFactory factory, EnvanterService envanter, IslevService islev, CancellationToken ct) =>
 {
     var sw = Stopwatch.StartNew();
     var (env, envErr) = await Capture(() => envanter.GetAsync(false, ct), ct);
     if (env == null) return Results.Json(new { error = "Envanter okunamadı: " + envErr }, statusCode: 502);
-    var map = await islev.MapAsync(etiket.Trim(), false, ct);
-    if (map.Toplam == 0) return Results.BadRequest(new { error = $"Bu etikette sunucu yok: {etiket}" });
+    var map = await islev.MapAsync(etiket.Trim(), false, ct, TenantList(tenant));
+    if (map.Toplam == 0) return Results.BadRequest(new { error = $"Bu etikette (seçili kurumlarda) sunucu yok: {etiket}" });
     var queried = KumeTopoloji.Queried(map, cfg.GetValue("Islev:TopolojiMaxIp", 400));
     if (!LookupQuery.TryParse(queried[0], start, end, cfg.GetValue("MaxRangeHours", 24), out var q, out var error))
         return Results.BadRequest(new { error });

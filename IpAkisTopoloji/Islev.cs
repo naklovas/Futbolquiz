@@ -19,11 +19,13 @@ record IslevDetay(string? Islev, string? Rol, int Guven, string? Gerekce, string
     string? Takma = null, string? TakmaKaynak = null);
 record IslevSunucu(string Ip, string? Hostname, List<string> Apps, string? Muhafiz, string? Rol, int? Guven, bool Elle);
 record IslevVip(string Vip, string? Pool, string? App, List<IslevSunucu> Sunucular);
-record IslevSegment(string Ad, string? Cidr, List<IslevVip> Vipler, List<IslevSunucu> Sunucular);
+record IslevSegment(string Ad, string? Cidr, List<IslevVip> Vipler, List<IslevSunucu> Sunucular, string? Tenant = null);
 record IslevKume(string Ad, string? Aciklama, int Sunucu, List<IslevSegment> Segmentler);
 record IslevDurum(bool Calisiyor, string? Asama, int Toplam, int Biten, int Hata, string? Mesaj, string? Etiket,
     string? Baslatan, DateTimeOffset? Baslangic, DateTimeOffset? Bitis, List<string> Hatalar);
-record IslevHarita(string Etiket, int Toplam, int Siniflanan, List<IslevKume> Kumeler, IslevDurum Durum, bool Yazabilir, string? Uyari);
+// Coklu: birden çok kurum (tenant) gösteriliyor → arayüz kurum bazında gruplar; tek kurum seçiliyse gruplama yok.
+record IslevHarita(string Etiket, int Toplam, int Siniflanan, List<IslevKume> Kumeler, IslevDurum Durum, bool Yazabilir, string? Uyari,
+    bool Coklu = false, List<string>? Tenantlar = null);
 record IslevCalistir(string? Etiket, bool Hepsi, bool SadeceKumele);
 record IslevDuzelt(List<string>? Ips, string? Kume, string? Aciklama = null);
 record IslevAd(string? Etiket, string? Eski, string? Yeni);
@@ -175,11 +177,22 @@ sealed class IslevService(IConfiguration cfg, IHttpClientFactory factory, Envant
     }
 
     // ---------------- Harita: küme → segment → VIP → sunucu ----------------
-    public async Task<IslevHarita> MapAsync(string tag, bool yazabilir, CancellationToken ct)
+    public const string TenantYok = "(kurum yok)";
+    public static string TenantOf(EnvanterSnapshot env, string ip) => env.FindSegment(ip)?.Tenant ?? TenantYok;
+
+    // tenants: boş / null = tümü; doluysa yalnız o kurumların (KonsolideSegmentler4.Tenant) sunucuları
+    public async Task<IslevHarita> MapAsync(string tag, bool yazabilir, CancellationToken ct, IReadOnlyCollection<string>? tenants = null)
     {
         var env = await envanter.GetAsync(false, ct);
         var (res, uyari) = await ResultsAsync(false, ct);
         var ips = env.TagIps(tag);
+        if (tenants is { Count: > 0 })
+        {
+            var set = tenants.ToHashSet(StringComparer.OrdinalIgnoreCase);
+            ips = ips.Where(ip => set.Contains(TenantOf(env, ip))).ToList();
+        }
+        var shown = ips.Select(ip => TenantOf(env, ip)).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(t => t).ToList();
+        bool coklu = shown.Count > 1 && tenants is not { Count: 1 };
         IslevSunucu Row(string ip)
         {
             res.TryGetValue(ip, out var x);
@@ -193,7 +206,7 @@ sealed class IslevService(IConfiguration cfg, IHttpClientFactory factory, Envant
         var kumeler = ips.GroupBy(KumeOf, StringComparer.OrdinalIgnoreCase).Select(g =>
         {
             string? aciklama = g.Select(ip => res.TryGetValue(ip, out var x) ? x.Detay?.KumeAciklama : null).OfType<string>().FirstOrDefault();
-            var segs = g.GroupBy(ip => env.FindSegment(ip)?.Label ?? "Segment bilinmiyor").Select(sg =>
+            var segs = g.GroupBy(ip => (coklu ? TenantOf(env, ip) : "") + "\u0001" + (env.FindSegment(ip)?.Label ?? "Segment bilinmiyor")).Select(sg =>
             {
                 var vips = sg.SelectMany(ip => env.MemberOf(ip).Select(m => (ip, m)))
                     .GroupBy(t => t.m.LbIp + (t.m.LbPort is { } p ? ":" + p : ""))
@@ -202,12 +215,12 @@ sealed class IslevService(IConfiguration cfg, IHttpClientFactory factory, Envant
                         vg.Select(t => t.ip).Distinct().Select(Row).ToList()))
                     .OrderBy(v => v.Vip, cmp).ToList();
                 var free = sg.Where(ip => env.MemberOf(ip).Count == 0).Select(Row).OrderBy(s => s.Hostname ?? s.Ip, cmp).ToList();
-                return new IslevSegment(sg.Key, env.FindSegment(sg.First())?.Cidr, vips, free);
-            }).OrderByDescending(s => s.Vipler.Sum(v => v.Sunucular.Count) + s.Sunucular.Count).ToList();
+                return new IslevSegment(sg.Key.Split('\u0001')[1], env.FindSegment(sg.First())?.Cidr, vips, free, coklu ? TenantOf(env, sg.First()) : null);
+            }).OrderBy(s => s.Tenant).ThenByDescending(s => s.Vipler.Sum(v => v.Sunucular.Count) + s.Sunucular.Count).ToList();
             return new IslevKume(g.Key, aciklama, g.Count(), segs);
         })
         .OrderBy(k => k.Ad == Sinifsiz).ThenByDescending(k => k.Sunucu).ToList();
-        return new IslevHarita(tag, ips.Count, ips.Count(ip => KumeOf(ip) != Sinifsiz), kumeler, Durum, yazabilir, uyari);
+        return new IslevHarita(tag, ips.Count, ips.Count(ip => KumeOf(ip) != Sinifsiz), kumeler, Durum, yazabilir, uyari, coklu, shown);
     }
 
     // ---------------- Elle düzeltme ----------------

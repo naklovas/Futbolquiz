@@ -26,6 +26,8 @@ const iv = { tag: "", data: null, q: "", poll: null, sel: null, seq: 0, pick: nu
   .iv-card header { all:unset; display:block; padding:10px 14px 8px; border-bottom:1px solid var(--line); }
   .iv-card h3 { margin:0; font-size:15px; display:flex; justify-content:space-between; gap:8px; align-items:baseline; }
   .iv-card h3 span { font-size:12px; color:var(--muted); font-weight:500; white-space:nowrap; }
+  .iv-tn { display:inline-block; font-size:10.5px; font-weight:700; letter-spacing:.03em; text-transform:uppercase; padding:0 6px; margin-right:6px;
+    border-radius:4px; background:var(--text); color:var(--panel); }
   .iv-acts { display:flex; gap:12px; margin-top:3px; font-size:11.5px; }
   .iv-merge { color:var(--muted); text-decoration:none; }
   .iv-merge:hover { color:var(--in); }
@@ -83,7 +85,8 @@ async function runIslev(tag) {
 async function ivLoad() {
   const my = ++iv.seq;
   try {
-    const r = await fetch("api/islev?" + new URLSearchParams({ etiket: iv.tag }));
+    await tnLoad(iv.tag);
+    const r = await fetch("api/islev?" + new URLSearchParams({ etiket: iv.tag, tenant: tenantParam() }));
     const b = await r.json().catch(() => ({ error: `HTTP ${r.status}` }));
     if (!r.ok) throw new Error(b.error || `HTTP ${r.status}`);
     if (my !== iv.seq || uiMode !== "topo") return;
@@ -158,7 +161,7 @@ function ivGrid() {
       const free = sg.sunucular.filter(hit).map(srv).join("");
       if (!vips && !free) return "";
       const n = new Set([...sg.vipler.flatMap(v => v.sunucular.map(s => s.ip)), ...sg.sunucular.map(s => s.ip)]).size;
-      return `<div class="iv-seg"><div><b>${esc(sg.ad)}</b><span>${sg.cidr ? esc(sg.cidr) + " · " : ""}${n} sunucu</span></div>${vips}${free}</div>`;
+      return `<div class="iv-seg"><div><b>${sg.tenant ? `<span class="iv-tn">${esc(sg.tenant)}</span>` : ""}${esc(sg.ad)}</b><span>${sg.cidr ? esc(sg.cidr) + " · " : ""}${n} sunucu</span></div>${vips}${free}</div>`;
     }).join("");
     if (!segs) return "";
     const none = k.ad === "Sınıflanmamış";

@@ -8,13 +8,15 @@ record KtUye(string Ip, string? Hostname, string? Rol, int? Guven, bool Elle, st
 record KtDis(string Ad, long Hits, List<string> Portlar);
 record KtEleman(string Id, string Tur, string Ip, string? Port, string Ad, string? Alt, string? Segment, List<KtUye> Uyeler,
     long Gelen, long Giden, List<KtDis> DisGelen, List<KtDis> DisGiden);
-record KtKume(string Ad, string? Aciklama, int Sunucu, List<KtEleman> Elemanlar);
+record KtKume(string Ad, string? Aciklama, int Sunucu, List<KtEleman> Elemanlar, string? Tenant = null);
 record KtBag(string From, string To, List<string> Portlar, long Hits, long Engel, bool Altyapi);
 record KtAkis(string Src, string Dst, string Port, long Hits, long Engel);
 record KtSonuc(string Etiket, List<KtKume> Kumeler, List<KtBag> Baglar, List<KtAkis> Akislar, int Sorgulanan, int Toplam,
     SourceStatus Splunk, SourceStatus AppResponse, SourceStatus Envanter, long ElapsedMs)
 {
     public SourceStatus? Firewall { get; init; }
+    public bool Coklu { get; init; }              // birden çok kurum: kümeler kurum başına ayrı kutu, arayüz kurum çerçevesiyle gruplar
+    public List<string> Tenantlar { get; init; } = [];
 }
 
 static class KumeTopoloji
@@ -29,14 +31,19 @@ static class KumeTopoloji
         EnvanterSnapshot env, HashSet<string> infraPorts, SourceStatus spSt, SourceStatus arSt, SourceStatus envSt, long elapsedMs)
     {
         // --- elemanlar ---
-        // VIP birden çok kümede üyeye sahipse en çok üyesinin olduğu kümeye konur.
-        var vipKume = map.Kumeler.SelectMany(k => k.Segmentler.SelectMany(s => s.Vipler).Select(v => (v.Vip, k.Ad, n: v.Sunucular.Count)))
-            .GroupBy(x => x.Vip).ToDictionary(g => g.Key, g => g.OrderByDescending(x => x.n).First().Ad);
-        var vipInfo = map.Kumeler.SelectMany(k => k.Segmentler.SelectMany(s => s.Vipler.Select(v => (v, seg: s.Ad))))
+        // Kutu = küme; birden çok kurum gösteriliyorsa küme × kurum (aynı küme her kurumda ayrı kutu).
+        var groups = map.Kumeler.SelectMany(k => map.Coklu
+                ? k.Segmentler.GroupBy(s => s.Tenant).Select(g => (Id: k.Ad + "\u0001" + g.Key, k.Ad, Tenant: g.Key, k.Aciklama, Segs: g.ToList()))
+                : [(Id: k.Ad, k.Ad, Tenant: (string?)null, k.Aciklama, Segs: k.Segmentler)])
+            .ToList();
+        // VIP birden çok kutuda üyeye sahipse en çok üyesinin olduğu kutuya konur.
+        var vipKume = groups.SelectMany(k => k.Segs.SelectMany(s => s.Vipler).Select(v => (v.Vip, k.Id, n: v.Sunucular.Count)))
+            .GroupBy(x => x.Vip).ToDictionary(g => g.Key, g => g.OrderByDescending(x => x.n).First().Id);
+        var vipInfo = groups.SelectMany(k => k.Segs.SelectMany(s => s.Vipler.Select(v => (v, seg: s.Ad))))
             .GroupBy(x => x.v.Vip).ToDictionary(g => g.Key, g => (Vip: g.First().v, Seg: g.First().seg,
                 Uyeler: g.SelectMany(x => x.v.Sunucular).GroupBy(s => s.Ip).Select(s => s.First()).ToList()));
-        var srvInfo = map.Kumeler.SelectMany(k => k.Segmentler.SelectMany(s => s.Sunucular.Concat(s.Vipler.SelectMany(v => v.Sunucular))
-                .Select(x => (x, kume: k.Ad, seg: s.Ad))))
+        var srvInfo = groups.SelectMany(k => k.Segs.SelectMany(s => s.Sunucular.Concat(s.Vipler.SelectMany(v => v.Sunucular))
+                .Select(x => (x, kume: k.Id, seg: s.Ad))))
             .GroupBy(t => t.x.Ip).ToDictionary(g => g.Key, g => g.First());
 
         // Sunucu → elemanı: üyesi olduğu (haritadaki) ilk VIP, yoksa kendisi
@@ -138,10 +145,10 @@ static class KumeTopoloji
         KtUye Uye(IslevSunucu s, string? port) => new(s.Ip, s.Hostname, s.Rol, s.Guven, s.Elle, port,
             uyeGelen.GetValueOrDefault(s.Ip), uyeGiden.GetValueOrDefault(s.Ip));
 
-        var kumeler = map.Kumeler.Select(k =>
+        var kumeler = groups.Select(k =>
         {
             var els = new List<KtEleman>();
-            foreach (var (key, info) in vipInfo.Where(v => vipKume[v.Key] == k.Ad))
+            foreach (var (key, info) in vipInfo.Where(v => vipKume[v.Key] == k.Id))
             {
                 string id = "v:" + key;
                 var parts = key.Split(':');
@@ -151,14 +158,15 @@ static class KumeTopoloji
                     info.Uyeler.Select(u => Uye(u, members.FirstOrDefault(m => m.Ip == u.Ip)?.Port)).ToList(),
                     gelen.GetValueOrDefault(id), giden.GetValueOrDefault(id), Top(disGelen, id), Top(disGiden, id)));
             }
-            foreach (var (ip, info) in srvInfo.Where(s => s.Value.kume == k.Ad && srvElem[s.Key] == "s:" + s.Key))
+            foreach (var (ip, info) in srvInfo.Where(s => s.Value.kume == k.Id && srvElem[s.Key] == "s:" + s.Key))
             {
                 string id = "s:" + ip;
                 els.Add(new KtEleman(id, "sunucu", ip, null, info.x.Hostname ?? ip, info.x.Rol, info.seg, [Uye(info.x, null)],
                     gelen.GetValueOrDefault(id), giden.GetValueOrDefault(id), Top(disGelen, id), Top(disGiden, id)));
             }
-            return new KtKume(k.Ad, k.Aciklama, k.Sunucu,
-                els.OrderBy(e => e.Tur == "vip" ? 0 : 1).ThenBy(e => e.Segment).ThenByDescending(e => e.Gelen + e.Giden).ToList());
+            int n = k.Segs.SelectMany(s => s.Sunucular.Concat(s.Vipler.SelectMany(v => v.Sunucular))).Select(x => x.Ip).Distinct().Count();
+            return new KtKume(k.Ad, k.Aciklama, n,
+                els.OrderBy(e => e.Tur == "vip" ? 0 : 1).ThenBy(e => e.Segment).ThenByDescending(e => e.Gelen + e.Giden).ToList(), k.Tenant);
         }).Where(k => k.Elemanlar.Count > 0).ToList();
 
         var baglar = bag.Select(kv => new KtBag(kv.Key.Item1, kv.Key.Item2,
@@ -166,6 +174,7 @@ static class KumeTopoloji
             .OrderByDescending(b => b.Hits).ToList();
         var akislar = akis.Where(kv => kv.Value.hits > 0).OrderByDescending(kv => kv.Value.hits).Take(5000)
             .Select(kv => new KtAkis(kv.Key.Item1, kv.Key.Item2, kv.Key.Item3, kv.Value.hits, kv.Value.deny)).ToList();
-        return new KtSonuc(map.Etiket, kumeler, baglar, akislar, queried.Count, map.Toplam, spSt, arSt, envSt, elapsedMs);
+        return new KtSonuc(map.Etiket, kumeler, baglar, akislar, queried.Count, map.Toplam, spSt, arSt, envSt, elapsedMs)
+            { Coklu = map.Coklu, Tenantlar = map.Tenantlar ?? [] };
     }
 }

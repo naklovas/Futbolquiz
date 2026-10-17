@@ -20,6 +20,9 @@ const kt = { tag: "", data: null, scale: 1, mode: "kume", expanded: new Set(), c
   .kt-svg .box rect.hd { fill:hsl(var(--h) 60% 50% / .12); }
   .kt-svg .box .bt { font-size:14px; font-weight:700; fill:var(--text); }
   .kt-svg .box .bs { font-size:11px; fill:var(--muted); }
+  .kt-svg .frame rect { fill:none; stroke:var(--muted); stroke-opacity:.45; stroke-width:1.5; stroke-dasharray:8 5; }
+  .kt-svg .frame text { font-size:14px; font-weight:800; fill:var(--text); letter-spacing:.04em; text-transform:uppercase; }
+  .kt-svg .frame text.fs { font-size:11.5px; font-weight:500; fill:var(--muted); text-transform:none; letter-spacing:0; }
   .kt-svg .el { cursor:pointer; }
   .kt-svg .el .tile { fill:var(--panel); stroke:var(--line); }
   .kt-svg .el.vip .tile { fill:hsl(var(--h, 210) 60% 50% / .07); }
@@ -71,7 +74,8 @@ async function ktRun(tag) {
   ivStopPoll();
   const srcs = selectedSources();
   if (!srcs.length) { alert("En az bir kaynak seçin."); return; }
-  const p = new URLSearchParams({ etiket: tag, start: $("#start").value, end: $("#end").value,
+  await tnLoad(tag);
+  const p = new URLSearchParams({ etiket: tag, tenant: tenantParam(), start: $("#start").value, end: $("#end").value,
     appliance: $("#appliance").value || "0", sources: srcs.join(",") });
   history.replaceState(null, "", "?" + new URLSearchParams({ topo: tag, ciz: "1", start: p.get("start"), end: p.get("end") }));
   kt.abort?.abort(); kt.abort = new AbortController();
@@ -83,6 +87,8 @@ async function ktRun(tag) {
     const b = await r.json().catch(() => ({ error: `HTTP ${r.status}` }));
     if (!r.ok) throw new Error(b.error || `HTTP ${r.status}`);
     if (uiMode !== "topo") return;
+    // Birden çok kurum: kutu = kurum × küme; anahtar "Kurum · Küme", kutu başlığında yalnız küme adı (kurum çerçevede)
+    if (b.coklu) b.kumeler.forEach(k => { k.kume = k.ad; k.ad = `${k.tenant} · ${k.ad}`; });
     kt.data = b;
     ktShell();
   } catch (e) {
@@ -173,10 +179,21 @@ function ktLayout() {
   // akış sırası: kümeler arası net giden trafiği fazla olan önce
   const net = {};
   d.baglar.forEach(b => { const f = elemKume[b.from], t = elemKume[b.to]; if (f && t && f !== t) { net[f] = (net[f] || 0) + b.hits; net[t] = (net[t] || 0) - b.hits; } });
-  const order = [...d.kumeler].sort((a, b) => (net[b.ad] || 0) - (net[a.ad] || 0) || b.elemanlar.length - a.elemanlar.length);
-  const C = Math.min(order.length, kt.cols || (order.length <= 2 ? order.length : order.length <= 6 ? 3 : 4)), R = Math.ceil(order.length / C);
-  const cell = {};
-  order.forEach((k, i) => cell[k.ad] = { r: Math.floor(i / C), c: i % C });
+  const flow = (a, b) => (net[b.ad] || 0) - (net[a.ad] || 0) || b.elemanlar.length - a.elemanlar.length;
+  // Birden çok kurum: her kurum kendi satırlarından başlar (kurum çerçevesi), kurum içinde akış sırası
+  const sections = d.coklu
+    ? [...new Set(d.kumeler.map(k => k.tenant))].sort((a, b) => a.localeCompare(b, "tr")).map(t => ({ t, ks: d.kumeler.filter(k => k.tenant === t).sort(flow) }))
+    : [{ t: null, ks: [...d.kumeler].sort(flow) }];
+  const maxSec = Math.max(...sections.map(s => s.ks.length));
+  const C = Math.max(1, Math.min(maxSec, kt.cols || (maxSec <= 2 ? maxSec : maxSec <= 6 ? 3 : 4)));
+  const cell = {}, order = [], secRows = [];
+  let R = 0;
+  for (const sec of sections) {
+    const r0 = R;
+    sec.ks.forEach((k, i) => { cell[k.ad] = { r: R + Math.floor(i / C), c: i % C }; order.push(k); });
+    R += Math.ceil(sec.ks.length / C);
+    secRows.push({ t: sec.t, r0, r1: R - 1 });
+  }
   kt.pos = { elemKume, cell, C, R };
 
   // 1) güzergâhlar ızgara düzeyinde (hangi kanallar) → şerit sayıları → kanal genişlikleri
@@ -195,6 +212,10 @@ function ktLayout() {
   const LANE = 4;
   const cap = kt.mode === "kume" ? 170 : 260;
   const gH = hUse.map(u => Math.min(cap, Math.max(44, 26 + u.length * LANE)));
+  // kurum başlığı için kurumun ilk satırının üstündeki kanala yer
+  // (başlık bandı hPad kadar; şeritler bandın altındaki kısımda kalır)
+  const hPad = Array(R + 1).fill(0);
+  if (d.coklu) secRows.forEach(sr => { hPad[sr.r0] = 34; gH[sr.r0] += 34; });
   const gV = vUse.map(u => Math.min(cap, Math.max(48, 26 + u.length * LANE)));
 
   // 2) kutu ve karo konumları
@@ -228,9 +249,13 @@ function ktLayout() {
   order.forEach(k => vis[k.ad].idle.forEach(e => elems[e.id] = boxes[k.ad].tiles.find(t => t.idle)));
 
   // kanal merkezleri
-  const hY = i => i === 0 ? gH[0] / 2 : rowY[i - 1] + rowH[i - 1] + gH[i] / 2;
+  const hY = i => (i === 0 ? gH[0] / 2 : rowY[i - 1] + rowH[i - 1] + gH[i] / 2) + hPad[i] / 2;
   const vX = j => j === 0 ? gV[0] / 2 : colX[j - 1] + BW + gV[j] / 2;
-  Object.assign(kt.pos, { boxes, elems, W, H, links, routes, hUse, vUse, gH, gV, hY, vX, rowY, rowH, colX, LANE });
+  // kurum çerçeveleri: kurumun satırlarını çevreler, başlık kanalın üst kısmında
+  const frames = d.coklu ? secRows.map(sr => ({ t: sr.t, x: 6, y: rowY[sr.r0] - gH[sr.r0] + 6, w: W - 12,
+    h: rowY[sr.r1] + rowH[sr.r1] + 10 - (rowY[sr.r0] - gH[sr.r0] + 6),
+    n: d.kumeler.filter(k => k.tenant === sr.t).reduce((a, k) => a + k.sunucu, 0) })) : [];
+  Object.assign(kt.pos, { boxes, elems, W, H, links, routes, hUse, vUse, gH, gV, hY, vX, rowY, rowH, colX, LANE, frames, hPad });
 }
 
 // Rota noktaları → köşeleri yuvarlatılmış yol
@@ -271,7 +296,7 @@ function ktDraw() {
   const max = Math.max(1, ...links.map(l => l.hits));
   // şerit kaydırması kanalın içinde kalır: şerit aralığı = min(4px, kanal / şerit sayısı)
   const laneOff = (arr, idx, size) => (idx - (arr.length - 1) / 2) * Math.min(LANE, (size - 16) / Math.max(1, arr.length));
-  const hOff = (i, idx) => laneOff(hUse[i], idx, P.gH[i]), vOff = (j, idx) => laneOff(vUse[j], idx, P.gV[j]);
+  const hOff = (i, idx) => laneOff(hUse[i], idx, P.gH[i] - P.hPad[i]), vOff = (j, idx) => laneOff(vUse[j], idx, P.gV[j]);
   // kutu kenarında çıkış / giriş noktaları: aynı kenardaki bağlar karşı ucun x'ine göre sıralanıp yayılır
   const side = {};
   const pushSide = (box, s, i, otherX) => (side[box + "|" + s] ??= []).push({ i, otherX });
@@ -311,7 +336,7 @@ function ktDraw() {
     const h = tagHue(b.k.ad), nVip = b.k.elemanlar.filter(e => e.tur === "vip").length;
     return `<g class="box" data-box="${esc(b.k.ad)}" style="--h:${h}"><rect class="bg" x="${b.x}" y="${b.y}" width="${b.w}" height="${b.h}" rx="10"/>
       <path d="M${b.x} ${b.y + 10} a10 10 0 0 1 10 -10 h${b.w - 20} a10 10 0 0 1 10 10 v26 h${-b.w} z" style="fill:hsl(${h} 60% 50% / .15)"/>
-      <text class="bt" x="${b.x + 12}" y="${b.y + 17}">${esc(ktCut(b.k.ad, 38))}</text>
+      <text class="bt" x="${b.x + 12}" y="${b.y + 17}">${esc(ktCut(b.k.kume || b.k.ad, 38))}</text>
       <text class="bs" x="${b.x + 12}" y="${b.y + 31}">${b.k.sunucu} sunucu · ${nVip} VIP${b.idle.length ? ` · ${b.idle.length} trafiksiz` : ""}</text>
       ${b.tiles.map(t => t.idle
         ? `<g class="el idle" data-idle="${esc(b.k.ad)}"><rect class="tile" x="${t.x}" y="${t.y}" width="${KT.TW}" height="${KT.TH}" rx="7"/>
@@ -330,6 +355,8 @@ function ktDraw() {
       <marker id="ktArrD" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="9" markerHeight="9" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="var(--err)"/></marker>
       <marker id="ktArrH" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="10" markerHeight="10" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="var(--out)"/></marker>
     </defs>
+    ${P.frames.map(f => `<g class="frame"><rect x="${f.x}" y="${f.y}" width="${f.w}" height="${f.h}" rx="14"/>
+      <text x="${f.x + 14}" y="${f.y + 20}">${esc(f.t)}</text><text class="fs" x="${f.x + 26 + f.t.length * 11}" y="${f.y + 20}">${f.n} sunucu</text></g>`).join("")}
     ${boxSvg}<g id="ktLinks">${paths}</g><g id="ktOver"></g></svg>`;
   ktWire(links);
 }

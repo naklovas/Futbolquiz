@@ -38,6 +38,7 @@ function setUiMode(m) {
   $("#ipLabel").hidden = m !== "ip";
   $("#appLabel").hidden = m !== "app";
   $("#topoLabel").hidden = m !== "topo";
+  $("#tenantLabel").hidden = m !== "topo";
   // Etiketleme trafik sorgulamaz: tarih, kutu, kaynak seçimleri ve Sorgula gizli (filtreler tablonun içinde)
   $("#startLabel").hidden = $("#endLabel").hidden = $("#srcChecks").hidden = $("#go").hidden = m === "etiket";
   $("#hop2Label").hidden = m !== "ip";
@@ -48,7 +49,7 @@ function setUiMode(m) {
   $("#srcF5Label").hidden = m !== "erisim";
   $("#srcOpLabel").hidden = m !== "erisim";
   if (m === "app") loadAppCatalog();
-  if (m === "topo") loadTopoTags();
+  if (m === "topo") { loadTopoTags(); globalThis.tnRender?.(); }
 }
 document.querySelectorAll("#modeTabs button").forEach(b => b.addEventListener("click", () => {
   setUiMode(b.dataset.ui);
