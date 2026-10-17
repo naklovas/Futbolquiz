@@ -598,6 +598,10 @@ function renderStatus(d) {
     </div>${msgs.length ? `<div class="msgs">${esc(msgs.join("\n"))}</div>` : ""}`;
 }
 
+// Sunucu etiketleri (envanter TAG kolonu): ip -> [etiket]; IP kartında rozet olarak gösterilir.
+let tagMap = null;
+fetch("api/etiketler").then(r => r.ok ? r.json() : null).then(b => { if (b?.ipler) tagMap = b.ipler; }).catch(() => {});
+
 function renderTarget(d) {
   const t = d.target, s = t.segment;
   const segDl = s ? `<dl>
@@ -624,7 +628,7 @@ function renderTarget(d) {
     : `<div class="unk">Bu IP için uygulama envanterinde kayıt yok.</div>`;
 
   return `<div class="target-grid">
-      <div><div class="bigip">${esc(t.ip)}</div>${segDl}</div>
+      <div><div class="bigip">${esc(t.ip)}</div>${(tagMap?.[t.ip] ?? []).map(x => `<span class="badge" title="Envanter etiketi">${esc(x)}</span> `).join("")}${segDl}</div>
       <div>
         <div class="kpis" style="margin-bottom:12px">
           <div class="kpi"><b style="color:var(--in)">${fmt(inPeers)}</b><span>gelen IP · ${fmt(inSegs)} segment</span></div>

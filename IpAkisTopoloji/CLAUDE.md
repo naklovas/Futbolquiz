@@ -126,6 +126,11 @@ topoloji çizer ve şirket içi AI'a etki analizi yaptırır. Canlıda IIS'te, W
   - `dbo.ERT_HOSTIPADDRESS` (IPADDRESS, PORT, VIP_IP, VIP_PORT, APPNAME, WEBSITE, UNIXNAME, SERVICENAME, VARLIKMUHAFIZI,
     SUNUCUISLETENBIRIM, UYGULAMAVARLIKSAHIBI): uygulama eşleşmesi sırası IP+PORT → VIP_IP+VIP_PORT → IP → VIP_IP.
     APPNAME "Sistem Portudur" → "Sistem Portudur: RDP" gibi (SystemPorts; `Envanter:SistemPortlari` ile ek/override).
+  - **Etiket** (veri ambarı işi için): ERT tablosuna `TAG NVARCHAR(200)` kolonu (`Envanter:EtiketKolonu`, varsayılan TAG; virgülle
+    birden çok) ve/veya ayrı tablo `Envanter:EtiketTablosu` (IPADDRESS, ETIKET). Yoksa sessizce etiketsiz. `TagsOf/TagIps/TagCatalog`,
+    `/api/etiketler`; uygulama listesinde `etiket:VERIAMBARI` → `AppTopology.TagEndpoints` (etiketli sunucular + üyesi oldukları VIP'ler),
+    aynı uygulama çizimi; IP kartında etiket rozeti. Plan: Faz 1 AI rol sınıflaması (Exadata, ETL, rapor…), Faz 1.5 aktarım takibi,
+    Faz 2 DB→tablo→kolon.
   - `dbo.vip_envanteri` (hostname, server_ip, server_port, server_type, loadbalancer_ip, loadbalancer_port, loadbalancer_pool)
   - `dbo.vipgw` (GWIP, FW, Segment=CIDR): LB havuz üyelerine kendi segmentindeki GW IP'sinden gider.
 

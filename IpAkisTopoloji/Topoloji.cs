@@ -118,7 +118,49 @@ sealed class EnvanterService(IConfiguration cfg, ILogger<EnvanterService> log)
             log.LogWarning(ex, "VIP tabloları okunamadı ({Vip}, {Gw}); VIP çözümlemesi kapalı.", vipTable, vipGwTable);
         }
 
-        return new EnvanterSnapshot(segments, hosts, vips, vipGws, marker);
+        var tags = await LoadTagsAsync(conn, hostTable, ct);
+        return new EnvanterSnapshot(segments, hosts, vips, vipGws, marker, tags);
+    }
+
+    // Sunucu etiketleri (ör. VERIAMBARI): ERT tablosundaki etiket kolonu (Envanter:EtiketKolonu, varsayılan TAG) ve/veya
+    // ayrı etiket tablosu (Envanter:EtiketTablosu: IPADDRESS, ETIKET). Virgül / noktalı virgülle birden çok etiket.
+    // Kolon ya da tablo yoksa etiketsiz devam edilir (uygulama hata vermez).
+    async Task<Dictionary<string, List<string>>> LoadTagsAsync(SqlConnection conn, string hostTable, CancellationToken ct)
+    {
+        var map = new Dictionary<string, List<string>>();
+        void Add(string? ip, string? raw)
+        {
+            if (ip == null || raw == null) return;
+            foreach (var t in raw.Split(new[] { ',', ';' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            {
+                if (!map.TryGetValue(ip, out var l)) map[ip] = l = [];
+                if (!l.Contains(t, StringComparer.OrdinalIgnoreCase)) l.Add(t);
+            }
+        }
+        var safe = new System.Text.RegularExpressions.Regex(@"^[A-Za-z_][A-Za-z0-9_]*$");
+        string col = cfg["Envanter:EtiketKolonu"] ?? "TAG";
+        if (col != "" && safe.IsMatch(col))
+        {
+            try
+            {
+                await using var cmd = new SqlCommand($"SELECT IPADDRESS, [{col}] FROM {hostTable} WHERE [{col}] IS NOT NULL", conn);
+                await using var r = await cmd.ExecuteReaderAsync(ct);
+                while (await r.ReadAsync(ct)) Add(Clean(r, 0), Clean(r, 1));
+            }
+            catch (SqlException ex) { log.LogInformation("Etiket kolonu okunamadı ({Col}): {Msg}", col, ex.Message); }
+        }
+        string? tbl = cfg["Envanter:EtiketTablosu"];
+        if (!string.IsNullOrWhiteSpace(tbl) && System.Text.RegularExpressions.Regex.IsMatch(tbl, @"^[A-Za-z0-9_.\[\]]+$"))
+        {
+            try
+            {
+                await using var cmd = new SqlCommand($"SELECT IPADDRESS, ETIKET FROM {tbl}", conn);
+                await using var r = await cmd.ExecuteReaderAsync(ct);
+                while (await r.ReadAsync(ct)) Add(Clean(r, 0), Clean(r, 1));
+            }
+            catch (SqlException ex) { log.LogWarning("Etiket tablosu okunamadı ({Tbl}): {Msg}", tbl, ex.Message); }
+        }
+        return map;
     }
 
     static string? Clean(SqlDataReader r, int i) => r.IsDBNull(i) ? null : EnvanterSnapshot.Clean(Convert.ToString(r.GetValue(i)));
@@ -173,11 +215,30 @@ sealed class EnvanterSnapshot
     // Uygulama adı -> envanter satırları ("Sistem Portudur..." kayıtları hariç)
     readonly Dictionary<string, List<HostApp>> _byApp = new(StringComparer.OrdinalIgnoreCase);
     readonly string _systemMarker;
+    readonly Dictionary<string, List<string>> _tagsByIp = new();
+    readonly Dictionary<string, List<string>> _ipsByTag = new(StringComparer.OrdinalIgnoreCase);
+
+    // Sunucu etiketleri (VERIAMBARI vb.)
+    public List<string> TagsOf(string ip) => _tagsByIp.TryGetValue(ip, out var l) ? l : [];
+    public List<string> TagIps(string tag) => _ipsByTag.TryGetValue(tag, out var l) ? l : [];
+    public IReadOnlyDictionary<string, List<string>> TaggedIps => _tagsByIp;
+    public List<(string Tag, int Count)> TagCatalog() =>
+        _ipsByTag.Select(kv => (kv.Key, kv.Value.Count)).OrderBy(x => x.Key, StringComparer.CurrentCultureIgnoreCase).ToList();
 
     public EnvanterSnapshot(List<SegmentInfo> segments, List<HostApp> hosts,
-        List<VipRow>? vips = null, List<VipGwRow>? vipGws = null, string systemMarker = SystemPorts.DefaultMarker)
+        List<VipRow>? vips = null, List<VipGwRow>? vipGws = null, string systemMarker = SystemPorts.DefaultMarker,
+        Dictionary<string, List<string>>? tags = null)
     {
         _systemMarker = systemMarker;
+        foreach (var (ip, list) in tags ?? [])
+        {
+            _tagsByIp[ip] = list;
+            foreach (var t in list)
+            {
+                if (!_ipsByTag.TryGetValue(t, out var ips)) _ipsByTag[t] = ips = [];
+                if (!ips.Contains(ip)) ips.Add(ip);
+            }
+        }
         foreach (var s in segments)
         {
             if (!TryParseCidr(s.Cidr, out uint net, out int prefix)) continue;

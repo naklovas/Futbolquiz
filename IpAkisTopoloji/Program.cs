@@ -475,11 +475,18 @@ app.MapGet("/api/app", async (string? name, string? start, string? end, int? app
     var (env, envErr) = await Capture(() => envanter.GetAsync(false, ct), ct);
     if (env == null)
         return Results.Json(new { error = "Envanter okunamadı: " + envErr }, statusCode: 502);
-    if (string.IsNullOrWhiteSpace(name) || env.AppRows(name.Trim()).Count == 0)
+    // "etiket:VERIAMBARI" = etiketli sunucuların topolojisi (uygulama görünümüyle aynı çizim)
+    string? tag = name?.Trim() is { } nm && nm.StartsWith("etiket:", StringComparison.OrdinalIgnoreCase) ? nm[7..].Trim() : null;
+    if (tag != null)
+    {
+        if (env.TagIps(tag).Count == 0)
+            return Results.BadRequest(new { error = $"Bu etikette sunucu yok: {tag} (envanterde {cfg["Envanter:EtiketKolonu"] ?? "TAG"} kolonu dolu mu?)" });
+    }
+    else if (string.IsNullOrWhiteSpace(name) || env.AppRows(name.Trim()).Count == 0)
         return Results.BadRequest(new { error = $"Uygulama envanterde bulunamadı: {name}" });
-    name = name.Trim();
+    name = name!.Trim();
 
-    var (servers, vips) = AppTopology.Endpoints(name, env);
+    var (servers, vips) = tag != null ? AppTopology.TagEndpoints(tag, env) : AppTopology.Endpoints(name, env);
     // VIP'ler önce (istemciler oraya gelir), sonra sunucular; limit aşılırsa fazlası sorgulanmaz.
     int max = cfg.GetValue("Uygulama:MaxIp", cfg.GetValue("Hop2MaxPeers", 80));
     var queried = vips.Select(v => v.Ip).Concat(servers.Select(s => s.Ip))
@@ -514,7 +521,22 @@ app.MapGet("/api/app", async (string? name, string? start, string? end, int? app
     var (fw, fwErr) = fwTask.Result;
     var (spSt, arSt, envSt) = Statuses(wanted, sp, spErr, ar, arErr, env, envErr);
     return Results.Ok(AppTopology.Build(name, servers, vips, queried, sp, ar, fw, env, AppTopology.InfraPorts(cfg), EnvFilter.Load(cfg),
-        spSt, arSt, envSt, sw.ElapsedMilliseconds) with { Firewall = FirewallStatus(wanted, cfg, fw, fwErr) });
+        spSt, arSt, envSt, sw.ElapsedMilliseconds, tag) with { Firewall = FirewallStatus(wanted, cfg, fw, fwErr) });
+});
+
+// Sunucu etiketleri (VERIAMBARI vb.): etiket listesi (sunucu sayısıyla) + etiketli IP'ler. Uygulama listesinde
+// "etiket:<ad>" olarak seçilir; IP kartında sorgulanan IP'nin etiketleri gösterilir.
+app.MapGet("/api/etiketler", async (EnvanterService envanter, CancellationToken ct) =>
+{
+    try
+    {
+        var env = await envanter.GetAsync(false, ct);
+        return Results.Ok(new { etiketler = env.TagCatalog().Select(t => new { ad = t.Tag, sunucu = t.Count }), ipler = env.TaggedIps });
+    }
+    catch (Exception ex)
+    {
+        return Results.Json(new { error = ex.Message }, statusCode: 502);
+    }
 });
 
 // 2. seviye: sorgulanan IP'nin karşısındaki sunucuların kendi trafiği (tek sorguda, tüm sunucular için).

@@ -77,9 +77,30 @@ static class AppTopology
         return (servers, vips);
     }
 
+    // Etiket görünümü (ör. VERIAMBARI): uygulama yerine etiketli sunucular; VIP'ler = bu sunucuların üyesi olduğu VIP'ler.
+    public static (List<AppServer> servers, List<AppVip> vips) TagEndpoints(string tag, EnvanterSnapshot env)
+    {
+        var servers = env.TagIps(tag)
+            .Select(ip => new AppServer(ip,
+                env.AppsOnIp(ip).Select(h => h.Port).OfType<string>().Distinct().OrderBy(p => int.TryParse(p, out var n) ? n : int.MaxValue).ToList(),
+                env.AppsOnIp(ip).Select(h => h.UnixName).OfType<string>().FirstOrDefault(),
+                env.FindSegment(ip),
+                env.MemberOf(ip).Select(m => m.LbIp).Distinct().ToList()))
+            .OrderBy(s => s.Segment?.Label).ThenBy(s => s.Ip, StringComparer.Ordinal)
+            .ToList();
+        var vips = servers.SelectMany(s => env.MemberOf(s.Ip)).Select(m => (Ip: m.LbIp, Port: m.LbPort)).Distinct()
+            .Select(k =>
+            {
+                var members = env.VipMembers(k.Ip, k.Port);
+                return new AppVip(k.Ip, k.Port, members.Select(m => m.Pool).OfType<string>().FirstOrDefault(), members, env.FindSegment(k.Ip));
+            })
+            .ToList();
+        return (servers, vips);
+    }
+
     public static AppTopologyResponse Build(string name, List<AppServer> servers, List<AppVip> vips, List<string> queried,
         SplunkResult? sp, AppResponseResult? ar, SplunkResult? fw, EnvanterSnapshot env, HashSet<string> infraPorts, List<EnvFilter> envFilters,
-        SourceStatus spSt, SourceStatus arSt, SourceStatus envSt, long elapsedMs)
+        SourceStatus spSt, SourceStatus arSt, SourceStatus envSt, long elapsedMs, string? tag = null)
     {
         var appIps = servers.Select(s => s.Ip).Concat(vips.Select(v => v.Ip)).ToHashSet();
         var serverByIp = servers.ToDictionary(s => s.Ip);
@@ -110,7 +131,7 @@ static class AppTopology
                 else if (isServer && env.IsVipGw(e.PeerIp, out _))
                 {
                     // LB, havuz üyesine GW IP'sinden gelir: VIP -> üye (uygulama içi)
-                    var viaVip = env.AppMemberOf(name, x).Where(m => m.Port == null || m.Port == e.Port).Select(m => m.LbIp).FirstOrDefault();
+                    var viaVip = (tag != null ? env.MemberOf(x) : env.AppMemberOf(name, x)).Where(m => m.Port == null || m.Port == e.Port).Select(m => m.LbIp).FirstOrDefault();
                     AddInternal(internals, viaVip ?? $"LB GW {e.PeerIp}", x, e.Port, "lb", e.Hits);
                 }
                 else
@@ -146,11 +167,12 @@ static class AppTopology
             }
         }
 
-        var owners = env.AppRows(name).SelectMany(h => new[] { h.VarlikMuhafizi, h.UygulamaVarlikSahibi, h.SunucuIsletenBirim })
+        var ownRows = tag != null ? servers.SelectMany(s => env.AppsOnIp(s.Ip)).ToList() : env.AppRows(name);
+        var owners = ownRows.SelectMany(h => new[] { h.VarlikMuhafizi, h.UygulamaVarlikSahibi, h.SunucuIsletenBirim })
             .OfType<string>().Distinct().ToList();
 
         return new AppTopologyResponse(
-            env.AppRows(name).FirstOrDefault()?.AppName ?? name, owners, servers, vips,
+            tag != null ? $"{tag} (etiket)" : env.AppRows(name).FirstOrDefault()?.AppName ?? name, owners, servers, vips,
             callers.Values.Select(a => a.ToLink()).OrderByDescending(l => l.Hits).ToList(),
             deps.Values.Select(a => a.ToLink()).OrderByDescending(l => l.Hits).ToList(),
             internals.Select(kv => new AppInternal(kv.Key.Item1, kv.Key.Item2, kv.Key.Item3, kv.Value, kv.Key.Item4))

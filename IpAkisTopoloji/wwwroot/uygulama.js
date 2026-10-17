@@ -50,10 +50,12 @@ document.querySelectorAll("#modeTabs button").forEach(b => b.addEventListener("c
 async function loadAppCatalog() {
   if (appState.catalog) return;
   try {
-    const r = await fetch("api/apps");
+    const [r, rt] = await Promise.all([fetch("api/apps"), fetch("api/etiketler").catch(() => null)]);
     if (!r.ok) return;
     appState.catalog = await r.json();
-    $("#appList").innerHTML = appState.catalog.map(a =>
+    // Etiketler (ör. VERIAMBARI) listenin başında: "etiket:<ad>" etiketli sunucuların topolojisini açar
+    const tags = rt?.ok ? ((await rt.json()).etiketler ?? []) : [];
+    $("#appList").innerHTML = tags.map(t => `<option value="etiket:${esc(t.ad)}">Etiket · ${t.sunucu} sunucu</option>`).join("") + appState.catalog.map(a =>
       `<option value="${esc(a.name)}">${a.servers} sunucu${a.vips ? ` · ${a.vips} VIP` : ""}${a.owner ? " · " + esc(a.owner) : ""}</option>`).join("");
   } catch { /* liste gelmezse elle yazılabilir */ }
 }
