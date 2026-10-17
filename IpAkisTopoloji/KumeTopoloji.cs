@@ -7,7 +7,7 @@
 record KtUye(string Ip, string? Hostname, string? Rol, int? Guven, bool Elle, string? Port, long Gelen, long Giden);
 record KtDis(string Ad, long Hits, List<string> Portlar);
 record KtEleman(string Id, string Tur, string Ip, string? Port, string Ad, string? Alt, string? Segment, List<KtUye> Uyeler,
-    long Gelen, long Giden, List<KtDis> DisGelen, List<KtDis> DisGiden);
+    long Gelen, long Giden, List<KtDis> DisGelen, List<KtDis> DisGiden, string? Uygulama = null);
 record KtKume(string Ad, string? Aciklama, int Sunucu, List<KtEleman> Elemanlar, string? Tenant = null);
 record KtBag(string From, string To, List<string> Portlar, long Hits, long Engel, bool Altyapi);
 record KtAkis(string Src, string Dst, string Port, long Hits, long Engel);
@@ -156,13 +156,16 @@ static class KumeTopoloji
                 els.Add(new KtEleman(id, "vip", parts[0], parts.Length > 1 ? parts[1] : null,
                     info.Vip.App ?? info.Vip.Pool ?? key, info.Vip.Pool, info.Seg,
                     info.Uyeler.Select(u => Uye(u, members.FirstOrDefault(m => m.Ip == u.Ip)?.Port)).ToList(),
-                    gelen.GetValueOrDefault(id), giden.GetValueOrDefault(id), Top(disGelen, id), Top(disGiden, id)));
+                    gelen.GetValueOrDefault(id), giden.GetValueOrDefault(id), Top(disGelen, id), Top(disGiden, id),
+                    // kutu içi gruplama: ERT APPNAME (VIP'in uygulaması, yoksa üyelerinin ilk uygulaması)
+                    info.Vip.App is { } va && !env.IsSystemApp(va) ? va : info.Uyeler.SelectMany(u => env.AppNamesOnIp(u.Ip)).FirstOrDefault()));
             }
             foreach (var (ip, info) in srvInfo.Where(s => s.Value.kume == k.Id && srvElem[s.Key] == "s:" + s.Key))
             {
                 string id = "s:" + ip;
                 els.Add(new KtEleman(id, "sunucu", ip, null, info.x.Hostname ?? ip, info.x.Rol, info.seg, [Uye(info.x, null)],
-                    gelen.GetValueOrDefault(id), giden.GetValueOrDefault(id), Top(disGelen, id), Top(disGiden, id)));
+                    gelen.GetValueOrDefault(id), giden.GetValueOrDefault(id), Top(disGelen, id), Top(disGiden, id),
+                    env.AppNamesOnIp(ip).FirstOrDefault()));
             }
             int n = k.Segs.SelectMany(s => s.Sunucular.Concat(s.Vipler.SelectMany(v => v.Sunucular))).Select(x => x.Ip).Distinct().Count();
             return new KtKume(k.Ad, k.Aciklama, n,

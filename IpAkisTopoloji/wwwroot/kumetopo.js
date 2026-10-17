@@ -6,7 +6,7 @@
 // ayrıntısı (AI rolü / gerekçesi, IP düzeyinde akışlar). Veri: /api/islev/topoloji (KumeTopoloji.cs).
 // ============================================================================
 
-const kt = { tag: "", data: null, scale: 1, mode: "kume", expanded: new Set(), cols: 0, per: 5, infra: false, abort: null, hover: null, pos: null, stack: [] };
+const kt = { tag: "", data: null, scale: 1, mode: "kume", expanded: new Set(), cols: 0, per: 5, alt: "uygulama", infra: false, abort: null, hover: null, pos: null, stack: [] };
 
 (function ktStyle() {
   const css = `
@@ -23,6 +23,11 @@ const kt = { tag: "", data: null, scale: 1, mode: "kume", expanded: new Set(), c
   .kt-svg .frame rect { fill:none; stroke:var(--muted); stroke-opacity:.45; stroke-width:1.5; stroke-dasharray:8 5; }
   .kt-svg .frame text { font-size:14px; font-weight:800; fill:var(--text); letter-spacing:.04em; text-transform:uppercase; }
   .kt-svg .frame text.fs { font-size:11.5px; font-weight:500; fill:var(--muted); text-transform:none; letter-spacing:0; }
+  .kt-svg .ah text { font-size:11px; font-weight:700; fill:hsl(var(--h) 45% 38%); letter-spacing:.02em; }
+  .kt-svg .ah tspan { font-weight:500; fill:var(--muted); }
+  .kt-svg .ah line { stroke:hsl(var(--h) 50% 50% / .25); }
+  :root[data-theme="dark"] .kt-svg .ah text { fill:hsl(var(--h) 60% 72%); }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .kt-svg .ah text { fill:hsl(var(--h) 60% 72%); } }
   .kt-svg .el { cursor:pointer; }
   .kt-svg .el .tile { fill:var(--panel); stroke:var(--line); }
   .kt-svg .el.vip .tile { fill:hsl(var(--h, 210) 60% 50% / .07); }
@@ -117,6 +122,7 @@ function ktShell() {
     <div class="kt-bar">
       <button id="ktBack">← İşlev haritası</button>
       <div class="seg"><button data-ktm="kume" class="${kt.mode === "kume" ? "on" : ""}" title="Kümeler arası toplam trafik; elemanın üstüne gelince kendi bağları çizilir">Küme bağları</button><button data-ktm="eleman" class="${kt.mode === "eleman" ? "on" : ""}" title="Bütün VIP / sunucu bağları kanallardan">Tüm eleman bağları</button></div>
+      <label>Kutu içi grup <select id="ktAlt"><option value="uygulama"${kt.alt === "uygulama" ? " selected" : ""}>Uygulama (ERT)</option><option value="yok"${kt.alt !== "uygulama" ? " selected" : ""}>Yok</option></select></label>
       <label>Kutu içi <select id="ktPer">${[2, 3, 4, 5, 6].map(v => `<option${v === kt.per ? " selected" : ""}>${v}</option>`).join("")}</select></label>
       <label>Sütun <select id="ktCols">${[["0", "Otomatik"], ["2", "2"], ["3", "3"], ["4", "4"], ["5", "5"]].map(([v, t]) => `<option value="${v}"${+v === kt.cols ? " selected" : ""}>${t}</option>`).join("")}</select></label>
       <label><input type="checkbox" id="ktInfra" ${kt.infra ? "checked" : ""}> Altyapı portları (DNS, AD, RDP…)</label>
@@ -132,6 +138,7 @@ function ktShell() {
   $("#ktBack").addEventListener("click", () => runIslev(kt.tag));
   $("#ktAgain").addEventListener("click", () => ktRun(kt.tag));
   document.querySelectorAll("[data-ktm]").forEach(b => b.addEventListener("click", () => { kt.mode = b.dataset.ktm; ktShell(); }));
+  $("#ktAlt").addEventListener("change", e => { kt.alt = e.target.value; ktDraw(); });
   $("#ktPer").addEventListener("change", e => { kt.per = +e.target.value; ktDraw(); kt.scale = Math.min(1, ($("#ktWrap").clientWidth - 4) / kt.pos.W); ktDraw(); });
   $("#ktCols").addEventListener("change", e => { kt.cols = +e.target.value; ktDraw(); kt.scale = Math.min(1, ($("#ktWrap").clientWidth - 4) / kt.pos.W); ktDraw(); });
   $("#ktInfra").addEventListener("change", e => { kt.infra = e.target.checked; ktDraw(); });
@@ -172,6 +179,24 @@ function ktLinks() {
     a.hits += b.hits; a.engel += b.engel; a.n++; b.portlar.forEach(p => a.portlar.add(p));
   }
   return Object.values(agg).map(a => ({ ...a, portlar: [...a.portlar] }));
+}
+
+// Kutunun içi: kt.alt === "uygulama" ise karolar ERT APPNAME'e göre alt başlıklar altında, değilse düz ızgara.
+// Döner: { h, items: [{ hdr, n, y } | { e | idle, col, y }] } (y kutu üstüne göre)
+const KT_AH = 20;
+function ktPlan(k, tc) {
+  const { TH, TG, HEAD } = KT, v = ktVisible(k), items = [];
+  let y = HEAD;
+  const put = list => { list.forEach((t, j) => items.push({ ...t, col: j % tc, y: y + Math.floor(j / tc) * (TH + TG) })); y += Math.ceil(list.length / tc) * (TH + TG); };
+  if (kt.alt === "uygulama") {
+    const g = new Map();
+    v.show.forEach(e => { const a = e.uygulama || "Uygulama kaydı yok"; (g.get(a) || g.set(a, []).get(a)).push(e); });
+    const groups = [...g.entries()].sort((a, b) => (a[0] === "Uygulama kaydı yok") - (b[0] === "Uygulama kaydı yok") || b[1].length - a[1].length || a[0].localeCompare(b[0], "tr"));
+    for (const [ad, es] of groups) { items.push({ hdr: ad, n: es.length, y }); y += KT_AH; put(es.map(e => ({ e }))); }
+    if (v.idle.length) { items.push({ hdr: "Trafiksiz", n: v.idle.length, y }); y += KT_AH; put([{ idle: v.idle }]); }
+  } else put([...v.show.map(e => ({ e })), ...(v.idle.length ? [{ idle: v.idle }] : [])]);
+  if (!items.length) y += TH + TG;
+  return { h: y + KT.PAD, items, idle: v.idle };
 }
 
 function ktLayout() {
@@ -250,9 +275,10 @@ function ktLayout() {
     colTc[c] = Math.max(colTc[c], Math.min(kt.per, nTiles[k.ad]));
   });
   const colW = colTc.map(tc => Math.max(KT.PAD * 2 + tc * TW + (tc - 1) * TG, 250));
+  const plan = {};
   order.forEach(k => {
-    const tc = colTc[cell[k.ad].c];
-    rowH[cell[k.ad].r] = Math.max(rowH[cell[k.ad].r], HEAD + Math.ceil(nTiles[k.ad] / tc) * (TH + TG) + PAD);
+    plan[k.ad] = ktPlan(k, colTc[cell[k.ad].c]);
+    rowH[cell[k.ad].r] = Math.max(rowH[cell[k.ad].r], plan[k.ad].h);
   });
   const colX = [], rowY = [];
   let x = gV[0];
@@ -261,17 +287,15 @@ function ktLayout() {
   for (let r = 0; r < R; r++) { rowY[r] = y; y += rowH[r] + gH[r + 1]; }
   const W = x, H = y;
   order.forEach(k => {
-    const { r, c } = cell[k.ad], v = vis[k.ad];
-    const tiles = [...v.show.map(e => ({ e })), ...(v.idle.length ? [{ idle: v.idle, id: "idle:" + k.ad }] : [])];
-    const tc = colTc[c];
-    const h = HEAD + Math.ceil(Math.max(1, tiles.length) / tc) * (TH + TG) + PAD;
-    const b = boxes[k.ad] = { x: colX[c], y: rowY[r], w: colW[c], h, k, idle: v.idle, tiles: [] };
-    tiles.forEach((t, j) => {
-      const tx = b.x + PAD + (j % tc) * (TW + TG), ty = b.y + HEAD + Math.floor(j / tc) * (TH + TG);
-      const p = { x: tx, y: ty, cx: tx + TW / 2, e: t.e, idle: t.idle, id: t.e?.id || t.id, k: k.ad };
+    const { r, c } = cell[k.ad], pl = plan[k.ad];
+    const b = boxes[k.ad] = { x: colX[c], y: rowY[r], w: colW[c], h: pl.h, k, idle: pl.idle, tiles: [], hdrs: [] };
+    for (const it of pl.items) {
+      if (it.hdr != null) { b.hdrs.push({ t: it.hdr, n: it.n, y: b.y + it.y }); continue; }
+      const tx = b.x + PAD + it.col * (TW + TG), ty = b.y + it.y;
+      const p = { x: tx, y: ty, cx: tx + TW / 2, e: it.e, idle: it.idle, id: it.e?.id || "idle:" + k.ad, k: k.ad };
       b.tiles.push(p);
-      if (t.e) elems[t.e.id] = p;
-    });
+      if (it.e) elems[it.e.id] = p;
+    }
   });
   // gizli (trafiksiz) elemanlar kutunun "+N" karosuna bağlanır
   order.forEach(k => vis[k.ad].idle.forEach(e => elems[e.id] = boxes[k.ad].tiles.find(t => t.idle)));
@@ -366,6 +390,8 @@ function ktDraw() {
       <path d="M${b.x} ${b.y + 10} a10 10 0 0 1 10 -10 h${b.w - 20} a10 10 0 0 1 10 10 v26 h${-b.w} z" style="fill:hsl(${h} 60% 50% / .15)"/>
       <text class="bt" x="${b.x + 12}" y="${b.y + 17}">${esc(ktCut(b.k.kume || b.k.ad, 38))}</text>
       <text class="bs" x="${b.x + 12}" y="${b.y + 31}">${b.k.sunucu} sunucu · ${nVip} VIP${b.idle.length ? ` · ${b.idle.length} trafiksiz` : ""}</text>
+      ${b.hdrs.map(hd => `<g class="ah"><text x="${b.x + KT.PAD + 2}" y="${hd.y + 14}">${esc(ktCut(hd.t, Math.floor((b.w - 70) / 7)))}<tspan dx="6">${hd.n}</tspan></text>
+        <line x1="${b.x + KT.PAD + Math.min(b.w - 60, 14 + Math.min(hd.t.length, Math.floor((b.w - 70) / 7)) * 7 + 22)}" y1="${hd.y + 10}" x2="${b.x + b.w - KT.PAD}" y2="${hd.y + 10}"/></g>`).join("")}
       ${b.tiles.map(t => t.idle
         ? `<g class="el idle" data-idle="${esc(b.k.ad)}"><rect class="tile" x="${t.x}" y="${t.y}" width="${KT.TW}" height="${KT.TH}" rx="7"/>
             <text class="nm" x="${t.cx}" y="${t.y + 19}" text-anchor="middle">+${t.idle.length} trafiksiz sunucu</text>
@@ -521,7 +547,7 @@ function ktServer(ip) {
   const g = u.guven == null ? "" : `%${u.guven}`;
   const bg = ktModal(`${ktHead(`▭ ${esc(u.hostname || ip)}`, `<span class="ip">${esc(ip)}</span> · ${esc(kume)}${el.tur === "vip" ? ` · VIP ${esc(el.ip)}:${esc(el.port || "")} üyesi` : ""} · ${esc(el.segment || "")}`, kt.stack.length > 1)}
     <div class="mb">
-      <dl class="kv"><dt>Küme</dt><dd><b>${esc(kume)}</b></dd><dt>AI rolü</dt><dd>${esc(u.rol || "—")} ${g ? `<span class="eg-sub">(güven ${g}${u.elle ? ", elle atandı" : ""})</span>` : ""}</dd>
+      <dl class="kv"><dt>Küme</dt><dd><b>${esc(kume)}</b></dd>${el.uygulama ? `<dt>Uygulama (ERT)</dt><dd>${esc(el.uygulama)}</dd>` : ""}<dt>AI rolü</dt><dd>${esc(u.rol || "—")} ${g ? `<span class="eg-sub">(güven ${g}${u.elle ? ", elle atandı" : ""})</span>` : ""}</dd>
         <dt>Trafik</dt><dd>${fmt(u.gelen)} gelen · ${fmt(u.giden)} giden (etiketli sunucularla)</dd></dl>
       <div id="ktWhy" class="eg-sub"><span class="spinner"></span> AI gerekçesi ve kanıtlar yükleniyor…</div>
       <div class="two"><div><h4>Gelen</h4>${ft(flows.filter(a => a.dst === ip), "in")}</div><div><h4>Giden</h4>${ft(flows.filter(a => a.src === ip), "out")}</div></div>

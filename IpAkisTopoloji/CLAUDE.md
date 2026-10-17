@@ -168,7 +168,8 @@ topoloji çizer ve şirket içi AI'a etki analizi yaptırır. Canlıda IIS'te, W
     Çıktı: Kumeler/Elemanlar/Uyeler, Baglar (eleman→eleman, portlar, hits, engel, altyapı), Akislar (IP düzeyi, ilk 5000).
     Arayüz (canlıda katmanlı sütun düzeni 355 sunucuda kutuları aşağı uzattı, çizgiler karıştı → yeniden yapıldı): kümeler 3–4
     sütunluk ızgara (net akış sırası, "Sütun" seçici), kutu içinde varsayılan 5 sütunlu karolar ("Kutu içi" seçici 2–6; ızgara sütunundaki
-    kutular aynı genişlikte, karo sütunu sütundaki en kalabalık kutuya göre; otomatik ızgara sütunu = ekran genişliğine (%15 küçültme payıyla) sığan en çok kutu; kullanıcı "kutu içi 4–5 sütun, sayfayı doldursun" dedi); trafiksiz sunucular "+N trafiksiz" karosunda
+    kutular aynı genişlikte, karo sütunu sütundaki en kalabalık kutuya göre; otomatik ızgara sütunu = ekran genişliğine (%15 küçültme payıyla) sığan en çok kutu; kullanıcı "kutu içi 4–5 sütun, sayfayı doldursun" dedi); "Kutu içi grup" = Uygulama (ERT, varsayılan): kutu içinde karolar ERT APPNAME alt başlıkları
+    altında (`KtEleman.Uygulama`: VIP'in uygulaması ya da üyelerinin ilk uygulaması; sunucuda ilk sistem-dışı APPNAME; `ktPlan`), "Yok" = düz ızgara; trafiksiz sunucular "+N trafiksiz" karosunda
     (tıkla → açılır). Oklar YALNIZ kutular arası yatay/dikey kanallardan, köşeleri yuvarlatılmış: aşağı satıra = alt kenar → alt kanal
     → (gerekirse hedef sütunun sol kanalında dikey) → hedefin üst kenarı; yukarı tersi; aynı satır alt kenardan alt kanal. Her
     kanalda her oka şerit; kanal genişliği şerit sayısıyla (en çok 170/260) büyür, şerit aralığı kanala sığar. Varsayılan "Küme bağları"
