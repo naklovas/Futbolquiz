@@ -174,7 +174,11 @@ topoloji çizer ve şirket içi AI'a etki analizi yaptırır. Canlıda IIS'te, W
     YIĞMA — kümeler akış sırasıyla "en kısa sütuna" üst üste dizilir (satır hizası yok); otomatik sütun sayısı en geniş kutuya göre
     ekrana sığan. Oklar kutunun YAN kenarından (başlığın altından itibaren 9px aralıkla, karşı ucun y'sine göre sıralı; eleman
     modunda karonun y'si) çıkar: komşu sütun → aradaki dikey kanal, aynı sütun → sağdaki kanal, uzak sütun → kendi yanındaki
-    kanal → en üst ya da en alt yatay kanal → hedefin yanındaki kanal. Her kanalda her oka şerit; kanal genişliği şerit sayısıyla büyür. Varsayılan "Küme bağları"
+    kanal → en üst ya da en alt yatay kanal → hedefin yanındaki kanal. Her kanalda her oka şerit; kanal genişliği şerit sayısıyla büyür.
+    GÖRÜNÜM: varsayılan "Özet" (kullanıcı: "küçük çizilsin, ekrana sığsın, aşağı çok iniyor anlaşılmıyor"): kutuda karo yok, uygulama
+    başına tek satır (`ktGroups`: ad · VIP · sunucu · trafiksiz), kutu 300px; satıra / küme başlığına tıkla → `ktGroupModal` (kart
+    listesi → ktOpen/ktServer, geri yığını). "Ayrıntılı" = karolar. Çizim alanı pencere altına kadar (`ktWrapH`), ölçek genişlik VE
+    yüksekliğe sığar (`ktFitScale`, Sığdır düğmesi de). Varsayılan "Küme bağları"
     (küme çifti başına tek ok; kenar noktaları karşı uca göre yayılır); "Tüm eleman bağları" eleman → eleman (kenar noktası karonun x'i).
     Elemanın üstüne gelince yalnız onun bağları turuncu üst katmanda; küme adının üstüne gelince kümenin bağları. Kutu içinden çizgi
     geçmediği Playwright'ta yol üzerinden örnekleyerek doğrulandı.

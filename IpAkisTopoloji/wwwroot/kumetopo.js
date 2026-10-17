@@ -6,7 +6,7 @@
 // ayrıntısı (AI rolü / gerekçesi, IP düzeyinde akışlar). Veri: /api/islev/topoloji (KumeTopoloji.cs).
 // ============================================================================
 
-const kt = { tag: "", data: null, scale: 1, mode: "kume", expanded: new Set(), cols: 0, per: 5, alt: "uygulama", infra: false, abort: null, hover: null, pos: null, stack: [] };
+const kt = { tag: "", data: null, scale: 1, mode: "kume", expanded: new Set(), cols: 0, per: 5, alt: "uygulama", view: "ozet", open: new Set(), infra: false, abort: null, hover: null, pos: null, stack: [] };
 
 (function ktStyle() {
   const css = `
@@ -14,7 +14,7 @@ const kt = { tag: "", data: null, scale: 1, mode: "kume", expanded: new Set(), c
   .kt-bar .sp { flex:1; }
   .kt-bar label { display:flex; gap:6px; align-items:center; font-size:12.5px; color:var(--text); }
   .kt-src { display:flex; gap:8px; flex-wrap:wrap; font-size:12px; color:var(--muted); margin-bottom:10px; }
-  .kt-wrap { border:1px solid var(--line); border-radius:10px; background:var(--bg); overflow:auto; max-height:calc(100vh - 250px); position:relative; }
+  .kt-wrap { border:1px solid var(--line); border-radius:10px; background:var(--bg); overflow:auto; position:relative; }
   .kt-svg { display:block; }
   .kt-svg .box rect.bg { fill:var(--panel); stroke:hsl(var(--h) 55% 50% / .55); stroke-width:1.5; }
   .kt-svg .box rect.hd { fill:hsl(var(--h) 60% 50% / .12); }
@@ -28,6 +28,11 @@ const kt = { tag: "", data: null, scale: 1, mode: "kume", expanded: new Set(), c
   .kt-svg .ah line { stroke:hsl(var(--h) 50% 50% / .25); }
   :root[data-theme="dark"] .kt-svg .ah text { fill:hsl(var(--h) 60% 72%); }
   @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .kt-svg .ah text { fill:hsl(var(--h) 60% 72%); } }
+  .kt-svg .grp { cursor:pointer; }
+  .kt-svg .grp rect { fill:transparent; }
+  .kt-svg .grp:hover rect { fill:var(--in-soft); }
+  .kt-svg .grp .gn { font-size:12px; font-weight:600; fill:var(--text); }
+  .kt-svg .grp .gc { font-size:11px; fill:var(--muted); font-variant-numeric:tabular-nums; }
   .kt-svg .el { cursor:pointer; }
   .kt-svg .el .tile { fill:var(--panel); stroke:var(--line); }
   .kt-svg .el.vip .tile { fill:hsl(var(--h, 210) 60% 50% / .07); }
@@ -69,7 +74,14 @@ const kt = { tag: "", data: null, scale: 1, mode: "kume", expanded: new Set(), c
   .kt-modal .kv { display:grid; grid-template-columns:120px 1fr; gap:5px 10px; }
   .kt-modal .kv dt { color:var(--muted); }
   .kt-modal .why { background:var(--bg); border:1px solid var(--line); border-radius:8px; padding:10px 12px; line-height:1.45; }
-  .kt-modal .stat { display:flex; gap:10px; flex-wrap:wrap; }`;
+  .kt-modal .stat { display:flex; gap:10px; flex-wrap:wrap; }
+  .kt-cards { display:grid; grid-template-columns:repeat(auto-fill, minmax(190px, 1fr)); gap:6px; }
+  .kt-card { display:grid; grid-template-columns:18px 1fr; gap:0 6px; text-align:left; padding:6px 8px; border:1px solid var(--line); border-radius:7px;
+    background:var(--panel); color:var(--text); cursor:pointer; font:inherit; font-size:12.5px; }
+  .kt-card:hover { border-color:var(--in); background:var(--in-soft); }
+  .kt-card .ic { grid-row:1 / 4; color:var(--muted); } .kt-card b { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .kt-card .ip { font-family:Consolas, ui-monospace, monospace; font-size:11px; color:var(--muted); }
+  .kt-card .tr { font-size:11px; color:var(--muted); }`;
   const st = document.createElement("style"); st.textContent = css; document.head.appendChild(st);
 })();
 
@@ -102,6 +114,14 @@ async function ktRun(tag) {
   }
 }
 
+// Ekrana sığdır: çizim alanı pencerenin altına kadar uzar; ölçek genişliğe VE yüksekliğe sığacak şekilde
+function ktWrapH() { const w = $("#ktWrap"); return w ? Math.max(320, window.innerHeight - w.getBoundingClientRect().top - window.scrollY * 0 - 46) : 600; }
+function ktFitScale() {
+  const w = $("#ktWrap");
+  if (!w || !kt.pos) return 1;
+  w.style.height = ktWrapH() + "px";
+  return Math.max(0.2, Math.min(1, (w.clientWidth - 4) / kt.pos.W, (w.clientHeight - 4) / kt.pos.H));
+}
 function ktShell() {
   const d = kt.data;
   const pill = (n, s) => s ? `<span class="pill ${s.ok ? "ok" : s.error === "Sorgulanmadı" ? "skip" : "err"}" title="${esc(s.error || (s.messages || []).join(" · "))}">${n}${s.ok ? ` · ${fmt(s.rows)} satır` : ""}</span>` : "";
@@ -122,6 +142,7 @@ function ktShell() {
     <div class="kt-bar">
       <button id="ktBack">← İşlev haritası</button>
       <div class="seg"><button data-ktm="kume" class="${kt.mode === "kume" ? "on" : ""}" title="Kümeler arası toplam trafik; elemanın üstüne gelince kendi bağları çizilir">Küme bağları</button><button data-ktm="eleman" class="${kt.mode === "eleman" ? "on" : ""}" title="Bütün VIP / sunucu bağları kanallardan">Tüm eleman bağları</button></div>
+      <div class="seg"><button data-ktv="ozet" class="${kt.view === "ozet" ? "on" : ""}" title="Kutuda uygulama başına tek satır; tıklayınca o kutu ayrıntılı açılır">Özet</button><button data-ktv="detay" class="${kt.view !== "ozet" ? "on" : ""}" title="Bütün VIP ve sunucu karoları">Ayrıntılı</button></div>
       <label>Kutu içi grup <select id="ktAlt"><option value="uygulama"${kt.alt === "uygulama" ? " selected" : ""}>Uygulama (ERT)</option><option value="yok"${kt.alt !== "uygulama" ? " selected" : ""}>Yok</option></select></label>
       <label>Kutu içi <select id="ktPer">${[2, 3, 4, 5, 6].map(v => `<option${v === kt.per ? " selected" : ""}>${v}</option>`).join("")}</select></label>
       <label>Sütun <select id="ktCols">${[["0", "Otomatik"], ["2", "2"], ["3", "3"], ["4", "4"], ["5", "5"]].map(([v, t]) => `<option value="${v}"${+v === kt.cols ? " selected" : ""}>${t}</option>`).join("")}</select></label>
@@ -138,15 +159,20 @@ function ktShell() {
   $("#ktBack").addEventListener("click", () => runIslev(kt.tag));
   $("#ktAgain").addEventListener("click", () => ktRun(kt.tag));
   document.querySelectorAll("[data-ktm]").forEach(b => b.addEventListener("click", () => { kt.mode = b.dataset.ktm; ktShell(); }));
+  document.querySelectorAll("[data-ktv]").forEach(b => b.addEventListener("click", () => {
+    kt.view = b.dataset.ktv; kt.open.clear();
+    document.querySelectorAll("[data-ktv]").forEach(x => x.classList.toggle("on", x === b));
+    ktDraw(); kt.scale = ktFitScale(); ktDraw();
+  }));
   $("#ktAlt").addEventListener("change", e => { kt.alt = e.target.value; ktDraw(); });
-  $("#ktPer").addEventListener("change", e => { kt.per = +e.target.value; ktDraw(); kt.scale = Math.min(1, ($("#ktWrap").clientWidth - 4) / kt.pos.W); ktDraw(); });
-  $("#ktCols").addEventListener("change", e => { kt.cols = +e.target.value; ktDraw(); kt.scale = Math.min(1, ($("#ktWrap").clientWidth - 4) / kt.pos.W); ktDraw(); });
+  $("#ktPer").addEventListener("change", e => { kt.per = +e.target.value; ktDraw(); kt.scale = ktFitScale(); ktDraw(); });
+  $("#ktCols").addEventListener("change", e => { kt.cols = +e.target.value; ktDraw(); kt.scale = ktFitScale(); ktDraw(); });
   $("#ktInfra").addEventListener("change", e => { kt.infra = e.target.checked; ktDraw(); });
   $("#ktZi").addEventListener("click", () => { kt.scale = Math.min(2.5, kt.scale * 1.2); ktDraw(); });
   $("#ktZo").addEventListener("click", () => { kt.scale = Math.max(0.3, kt.scale / 1.2); ktDraw(); });
-  $("#ktFit").addEventListener("click", () => { kt.scale = Math.min(1, ($("#ktWrap").clientWidth - 4) / kt.pos.W); ktDraw(); });
+  $("#ktFit").addEventListener("click", () => { kt.scale = ktFitScale(); ktDraw(); });
   ktLayout();
-  kt.scale = Math.min(1, ($("#ktWrap").clientWidth - 4) / kt.pos.W);
+  kt.scale = ktFitScale();
   ktDraw();
 }
 
@@ -184,9 +210,27 @@ function ktLinks() {
 // Kutunun içi: kt.alt === "uygulama" ise karolar ERT APPNAME'e göre alt başlıklar altında, değilse düz ızgara.
 // Döner: { h, items: [{ hdr, n, y } | { e | idle, col, y }] } (y kutu üstüne göre)
 const KT_AH = 20;
+// Özet görünüm: kutuda karo yok, uygulama başına tek satır (VIP / sunucu / trafiksiz sayısı); satıra tıklayınca kutu açılır.
+const KT_GR = 22, KT_OZW = 300;
+const ktOzet = k => kt.view === "ozet" && !kt.open.has(k.ad);
+function ktGroups(k) {
+  const g = new Map(), name = e => (kt.alt === "uygulama" ? e.uygulama : null) || (kt.alt === "uygulama" ? "Uygulama kaydı yok" : "Tüm elemanlar");
+  for (const e of k.elemanlar) {
+    const a = name(e), r = g.get(a) || g.set(a, { ad: a, vip: 0, srv: 0, idle: 0, es: [] }).get(a);
+    r.es.push(e);
+    if (e.tur === "vip") r.vip++; else r.srv++;
+  }
+  const v = ktVisible(k);
+  v.idle.forEach(e => g.get(name(e)).idle++);
+  return [...g.values()].sort((a, b) => (a.ad === "Uygulama kaydı yok") - (b.ad === "Uygulama kaydı yok") || (b.vip + b.srv) - (a.vip + a.srv) || a.ad.localeCompare(b.ad, "tr"));
+}
 function ktPlan(k, tc) {
   const { TH, TG, HEAD } = KT, v = ktVisible(k), items = [];
   let y = HEAD;
+  if (ktOzet(k)) {
+    for (const g of ktGroups(k)) { items.push({ grp: g, y }); y += KT_GR; }
+    return { h: y + 8, items, idle: v.idle, ozet: true };
+  }
   const put = list => { list.forEach((t, j) => items.push({ ...t, col: j % tc, y: y + Math.floor(j / tc) * (TH + TG) })); y += Math.ceil(list.length / tc) * (TH + TG); };
   if (kt.alt === "uygulama") {
     const g = new Map();
@@ -215,7 +259,7 @@ function ktLayout() {
     : [{ t: null, ks: [...d.kumeler].sort(flow) }];
   const maxSec = Math.max(...sections.map(s => s.ks.length));
   const tiles = k => { const v = ktVisible(k); return Math.max(1, v.show.length + (v.idle.length ? 1 : 0)); };
-  const bw = k => { const tc = Math.min(kt.per, tiles(k)); return Math.max(PAD * 2 + tc * TW + (tc - 1) * TG, 250); };
+  const bw = k => { if (ktOzet(k)) return KT_OZW; const tc = Math.min(kt.per, tiles(k)); return Math.max(PAD * 2 + tc * TW + (tc - 1) * TG, 250); };
   const fitCols = () => {
     const avail = Math.max(600, ($("#ktWrap")?.clientWidth || 1600) - 8) * 1.15;
     const widest = Math.max(...d.kumeler.map(bw));
@@ -225,7 +269,7 @@ function ktLayout() {
   const GAPY = 34;
 
   // 1) kutu planları ve sütun yığma (sütun içi y, bölüme göre)
-  const plan = {}, cell = {}, secH = [], colW = Array(C).fill(250);
+  const plan = {}, cell = {}, secH = [], colW = Array(C).fill(Math.min(250, KT_OZW));
   sections.forEach((sec, si) => {
     const colH = Array(C).fill(0);
     for (const k of sec.ks) {
@@ -276,15 +320,21 @@ function ktLayout() {
   const boxes = {}, elems = {};
   sections.forEach((sec, si) => sec.ks.forEach(k => {
     const { c, yRel } = cell[k.ad], pl = plan[k.ad];
-    const b = boxes[k.ad] = { x: colX[c], y: secY[si] + yRel, w: bw(k), h: pl.h, k, idle: pl.idle, tiles: [], hdrs: [], c };
+    const b = boxes[k.ad] = { x: colX[c], y: secY[si] + yRel, w: bw(k), h: pl.h, k, idle: pl.idle, tiles: [], hdrs: [], grps: [], c, ozet: !!pl.ozet };
     for (const it of pl.items) {
+      if (it.grp) {   // özet satırı; elemanları bağ uçları için bu satıra bağlanır
+        const gy = b.y + it.y, row = { x: b.x + PAD, y: gy - 9, cx: b.x + b.w / 2, cy: gy + KT_GR / 2, k: k.ad, g: it.grp };
+        b.grps.push(row);
+        it.grp.es.forEach(e => elems[e.id] = row);
+        continue;
+      }
       if (it.hdr != null) { b.hdrs.push({ t: it.hdr, n: it.n, y: b.y + it.y }); continue; }
       const tx = b.x + PAD + it.col * (TW + TG), ty = b.y + it.y;
       const p = { x: tx, y: ty, cx: tx + TW / 2, cy: ty + KT.TH / 2, e: it.e, idle: it.idle, id: it.e?.id || "idle:" + k.ad, k: k.ad };
       b.tiles.push(p);
       if (it.e) elems[it.e.id] = p;
     }
-    pl.idle.forEach(e => elems[e.id] = b.tiles.find(t => t.idle));
+    if (!pl.ozet) pl.idle.forEach(e => elems[e.id] = b.tiles.find(t => t.idle));
   }));
   const vX = j => j === 0 ? gV[0] / 2 : colX[j - 1] + colW[j - 1] + gV[j] / 2;
   const chY = ch => ch === "top" ? chH.top / 2 + 2 : H - chH.bot / 2 - 2;
@@ -357,6 +407,10 @@ function ktDraw() {
       <path d="M${b.x} ${b.y + 10} a10 10 0 0 1 10 -10 h${b.w - 20} a10 10 0 0 1 10 10 v26 h${-b.w} z" style="fill:hsl(${h} 60% 50% / .15)"/>
       <text class="bt" x="${b.x + 12}" y="${b.y + 17}">${esc(ktCut(b.k.kume || b.k.ad, 38))}</text>
       <text class="bs" x="${b.x + 12}" y="${b.y + 31}">${b.k.sunucu} sunucu · ${nVip} VIP${b.idle.length ? ` · ${b.idle.length} trafiksiz` : ""}</text>
+      ${b.grps.map(g => `<g class="grp" data-grp="${esc(b.k.ad)}" data-gad="${esc(g.g.ad)}"><rect x="${b.x + 6}" y="${g.cy - 10}" width="${b.w - 12}" height="20" rx="5"/>
+        <text class="gn" x="${b.x + 14}" y="${g.cy + 4}">${esc(ktCut(g.g.ad, g.g.vip && g.g.idle ? 15 : 19))}</text>
+        <text class="gc" x="${b.x + b.w - 14}" y="${g.cy + 4}" text-anchor="end">${g.g.vip ? `${g.g.vip} VIP · ` : ""}${g.g.srv - g.g.idle} sunucu${g.g.idle ? ` · ${g.g.idle} trafiksiz` : ""}</text>
+        <title>${esc(g.g.ad)} — tıklayın: VIP ve sunucular</title></g>`).join("")}
       ${b.hdrs.map(hd => `<g class="ah"><text x="${b.x + KT.PAD + 2}" y="${hd.y + 14}">${esc(ktCut(hd.t, Math.floor((b.w - 70) / 7)))}<tspan dx="6">${hd.n}</tspan></text>
         <line x1="${b.x + KT.PAD + Math.min(b.w - 60, 14 + Math.min(hd.t.length, Math.floor((b.w - 70) / 7)) * 7 + 22)}" y1="${hd.y + 10}" x2="${b.x + b.w - KT.PAD}" y2="${hd.y + 10}"/></g>`).join("")}
       ${b.tiles.map(t => t.idle
@@ -423,13 +477,22 @@ function ktWire(links) {
     g.addEventListener("mouseleave", clear);
     g.addEventListener("click", () => ktOpen(g.dataset.el));
   });
+  svg.querySelectorAll(".grp").forEach(g => {
+    g.addEventListener("click", () => ktGroupModal(g.dataset.grp, g.dataset.gad));
+    g.addEventListener("mouseenter", () => lightBox(g.dataset.grp));
+    g.addEventListener("mouseleave", clear);
+  });
   svg.querySelectorAll(".el[data-idle]").forEach(g => g.addEventListener("click", () => { kt.expanded.add(g.dataset.idle); ktDraw(); }));
   svg.querySelectorAll(".box text.bt").forEach(t => {
     const n = t.closest(".box").dataset.box;
     t.style.cursor = "pointer";
     t.addEventListener("mouseenter", () => lightBox(n));
     t.addEventListener("mouseleave", clear);
-    t.addEventListener("click", () => { if (kt.expanded.has(n)) { kt.expanded.delete(n); ktDraw(); } });
+    // başlığa tıklama: özet görünümde kutuyu açar / kapatır; ayrıntılıda açılmış trafiksizleri toplar
+    t.addEventListener("click", () => {
+      if (kt.view === "ozet") ktGroupModal(n, null);
+      else if (kt.expanded.has(n)) { kt.expanded.delete(n); ktDraw(); }
+    });
   });
   svg.querySelectorAll(".lkh").forEach(p => {
     const l = links[+p.dataset.li];
@@ -475,6 +538,24 @@ function ktElemName(id) { const p = ktFind(id); return p ? `${p.e.tur === "vip" 
 function ktHead(title, sub, back) {
   return `<div class="mh"><div>${back ? `<a href="#" data-ktback style="font-size:12px">← geri</a>` : ""}<h3>${title}</h3><div class="eg-sub">${sub}</div></div>
     <button data-ktclose>Kapat</button></div>`;
+}
+
+// Özet görünümde küme / uygulama satırına tıklayınca: o grubun VIP ve sunucuları kart kart (tıklayınca ayrıntı)
+function ktGroupModal(kAd, gAd) {
+  const k = kt.data.kumeler.find(x => x.ad === kAd);
+  if (!k) return;
+  kt.stack.push(() => ktGroupModal(kAd, gAd));
+  const groups = ktGroups(k).filter(g => gAd == null || g.ad === gAd);
+  const h = tagHue(kAd);
+  const card = e => `<button type="button" class="kt-card" data-open="${esc(e.id)}">
+      <span class="ic">${e.tur === "vip" ? "◉" : "▭"}</span><b>${esc(e.tur === "vip" ? "VIP " + e.ad : e.ad)}</b>
+      <span class="ip">${esc(e.ip)}${e.port ? ":" + esc(e.port) : ""}${e.tur === "vip" ? ` · ${e.uyeler.length} üye` : ""}</span>
+      <span class="tr">${e.gelen + e.giden ? `${fmt(e.gelen)} gelen · ${fmt(e.giden)} giden` : "trafik yok"}</span></button>`;
+  const bg = ktModal(`${ktHead(`<span style="color:hsl(${h} 55% 45%)">■</span> ${esc(k.kume || k.ad)}${gAd ? ` · ${esc(gAd)}` : ""}`,
+      `${k.sunucu} sunucu · ${k.elemanlar.filter(e => e.tur === "vip").length} VIP${k.tenant ? " · " + esc(k.tenant) : ""}`, kt.stack.length > 1)}
+    <div class="mb">${groups.map(g => `<div><h4>${esc(g.ad)} · ${g.vip ? g.vip + " VIP · " : ""}${g.srv} sunucu</h4>
+      <div class="kt-cards">${[...g.es].sort((a, b) => (a.tur !== "vip") - (b.tur !== "vip") || (b.gelen + b.giden) - (a.gelen + a.giden)).map(card).join("")}</div></div>`).join("")}</div>`);
+  bg.querySelectorAll("[data-open]").forEach(c => c.addEventListener("click", () => ktOpen(c.dataset.open)));
 }
 
 function ktOpen(id) {
