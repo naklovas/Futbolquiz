@@ -254,7 +254,7 @@ Açık soru: ERT Entropi'den truncate ile yeniden yükleniyorsa TAG / AI_KUME / 
   yeni=true; "Altyapı: …"; kanıt yoksa null. Sonuç ERT'ye YAZILMAZ: `Eksik:OneriTablosu` dbo.DF_ERT_UYGULAMA_ONERI (`sql/ert_oneri.sql`;
   yoksa bellekte + uyarı), DURUM AI / Onaylandı / Reddedildi / Elle; onaylanan / elle girilene AI dokunmaz. Uçlar: `/api/eksik`
   (ara, durum yok|ai|onay|red, altyapi, sayfa), `/api/eksik/durum`, `/kanit?ip=`, POST `/calistir {ips?, hepsi, yeniden, saat}`,
-  `/durdur`, `/karar {ip, port, karar: onay|red|elle|sil, uygulama}`, `/csv?hepsi=` (Excel, ; ayraçlı, BOM). Yazma yetkisi
+  `/durdur`, `/karar {ip, port, karar: onay|red|elle|sil, uygulama}` (calistir'da `max`: sayfadaki "Sunucu" seçicisi 100/200/500/1000/Tümü=0; varsayılan `Eksik:MaxIp`=200 — kullanıcı "kafasına göre sayı seçiyor" dedi: 14 bin satırdan 1438 = 200 sunucunun portları; onay penceresi ve ilerlemede "bu çalıştırmada X / Y sunucu" yazılır), `/csv?hepsi=` (Excel, ; ayraçlı, BOM). Yazma yetkisi
   `Etiket:Yazanlar`. Kullanıcı: alt sayfalara ayrı yetki kontrolü SONRA eklenecek.
   Kullanıcı istekleri: otomatik / dinamik portlar (≥ `Eksik:DinamikPortBaslangic`=49152) HİÇ listelenmez; test segmentleri
   (segment Domain'inde `Eksik:TestIfadeleri`=["test"]) altyapı portları gibi seçmeli ("Test segmentleri" kutucuğu, varsayılan gizli,

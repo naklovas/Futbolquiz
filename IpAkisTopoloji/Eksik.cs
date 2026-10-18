@@ -16,7 +16,8 @@ record EksikSatir(string Ip, string Port, string? Hostname, string? Segment, str
     string? Birim, List<string> Diger, bool Altyapi, EksikOneri? Oneri, bool Test = false);
 record EksikListe(List<EksikSatir> Satirlar, int Toplam, int TumSatir, int TumIp, int Onerili, int Onayli, IslevDurum Durum,
     bool Yazabilir, string? Uyari);
-record EksikCalistir(List<string>? Ips, bool Hepsi, bool Yeniden, int? Saat, bool Test = false);
+// Max: bu çalıştırmada en çok kaç sunucu (boş = Eksik:MaxIp; 0 = sınırsız)
+record EksikCalistir(List<string>? Ips, bool Hepsi, bool Yeniden, int? Saat, bool Test = false, int? Max = null);
 record EksikKarar(string? Ip, string? Port, string? Karar, string? Uygulama);
 
 sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, EnvanterService envanter, IslevService islev,
@@ -496,16 +497,19 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
         var have = await LoadAsync(true, ct);
         var wanted = req.Ips is { Count: > 0 } ? req.Ips.ToHashSet() : null;
         // Hedef: istenen IP'ler ya da önerisi olmayanlar; altyapı portları ve onaylanmış / elle girilmiş olanlar atlanır
-        var todo = Missing(env, Dyn).Where(m => !infra.Contains(m.Port))
+        var cands = Missing(env, Dyn).Where(m => !infra.Contains(m.Port))
             .Where(m => wanted == null || wanted.Contains(m.Ip))
             .Where(m => wanted != null || req.Test || !IsTest(env, m.Ip))   // test segmentleri yalnız seçilirse
             .Where(m => !have.TryGetValue((m.Ip, m.Port), out var o) || (o.Durum is not (Onay or Elle) && (req.Yeniden || wanted != null)))
-            .GroupBy(m => m.Ip).OrderByDescending(g => g.Count())
-            .Take(Math.Clamp(cfg.GetValue("Eksik:MaxIp", 200), 1, 5000))
+            .GroupBy(m => m.Ip).OrderByDescending(g => g.Count()).ToList();
+        int allIps = cands.Count, allPorts = cands.Sum(g => g.Count());
+        var todo = cands.Take(req.Max is 0 ? int.MaxValue : Math.Clamp(req.Max ?? cfg.GetValue("Eksik:MaxIp", 200), 1, 100000))
             .ToDictionary(g => g.Key, g => g.Select(m => m.Port).ToList());
         if (todo.Count == 0) throw new InvalidOperationException("Öneri bekleyen satır yok (altyapı portları ve onaylananlar hariç).");
         int total = todo.Values.Sum(v => v.Count), hours = Hours(req.Saat);
-        Set(d => d with { Asama = "Kanıtlar toplanıyor", Toplam = total });
+        // Etiket alanı özet için: bu çalıştırmada kaç sunucu / bekleyen toplam
+        Set(d => d with { Asama = "Kanıtlar toplanıyor", Toplam = total,
+            Etiket = todo.Count < allIps ? $"bu çalıştırmada {todo.Count} / {allIps} sunucu ({allPorts - total} port sonraki çalıştırmalara kaldı)" : $"{allIps} sunucu" });
         int paket = Math.Clamp(cfg.GetValue("Eksik:Paket", 3), 1, 10), paralel = Math.Clamp(cfg.GetValue("Eksik:Paralel", 2), 1, 6);
         using var gate = new SemaphoreSlim(paralel);
         // Kanıtlar 20'şer IP'lik gruplarla (Carbon Black tek sorgu), AI paketleri paralel
