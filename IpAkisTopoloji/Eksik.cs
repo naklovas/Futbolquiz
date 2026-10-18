@@ -91,7 +91,7 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
         bool Has(string? v) => v != null && v.Contains(q!, StringComparison.CurrentCultureIgnoreCase);
         var f = rows.Where(r => altyapi || !r.Altyapi).Where(r => test || !r.Test)
             .Where(r => string.IsNullOrEmpty(q) || Has(r.Ip) || Has(r.Port) || Has(r.Hostname) || Has(r.Website) || Has(r.Servis)
-                        || Has(r.Muhafiz) || Has(r.Segment) || Has(r.Oneri?.Uygulama) || r.Diger.Any(Has))
+                        || Has(r.Muhafiz) || Has(r.Segment) || Has(r.Oneri?.Uygulama) || Has(r.Oneri?.Gerekce) || r.Diger.Any(Has))
             .Where(r => durum switch
             {
                 "yok" => r.Oneri == null,
@@ -598,6 +598,10 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
               Gerekçede teknolojiyi belirt (ör. "1433 SQL Server; istemcileri KREDİ uygulaması"). Sahibi bulunamazsa
               uygulama null, gerekçede "SQL Server veritabanı, sahibi belirsiz" yaz.
             - Kanıt yetersizse "uygulama": null ve güven düşük yaz. Uydurma.
+            - "Envanter Kahini" satırları daha önce BAŞKA BİR AI'ın yaptığı tahminlerdir, doğrulanmış bilgi değildir. Girdi olarak
+              kullan; ama öneri yalnız Kahin'e dayanıyorsa güven en fazla 60 olsun ve gerekçede "yalnız Kahin tahmini" yaz.
+              Kahin diğer kanıtlarla (exe yolu, SM talebi, WEBSITE, benzer adlı sunucular…) çelişirse diğer kanıtları tercih et;
+              destekleniyorsa gerekçede destekleyen kanıtı da yaz.
 
             Yalnızca JSON dizi döndür, başka metin yazma. Her boş port için bir eleman:
             [{"ip":"…","port":"…","uygulama":"… ya da null","yeni":false,"guven":0-100,"gerekce":"tek cümle; hangi kanıta dayandığın"}]
