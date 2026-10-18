@@ -104,6 +104,7 @@
 <main>
   <section class="panel">
     <div class="stats" id="stats"></div>
+    <div id="bilgi" class="sub" style="margin:-4px 0 10px"></div>
     <div id="warn"></div>
     <div class="tools">
       <input type="search" id="q" placeholder="IP, sunucu, website, muhafız, öneri, gerekçe ara…" title="Gerekçede de arar: ör. 'Kahin' yazınca Kahin'e dayanan öneriler" style="min-width:300px">
@@ -164,6 +165,7 @@ function render() {
   const d = st.data, w = d.yazabilir;
   $("#stats").innerHTML = [["Boş uygulama adlı satır", d.tumSatir], ["Sunucu", d.tumIp], ["Önerisi olan", d.onerili], ["Onaylanan", d.onayli], ["Filtre sonucu", d.toplam]]
     .map(([l, n]) => `<div class="stat"><b>${fmt(n)}</b><span>${l}</span></div>`).join("");
+  $("#bilgi").textContent = d.bilgi ? "AI'a her istekte giden " + d.bilgi : "";
   $("#warn").innerHTML = d.uyari ? `<div class="warn">${esc(d.uyari)}</div>` : w ? "" : `<div class="warn">Yalnız görüntüleme yetkiniz var.</div>`;
   const run = d.durum?.calisiyor;
   $("#runAll").disabled = !w || run || !d.topluYetki;

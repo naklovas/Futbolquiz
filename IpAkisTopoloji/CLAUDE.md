@@ -247,7 +247,8 @@ Açık soru: ERT Entropi'den truncate ile yeniden yükleniyorsa TAG / AI_KUME / 
   havuz komşuları, benzer ad, segment+port, muhafızın uygulamaları, adı kanıtla kelime örtüşen ERT uygulamaları).
   SM talepleri IP + port (`SmPortAsync`, kullanıcının diğer projesinden gelen sorgu): `Eksik:SmTablolari` (varsayılan dbo.REQUESTM1; SM
   ERT ile aynı doku DB'sinde), DESCRIPTION / BRIEF_DESCRIPTION / ZT_KAYNAKACIKLAMA / ZT_HEDEFACIKLAMA'da IP ya da UNIXNAME VE
-  DESCRIPTION / BRIEF_DESCRIPTION'da port. Kullanıcı: tablo büyük → tek sorgu 20 sunuculuk grup için, OPEN_TIME ≥ son `Eksik:SmYil`
+  DESCRIPTION / BRIEF_DESCRIPTION'da port. Kullanıcı: tablo büyük → tek sorgu 20 sunuculuk grup için, tarih (`Eksik:SmTarihKolonu`, varsayılan
+  SUBMIT_DATE — canlıda OPEN_TIME YOK, "Invalid column name" verdi) ≥ son `Eksik:SmYil`
   (varsayılan Islev:SmYil=3) yıl, NOLOCK, TOP 500; sunucu/port ataması C#'ta (IP tam, port tam sayı), sunucu başına en yeni 10; ZT_ kolonu yoksa (207) yalnız iki kolon. Kullanıcının canlı örneği:
   2.71.51.16:5000 boş, CB'de c:\bbpgm\atm_monitoring_service\terminaldurum.restservice.exe, sunucu adı zb1pwatmvzsra01 ("atm").
   AI (`IslevService.ChatAsync`, `Paket`=3 sunucu/istek, `Paralel`=2, `MaxIp`=200/çalıştırma): adaydan harfi harfine seçer ya da
@@ -264,7 +265,10 @@ Açık soru: ERT Entropi'den truncate ile yeniden yükleniyorsa TAG / AI_KUME / 
   YETKİ (kullanıcı): TÜM boşları tahmin ettirme (calistir'da ips yok) yalnız `Eksik:TopluYetkililer` (varsayılan ["visikhan"], DOMAIN\
   öneki fark etmez; `CanBulk`); diğer yazma yetkililer yalnız seçili sunucular (en çok 50) / tek sunucu yenileme. `/api/eksik`
   TopluYetki döner, düğme pasif. Envanter Kahini (dbo.SONUCLAR, kullanıcının önceki Gemini projesinin KAYITLI sonuçları; IP, PORT, TAHMIN, SAHIPLIK_ANALIZI) AI'a
-  girdi; prompt: önceki AI tahmini, tek dayanaksa güven ≤60 ve "yalnız Kahin tahmini", çelişirse diğer kanıtlar. Arama gerekçede de ("Kahin"). Sıralama: başlıklar IP / Port / Sunucu / Öneri (önerisi olmayan sonda) / güven / durum (`sirala`, `yon`).
+  girdi; prompt: önceki AI tahmini, tek dayanaksa güven ≤60 ve "yalnız Kahin tahmini", çelişirse diğer kanıtlar.
+  Genel bilgiler dosyası (`Eksik:BilgiDosyasi`, kullanıcının .txt'si; göreli yol uygulama klasörüne göre; UTF-8 ya da Windows-1254;
+  `BilgiMaxKarakter`=15000; tarih değişince yeniden okunur): HER AI isteğinin başına eklenir (model istekler arası hatırlamaz);
+  sayfada "AI'a her istekte giden genel bilgi dosyası: … karakter" satırı. Arama gerekçede de ("Kahin"). Sıralama: başlıklar IP / Port / Sunucu / Öneri (önerisi olmayan sonda) / güven / durum (`sirala`, `yon`).
 - **VIP**: sorgulanan IP VIP ise üyeler + GW'ler aynı sorguya eklenir, üyeler "VIP ÜYESİ" (GW→üye trafiği varsa ✓).
   Gidilen IP VIP ise "VIP → n ÜYE"; gelen IP LB GW ise "LB GW"; sorgulanan sunucu havuz üyesiyse VIP kartı.
 - **Uygulama görünümü** (`/api/apps`, `/api/app`): `[kullanan uygulamalar] → [UYGULAMA: VIP'ler + segment grupları] → [bağımlı olunanlar]`,

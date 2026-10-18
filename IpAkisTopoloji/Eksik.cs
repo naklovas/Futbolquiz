@@ -15,7 +15,7 @@ record EksikOneri(string? Uygulama, bool Yeni, int Guven, string? Gerekce, strin
 record EksikSatir(string Ip, string Port, string? Hostname, string? Segment, string? Website, string? Servis, string? Muhafiz,
     string? Birim, List<string> Diger, bool Altyapi, EksikOneri? Oneri, bool Test = false);
 record EksikListe(List<EksikSatir> Satirlar, int Toplam, int TumSatir, int TumIp, int Onerili, int Onayli, IslevDurum Durum,
-    bool Yazabilir, string? Uyari, bool TopluYetki = false);
+    bool Yazabilir, string? Uyari, bool TopluYetki = false, string? Bilgi = null);
 // Max: bu çalıştırmada en çok kaç sunucu (boş = Eksik:MaxIp; 0 = sınırsız)
 record EksikCalistir(List<string>? Ips, bool Hepsi, bool Yeniden, int? Saat, bool Test = false, int? Max = null);
 record EksikKarar(string? Ip, string? Port, string? Karar, string? Uygulama);
@@ -118,8 +118,10 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
             _ => f.OrderBy(r => r.Oneri == null ? 1 : 0).ThenByDescending(r => r.Oneri?.Guven ?? 0).ThenBy(r => IpKey(r.Ip)).ThenBy(r => PortN(r.Port))
         }).ToList();
         int size = Math.Clamp(boyut, 20, 1000), page = Math.Max(1, sayfa);
+        string bilgi;
+        try { bilgi = Bilgi().Durum; } catch (Exception ex) { bilgi = "genel bilgi dosyası okunamadı: " + ex.Message; }
         return new EksikListe(f.Skip((page - 1) * size).Take(size).ToList(), f.Count, rows.Count, rows.Select(r => r.Ip).Distinct().Count(),
-            rows.Count(r => r.Oneri != null), rows.Count(r => r.Oneri?.Durum is Onay or Elle), Durum, yazabilir, _uyari);
+            rows.Count(r => r.Oneri != null), rows.Count(r => r.Oneri?.Durum is Onay or Elle), Durum, yazabilir, _uyari, false, bilgi);
     }
 
     static string IpKey(string ip) => string.Join(".", ip.Split('.').Select(p => p.PadLeft(3, '0')));
@@ -284,7 +286,7 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
 
     // SM talepleri (IP + port): açıklamasında sunucunun IP'si ya da adı VE boş portlardan biri geçen en yeni talepler
     // (kullanıcının diğer projesindeki sorgu). SM verisi ERT ile aynı doku DB'sinde: Eksik:SmTablolari (varsayılan dbo.REQUESTM1).
-    // Tablo büyük: tek sorgu tüm grup (≤20 sunucu) için, yalnız son Eksik:SmYil (varsayılan Islev:SmYil = 3) yıl; hangi talebin
+    // Tablo büyük: tek sorgu tüm grup (≤20 sunucu) için, yalnız son Eksik:SmYil (tarih Eksik:SmTarihKolonu, varsayılan SUBMIT_DATE) (varsayılan Islev:SmYil = 3) yıl; hangi talebin
     // hangi sunucu / porta ait olduğu C#'ta ayrılır (port tam sayı olarak). ZT_*ACIKLAMA yoksa yalnız DESCRIPTION / BRIEF_DESCRIPTION.
     async Task<Dictionary<string, string>> SmPortAsync(List<string> ips, Dictionary<string, List<string>> ports, EnvanterSnapshot env, CancellationToken ct)
     {
@@ -298,6 +300,8 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
         var since = DateTime.Today.AddYears(-Math.Clamp(cfg.GetValue("Eksik:SmYil", cfg.GetValue("Islev:SmYil", 3)), 1, 20));
         var rows = new List<(string No, DateTime? T, string Who, string Desc, string Text)>();
         string? err = null;
+        // Tarih kolonu: canlı REQUESTM1'de OPEN_TIME yok ("Invalid column name") → işlev haritasının kullandığı SUBMIT_DATE
+        string dateCol = cfg["Eksik:SmTarihKolonu"] is { Length: > 0 } dc && System.Text.RegularExpressions.Regex.IsMatch(dc, "^[A-Za-z_][A-Za-z0-9_]*$") ? dc : "SUBMIT_DATE";
         foreach (var table in tables.Where(t => System.Text.RegularExpressions.Regex.IsMatch(t, @"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*){0,2}$")))
         {
             async Task Query(bool zt)
@@ -314,11 +318,11 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
                 var port = want.SelectMany(x => x.ps).Distinct().Select(P).Select(p => $"req.DESCRIPTION LIKE {p} OR req.BRIEF_DESCRIPTION LIKE {p}").ToList();
                 cmd.Parameters.AddWithValue("@since", since);
                 cmd.CommandText = $"""
-                    SELECT TOP (500) req.NUMBER, req.OPEN_TIME, req.BRIEF_DESCRIPTION, LEFT(CAST(req.DESCRIPTION AS nvarchar(max)), 800)
+                    SELECT TOP (500) req.NUMBER, req.[{dateCol}], req.BRIEF_DESCRIPTION, LEFT(CAST(req.DESCRIPTION AS nvarchar(max)), 800)
                         {(zt ? ", req.ZT_KAYNAKACIKLAMA, req.ZT_HEDEFACIKLAMA" : "")}
                     FROM {table} req WITH (NOLOCK)
-                    WHERE req.OPEN_TIME >= @since AND ({string.Join(" OR ", who)}) AND ({string.Join(" OR ", port)})
-                    ORDER BY req.OPEN_TIME DESC
+                    WHERE req.[{dateCol}] >= @since AND ({string.Join(" OR ", who)}) AND ({string.Join(" OR ", port)})
+                    ORDER BY req.[{dateCol}] DESC
                     """;
                 await using var r = await cmd.ExecuteReaderAsync(ct);
                 while (await r.ReadAsync(ct))
@@ -571,10 +575,40 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
         }
     }
 
+    // Kullanıcının genel bilgiler dosyası (Eksik:BilgiDosyasi; .txt, UTF-8 ya da Windows-1254): her AI isteğinin başına eklenir.
+    // Model istekler arası hatırlamadığı için "öğretmek" = her istekte göndermek. Dosya değişince (tarih) yeniden okunur.
+    (string Path, DateTime At, string Text, bool Cut)? _bilgi;
+    public (string? Text, string Durum) Bilgi()
+    {
+        string? path = cfg["Eksik:BilgiDosyasi"];
+        if (string.IsNullOrWhiteSpace(path)) return (null, "genel bilgi dosyası tanımlı değil (Eksik:BilgiDosyasi)");
+        if (!System.IO.Path.IsPathRooted(path)) path = System.IO.Path.Combine(AppContext.BaseDirectory, path);
+        if (!File.Exists(path)) return (null, $"genel bilgi dosyası bulunamadı: {System.IO.Path.GetFileName(path)}");
+        var at = File.GetLastWriteTimeUtc(path);
+        if (_bilgi is not { } b || b.Path != path || b.At != at)
+        {
+            var bytes = File.ReadAllBytes(path);
+            string text;
+            try { text = new UTF8Encoding(false, true).GetString(bytes).TrimStart('\uFEFF'); }
+            catch (DecoderFallbackException)
+            {
+                Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+                text = Encoding.GetEncoding(1254).GetString(bytes);
+            }
+            int max = Math.Clamp(cfg.GetValue("Eksik:BilgiMaxKarakter", 15000), 1000, 200000);
+            bool cut = text.Length > max;
+            _bilgi = b = (path, at, cut ? text[..max] : text, cut);
+        }
+        return (b.Text, $"genel bilgi dosyası: {System.IO.Path.GetFileName(path)} · {b.Text.Length:N0} karakter{(b.Cut ? " (Eksik:BilgiMaxKarakter sınırında kesildi)" : "")}");
+    }
+
     async Task<Dictionary<(string, string), EksikOneri>> AskAsync(string[] ips, Dictionary<string, List<string>> todo,
         Dictionary<string, string> texts, EnvanterSnapshot env, CancellationToken ct)
     {
         var sb = new StringBuilder();
+        if (Bilgi().Text is { Length: > 0 } genel)
+            sb.AppendLine("KURUMA ÖZEL GENEL BİLGİLER (kullanıcının hazırladığı; kanıtları yorumlarken bunlara göre düşün):")
+              .AppendLine(genel.Trim()).AppendLine("--- genel bilgilerin sonu ---").AppendLine();
         sb.AppendLine("""
             Bir bankanın veri merkezinde çalışan kıdemli bir altyapı mimarısın. Kurumun uygulama envanterinde (ERT) aşağıdaki
             sunucuların bazı portlarında UYGULAMA ADI BOŞ. Verilen kanıtlara bakarak her boş port için o portta hangi uygulamanın
