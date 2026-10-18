@@ -223,10 +223,11 @@ Açık soru: ERT Entropi'den truncate ile yeniden yükleniyorsa TAG / AI_KUME / 
 - **IP görünümü**: 5 sütun `[segment] → [gelen sunucu] → [SORGULANAN IP] → [gidilen sunucu] → [segment]`.
   2. seviye (`/api/hop2`) sunucuların kendi trafiği tek sorguda. Sunucu/segment sayısı seçilebilir, hover vurgusu,
   detay kartı, "Bu IP'nin topolojisini aç", tablolar, CSV, SVG/PNG, segment özeti.
-- **Çalışan süreç (exe)**: IP kartındaki "Bu makinedeki uygulamalar" tablosunda Port'tan sonra kolon: o portta gelen bağlantıyı
-  kabul eden süreç (Carbon Black, `/api/surec` IP sorgusundan sonra Splunk seçiliyse arka planda çekilir; `procByPort`/`targetApps`,
-  `#tgtApps` güncellenir; PID'ler ipucunda). ERT'de olmayan ama CB'de dinlenen portlar (altyapı portları `PROC_INFRA` hariç)
-  "ERT'de kayıt yok (yalnız Carbon Black)" satırı. Bağlantı görülmeyen portta "görülmedi".
+- **Gelen portlar ve çalışan süreçler**: IP kartında "Bu makinedeki uygulamalar" (ERT) tablosunun ALTINDA ERT'den bağımsız tablo
+  (kullanıcı: önce ERT tablosuna exe kolonu eklendi, eşleşme çok az çıktı → "bağımsız gelsin"): Port | exe | PID | gelen bağlantı |
+  karşı IP | ERT'deki uygulama (varsa). Kaynak Carbon Black (`/api/surec`, IP sorgusundan sonra Splunk seçiliyse arka planda;
+  `ProcNode.Portlar` = port başına tüm bağlantılar, Inbound'un 40 karşı IP sınırından bağımsız). Altyapı portları soluk "altyapı".
+  Seçili aralıkta bağlantı kabul eden exe'ler; netstat gibi tüm dinlenen portlar değil.
 - **VIP**: sorgulanan IP VIP ise üyeler + GW'ler aynı sorguya eklenir, üyeler "VIP ÜYESİ" (GW→üye trafiği varsa ✓).
   Gidilen IP VIP ise "VIP → n ÜYE"; gelen IP LB GW ise "LB GW"; sorgulanan sunucu havuz üyesiyse VIP kartı.
 - **Uygulama görünümü** (`/api/apps`, `/api/app`): `[kullanan uygulamalar] → [UYGULAMA: VIP'ler + segment grupları] → [bağımlı olunanlar]`,

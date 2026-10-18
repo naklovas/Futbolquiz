@@ -6,8 +6,10 @@
 // ---------------------------------------------------------------------------
 record ProcPeer(string Ip, string Port, long Hits, SegmentInfo? Segment, List<string> Apps, bool Vip, bool LbGw);
 
+// Portlar: dinlenen port başına tüm gelen bağlantılar ve farklı karşı IP sayısı (Inbound ilk 40 karşı IP ile sınırlı, bu değil)
+record ProcPort(string Port, long Hits, int Peers);
 record ProcNode(string Key, string Name, string? Pid, long InHits, long OutHits, List<string> ListenPorts, List<string> LocalApps,
-    List<ProcPeer> Inbound, List<ProcPeer> Outbound);
+    List<ProcPeer> Inbound, List<ProcPeer> Outbound, List<ProcPort>? Portlar = null);
 
 record ProcessFlowResponse(string Ip, List<ProcNode> Processes, SourceStatus Splunk, SourceStatus Envanter, long ElapsedMs);
 
@@ -44,7 +46,9 @@ static class ProcessFlowBuilder
 
                 return new ProcNode(g.Key.proc + "|" + g.Key.pid, g.First().proc, g.Key.pid,
                     g.Where(r => r.dir == "in").Sum(r => r.hits), g.Where(r => r.dir == "out").Sum(r => r.hits),
-                    listen, localApps, inbound, Peers("out"));
+                    listen, localApps, inbound, Peers("out"),
+                    g.Where(r => r.dir == "in" && r.port != "").GroupBy(r => r.port)
+                        .Select(x => new ProcPort(x.Key, x.Sum(r => r.hits), x.Select(r => r.peer).Distinct().Count())).ToList());
             })
             .OrderByDescending(p => p.InHits + p.OutHits)
             .ToList();
