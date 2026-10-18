@@ -657,38 +657,48 @@ function targetApps(t) {
         <td>${esc(a.varlikMuhafizi ?? "")}</td><td>${esc(a.sunucuIsletenBirim ?? "")}</td><td>${esc(a.uygulamaVarlikSahibi ?? "")}</td>
       </tr>`).join("")}</tbody></table></div>`
     : `<div class="unk">Bu IP için uygulama envanterinde kayıt yok.</div>`;
-  return ert + `<h2 style="margin-top:14px">Gelen portlar ve çalışan süreçler <span class="small muted" style="font-weight:400">Carbon Black · seçili aralıkta bağlantı kabul eden exe'ler</span></h2>${listenTable(t)}`;
+  const rng = state.lastParams ? `${(state.lastParams.get("start") || "").replace("T", " ")} – ${(state.lastParams.get("end") || "").replace("T", " ")}` : "seçili aralık";
+  return ert + `<h2 style="margin-top:14px">Gelen portlar ve çalışan süreçler <span class="small muted" style="font-weight:400">Carbon Black · ${esc(rng)} · bu sunucuda ağ bağlantısı görülen tüm exe'ler</span></h2>${listenTable(t)}`;
 }
 function listenTable(t) {
   const pr = state.proc;
   if (!pr) return `<div class="unk">Carbon Black (Splunk) kaynağı seçili değil.</div>`;
   if (pr.status === "loading") return `<div class="small muted"><span class="spinner"></span> Carbon Black'ten alınıyor…</div>`;
   if (pr.status === "error") return `<div class="unk" style="color:var(--err)">Alınamadı: ${esc(pr.error)}</div>`;
-  // port × exe satırları (aynı exe'nin PID kopyaları tek satır)
+  // port × exe satırları (aynı exe'nin PID kopyaları tek satır); gelen bağlantısı olmayan exe'ler "yalnız giden" satırı
   const rows = new Map();
   for (const n of pr.body.processes ?? []) {
+    if (!(n.portlar ?? n.listenPorts ?? []).length) {
+      const k = "~out|" + n.name.toLowerCase();
+      const r = rows.get(k) ?? { port: "", out: true, name: n.name, pids: new Set(), hits: 0, peers: 0, outHits: 0 };
+      if (n.pid) r.pids.add(n.pid);
+      r.outHits += n.outHits || 0; rows.set(k, r);
+      continue;
+    }
     const ports = n.portlar ?? (n.listenPorts ?? []).map(port => {
       const ps = n.inbound.filter(p => p.port === port);
       return { port, hits: ps.reduce((a, p) => a + p.hits, 0), peers: new Set(ps.map(p => p.ip)).size };
     });
     for (const x of ports) {
       const k = x.port + "|" + n.name.toLowerCase();
-      const r = rows.get(k) ?? { port: x.port, name: n.name, pids: new Set(), hits: 0, peers: 0 };
-      if (n.pid) r.pids.add(n.pid);
+      const r = rows.get(k) ?? { port: x.port, name: n.name, pids: new Set(), hits: 0, peers: 0, outHits: 0 };
+      if (n.pid && !r.pids.has(n.pid)) { r.pids.add(n.pid); r.outHits += n.outHits || 0; }
       r.hits += x.hits; r.peers += x.peers; rows.set(k, r);
     }
   }
-  if (!rows.size) return `<div class="unk">Seçili aralıkta bu sunucuya gelen bağlantı Carbon Black'te görülmedi (ajan yok ya da trafik yok).</div>`;
+  if (!rows.size) return `<div class="unk">Seçili aralıkta bu sunucuda Carbon Black ağ olayı görülmedi (ajan yok ya da trafik yok).</div>`;
   const ertApps = port => [...new Set(t.apps.filter(a => String(a.port ?? "") === port).map(a => a.appName).filter(Boolean))];
-  const list = [...rows.values()].sort((a, b) => (+a.port || 1e9) - (+b.port || 1e9) || b.hits - a.hits);
-  return `<div class="tbl-wrap" style="max-height:260px"><table>
-      <thead><tr><th>Port</th><th>Çalışan süreç (exe)</th><th>PID</th><th class="num">Gelen bağlantı</th><th class="num">Karşı IP</th><th>ERT'deki uygulama</th></tr></thead>
-      <tbody>${list.map(r => { const apps = ertApps(r.port), infra = PROC_INFRA.has(r.port); return `<tr${infra ? ` class="muted" title="Altyapı portu"` : ""}>
-        <td class="mono">${esc(r.port)}${infra ? ` <span class="small muted">altyapı</span>` : ""}</td>
+  const list = [...rows.values()].sort((a, b) => a.out - b.out || (+a.port || 1e9) - (+b.port || 1e9) || b.hits - a.hits || b.outHits - a.outHits);
+  const nExe = new Set(list.map(r => r.name.toLowerCase())).size;
+  return `<div class="small muted" style="margin:-4px 0 6px">${fmt(nExe)} farklı exe · ${fmt(list.filter(r => !r.out).length)} port satırı${list.some(r => r.out) ? ` · ${fmt(list.filter(r => r.out).length)} exe yalnız dışarı bağlanıyor` : ""}</div>
+    <div class="tbl-wrap" style="max-height:300px"><table>
+      <thead><tr><th>Gelen port</th><th>Çalışan süreç (exe)</th><th>PID</th><th class="num">Gelen bağlantı</th><th class="num">Karşı IP</th><th class="num">Giden bağlantı</th><th>ERT'deki uygulama</th></tr></thead>
+      <tbody>${list.map(r => { const apps = r.out ? [] : ertApps(r.port), infra = PROC_INFRA.has(r.port); return `<tr${infra ? ` class="muted" title="Altyapı portu"` : ""}>
+        <td class="mono">${r.out ? `<span class="small muted">— yalnız giden</span>` : r.port ? esc(r.port) : `<span class="small muted" title="Carbon Black olayında yerel port yok">?</span>`}${infra ? ` <span class="small muted">altyapı</span>` : ""}</td>
         <td><b class="mono">${esc(r.name)}</b></td>
         <td class="mono small">${esc([...r.pids].join(", ") || "—")}</td>
-        <td class="num">${fmt(r.hits)}</td><td class="num">${fmt(r.peers)}</td>
-        <td>${apps.length ? esc(apps.join(", ")) : `<span class="small muted">kayıt yok</span>`}</td></tr>`; }).join("")}</tbody></table></div>`;
+        <td class="num">${r.out ? "" : fmt(r.hits)}</td><td class="num">${r.out ? "" : fmt(r.peers)}</td><td class="num">${r.out && r.outHits ? fmt(r.outHits) : ""}</td>
+        <td>${r.out ? "" : apps.length ? esc(apps.join(", ")) : `<span class="small muted">kayıt yok</span>`}</td></tr>`; }).join("")}</tbody></table></div>`;
 }
 function updateTargetApps() {
   const box = $("#tgtApps");

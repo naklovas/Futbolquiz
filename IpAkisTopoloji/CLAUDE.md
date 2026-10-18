@@ -227,7 +227,9 @@ Açık soru: ERT Entropi'den truncate ile yeniden yükleniyorsa TAG / AI_KUME / 
   (kullanıcı: önce ERT tablosuna exe kolonu eklendi, eşleşme çok az çıktı → "bağımsız gelsin"): Port | exe | PID | gelen bağlantı |
   karşı IP | ERT'deki uygulama (varsa). Kaynak Carbon Black (`/api/surec`, IP sorgusundan sonra Splunk seçiliyse arka planda;
   `ProcNode.Portlar` = port başına tüm bağlantılar, Inbound'un 40 karşı IP sınırından bağımsız). Altyapı portları soluk "altyapı".
-  Seçili aralıkta bağlantı kabul eden exe'ler; netstat gibi tüm dinlenen portlar değil.
+  Bu sunucuda ağ olayı görülen TÜM exe'ler (kullanıcı: "Splunk'ta daha çok exe var, burada 1 satır" → yalnız gelen bağlantılı süreçler
+  gösteriliyordu ve kendine / karşı IP'siz olaylar Surec.Build'de atılıyordu; artık süreç listesi tüm satırlardan, çizim filtreli):
+  gelen bağlantısı olmayanlar "— yalnız giden" satırı (giden sayısıyla), yerel portu olmayan "?". Başlıkta kullanılan aralık yazılır.
 - **VIP**: sorgulanan IP VIP ise üyeler + GW'ler aynı sorguya eklenir, üyeler "VIP ÜYESİ" (GW→üye trafiği varsa ✓).
   Gidilen IP VIP ise "VIP → n ÜYE"; gelen IP LB GW ise "LB GW"; sorgulanan sunucu havuz üyesiyse VIP kartı.
 - **Uygulama görünümü** (`/api/apps`, `/api/app`): `[kullanan uygulamalar] → [UYGULAMA: VIP'ler + segment grupları] → [bağımlı olunanlar]`,

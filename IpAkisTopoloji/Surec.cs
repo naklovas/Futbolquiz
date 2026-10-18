@@ -22,17 +22,22 @@ static class ProcessFlowBuilder
     {
         static string? V(Dictionary<string, string> r, string k) => r.TryGetValue(k, out var v) ? EnvanterSnapshot.Clean(v) : null;
 
-        var rows = sp.Rows
+        var all = sp.Rows
             .Select(r => (proc: V(r, "process") ?? "bilinmeyen süreç", pid: V(r, "pid"), dir: V(r, "yon"),
                 peer: V(r, "peer"), port: V(r, "port") ?? "", hits: long.TryParse(V(r, "count"), out long c) ? c : 1))
-            .Where(r => r.dir is "in" or "out" && r.peer != null && r.peer != target && r.peer != "127.0.0.1")
+            .Where(r => r.dir is "in" or "out")
             .ToList();
+        // Çizim için karşı IP'si olmayan, kendine (aynı IP / 127.0.0.1) giden bağlantılar atlanır; ama süreç listesi ve port
+        // sayıları (Portlar, Giden) hepsinden hesaplanır — "Gelen portlar ve çalışan süreçler" tablosunda süreç kaybolmasın.
+        static bool Drawn((string proc, string? pid, string? dir, string? peer, string port, long hits) r, string target) =>
+            r.peer != null && r.peer != target && r.peer != "127.0.0.1";
 
         // Süreç kopyası (PID) ayrı düğüm: IIS'te her uygulama havuzu ayrı w3wp.exe'dir, karışmasınlar.
-        return rows.GroupBy(r => (proc: r.proc.ToLowerInvariant(), pid: r.pid is null or "-" ? null : r.pid))
+        return all.GroupBy(r => (proc: r.proc.ToLowerInvariant(), pid: r.pid is null or "-" ? null : r.pid))
             .Select(g =>
             {
-                List<ProcPeer> Peers(string dir) => g.Where(r => r.dir == dir)
+                var drawn = g.Where(r => Drawn(r, target)).ToList();
+                List<ProcPeer> Peers(string dir) => drawn.Where(r => r.dir == dir)
                     .GroupBy(r => (r.peer, r.port))
                     .Select(x => Peer(target, x.Key.peer!, x.Key.port, x.Sum(r => r.hits), dir, env))
                     .OrderByDescending(p => p.Hits).Take(MaxPeersPerSide).ToList();
@@ -47,8 +52,8 @@ static class ProcessFlowBuilder
                 return new ProcNode(g.Key.proc + "|" + g.Key.pid, g.First().proc, g.Key.pid,
                     g.Where(r => r.dir == "in").Sum(r => r.hits), g.Where(r => r.dir == "out").Sum(r => r.hits),
                     listen, localApps, inbound, Peers("out"),
-                    g.Where(r => r.dir == "in" && r.port != "").GroupBy(r => r.port)
-                        .Select(x => new ProcPort(x.Key, x.Sum(r => r.hits), x.Select(r => r.peer).Distinct().Count())).ToList());
+                    g.Where(r => r.dir == "in").GroupBy(r => r.port)
+                        .Select(x => new ProcPort(x.Key, x.Sum(r => r.hits), x.Select(r => r.peer).OfType<string>().Distinct().Count())).ToList());
             })
             .OrderByDescending(p => p.InHits + p.OutHits)
             .ToList();
