@@ -360,6 +360,7 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
                 outp[ip] = sb.ToString();
             }
             else if (err != null) outp[ip] = $"SM TALEPLERİ (IP + port): okunamadı ({Cut(err, 150)})\n";
+            else outp[ip] = $"SM açıklama araması: açıklamasında bu sunucu ile boş port ({string.Join(", ", ps)}) birlikte geçen talep yok.\n";
         }
         return outp;
     }
@@ -380,7 +381,7 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
         var rows = new List<Dictionary<string, string>>();
         string? err = null;
         string[] cols = ["NUMBER", dateCol, "ZT_HEDEF", "ZT_HEDEFHOSTNAME", "ZT_HEDEFPORT", "ZT_PORT", "ZT_HEDEFUYGULAMA", "ZT_HEDEFUGULAMA",
-            "ZT_KAYNAK", "ZT_KAYNAKHOSTNAME", "ZT_KAYNAKUYGULAMA", "ZT_DNSHOST_IPADDR", "ZT_DNSHOST_HOSTNAME", "ZT_DNSHOST_UYGULAMA"];
+            "ZT_KAYNAK", "ZT_KAYNAKHOSTNAME", "ZT_KAYNAKUYGULAMA", "ZT_DNSHOST_IPADDR", "ZT_DNSHOST_HOSTNAME", "ZT_DNSHOST_UYGULAMA", "BRIEF_DESCRIPTION"];
         foreach (var table in tables.Where(t => System.Text.RegularExpressions.Regex.IsMatch(t, @"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*){0,2}$")))
         {
             try
@@ -440,9 +441,13 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
                 var cur = agg.GetValueOrDefault(k);
                 agg[k] = (cur.N + 1, cur.Son ?? G(r, "TARIH"), cur.No ?? G(r, "NUMBER"));
             }
+            var matched = new List<(Dictionary<string, string> R, string Rol)>();
             foreach (var r in rows)
             {
                 string? hedefApp = G(r, "ZT_HEDEFUYGULAMA", "ZT_HEDEFUGULAMA");
+                bool isH = HasIp(G(r, "ZT_HEDEF"), ip) || Same(G(r, "ZT_HEDEFHOSTNAME")), isK = HasIp(G(r, "ZT_KAYNAK"), ip) || Same(G(r, "ZT_KAYNAKHOSTNAME")),
+                     isD = HasIp(G(r, "ZT_DNSHOST_IPADDR"), ip) || Same(G(r, "ZT_DNSHOST_HOSTNAME"));
+                if (isH || isK || isD) matched.Add((r, isH ? "hedef" : isK ? "kaynak" : "DNS"));
                 if (HasIp(G(r, "ZT_HEDEF"), ip) || Same(G(r, "ZT_HEDEFHOSTNAME")))
                 {
                     string portText = string.Join(" ", G(r, "ZT_HEDEFPORT"), G(r, "ZT_PORT"));
@@ -463,6 +468,15 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
                 outp[ip] = sb.ToString();
             }
             else if (err != null) outp[ip] = $"SM YAPISAL ALANLAR: okunamadı ({Cut(err, 150)})\n";
+            else if (matched.Count > 0)
+            {
+                // Talep var ama uygulama alanları boş: talepleri yine de göster (kısa açıklama + port çoğu zaman yeterli ipucu)
+                var sb = new StringBuilder($"SM TALEPLERİ (bu sunucunun hedef / kaynak / DNS olduğu {matched.Count} talep; uygulama alanları boş, en yeni):\n");
+                foreach (var (r, rol) in matched.DistinctBy(m => G(m.R, "NUMBER")).Take(8))
+                    sb.AppendLine($"- {G(r, "NUMBER")} {G(r, "TARIH")} [{rol}; port {Cut(string.Join(" ", G(r, "ZT_HEDEFPORT"), G(r, "ZT_PORT")).Trim(), 30)}]: {Cut(G(r, "BRIEF_DESCRIPTION"), 200)}");
+                outp[ip] = sb.ToString();
+            }
+            else outp[ip] = $"SM TALEPLERİ: son {DateTime.Today.Year - since.Year} yılda bu sunucunun (IP {ip}{(host != null ? ", ad " + host : "")}) hedef, kaynak ya da DNS olduğu talep bulunamadı.\n";
         }
         return outp;
     }
