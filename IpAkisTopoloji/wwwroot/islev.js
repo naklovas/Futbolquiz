@@ -5,7 +5,7 @@
 // Sınıflandırma sunucuda arka planda çalışır; ilerleme /api/islev/durum ile izlenir. Sunucuya tıklayınca ayrıntı
 // çekmecesi: AI gerekçesi, küme düzeltme, AI'a giden kanıtlar. topoloji.html / etiket.js yardımcılarını kullanır.
 // Versiyonlar (Versiyon.cs): küme topolojisi çizilip bitince harita + topoloji birlikte kaydedilir (etiket başına son 3).
-// Sayfa açılınca etiketin en son versiyonu gösterilir (trafik yeniden sorgulanmaz); "Canlı" seçilince güncel veri.
+// Sayfa canlı haritayla açılır (düzenleme yalnız canlıda); "Son kayıtlı topoloji" ya da "Görünüm" seçicisi kayıtlı versiyonu sorgusuz açar.
 // ============================================================================
 
 const iv = { tag: "", data: null, q: "", poll: null, sel: null, seq: 0, pick: null, canWrite: false, descEdit: false,
@@ -113,7 +113,8 @@ async function ivLoad() {
   try {
     await tnLoad(iv.tag);
     await ivVersions();
-    if (iv.ver.id === undefined) iv.ver.id = iv.ver.list[0]?.id ?? null;   // varsayılan: en son kayıtlı versiyon
+    // Varsayılan: canlı harita (küme adı değiştirme / taşıma / AI yalnız canlıda). Kayıtlı topoloji "Son kayıtlı topoloji" ile açılır.
+    if (iv.ver.id === undefined) iv.ver.id = null;
     history.replaceState(null, "", "?" + new URLSearchParams({ topo: iv.tag, ...(iv.ver.id ? { ver: iv.ver.id } : iv.ver.list.length ? { canli: "1" } : {}) }));
     let b;
     if (iv.ver.id) {
@@ -165,6 +166,7 @@ function ivRender() {
       <button id="ivClu" ${run || d.uyari || !d.siniflanan ? "disabled" : ""} title="Sunucuları yeniden sormadan yalnız kümeleri yeniden oluşturur">Yeniden kümele</button>` : ""}
       ${w ? `<button id="ivPick" class="${iv.pick ? "on" : ""}" title="Sunucuları seçip yeni bir kümeye ya da var olan bir kümeye taşıyın">${iv.pick ? "Seçimi bitir" : "+ Yeni küme / taşı"}</button>` : ""}
       <button id="ivTopo" class="primary" title="${iv.ver.id ? "Bu versiyonda kaydedilmiş topolojiyi açar (trafik yeniden sorgulanmaz)" : "Kümeleri kutu kutu, içlerinde VIP'ler ve sunucularla; aralarındaki trafikle çizer (seçili tarih aralığı)"}">${iv.ver.id ? "Kayıtlı topolojiyi aç" : "Topoloji çiz"}</button>
+      ${!iv.ver.id && iv.ver.list.length ? `<button id="ivLast" title="En son kaydedilen topolojiyi trafiği yeniden sorgulamadan açar">Son kayıtlı topoloji</button>` : ""}
       <button id="ivDep" title="Etiketli sunucuların uygulama görünümündeki eski bağımlılık çizimi">Eski çizim</button>
     </div>
     <div id="ivRunBox"></div>
@@ -182,6 +184,7 @@ function ivRender() {
   $("#ivClu")?.addEventListener("click", () => ivStart({ sadeceKumele: true }));
   $("#ivPick")?.addEventListener("click", () => { iv.pick = iv.pick ? null : new Set(); ivCloseDrawer(); ivRender(); });
   $("#ivTopo").addEventListener("click", () => iv.ver.id ? ktShowSaved(iv.tag) : ktRun(iv.tag));
+  $("#ivLast")?.addEventListener("click", () => { iv.ver.id = iv.ver.list[0].id; ktShowSaved(iv.tag); });
   $("#ivDep").addEventListener("click", () => { ivStopPoll(); runApp("etiket:" + iv.tag, "topo"); });
   if (iv.sel) ivDrawer(iv.sel);
 }
@@ -507,11 +510,13 @@ function ivVerBar() {
   if (iv.ver.uyari && !iv.ver.list.length) { box.innerHTML = `<div class="iv-ver"><span class="note">Versiyonlar: ${esc(iv.ver.uyari)}</span></div>`; return; }
   box.innerHTML = `<div class="iv-ver${cur ? " saved" : ""}">
     <label>Görünüm <select id="ivVerSel">${verOptions("Canlı (güncel veri)")}</select></label>
-    ${cur ? `<span><b>Kayıtlı versiyon</b> · trafik aralığı ${esc(verRange(cur))} · harita ve topoloji kayıttan; düzenlemek ya da yeniden çizmek için "Canlı"yı seçin</span>
+    ${cur ? `<span><b>Kayıtlı versiyon</b> · trafik aralığı ${esc(verRange(cur))} · harita ve topoloji kayıttan, burada düzenleme yapılamaz</span>
+      <button id="ivVerLive" class="primary" title="Güncel haritaya döner: küme adı değiştirme, sunucu taşıma, AI">Canlıya dön (düzenle)</button>
       ${iv.canWrite ? `<button id="ivVerDel" title="Bu versiyonu siler">Sil</button>` : ""}`
       : `<span class="note">${iv.ver.list.length ? `${iv.ver.list.length} kayıtlı versiyon · ` : "Henüz kayıtlı versiyon yok · "}topoloji çizilip bitince "Versiyon olarak kaydet" ile kaydedilir (son ${iv.ver.tutulan} tutulur)</span>`}
   </div>`;
   $("#ivVerSel").addEventListener("change", e => { iv.ver.id = e.target.value ? +e.target.value : null; iv.pick = null; ivCloseDrawer(); ivLoad(); });
+  $("#ivVerLive")?.addEventListener("click", () => { iv.ver.id = null; ivLoad(); });
   $("#ivVerDel")?.addEventListener("click", async () => {
     if (!confirm(`${verLabel(cur)} versiyonu silinsin mi?`)) return;
     try {

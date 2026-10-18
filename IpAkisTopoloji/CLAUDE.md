@@ -197,9 +197,10 @@ topoloji çizer ve şirket içi AI'a etki analizi yaptırır. Canlıda IIS'te, W
     topolojisi bitince "💾 Versiyon olarak kaydet" → işlev haritası (aynı kurum seçimiyle `api/islev`, ktRun'da paralel alınır) + topoloji
     JSON'u + parametre (aralık, kaynak, kurum) kaydedilir; etiket başına son `Islev:VersiyonSayisi`=3 (kayıtta eskiler silinir).
     `/api/islev/versiyonlar?etiket=`, `/api/islev/versiyon/{id}` (GET/DELETE), `POST /api/islev/versiyon`. Kullanıcı kararı: her seferinde
-    topoloji çizilmesin → Topoloji sekmesi açılınca etiketin EN SON versiyonu gösterilir (`iv.ver`, URL `&ver=ID`, `&canli=1`); "Görünüm"
-    seçicisinde "Canlı" = güncel veri (düzenleme / AI / yeniden çizim yalnız canlıda); versiyonda "Kayıtlı topolojiyi aç" sorgusuz çizer
-    (`ktShowSaved`). Kurum seçimi değişince canlıya geçer.
+    topoloji çizilmesin. İlk sürümde sayfa en son versiyonla açılıyordu; kullanıcı "küme adı değişmiyor, sunucu taşınamıyor" dedi
+    (versiyonda düzenleme kapalı) → Topoloji sekmesi CANLI haritayla açılır (`iv.ver`, URL `&ver=ID`); araç çubuğunda "Son kayıtlı
+    topoloji" düğmesi ve "Görünüm" seçicisi kayıtlı versiyonu sorgusuz açar (`ktShowSaved`); versiyon bandında "Canlıya dön (düzenle)".
+    Düzenleme / AI / yeniden çizim yalnız canlıda. Kurum seçimi değişince canlıya geçer.
   - **Kurum seçimi** (`wwwroot/kurum.js`, Topoloji sekmesinde Etiket'in yanında): KonsolideSegmentler4.**Domain** (kullanıcı düzeltti:
     Tenant DEĞİL; kodda adlar hâlâ tenant/TenantOf) — sunucunun segmentinin Domain'i; yoksa "(kurum yok)". `/api/tenantlar?etiket=` (kurum + sunucu sayısı). Çoklu seçimli açılır kutu: arama,
     "Tümü" (boş seçim = tümü; hepsi tek tek seçilirse yine tümü), Uygula; seçim localStorage `df.tenant`. `/api/islev` ve
