@@ -35,6 +35,7 @@ builder.Services.AddHttpClient("ai", c => c.Timeout = TimeSpan.FromMinutes(build
 
 builder.Services.AddSingleton<EnvanterService>();
 builder.Services.AddSingleton<IslevService>();
+builder.Services.AddSingleton<EksikService>();
 builder.Services.AddMemoryCache();
 
 // Windows Authentication: IIS'te IIS'in Windows Auth'u, Kestrel'de Negotiate kullanılır.
@@ -672,6 +673,44 @@ app.MapGet("/api/islev/topoloji", async (string etiket, string? tenant, string? 
 });
 
 app.MapGet("/api/islev/durum", (IslevService islev) => Results.Ok(islev.Durum));
+
+// ERT eksikleri (Eksik.cs, wwwroot/eksik.html): APPNAME'i boş (IP, port) satırlarına AI'dan uygulama önerisi; ERT'ye yazılmaz.
+app.MapGet("/api/eksik", async (string? ara, string? durum, bool? altyapi, int? sayfa, int? boyut, HttpContext ctx, IConfiguration cfg,
+    EksikService eksik, CancellationToken ct) =>
+{
+    try { return Results.Ok(await eksik.ListAsync(ara, durum, altyapi ?? false, sayfa ?? 1, boyut ?? 200, EtiketService.CanWrite(cfg, ctx.User?.Identity?.Name), ct)); }
+    catch (Exception ex) { return Results.Json(new { error = ex.Message }, statusCode: 502); }
+});
+app.MapGet("/api/eksik/durum", (EksikService eksik) => Results.Ok(eksik.Durum));
+app.MapGet("/api/eksik/kanit", async (string ip, EksikService eksik, CancellationToken ct) =>
+{
+    if (!LookupQuery.TryParseIpv4(ip, out string v)) return Results.BadRequest(new { error = "Geçersiz IP." });
+    try { return Results.Ok(new { ip = v, metin = await eksik.EvidenceAsync(v, ct) }); }
+    catch (Exception ex) { return Results.Json(new { error = ex.Message }, statusCode: 502); }
+});
+app.MapPost("/api/eksik/calistir", (EksikCalistir req, HttpContext ctx, IConfiguration cfg, EksikService eksik) =>
+{
+    string user = ctx.User?.Identity?.Name ?? "?";
+    if (!EtiketService.CanWrite(cfg, ctx.User?.Identity?.Name)) return Results.Json(new { error = $"Yetkiniz yok ({user})." }, statusCode: 403);
+    return eksik.Start(req, user) ? Results.Ok(eksik.Durum) : Results.Json(new { error = "Bir öneri işi zaten çalışıyor.", durum = eksik.Durum }, statusCode: 409);
+});
+app.MapPost("/api/eksik/durdur", (HttpContext ctx, IConfiguration cfg, EksikService eksik) =>
+{
+    if (!EtiketService.CanWrite(cfg, ctx.User?.Identity?.Name)) return Results.Json(new { error = "Yetkiniz yok." }, statusCode: 403);
+    eksik.Stop();
+    return Results.Ok(eksik.Durum);
+});
+app.MapPost("/api/eksik/karar", async (EksikKarar req, HttpContext ctx, IConfiguration cfg, EksikService eksik, CancellationToken ct) =>
+{
+    string user = ctx.User?.Identity?.Name ?? "?";
+    if (!EtiketService.CanWrite(cfg, ctx.User?.Identity?.Name)) return Results.Json(new { error = $"Yetkiniz yok ({user})." }, statusCode: 403);
+    try { await eksik.DecideAsync(req, user, ct); return Results.Ok(new { ok = true }); }
+    catch (InvalidOperationException ex) { return Results.BadRequest(new { error = ex.Message }); }
+    catch (Microsoft.Data.SqlClient.SqlException ex) { return Results.Json(new { error = "SQL: " + ex.Message }, statusCode: 502); }
+});
+app.MapGet("/api/eksik/csv", async (bool? hepsi, EksikService eksik, CancellationToken ct) =>
+    Results.File(Encoding.UTF8.GetBytes(await eksik.CsvAsync(hepsi ?? false, ct)), "text/csv; charset=utf-8",
+        $"ert_uygulama_onerileri_{DateTime.Now:yyyyMMdd_HHmm}.csv"));
 
 // Versiyonlar (Versiyon.cs): işlev haritası + küme topolojisi birlikte; etiket başına son Islev:VersiyonSayisi (3).
 app.MapGet("/api/islev/versiyonlar", async (string etiket, IConfiguration cfg, CancellationToken ct) =>

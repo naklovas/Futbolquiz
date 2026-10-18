@@ -34,6 +34,7 @@ topoloji çizer ve şirket içi AI'a etki analizi yaptırır. Canlıda IIS'te, W
 | `KumeTopoloji.cs` | Küme topolojisi: işlev kümeleri kutu, içinde VIP / VIP'siz sunucu elemanları, aralarındaki trafik |
 | `wwwroot/kurum.js` | Kurum (segment Domain) çoklu seçimi: işlev haritası ve küme topolojisi süzme / gruplama |
 | `Etiket.cs` | Sunucu etiketleme: ERT TAG kolonu okuma/yazma, alt etiket (ANA/ALT), etiket açıklamaları |
+| `Eksik.cs` | ERT eksikleri: APPNAME boş (IP, port) satırlarına AI uygulama önerisi (`wwwroot/eksik.html`, ayrı sayfa) |
 | `Versiyon.cs` | İşlev haritası + küme topolojisi versiyonları (etiket başına son 3) |
 | `F5Waf.cs` | F5 ASM / Bot Defense güvenlik logları (Splunk index=f5): erişimde engel kararı, IP görünümünde URI listesi |
 | `PortBilgisi.cs` | Port → işlev ve kesilirse duracak iş (AI prompt'u için) |
@@ -237,6 +238,20 @@ Açık soru: ERT Entropi'den truncate ile yeniden yükleniyorsa TAG / AI_KUME / 
   HTTP.sys portunda asıl exe tahmini (`httpSysApp`): ERT'de o port için WEBSITE (IIS site adı; kullanıcı: "IIS adı WEBSITE kolonunda") /
   APPNAME / SERVICENAME, sunucudaki bir exe'nin tam yolunda (harf-rakam sadeleştirilmiş) geçiyorsa → "asıl uygulama büyük ihtimalle X";
   geçmiyorsa kelimelerin ≥2'si ve ≥2/3'ü yolda. Canlı örnek: 9000 · WEBSITE "ZB.Wall.P5" → d:\aspnetcore\zb.wall.p5\core\zb.app.wall.exe.
+- **ERT eksikleri** (`Eksik.cs`, `wwwroot/eksik.html` — ana sayfadan bağımsız sayfa, sekme çubuğunda "ERT eksikleri ↗"): ERT'de
+  APPNAME'i boş (IP, port) satırları (`EksikService.Missing`; altyapı portları `Uygulama:AltyapiPortlari` ayrı, AI'a gitmez).
+  Kanıt (sunucu başına, `BuildAsync`): IslevService.ProfilesAsync metni (ERT, segment, VIP, MSY, ÇSY, Kahin, SM) + boş satırın
+  WEBSITE/SERVICENAME/UNIXNAME/muhafız + KOMŞULAR (benzer adlı sunucular: ad sonundaki sayı atılınca aynı, ör. zb1pwatmvzsra01/02 →
+  uygulamaları; aynı segmentte aynı portu kullananlar; segmentin yaygın uygulamaları) + Carbon Black (son `Eksik:Saat`=24 saat,
+  20'şer IP tek SPL: port → exe tam yolu, istemci uygulamaları; exe'lerin gittiği yerler) + ADAY UYGULAMALAR (aynı sunucu, VIP ve
+  havuz komşuları, benzer ad, segment+port, muhafızın uygulamaları, adı kanıtla kelime örtüşen ERT uygulamaları). Kullanıcının canlı örneği:
+  2.71.51.16:5000 boş, CB'de c:\bbpgm\atm_monitoring_service\terminaldurum.restservice.exe, sunucu adı zb1pwatmvzsra01 ("atm").
+  AI (`IslevService.ChatAsync`, `Paket`=3 sunucu/istek, `Paralel`=2, `MaxIp`=200/çalıştırma): adaydan harfi harfine seçer ya da
+  yeni=true; "Altyapı: …"; kanıt yoksa null. Sonuç ERT'ye YAZILMAZ: `Eksik:OneriTablosu` dbo.DF_ERT_UYGULAMA_ONERI (`sql/ert_oneri.sql`;
+  yoksa bellekte + uyarı), DURUM AI / Onaylandı / Reddedildi / Elle; onaylanan / elle girilene AI dokunmaz. Uçlar: `/api/eksik`
+  (ara, durum yok|ai|onay|red, altyapi, sayfa), `/api/eksik/durum`, `/kanit?ip=`, POST `/calistir {ips?, hepsi, yeniden, saat}`,
+  `/durdur`, `/karar {ip, port, karar: onay|red|elle|sil, uygulama}`, `/csv?hepsi=` (Excel, ; ayraçlı, BOM). Yazma yetkisi
+  `Etiket:Yazanlar`. Kullanıcı: alt sayfalara ayrı yetki kontrolü SONRA eklenecek.
 - **VIP**: sorgulanan IP VIP ise üyeler + GW'ler aynı sorguya eklenir, üyeler "VIP ÜYESİ" (GW→üye trafiği varsa ✓).
   Gidilen IP VIP ise "VIP → n ÜYE"; gelen IP LB GW ise "LB GW"; sorgulanan sunucu havuz üyesiyse VIP kartı.
 - **Uygulama görünümü** (`/api/apps`, `/api/app`): `[kullanan uygulamalar] → [UYGULAMA: VIP'ler + segment grupları] → [bağımlı olunanlar]`,

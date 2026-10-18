@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DeltaFlow · ERT eksikleri</title>
+<link rel="icon" href="deltaflow.svg">
+<script>
+  try { const t = localStorage.getItem("deltaflow.theme"); if (t === "light" || t === "dark") document.documentElement.dataset.theme = t; } catch {}
+</script>
+<!--
+  ERT eksikleri: ERT_HOSTIPADDRESS'te APPNAME'i boş (IP, port) satırları; AI uygulama önerir (Eksik.cs), kişi onaylar / reddeder /
+  elle yazar; onaylananlar Excel'e (CSV) aktarılır. ERT'ye yazılmaz. Ana sayfadan bağımsız; aynı API ve oturumu kullanır.
+-->
+<style>
+  :root {
+    --bg: #f5f6f8; --panel: #ffffff; --text: #1d2330; --muted: #677084; --line: #dde1e8;
+    --in: #2f6fd6; --in-soft: #e5eefc; --ok: #2e8b57; --err: #c8353a; --warn: #b7791f;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #14171d; --panel: #1c2028; --text: #e4e7ec; --muted: #9098a8; --line: #2d333e;
+      --in: #6ea0f0; --in-soft: #1f2d45; --ok: #5cc28a; --err: #ef6b6f; --warn: #e0b050;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #14171d; --panel: #1c2028; --text: #e4e7ec; --muted: #9098a8; --line: #2d333e;
+    --in: #6ea0f0; --in-soft: #1f2d45; --ok: #5cc28a; --err: #ef6b6f; --warn: #e0b050;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 "Segoe UI", system-ui, sans-serif; }
+  header { padding: 14px 20px; background: var(--panel); border-bottom: 1px solid var(--line); display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
+  header img { width: 30px; height: 30px; }
+  header h1 { margin: 0; font-size: 19px; }
+  header a { color: var(--muted); text-decoration: none; font-size: 13px; }
+  header a:hover { color: var(--in); }
+  header .sp { flex: 1; }
+  #me { font-size: 12.5px; color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 4px 12px; }
+  main { padding: 18px 20px 40px; max-width: 1700px; margin: 0 auto; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; }
+  .sub { color: var(--muted); font-size: 12.5px; }
+  .stats { display: flex; gap: 10px; flex-wrap: wrap; margin: 12px 0; }
+  .stat { border: 1px solid var(--line); border-radius: 10px; padding: 8px 14px; min-width: 120px; background: var(--bg); }
+  .stat b { display: block; font-size: 20px; font-variant-numeric: tabular-nums; }
+  .stat span { color: var(--muted); font-size: 11.5px; text-transform: uppercase; letter-spacing: .04em; }
+  input, select, button, textarea { font: inherit; color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; }
+  button { cursor: pointer; }
+  button:disabled { opacity: .5; cursor: default; }
+  button.primary { background: var(--in); border-color: var(--in); color: #fff; font-weight: 600; }
+  .tools { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 4px 0 12px; }
+  .tools .sp { flex: 1; }
+  .tools label { display: flex; gap: 6px; align-items: center; font-size: 13px; }
+  .warn { border: 1px solid var(--warn); background: color-mix(in srgb, var(--warn) 12%, transparent); border-radius: 10px; padding: 9px 14px; margin-bottom: 12px; font-size: 13px; }
+  .run { border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; margin-bottom: 12px; background: var(--bg); display: grid; gap: 6px; font-size: 13px; }
+  .run .bar { height: 8px; border-radius: 99px; background: var(--line); overflow: hidden; }
+  .run .bar i { display: block; height: 100%; background: var(--in); transition: width .4s; }
+  .grid { border: 1px solid var(--line); border-radius: 10px; overflow: auto; max-height: calc(100vh - 330px); }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  th { position: sticky; top: 0; background: var(--bg); color: var(--muted); font-size: 11.5px; text-transform: uppercase; letter-spacing: .04em; text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--line); z-index: 1; }
+  td { padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  tr:hover td { background: var(--in-soft); }
+  tr.alt td { color: var(--muted); }
+  .mono { font-family: Consolas, ui-monospace, monospace; }
+  .ip a { font-family: Consolas, ui-monospace, monospace; font-weight: 600; color: var(--text); text-decoration: none; }
+  .ip a:hover { color: var(--in); text-decoration: underline; }
+  .chips span { display: inline-block; background: var(--bg); border: 1px solid var(--line); border-radius: 4px; padding: 0 6px; margin: 1px 3px 1px 0; font-size: 12px; }
+  .small { font-size: 12px; } .muted { color: var(--muted); }
+  .sug b { font-size: 13.5px; }
+  .sug .why { color: var(--muted); font-size: 12px; margin-top: 2px; max-width: 520px; }
+  .conf { display: inline-block; width: 46px; height: 6px; border-radius: 9px; background: var(--line); vertical-align: middle; margin: 0 6px; overflow: hidden; }
+  .conf i { display: block; height: 100%; }
+  .st { display: inline-block; font-size: 11px; font-weight: 700; border-radius: 999px; padding: 1px 8px; border: 1px solid; }
+  .st.ai { color: var(--in); border-color: var(--in); }
+  .st.ok { color: var(--ok); border-color: var(--ok); }
+  .st.red { color: var(--err); border-color: var(--err); }
+  .st.new { color: var(--warn); border-color: var(--warn); }
+  .acts { white-space: nowrap; }
+  .acts button { padding: 2px 8px; font-size: 12px; }
+  .foot { display: flex; justify-content: space-between; align-items: center; margin-top: 10px; color: var(--muted); font-size: 12.5px; gap: 10px; flex-wrap: wrap; }
+  .empty { padding: 40px; text-align: center; color: var(--muted); }
+  .spinner { display: inline-block; width: 12px; height: 12px; border: 2px solid var(--line); border-top-color: var(--in); border-radius: 50%; animation: sp 0.8s linear infinite; vertical-align: -2px; }
+  @keyframes sp { to { transform: rotate(360deg); } }
+  .drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(640px, 100vw); background: var(--panel); border-left: 1px solid var(--line);
+    box-shadow: -12px 0 32px rgba(0,0,0,.18); z-index: 50; display: flex; flex-direction: column; }
+  .drawer .dh { padding: 14px 18px; border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; gap: 10px; align-items: start; }
+  .drawer .dh h3 { margin: 0; font-size: 17px; }
+  .drawer pre { margin: 0; padding: 14px 18px; overflow: auto; white-space: pre-wrap; font-size: 12px; line-height: 1.5; flex: 1; }
+</style>
+</head>
+<body>
+<header>
+  <img src="deltaflow.svg" alt="">
+  <div><h1>ERT eksikleri · uygulama adı önerisi</h1>
+    <div class="sub">ERT_HOSTIPADDRESS'te uygulama adı boş portlar · AI kanıtlara bakarak önerir · onaylananlar Excel'e aktarılır (ERT'ye yazılmaz)</div></div>
+  <span class="sp"></span>
+  <a href="./">← DeltaFlow</a>
+  <span id="me"></span>
+</header>
+<main>
+  <section class="panel">
+    <div class="stats" id="stats"></div>
+    <div id="warn"></div>
+    <div class="tools">
+      <input type="search" id="q" placeholder="IP, sunucu, website, muhafız, öneri ara…" style="min-width:300px">
+      <select id="durum">
+        <option value="">Tümü</option><option value="yok">Önerisi yok</option><option value="ai">AI önerdi (karar bekliyor)</option>
+        <option value="onay">Onaylanan / elle</option><option value="red">Reddedilen</option>
+      </select>
+      <label title="RDP, SMB, DNS gibi altyapı portları (AI'a gönderilmez)"><input type="checkbox" id="alt"> Altyapı portları</label>
+      <span class="sp"></span>
+      <label title="Carbon Black kanıtları için geriye bakılacak süre">CB aralığı <select id="saat"><option value="1">1 saat</option><option value="6">6 saat</option><option value="24" selected>24 saat</option><option value="72">3 gün</option><option value="168">7 gün</option></select></label>
+      <button id="runSel" disabled title="Seçili satırların sunucularını AI'a gönderir (önceki AI önerisi yenilenir; onaylananlara dokunulmaz)">Seçilenlere öner</button>
+      <button id="runAll" class="primary" title="Önerisi olmayan tüm satırlar (altyapı portları hariç; en çok boş portu olan sunuculardan başlayarak)">AI ile öner (önerisi olmayanlar)</button>
+      <a id="csv" href="api/eksik/csv"><button type="button" title="Onaylanan ve elle girilen öneriler (Excel'de açılır)">Excel'e aktar</button></a>
+    </div>
+    <div id="run"></div>
+    <div class="grid"><table>
+      <thead><tr><th style="width:30px"><input type="checkbox" id="all"></th><th>IP</th><th>Port</th><th>Sunucu / segment</th><th>ERT satırındaki bilgiler</th><th>Aynı sunucudaki uygulamalar</th><th>Öneri</th><th></th></tr></thead>
+      <tbody id="body"><tr><td colspan="8" class="empty"><span class="spinner"></span> Yükleniyor…</td></tr></tbody>
+    </table></div>
+    <div class="foot"><span id="count"></span>
+      <span><button id="prev">‹ Önceki</button> <span id="page"></span> <button id="next">Sonraki ›</button></span></div>
+  </section>
+</main>
+<div id="drawerHost"></div>
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const fmt = n => Number(n || 0).toLocaleString("tr-TR");
+const st = { q: "", durum: "", alt: false, page: 1, size: 200, data: null, sel: new Set(), poll: null, timer: null, seq: 0 };
+const key = r => r.ip + "|" + r.port;
+
+async function api(url, opt) {
+  const r = await fetch(url, opt);
+  const b = await r.json().catch(() => ({ error: `HTTP ${r.status}` }));
+  if (!r.ok) throw new Error(b.error || `HTTP ${r.status}`);
+  return b;
+}
+const post = (url, body) => api(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+
+async function load() {
+  const my = ++st.seq;
+  try {
+    const p = new URLSearchParams({ sayfa: st.page, boyut: st.size, altyapi: st.alt });
+    if (st.q) p.set("ara", st.q);
+    if (st.durum) p.set("durum", st.durum);
+    const b = await api("api/eksik?" + p);
+    if (my !== st.seq) return;
+    st.data = b;
+    render();
+    if (b.durum?.calisiyor) watch();
+  } catch (e) { $("#body").innerHTML = `<tr><td colspan="8" class="empty" style="color:var(--err)">${esc(e.message)}</td></tr>`; }
+}
+
+function render() {
+  const d = st.data, w = d.yazabilir;
+  $("#stats").innerHTML = [["Boş uygulama adlı satır", d.tumSatir], ["Sunucu", d.tumIp], ["Önerisi olan", d.onerili], ["Onaylanan", d.onayli], ["Filtre sonucu", d.toplam]]
+    .map(([l, n]) => `<div class="stat"><b>${fmt(n)}</b><span>${l}</span></div>`).join("");
+  $("#warn").innerHTML = d.uyari ? `<div class="warn">${esc(d.uyari)}</div>` : w ? "" : `<div class="warn">Yalnız görüntüleme yetkiniz var.</div>`;
+  const run = d.durum?.calisiyor;
+  $("#runAll").disabled = !w || run; $("#runSel").disabled = !w || run || !st.sel.size;
+  $("#runSel").textContent = st.sel.size ? `Seçilenlere öner (${st.sel.size})` : "Seçilenlere öner";
+  runBox();
+  const rows = d.satirlar;
+  $("#body").innerHTML = rows.length ? rows.map(r => {
+    const o = r.oneri, g = o?.guven ?? 0;
+    const col = g >= 75 ? "var(--ok)" : g >= 50 ? "var(--warn)" : "var(--err)";
+    const stc = !o ? "" : o.durum === "Onaylandı" || o.durum === "Elle" ? "ok" : o.durum === "Reddedildi" ? "red" : "ai";
+    const info = [r.website && `WEBSITE: ${r.website}`, r.servis && `SERVICENAME: ${r.servis}`, r.muhafiz && `Muhafız: ${r.muhafiz}`, r.birim && `İşleten: ${r.birim}`].filter(Boolean);
+    return `<tr class="${r.altyapi ? "alt" : ""}">
+      <td>${w ? `<input type="checkbox" data-sel="${esc(key(r))}" data-ip="${esc(r.ip)}"${st.sel.has(key(r)) ? " checked" : ""}>` : ""}</td>
+      <td class="ip"><a href="./?ip=${encodeURIComponent(r.ip)}" target="_blank" rel="noopener" title="IP topolojisini aç">${esc(r.ip)}</a>
+        <div><a href="#" data-kanit="${esc(r.ip)}" class="small" style="font-family:inherit;font-weight:400;color:var(--muted)">kanıtlar</a></div></td>
+      <td class="mono">${esc(r.port || "—")}${r.altyapi ? `<div class="small muted">altyapı</div>` : ""}</td>
+      <td>${esc(r.hostname || "—")}<div class="small muted">${esc(r.segment || "")}</div></td>
+      <td class="small">${info.map(esc).join("<br>") || `<span class="muted">—</span>`}</td>
+      <td class="chips">${r.diger.map(a => `<span>${esc(a)}</span>`).join("") || `<span class="muted small" style="border:0;background:none">—</span>`}</td>
+      <td class="sug">${o ? `<div>${o.uygulama ? `<b>${esc(o.uygulama)}</b>` : `<span class="muted">öneri yok</span>`}${o.uygulama && o.durum !== "Elle" ? `<span class="conf" title="güven %${g}"><i style="width:${g}%;background:${col}"></i></span><span class="small muted">%${g}</span>` : ""}
+          <span class="st ${stc}">${esc(o.durum)}</span>${o.yeni ? ` <span class="st new" title="ERT'deki uygulama listesinde yok">yeni ad</span>` : ""}</div>
+          ${o.gerekce ? `<div class="why">${esc(o.gerekce)}</div>` : ""}${o.durum !== "AI" && o.kaynak ? `<div class="why">${esc(o.kaynak)}</div>` : ""}`
+        : `<span class="muted small">—</span>`}</td>
+      <td class="acts">${w ? `${o?.uygulama && o.durum === "AI" ? `<button data-k="onay" data-ip="${esc(r.ip)}" data-port="${esc(r.port)}" title="Öneriyi onayla">✓</button> ` : ""}${o && o.durum !== "Reddedildi" ? `<button data-k="red" data-ip="${esc(r.ip)}" data-port="${esc(r.port)}" title="Reddet">✗</button> ` : ""}<button data-k="elle" data-ip="${esc(r.ip)}" data-port="${esc(r.port)}" data-cur="${esc(o?.uygulama || "")}" title="Uygulama adını elle yaz">✎</button>${o ? ` <button data-k="sil" data-ip="${esc(r.ip)}" data-port="${esc(r.port)}" title="Öneriyi ve kararı sil">⟲</button>` : ""}` : ""}</td>
+    </tr>`;
+  }).join("") : `<tr><td colspan="8" class="empty">Filtreye uyan satır yok.</td></tr>`;
+  const from = d.toplam ? (st.page - 1) * st.size + 1 : 0, to = Math.min(st.page * st.size, d.toplam);
+  $("#count").textContent = `${fmt(from)}–${fmt(to)} / ${fmt(d.toplam)} satır`;
+  $("#page").textContent = `${st.page} / ${Math.max(1, Math.ceil(d.toplam / st.size))}`;
+  $("#prev").disabled = st.page <= 1; $("#next").disabled = st.page * st.size >= d.toplam;
+  $("#all").checked = rows.length > 0 && rows.every(r => st.sel.has(key(r)));
+}
+
+function runBox() {
+  const d = st.data?.durum, box = $("#run");
+  if (!d || !d.asama) { box.innerHTML = ""; return; }
+  const pct = d.toplam ? Math.round(100 * d.biten / d.toplam) : 5;
+  const t = s => s ? new Date(s).toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit" }) : "";
+  box.innerHTML = `<div class="run">
+    <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap">
+      <span>${d.calisiyor ? `<span class="spinner"></span> ` : ""}<b>${esc(d.asama)}</b>${d.toplam ? ` · ${fmt(d.biten)} / ${fmt(d.toplam)} port` : ""}${d.hata ? ` · <span style="color:var(--err)">${d.hata} hata</span>` : ""}</span>
+      <span class="muted">${esc(d.baslatan || "")} · ${t(d.baslangic)}${d.bitis ? "–" + t(d.bitis) : ""}${d.calisiyor && st.data.yazabilir ? ` <button id="stop" style="margin-left:8px">Durdur</button>` : ""}</span></div>
+    ${d.calisiyor || d.toplam ? `<div class="bar"><i style="width:${pct}%"></i></div>` : ""}
+    ${d.mesaj ? `<div style="color:var(--err)">${esc(d.mesaj)}</div>` : ""}
+    ${d.hatalar?.length ? `<details class="small muted"><summary>Hatalar (${d.hatalar.length})</summary><ul>${d.hatalar.map(h => `<li>${esc(h)}</li>`).join("")}</ul></details>` : ""}
+  </div>`;
+  $("#stop")?.addEventListener("click", () => post("api/eksik/durdur", {}).catch(e => alert(e.message)));
+}
+
+function watch() {
+  clearTimeout(st.poll);
+  st.poll = setTimeout(async () => {
+    try {
+      const d = await api("api/eksik/durum");
+      const was = st.data.durum?.calisiyor;
+      st.data.durum = d; runBox();
+      if (!d.calisiyor) { if (was) load(); return; }
+      if ((st.ticks = (st.ticks || 0) + 1) % 5 === 0) { await load(); return; }   // ara sonuçlar görünsün
+    } catch { /* sonraki turda */ }
+    watch();
+  }, 3000);
+}
+
+async function start(body) {
+  try { st.data.durum = await post("api/eksik/calistir", { saat: +$("#saat").value, ...body }); render(); watch(); }
+  catch (e) { alert(e.message); }
+}
+
+async function decide(k, ip, port, cur) {
+  let uygulama = null;
+  if (k === "elle") {
+    uygulama = prompt(`${ip}:${port || "(port yok)"} için uygulama adı (ERT'deki adla aynı yazılırsa eşleşir):`, cur || "");
+    if (!uygulama?.trim()) return;
+  }
+  if (k === "sil" && !confirm(`${ip}:${port} önerisi ve kararı silinsin mi?`)) return;
+  try { await post("api/eksik/karar", { ip, port, karar: k, uygulama }); load(); } catch (e) { alert(e.message); }
+}
+
+async function kanit(ip) {
+  $("#drawerHost").innerHTML = `<aside class="drawer"><div class="dh"><div><h3>${esc(ip)} · AI'a giden kanıtlar</h3>
+      <div class="sub">ERT, segment, VIP, sanal sunucu, SM, komşu sunucular, Carbon Black ve aday uygulamalar</div></div>
+      <button id="dclose">Kapat</button></div><pre id="kpre"><span class="spinner"></span> Toplanıyor (Carbon Black sorgusu birkaç saniye sürebilir)…</pre></aside>`;
+  $("#dclose").addEventListener("click", () => $("#drawerHost").innerHTML = "");
+  try { const b = await api("api/eksik/kanit?" + new URLSearchParams({ ip })); if ($("#kpre")) $("#kpre").textContent = b.metin || "(boş)"; }
+  catch (e) { if ($("#kpre")) $("#kpre").textContent = "Alınamadı: " + e.message; }
+}
+
+$("#q").addEventListener("input", e => { clearTimeout(st.timer); st.timer = setTimeout(() => { st.q = e.target.value.trim(); st.page = 1; load(); }, 350); });
+$("#durum").addEventListener("change", e => { st.durum = e.target.value; st.page = 1; load(); });
+$("#alt").addEventListener("change", e => { st.alt = e.target.checked; st.page = 1; load(); });
+$("#prev").addEventListener("click", () => { st.page--; load(); });
+$("#next").addEventListener("click", () => { st.page++; load(); });
+$("#runAll").addEventListener("click", () => { if (confirm("Önerisi olmayan satırlar AI'a gönderilsin mi? Sunucu sayısına göre uzun sürebilir; sayfa kapansa da arka planda devam eder.")) start({ hepsi: true }); });
+$("#runSel").addEventListener("click", () => start({ ips: [...new Set([...st.sel].map(k => k.split("|")[0]))], yeniden: true }));
+$("#all").addEventListener("change", e => { st.data.satirlar.forEach(r => e.target.checked ? st.sel.add(key(r)) : st.sel.delete(key(r))); render(); });
+$("#body").addEventListener("change", e => { const c = e.target.closest("[data-sel]"); if (!c) return; c.checked ? st.sel.add(c.dataset.sel) : st.sel.delete(c.dataset.sel); render(); });
+$("#body").addEventListener("click", e => {
+  const b = e.target.closest("[data-k]");
+  if (b) { decide(b.dataset.k, b.dataset.ip, b.dataset.port, b.dataset.cur); return; }
+  const k = e.target.closest("[data-kanit]");
+  if (k) { e.preventDefault(); kanit(k.dataset.kanit); }
+});
+document.addEventListener("keydown", e => { if (e.key === "Escape") $("#drawerHost").innerHTML = ""; });
+fetch("api/me").then(r => r.ok ? r.json() : null).then(me => { if (me?.name) $("#me").textContent = "👤 " + me.name; }).catch(() => {});
+load();
+</script>
+</body>
+</html>

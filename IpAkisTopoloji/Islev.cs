@@ -85,7 +85,7 @@ sealed class IslevService(IConfiguration cfg, IHttpClientFactory factory, Envant
 
     // Yazım farkını yok eden anahtar: Türkçe harfler sadeleşir, noktalama ve bağlaçlar atılır, kelimeler 5 harfe kısalır
     // ("ETL ve Veri Entegrasyonu", "ETL / Veri entegrasyonu", "ETL Veri Entegrasyon" → {etl, veri, enteg}).
-    static HashSet<string> Tokens(string? s)
+    public static HashSet<string> Tokens(string? s)
     {
         if (string.IsNullOrWhiteSpace(s)) return [];
         var sb = new StringBuilder();
@@ -510,7 +510,7 @@ sealed class IslevService(IConfiguration cfg, IHttpClientFactory factory, Envant
     }
 
     // ---------------- AI çağrısı (OpenAI uyumlu) ----------------
-    async Task<string> ChatAsync(string prompt, CancellationToken ct)
+    public async Task<string> ChatAsync(string prompt, CancellationToken ct)
     {
         var s = cfg.GetSection("Ai");
         string url = s["Url"] is { Length: > 0 } u ? u : throw new InvalidOperationException("Ai:Url tanımlı değil.");
@@ -534,7 +534,7 @@ sealed class IslevService(IConfiguration cfg, IHttpClientFactory factory, Envant
     }
 
     // Model cevabındaki ilk JSON dizi / nesnesi (``` blokları ve önündeki metin atlanır).
-    static JsonElement? ExtractJson(string text)
+    public static JsonElement? ExtractJson(string text)
     {
         int a = text.IndexOfAny(['[', '{']);
         if (a < 0) return null;
@@ -544,16 +544,16 @@ sealed class IslevService(IConfiguration cfg, IHttpClientFactory factory, Envant
         try { using var doc = JsonDocument.Parse(text[a..(b + 1)]); return doc.RootElement.Clone(); }
         catch (JsonException) { return null; }
     }
-    static JsonElement? Prop(JsonElement e, string name)
+    public static JsonElement? Prop(JsonElement e, string name)
     {
         if (e.ValueKind != JsonValueKind.Object) return null;
         foreach (var p in e.EnumerateObject()) if (string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase)) return p.Value;
         return null;
     }
-    static string? Str(JsonElement e, string name) => Prop(e, name) is { } v
+    public static string? Str(JsonElement e, string name) => Prop(e, name) is { } v
         ? (v.ValueKind == JsonValueKind.String ? v.GetString() : v.ValueKind is JsonValueKind.Number ? v.GetRawText() : null) is { Length: > 0 } s ? s.Trim() : null
         : null;
-    static int Int(JsonElement e, string name) => Prop(e, name) is { } v
+    public static int Int(JsonElement e, string name) => Prop(e, name) is { } v
         ? v.ValueKind == JsonValueKind.Number && v.TryGetDouble(out var d) ? (int)Math.Round(d <= 1 && d > 0 ? d * 100 : d)
         : v.ValueKind == JsonValueKind.String && double.TryParse(v.GetString()?.Trim('%', ' '), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var d2) ? (int)d2 : 0
         : 0;
@@ -573,7 +573,7 @@ sealed class IslevService(IConfiguration cfg, IHttpClientFactory factory, Envant
         public readonly List<SmKayit> Kurulum = [], Talepler = [];
     }
 
-    async Task<Dictionary<string, IslevProfil>> ProfilesAsync(List<string> ips, EnvanterSnapshot env, CancellationToken ct)
+    public async Task<Dictionary<string, IslevProfil>> ProfilesAsync(List<string> ips, EnvanterSnapshot env, CancellationToken ct)
     {
         var bags = ips.Distinct().ToDictionary(ip => ip, _ => new Bag());
         foreach (var (ip, b) in bags)

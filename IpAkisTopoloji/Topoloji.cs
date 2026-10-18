@@ -200,6 +200,8 @@ sealed class EnvanterSnapshot
     readonly Dictionary<string, List<string>> _tagsByIp = new();
     // Envanterdeki (ERT) tüm sunucu IP'leri
     public IEnumerable<string> HostIps => _byIp.Keys;
+    // ERT'deki uygulama adları (sistem portu kayıtları hariç)
+    public IEnumerable<string> AppNames => _byApp.Keys;
     readonly Dictionary<string, List<string>> _ipsByTag = new(StringComparer.OrdinalIgnoreCase);
 
     // Sunucu etiketleri (VERIAMBARI vb.)

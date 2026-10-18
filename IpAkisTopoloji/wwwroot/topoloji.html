@@ -78,6 +78,8 @@
   .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
   .seg button { border: 0; border-radius: 0; padding: 5px 12px; }
   .seg button.on { background: var(--text); color: var(--panel); }
+  .seg a.tablink { display: inline-flex; align-items: center; padding: 5px 12px; color: var(--muted); text-decoration: none; border-left: 1px solid var(--line); }
+  .seg a.tablink:hover { color: var(--in); }
   .legend { font-size: 12px; color: var(--muted); display: flex; gap: 14px; }
   .legend i { display: inline-block; width: 18px; height: 3px; vertical-align: middle; margin-right: 4px; border-radius: 2px; }
   .topo-wrap { overflow: auto; max-height: 80vh; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); }
@@ -236,6 +238,7 @@
     <button type="button" data-ui="topo">Topoloji</button>
     <button type="button" data-ui="erisim">Erişim sorgula</button>
     <button type="button" data-ui="etiket">Sunucu etiketleme</button>
+    <a href="eksik.html" target="_blank" rel="noopener" class="tablink" title="ERT'de uygulama adı boş portlar için AI önerisi (ayrı sayfa)">ERT eksikleri ↗</a>
     <!-- DB'ye gelenler: menüde gizli; kod duruyor, adresle açılabilir: ?db= (geri getirmek için hidden'ı kaldırın) -->
   </div>
   <form id="f">
