@@ -289,11 +289,11 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
         return outp;
     }
 
-    // SM talepleri (kullanıcının sorgusu birebir): IP ya da sunucu adı (UNIXNAME) DESCRIPTION / BRIEF_DESCRIPTION / ZT_KAYNAKACIKLAMA /
-    // ZT_HEDEFACIKLAMA'da geçen talepler. Port filtresi kullanıcının sorgusundaki gibi DESCRIPTION / BRIEF_DESCRIPTION'da: boş portu
-    // anan talepler başa alınır (port geçmeyenler de sunucunun ne iş yaptığını anlattığı için listede kalır). ZT_*ACIKLAMA kolonları
-    // yoksa (207) yalnız DESCRIPTION / BRIEF_DESCRIPTION (kullanıcının 2. sorgusu). Bulunan talebin ZT_HEDEFUYGULAMA / ZT_KAYNAKUYGULAMA
-    // doluysa ek bilgi olarak yazılır (arama o alanlarda YAPILMAZ). Tek sorgu / sunucu, tarih Eksik:SmTarihKolonu (SUBMIT_DATE) ≥ SmYil.
+    // SM talepleri (kullanıcı tarifi): sunucu ZT_HEDEF / ZT_KAYNAK'ta (IP) ya da ZT_HEDEFHOSTNAME / ZT_KAYNAKHOSTNAME'de (UNIXNAME) aranır;
+    // bulunan talebin DESCRIPTION, BRIEF_DESCRIPTION, ZT_KAYNAKACIKLAMA, ZT_HEDEFACIKLAMA alanları AI'a gider. Sunucunun talepte HEDEF mi
+    // KAYNAK mı olduğu yazılır: hedefse ZT_HEDEFACIKLAMA bu sunucuyu, ZT_KAYNAKACIKLAMA karşı tarafı anlatır (kaynaksa tersi). Hedef olup
+    // boş portu (ZT_HEDEFPORT / ZT_PORT / açıklamalar) anan talepler başa; en yeni 10. Talepte doluysa ZT_HEDEFUYGULAMA / ZT_KAYNAKUYGULAMA
+    // ek bilgi. Tek sorgu / sunucu, tarih Eksik:SmTarihKolonu (SUBMIT_DATE; canlıda OPEN_TIME yok) ≥ SmYil.
     async Task<Dictionary<string, string>> SmFieldsAsync(List<string> ips, Dictionary<string, List<string>> ports, EnvanterSnapshot env, CancellationToken ct)
     {
         var outp = new Dictionary<string, string>();
@@ -305,30 +305,37 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
         var since = DateTime.Today.AddYears(-Math.Clamp(cfg.GetValue("Eksik:SmYil", cfg.GetValue("Islev:SmYil", 3)), 1, 20));
         var rows = new List<Dictionary<string, string>>();
         string? err = null;
+        string[] names = ["NUMBER", "TARIH", "ZT_HEDEF", "ZT_KAYNAK", "ZT_HEDEFHOSTNAME", "ZT_KAYNAKHOSTNAME", "ZT_HEDEFPORT", "ZT_PORT",
+            "BRIEF_DESCRIPTION", "DESCRIPTION", "ZT_HEDEFACIKLAMA", "ZT_KAYNAKACIKLAMA", "ZT_HEDEFUYGULAMA", "ZT_HEDEFUGULAMA", "ZT_KAYNAKUYGULAMA"];
         foreach (var table in tables.Where(t => System.Text.RegularExpressions.Regex.IsMatch(t, @"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*){0,2}$")))
         {
-            async Task Query(bool zt)
+            try
             {
-                string[] text = zt ? ["DESCRIPTION", "BRIEF_DESCRIPTION", "ZT_KAYNAKACIKLAMA", "ZT_HEDEFACIKLAMA"] : ["DESCRIPTION", "BRIEF_DESCRIPTION"];
-                string[] extra = zt ? ["ZT_HEDEFPORT", "ZT_PORT", "ZT_HEDEFUYGULAMA", "ZT_HEDEFUGULAMA", "ZT_KAYNAKUYGULAMA"] : [];
                 await using var conn = new SqlConnection(ConnStr);
                 await conn.OpenAsync(ct);
                 await using var cmd = new SqlCommand("", conn) { CommandTimeout = cfg.GetValue("Islev:SqlTimeoutSaniye", 180) };
                 int n = 0;
-                string P(string v) { string name = "@f" + n++; cmd.Parameters.AddWithValue(name, $"%{v}%"); return name; }
-                var conds = want.SelectMany(x => new[] { x.ip }.Concat(x.host is { Length: >= 4 } h ? [h] : []))
-                    .Distinct(StringComparer.OrdinalIgnoreCase).Select(P).SelectMany(p => text.Select(c => $"req.[{c}] LIKE {p}")).ToList();
+                string P(string v, bool like) { string name = "@f" + n++; cmd.Parameters.AddWithValue(name, like ? $"%{v}%" : v); return name; }
+                var conds = new List<string>();
+                foreach (var (ip, host) in want)
+                {
+                    string l = P(ip, true);
+                    conds.Add($"req.ZT_HEDEF LIKE {l} OR req.ZT_KAYNAK LIKE {l}");
+                    if (host is { Length: >= 4 }) { string h = P(host, false); conds.Add($"req.ZT_HEDEFHOSTNAME = {h} OR req.ZT_KAYNAKHOSTNAME = {h}"); }
+                }
                 cmd.Parameters.AddWithValue("@since", since);
-                string sel = string.Join(", ", new[] { "req.[NUMBER]", $"req.[{dateCol}]" }
-                    .Concat(text.Select(c => c == "DESCRIPTION" ? "LEFT(CAST(req.[DESCRIPTION] AS nvarchar(max)), 3000)" : $"CAST(req.[{c}] AS nvarchar(max))"))
-                    .Concat(extra.Select(c => $"req.[{c}]")));
+                string sel = string.Join(", ", names.Select(c => c switch
+                {
+                    "TARIH" => $"req.[{dateCol}]",
+                    "DESCRIPTION" => "LEFT(CAST(req.[DESCRIPTION] AS nvarchar(max)), 3000)",
+                    _ => $"req.[{c}]"
+                }));
                 cmd.CommandText = $"""
                     SELECT TOP (300) {sel}
                     FROM {table} req WITH (NOLOCK)
                     WHERE req.[{dateCol}] >= @since AND ({string.Join(" OR ", conds)})
                     ORDER BY req.[{dateCol}] DESC
                     """;
-                var names = new[] { "NUMBER", "TARIH" }.Concat(text).Concat(extra).ToArray();
                 await using var r = await cmd.ExecuteReaderAsync(ct);
                 while (await r.ReadAsync(ct))
                 {
@@ -338,15 +345,10 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
                         if (r.IsDBNull(i)) continue;
                         object v = r.GetValue(i);
                         string s = v is DateTime dt ? dt.ToString("yyyy-MM-dd") : v is byte[] ? IslevService.ParseHexOrBinary(v) : Convert.ToString(v) ?? "";
-                        if (!string.IsNullOrWhiteSpace(s)) row[names[i]] = s.Trim();
+                        if (!string.IsNullOrWhiteSpace(s)) row[names[i]] = System.Text.RegularExpressions.Regex.Replace(s.Trim(), @"\s+", " ");
                     }
                     rows.Add(row);
                 }
-            }
-            try { await Query(true); }
-            catch (SqlException ex) when (ex.Number == 207)
-            {
-                try { await Query(false); } catch (SqlException ex2) { err = $"{table}: {ex2.Message}"; }
             }
             catch (SqlException ex) { err = $"{table}: {ex.Message}"; }
         }
@@ -355,43 +357,42 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
         static bool HasPort(string? text, string port) => text != null && port.Length > 0 && System.Text.RegularExpressions.Regex.IsMatch(text, $@"(?<!\d){port}(?!\d)");
         foreach (var (ip, host) in want)
         {
+            bool Same(string? h) => host is { Length: >= 4 } && h != null && h.Split(',', ';', ' ').Any(x => string.Equals(x.Trim().Split('.')[0], host.Split('.')[0], StringComparison.OrdinalIgnoreCase));
             var miss = (ports.GetValueOrDefault(ip) ?? []).Where(p => p.Length > 0).ToList();
-            string All(Dictionary<string, string> r) => string.Join(" ", G(r, "BRIEF_DESCRIPTION"), G(r, "DESCRIPTION"), G(r, "ZT_KAYNAKACIKLAMA"), G(r, "ZT_HEDEFACIKLAMA"));
-            var mine = rows.Where(r => HasIp(All(r), ip) || (host is { Length: >= 4 } && All(r).Contains(host, StringComparison.OrdinalIgnoreCase)))
-                .DistinctBy(r => G(r, "NUMBER"))
-                // kullanıcının port filtresi: DESCRIPTION / BRIEF_DESCRIPTION'da port (ZT_HEDEFPORT / ZT_PORT da sayılır)
-                .Select(r => (r, ps: miss.Where(p => HasPort(string.Join(" ", G(r, "BRIEF_DESCRIPTION"), G(r, "DESCRIPTION"), G(r, "ZT_HEDEFPORT"), G(r, "ZT_PORT")), p)).ToList()))
-                .OrderByDescending(x => x.ps.Count > 0).ThenByDescending(x => G(x.r, "TARIH")).Take(10).ToList();
-            if (mine.Count > 0)
-            {
-                int withPort = mine.Count(x => x.ps.Count > 0);
-                var sb = new StringBuilder($"SM TALEPLERİ (açıklamalarında bu sunucunun IP'si / adı geçen, en yeni; {withPort} tanesinde boş port da geçiyor):\n");
-                foreach (var (r, ps) in mine)
+            var mine = rows.Select(r =>
                 {
-                    string? app = G(r, "ZT_HEDEFUYGULAMA", "ZT_HEDEFUGULAMA");
-                    sb.AppendLine($"- {G(r, "NUMBER")} {G(r, "TARIH")}{(ps.Count > 0 ? $" [boş port {string.Join(",", ps)} geçiyor]" : "")}: {Cut(G(r, "BRIEF_DESCRIPTION"), 160)}"
-                        + (Snippet(string.Join(" · ", G(r, "DESCRIPTION"), G(r, "ZT_HEDEFACIKLAMA"), G(r, "ZT_KAYNAKACIKLAMA")), ip, host) is { Length: > 0 } sn ? $" … {sn}" : "")
-                        + (app != null ? $" [talepteki hedef uygulama: {app}]" : "")
-                        + (G(r, "ZT_KAYNAKUYGULAMA") is { } ka ? $" [kaynak uygulama: {ka}]" : ""));
-                }
-                outp[ip] = sb.ToString();
+                    bool hedef = HasIp(G(r, "ZT_HEDEF"), ip) || Same(G(r, "ZT_HEDEFHOSTNAME"));
+                    bool kaynak = HasIp(G(r, "ZT_KAYNAK"), ip) || Same(G(r, "ZT_KAYNAKHOSTNAME"));
+                    var ps = hedef ? miss.Where(p => HasPort(string.Join(" ", G(r, "ZT_HEDEFPORT"), G(r, "ZT_PORT"), G(r, "BRIEF_DESCRIPTION"), G(r, "DESCRIPTION")), p)).ToList() : [];
+                    return (r, hedef, kaynak, ps);
+                })
+                .Where(x => x.hedef || x.kaynak).DistinctBy(x => G(x.r, "NUMBER"))
+                .OrderByDescending(x => x.ps.Count > 0).ThenByDescending(x => x.hedef).ThenByDescending(x => G(x.r, "TARIH")).Take(10).ToList();
+            if (mine.Count == 0)
+            {
+                outp[ip] = err != null ? $"SM TALEPLERİ: okunamadı ({Cut(err, 150)})\n"
+                    : $"SM TALEPLERİ: son {DateTime.Today.Year - since.Year} yılda bu sunucunun (IP {ip}{(host != null ? ", ad " + host : "")}) ZT_HEDEF / ZT_KAYNAK olduğu talep bulunamadı.\n";
+                continue;
             }
-            else if (err != null) outp[ip] = $"SM TALEPLERİ: okunamadı ({Cut(err, 150)})\n";
-            else outp[ip] = $"SM TALEPLERİ: son {DateTime.Today.Year - since.Year} yılda açıklamalarında bu sunucunun IP'si ({ip}){(host != null ? " ya da adı (" + host + ")" : "")} geçen talep bulunamadı.\n";
+            var sb = new StringBuilder($"SM TALEPLERİ (bu sunucunun hedef ya da kaynak olduğu erişim talepleri, en yeni; {mine.Count(x => x.hedef)} hedef, {mine.Count(x => x.kaynak && !x.hedef)} kaynak):\n");
+            foreach (var (r, hedef, kaynak, ps) in mine)
+            {
+                string rol = hedef && kaynak ? "bu sunucu HEM HEDEF HEM KAYNAK" : hedef ? $"bu sunucu HEDEF (kaynak: {Cut(G(r, "ZT_KAYNAK", "ZT_KAYNAKHOSTNAME"), 60)})"
+                    : $"bu sunucu KAYNAK (hedef: {Cut(G(r, "ZT_HEDEF", "ZT_HEDEFHOSTNAME"), 60)})";
+                string port = string.Join(" ", G(r, "ZT_HEDEFPORT"), G(r, "ZT_PORT")).Trim();
+                sb.AppendLine($"- {G(r, "NUMBER")} {G(r, "TARIH")} · {rol}{(port.Length > 0 ? $" · hedef port {Cut(port, 40)}" : "")}{(ps.Count > 0 ? $" · BOŞ PORT {string.Join(",", ps)}" : "")}");
+                if (G(r, "BRIEF_DESCRIPTION") is { } bd) sb.AppendLine($"    Kısa açıklama: {Cut(bd, 200)}");
+                // açıklamaları sunucunun rolüne göre etiketle
+                if (G(r, hedef ? "ZT_HEDEFACIKLAMA" : "ZT_KAYNAKACIKLAMA") is { } own) sb.AppendLine($"    {(hedef ? "Hedef" : "Kaynak")} açıklaması (BU SUNUCU): {Cut(own, 250)}");
+                if (G(r, hedef ? "ZT_KAYNAKACIKLAMA" : "ZT_HEDEFACIKLAMA") is { } other) sb.AppendLine($"    {(hedef ? "Kaynak" : "Hedef")} açıklaması (karşı taraf): {Cut(other, 200)}");
+                if (G(r, "DESCRIPTION") is { } d) sb.AppendLine($"    Açıklama: {Cut(d, 400)}");
+                string? hApp = G(r, "ZT_HEDEFUYGULAMA", "ZT_HEDEFUGULAMA"), kApp = G(r, "ZT_KAYNAKUYGULAMA");
+                if (hApp != null || kApp != null)
+                    sb.AppendLine($"    Talepteki uygulama alanları: {(hApp != null ? $"hedef uygulama = {hApp}{(hedef ? " (BU SUNUCU)" : "")}" : "")}{(hApp != null && kApp != null ? "; " : "")}{(kApp != null ? $"kaynak uygulama = {kApp}{(kaynak && !hedef ? " (BU SUNUCU)" : "")}" : "")}");
+            }
+            outp[ip] = sb.ToString();
         }
         return outp;
-    }
-
-    // Açıklamada IP / sunucu adının geçtiği yerin çevresi (±150 karakter)
-    static string Snippet(string? text, string ip, string? host)
-    {
-        if (string.IsNullOrWhiteSpace(text)) return "";
-        text = System.Text.RegularExpressions.Regex.Replace(text, @"\s+", " ");
-        int i = text.IndexOf(ip, StringComparison.Ordinal);
-        if (i < 0 && host is { Length: >= 4 }) i = text.IndexOf(host, StringComparison.OrdinalIgnoreCase);
-        if (i < 0) return "";
-        int a = Math.Max(0, i - 150), b = Math.Min(text.Length, i + 150);
-        return (a > 0 ? "…" : "") + text[a..b] + (b < text.Length ? "…" : "");
     }
 
     // Komşu ipuçları: benzer adlı sunucular (ad sonundaki sayı atılınca aynı: zb1pwatmvzsra01/02…), aynı segmentte aynı portu
@@ -645,8 +646,9 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
             çalıştığını bul.
 
             Kanıtların gücü (güçlüden zayıfa): o portu kabul eden exe'nin adı ve klasör yolu (ör. d:\apps\odeme.api\odeme.exe);
-            açıklamalarında bu sunucu ve boş port geçen SM talepleri (erişim / kurulum talebinde uygulama adı çoğu zaman yazar;
-            talepteki hedef uygulama alanı varsa çok güçlü); aynı satırdaki WEBSITE (IIS site adı) ve SERVICENAME; aynı sunucunun diğer portlarındaki uygulamalar; VIP ve havuz
+            bu sunucunun HEDEF olduğu SM erişim talepleri (özellikle boş portu anan): "BU SUNUCU" diye işaretli açıklama bu
+            sunucuyu anlatır, "karşı taraf" açıklaması diğer ucu (onu bu sunucunun uygulaması sanma); talepte bu sunucu için
+            yazılmış uygulama alanı varsa çok güçlü; aynı satırdaki WEBSITE (IIS site adı) ve SERVICENAME; aynı sunucunun diğer portlarındaki uygulamalar; VIP ve havuz
             komşuları; BENZER ADLI SUNUCULARIN (aynı ad, farklı numara) uygulamaları; aynı segmentte aynı portu kullanan
             sunucuların uygulamaları; bu porta bağlanan istemci uygulamalar ve exe'nin bağlandığı yerler; sanal sunucu notları;
             iş istekleri; sunucu adındaki kısaltmalar (ör. "atm", "sql", "web"). ntoskrnl.exe görünüyorsa port HTTP.sys üzerindendir; asıl uygulama aynı sunucudaki ve adı WEBSITE ile

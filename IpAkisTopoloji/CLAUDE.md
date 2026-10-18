@@ -272,12 +272,12 @@ erişim talepleri) — DB → şema → tablo ve kim erişiyor bilgisi buradan b
   Genel bilgiler dosyası (`Eksik:BilgiDosyasi`, kullanıcının .txt'si; göreli yol uygulama klasörüne göre; UTF-8 ya da Windows-1254;
   `BilgiMaxKarakter`=15000; tarih değişince yeniden okunur): HER AI isteğinin başına eklenir (model istekler arası hatırlamaz);
   sayfada "AI'a her istekte giden genel bilgi dosyası: … karakter" satırı.
-  SM TALEPLERİ (`SmFieldsAsync`) — KULLANICININ SORGUSU BİREBİR (ZT_HEDEF / ZT_KAYNAK / ZT_DNSHOST_* alanlarında ARAMA YAPILMAZ, kullanıcı
-  düzeltti): IP ya da UNIXNAME `DESCRIPTION` / `BRIEF_DESCRIPTION` / `ZT_KAYNAKACIKLAMA` / `ZT_HEDEFACIKLAMA`'da LIKE; ZT_ kolonları
-  yoksa (207) yalnız ilk ikisi. Port filtresi DESCRIPTION / BRIEF_DESCRIPTION'da (ZT_HEDEFPORT / ZT_PORT da sayılır): boş portu anan
-  talepler başa, diğerleri de listede (en yeni 10). Satırda kısa açıklama + IP'nin geçtiği yerin ±150 karakteri (`Snippet`) + talepte
-  doluysa ZT_HEDEFUYGULAMA / ZT_KAYNAKUYGULAMA (ek bilgi). Tek sorgu / sunucu, SUBMIT_DATE (`Eksik:SmTarihKolonu`; canlıda OPEN_TIME
-  YOK) ≥ SmYil, TOP 300. Bulunamazsa / okunamazsa açık satır (sessiz kalmaz).
+  SM TALEPLERİ (`SmFieldsAsync`, kullanıcının son tarifi): ARAMA sunucu IP'si ZT_HEDEF / ZT_KAYNAK'ta (LIKE + C#'ta tam IP), UNIXNAME
+  ZT_HEDEFHOSTNAME / ZT_KAYNAKHOSTNAME'de; AI'A GİDEN bulunan talebin DESCRIPTION (ilk 400), BRIEF_DESCRIPTION, ZT_HEDEFACIKLAMA,
+  ZT_KAYNAKACIKLAMA — sunucunun rolüne göre etiketli ("Hedef açıklaması (BU SUNUCU)" / "Kaynak açıklaması (karşı taraf)" ya da tersi).
+  Hedef + boş port (ZT_HEDEFPORT / ZT_PORT / açıklamalar) önce, sonra hedef, sonra kaynak; en yeni 10. Talepte doluysa
+  ZT_HEDEFUYGULAMA / ZT_KAYNAKUYGULAMA ek satır. Tek sorgu / sunucu, SUBMIT_DATE (`Eksik:SmTarihKolonu`; canlıda OPEN_TIME YOK) ≥ SmYil,
+  TOP 300. Bulunamazsa / okunamazsa açık satır. (Ara sürümlerde açıklama kolonlarında LIKE araması denendi; kullanıcı düzeltti.)
 - **VIP**: sorgulanan IP VIP ise üyeler + GW'ler aynı sorguya eklenir, üyeler "VIP ÜYESİ" (GW→üye trafiği varsa ✓).
   Gidilen IP VIP ise "VIP → n ÜYE"; gelen IP LB GW ise "LB GW"; sorgulanan sunucu havuz üyesiyse VIP kartı.
 - **Uygulama görünümü** (`/api/apps`, `/api/app`): `[kullanan uygulamalar] → [UYGULAMA: VIP'ler + segment grupları] → [bağımlı olunanlar]`,
