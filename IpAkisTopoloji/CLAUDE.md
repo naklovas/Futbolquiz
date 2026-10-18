@@ -212,10 +212,21 @@ topoloji çizer ve şirket içi AI'a etki analizi yaptırır. Canlıda IIS'te, W
   - `dbo.vip_envanteri` (hostname, server_ip, server_port, server_type, loadbalancer_ip, loadbalancer_port, loadbalancer_pool)
   - `dbo.vipgw` (GWIP, FW, Segment=CIDR): LB havuz üyelerine kendi segmentindeki GW IP'sinden gider.
 
+## PARK EDİLDİ — "3. faz" (kullanıcı "3. faz" dediğinde buradan devam)
+Etiket → işlev haritası → küme topolojisi → versiyonlar çalışması (2. faz) tamamlandı ve park edildi. 3. fazda hedef: veri
+elemanlarına erişmek ve ETL'i kontrol etmeye kadar gitmek (DB → tablo → kolon, ETL iş/aktarım takibi: hangi ETL hangi kaynaktan
+hangi tabloya yüklüyor; işlev kümeleri ve küme topolojisi bunun üstüne kurulacak). Açık kalan küçük fikir: küme topolojisinde
+VIP tarafında veri yokken GW → üye trafiğini VIP penceresinde "LB GW üzerinden (kaynak bilinmiyor)" olarak göstermek (şu an atlanıyor).
+Açık soru: ERT Entropi'den truncate ile yeniden yükleniyorsa TAG / AI_KUME / AI_DETAY kaybolur (kullanıcıya soruldu, cevap yok).
+
 ## Özellikler (hepsi canlıda istenip yapıldı)
 - **IP görünümü**: 5 sütun `[segment] → [gelen sunucu] → [SORGULANAN IP] → [gidilen sunucu] → [segment]`.
   2. seviye (`/api/hop2`) sunucuların kendi trafiği tek sorguda. Sunucu/segment sayısı seçilebilir, hover vurgusu,
   detay kartı, "Bu IP'nin topolojisini aç", tablolar, CSV, SVG/PNG, segment özeti.
+- **Çalışan süreç (exe)**: IP kartındaki "Bu makinedeki uygulamalar" tablosunda Port'tan sonra kolon: o portta gelen bağlantıyı
+  kabul eden süreç (Carbon Black, `/api/surec` IP sorgusundan sonra Splunk seçiliyse arka planda çekilir; `procByPort`/`targetApps`,
+  `#tgtApps` güncellenir; PID'ler ipucunda). ERT'de olmayan ama CB'de dinlenen portlar (altyapı portları `PROC_INFRA` hariç)
+  "ERT'de kayıt yok (yalnız Carbon Black)" satırı. Bağlantı görülmeyen portta "görülmedi".
 - **VIP**: sorgulanan IP VIP ise üyeler + GW'ler aynı sorguya eklenir, üyeler "VIP ÜYESİ" (GW→üye trafiği varsa ✓).
   Gidilen IP VIP ise "VIP → n ÜYE"; gelen IP LB GW ise "LB GW"; sorgulanan sunucu havuz üyesiyse VIP kartı.
 - **Uygulama görünümü** (`/api/apps`, `/api/app`): `[kullanan uygulamalar] → [UYGULAMA: VIP'ler + segment grupları] → [bağımlı olunanlar]`,

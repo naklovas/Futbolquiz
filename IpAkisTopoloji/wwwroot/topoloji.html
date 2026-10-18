@@ -416,6 +416,8 @@ async function run() {
     render();
     if ($("#hop2On").checked) runHop2(params);
     runF5Uri(params);
+    // Dinleyen süreçler (uygulama tablosundaki "Çalışan süreç" kolonu; Süreçler sekmesi de hazır olur)
+    if ($("#srcSplunk").checked) runProc(params);
   } catch (e) {
     const msg = e.name === "AbortError" ? "Sorgu iptal edildi." : e.message;
     $("#main").innerHTML = `<div class="panel empty" style="color:var(--err)">${esc(msg)}</div>`;
@@ -627,15 +629,7 @@ function renderTarget(d) {
   const outSegs = new Set(d.outbound.map(e => segLabel(e.peerSegment) ?? "?")).size;
   const unknown = new Set([...d.inbound, ...d.outbound].filter(e => !e.peerSegment || !appNames(e.peerApps).length).map(e => e.peerIp)).size;
 
-  const apps = t.apps.length ? `<div class="tbl-wrap" style="max-height:220px"><table>
-      <thead><tr><th>Port</th><th>Uygulama</th><th>Servis</th><th>Unix/Host</th><th>Varlık muhafızı</th><th>İşleten birim</th><th>Varlık sahibi</th></tr></thead>
-      <tbody>${[...t.apps].sort((a, b) => (+a.port || 0) - (+b.port || 0)).map(a => `<tr>
-        <td class="mono">${esc(a.port ?? "")}${a.vipIp ? `<div class="small muted">VIP ${esc(a.vipIp)}:${esc(a.vipPort ?? "")}</div>` : ""}</td>
-        <td><b>${esc(a.appName ?? "")}</b>${a.website ? `<div class="small muted">${esc(a.website)}</div>` : ""}</td>
-        <td>${esc(a.serviceName ?? "")}</td><td>${esc(a.unixName ?? "")}</td>
-        <td>${esc(a.varlikMuhafizi ?? "")}</td><td>${esc(a.sunucuIsletenBirim ?? "")}</td><td>${esc(a.uygulamaVarlikSahibi ?? "")}</td>
-      </tr>`).join("")}</tbody></table></div>`
-    : `<div class="unk">Bu IP için uygulama envanterinde kayıt yok.</div>`;
+  const apps = `<div id="tgtApps">${targetApps(t)}</div>`;
 
   return `<div class="target-grid">
       <div><div class="bigip">${esc(t.ip)}</div><div class="tagrow">${(tagMap?.[t.ip] ?? []).map(x => tagChip(x, t.ip, true)).join("")}<button type="button" class="eg-add" data-tagip="${esc(t.ip)}" title="Bu sunucuya etiket ekle (ERT TAG kolonuna yazılır)">+ Etiket</button></div>${segDl}</div>
@@ -649,6 +643,53 @@ function renderTarget(d) {
         ${vipCard(t)}
       </div>
     </div>`;
+}
+
+// "Bu makinedeki uygulamalar": ERT kayıtları + o portu dinleyen süreç (Carbon Black, /api/surec arka planda çekilir).
+// ERT'de kaydı olmayan ama Carbon Black'te gelen bağlantı kabul eden portlar da (altyapı portları hariç) ayrı satır olarak eklenir.
+function procByPort() {
+  const m = new Map();
+  for (const n of state.proc?.body?.processes ?? []) for (const port of n.listenPorts ?? []) {
+    const hits = n.inbound.filter(p => p.port === port).reduce((a, p) => a + p.hits, 0);
+    if (!m.has(port)) m.set(port, new Map());
+    const byName = m.get(port), x = byName.get(n.name.toLowerCase()) ?? { name: n.name, pids: new Set(), hits: 0 };
+    if (n.pid) x.pids.add(n.pid);
+    x.hits += hits; byName.set(n.name.toLowerCase(), x);
+  }
+  return m;
+}
+function procCell(port, byPort) {
+  const pr = state.proc;
+  if (!pr) return `<span class="muted small" title="Carbon Black kaynağı seçili değil">—</span>`;
+  if (pr.status === "loading") return `<span class="muted small">yükleniyor…</span>`;
+  if (pr.status === "error") return `<span class="muted small" title="${esc(pr.error)}">alınamadı</span>`;
+  const list = [...(byPort.get(String(port ?? "")) ?? new Map()).values()].sort((a, b) => b.hits - a.hits);
+  if (!list.length) return `<span class="muted small" title="Seçili aralıkta bu porta gelen bağlantı Carbon Black'te görülmedi">görülmedi</span>`;
+  return list.map(x => `<div title="${esc(`${fmt(x.hits)} gelen bağlantı${x.pids.size ? " · PID " + [...x.pids].join(", ") : ""}`)}"><b class="mono">${esc(x.name.split(/[\\/]/).pop())}</b>${x.pids.size > 1 ? ` <span class="small muted">×${x.pids.size}</span>` : ""}</div>`).join("");
+}
+function targetApps(t) {
+  const byPort = procByPort();
+  const ertPorts = new Set(t.apps.map(a => String(a.port ?? "")));
+  // ERT'de olmayan dinlenen portlar (altyapı portları hariç)
+  const extra = [...byPort.keys()].filter(p => !ertPorts.has(p) && !PROC_INFRA.has(p)).sort((a, b) => (+a || 0) - (+b || 0));
+  if (!t.apps.length && !extra.length)
+    return `<div class="unk">Bu IP için uygulama envanterinde kayıt yok.</div>${state.proc?.status === "loading" ? `<div class="small muted">Dinleyen süreçler Carbon Black'ten alınıyor…</div>` : ""}`;
+  return `<div class="tbl-wrap" style="max-height:220px"><table>
+      <thead><tr><th>Port</th><th title="Bu portta gelen bağlantıyı kabul eden süreç (Carbon Black, seçili aralık)">Çalışan süreç (exe)</th><th>Uygulama</th><th>Servis</th><th>Unix/Host</th><th>Varlık muhafızı</th><th>İşleten birim</th><th>Varlık sahibi</th></tr></thead>
+      <tbody>${[...t.apps].sort((a, b) => (+a.port || 0) - (+b.port || 0)).map(a => `<tr>
+        <td class="mono">${esc(a.port ?? "")}${a.vipIp ? `<div class="small muted">VIP ${esc(a.vipIp)}:${esc(a.vipPort ?? "")}</div>` : ""}</td>
+        <td>${a.port ? procCell(a.port, byPort) : `<span class="muted small">—</span>`}</td>
+        <td><b>${esc(a.appName ?? "")}</b>${a.website ? `<div class="small muted">${esc(a.website)}</div>` : ""}</td>
+        <td>${esc(a.serviceName ?? "")}</td><td>${esc(a.unixName ?? "")}</td>
+        <td>${esc(a.varlikMuhafizi ?? "")}</td><td>${esc(a.sunucuIsletenBirim ?? "")}</td><td>${esc(a.uygulamaVarlikSahibi ?? "")}</td>
+      </tr>`).join("")}${extra.map(p => `<tr class="muted">
+        <td class="mono">${esc(p)}</td><td>${procCell(p, byPort)}</td>
+        <td colspan="6"><span class="small" title="Carbon Black bu portta gelen bağlantı gördü ama ERT'de bu port için kayıt yok">ERT'de kayıt yok (yalnız Carbon Black)</span></td>
+      </tr>`).join("")}</tbody></table></div>`;
+}
+function updateTargetApps() {
+  const box = $("#tgtApps");
+  if (box && state.data?.target) box.innerHTML = targetApps(state.data.target);
 }
 
 // VIP kartı: sorgulanan IP bir VIP ise havuz üyeleri; bir havuzun üyesiyse hangi VIP'ler.
@@ -1062,6 +1103,7 @@ async function runProc(params) {
   procAbort = new AbortController();
   state.proc = { status: "loading" };
   renderProc();
+  updateTargetApps();
   try {
     const p = new URLSearchParams({ ip: params.get("ip"), start: params.get("start"), end: params.get("end") });
     const r = await fetch("api/surec?" + p, { signal: procAbort.signal });
@@ -1073,6 +1115,7 @@ async function runProc(params) {
     state.proc = e.name === "AbortError" ? null : { status: "error", error: e.message };
   }
   renderProc();
+  updateTargetApps();
 }
 
 function procView() {
