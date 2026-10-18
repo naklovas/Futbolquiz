@@ -275,7 +275,10 @@ erişim talepleri) — DB → şema → tablo ve kim erişiyor bilgisi buradan b
   SM YAPISAL ALANLAR (`SmFieldsAsync`, kullanıcı REQUESTM1 kolon listesini verdi): ZT_HEDEF (IP) / ZT_HEDEFHOSTNAME + ZT_HEDEFPORT / ZT_PORT
   → ZT_HEDEFUYGULAMA (ikizi ZT_HEDEFUGULAMA); ZT_KAYNAK / ZT_KAYNAKHOSTNAME → ZT_KAYNAKUYGULAMA; ZT_DNSHOST_IPADDR / _HOSTNAME →
   ZT_DNSHOST_UYGULAMA. Tek sorgu / 20 sunucu, SUBMIT_DATE ≥ SmYil, TOP 2000; C#'ta IP tam, port tam sayı; uygulama başına sayı + son
-  tarih + örnek no; boş porta denk gelen hedef uygulama en üstte. Prompt'ta "çok güçlü" kanıt. Arama gerekçede de ("Kahin"). Sıralama: başlıklar IP / Port / Sunucu / Öneri (önerisi olmayan sonda) / güven / durum (`sirala`, `yon`).
+  tarih + örnek no; boş porta denk gelen hedef uygulama en üstte. Prompt'ta "çok güçlü" kanıt.
+  Kullanıcı: IP bazen yalnız DESCRIPTION / BRIEF_DESCRIPTION'da → aynı sorguda o iki kolon da (IP ve sunucu adı LIKE) aranır; ayrı
+  "açıklama + port" sorgusu (SmPortAsync) kaldırıldı (sunucu başına tek REQUESTM1 sorgusu). Uygulama alanı boş talepler de listelenir
+  (boş portu anan önce, IP'nin geçtiği yerin ±150 karakteri `Snippet`); hiç talep yoksa "bulunamadı" satırı (sessiz kalmaz). Arama gerekçede de ("Kahin"). Sıralama: başlıklar IP / Port / Sunucu / Öneri (önerisi olmayan sonda) / güven / durum (`sirala`, `yon`).
 - **VIP**: sorgulanan IP VIP ise üyeler + GW'ler aynı sorguya eklenir, üyeler "VIP ÜYESİ" (GW→üye trafiği varsa ✓).
   Gidilen IP VIP ise "VIP → n ÜYE"; gelen IP LB GW ise "LB GW"; sorgulanan sunucu havuz üyesiyse VIP kartı.
 - **Uygulama görünümü** (`/api/apps`, `/api/app`): `[kullanan uygulamalar] → [UYGULAMA: VIP'ler + segment grupları] → [bağımlı olunanlar]`,
