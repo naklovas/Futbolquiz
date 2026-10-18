@@ -165,7 +165,7 @@ function render() {
   const d = st.data, w = d.yazabilir;
   $("#stats").innerHTML = [["Boş uygulama adlı satır", d.tumSatir], ["Sunucu", d.tumIp], ["Önerisi olan", d.onerili], ["Onaylanan", d.onayli], ["Filtre sonucu", d.toplam]]
     .map(([l, n]) => `<div class="stat"><b>${fmt(n)}</b><span>${l}</span></div>`).join("");
-  $("#bilgi").textContent = d.bilgi ? "AI'a her istekte giden " + d.bilgi : "";
+  $("#bilgi").textContent = [d.bilgi ? "AI'a her istekte giden " + d.bilgi : "", d.surum || "eski sunucu sürümü (Eksik.cs yayınlanmamış)"].filter(Boolean).join(" · ");
   $("#warn").innerHTML = d.uyari ? `<div class="warn">${esc(d.uyari)}</div>` : w ? "" : `<div class="warn">Yalnız görüntüleme yetkiniz var.</div>`;
   const run = d.durum?.calisiyor;
   $("#runAll").disabled = !w || run || !d.topluYetki;

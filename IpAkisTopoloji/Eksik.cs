@@ -15,7 +15,7 @@ record EksikOneri(string? Uygulama, bool Yeni, int Guven, string? Gerekce, strin
 record EksikSatir(string Ip, string Port, string? Hostname, string? Segment, string? Website, string? Servis, string? Muhafiz,
     string? Birim, List<string> Diger, bool Altyapi, EksikOneri? Oneri, bool Test = false);
 record EksikListe(List<EksikSatir> Satirlar, int Toplam, int TumSatir, int TumIp, int Onerili, int Onayli, IslevDurum Durum,
-    bool Yazabilir, string? Uyari, bool TopluYetki = false, string? Bilgi = null);
+    bool Yazabilir, string? Uyari, bool TopluYetki = false, string? Bilgi = null, string? Surum = null);
 // Max: bu çalıştırmada en çok kaç sunucu (boş = Eksik:MaxIp; 0 = sınırsız)
 record EksikCalistir(List<string>? Ips, bool Hepsi, bool Yeniden, int? Saat, bool Test = false, int? Max = null);
 record EksikKarar(string? Ip, string? Port, string? Karar, string? Uygulama);
@@ -121,10 +121,13 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
         string bilgi;
         try { bilgi = Bilgi().Durum; } catch (Exception ex) { bilgi = "genel bilgi dosyası okunamadı: " + ex.Message; }
         return new EksikListe(f.Skip((page - 1) * size).Take(size).ToList(), f.Count, rows.Count, rows.Select(r => r.Ip).Distinct().Count(),
-            rows.Count(r => r.Oneri != null), rows.Count(r => r.Oneri?.Durum is Onay or Elle), Durum, yazabilir, _uyari, false, bilgi);
+            rows.Count(r => r.Oneri != null), rows.Count(r => r.Oneri?.Durum is Onay or Elle), Durum, yazabilir, _uyari, false, bilgi, Surum);
     }
 
     static string IpKey(string ip) => string.Join(".", ip.Split('.').Select(p => p.PadLeft(3, '0')));
+
+    // Çalışan sürüm (yayınlanan dll'in tarihi + SM tarih kolonu): eski dll ile yeni dosyalar karışınca sayfada görülsün
+    static readonly string Surum = $"sunucu sürümü {File.GetLastWriteTime(typeof(EksikService).Assembly.Location):yyyy-MM-dd HH:mm}";
 
     // ---------------- Öneri tablosu ----------------
     async Task<Dictionary<(string, string), EksikOneri>> LoadAsync(bool force, CancellationToken ct)
