@@ -173,7 +173,7 @@ function render() {
     : "Tüm boşları tahmin ettirme yetkisi yalnız yetkili kullanıcıda; satır seçip 'Seçilenlere öner' kullanabilirsiniz";
   $("#runSel").disabled = !w || run || !st.sel.size;
   document.querySelectorAll("[data-sort]").forEach(th => {
-    const on = th.dataset.sort === st.sort;
+    const on = th.dataset.sort === (st.sort || "ip");   // varsayılan sıra IP + port
     th.classList.toggle("on", on);
     th.querySelector(".arr").textContent = on ? (st.desc ? "▼" : "▲") : "↕";
   });
@@ -275,7 +275,7 @@ document.querySelectorAll("thead [data-sort]").forEach(th => th.addEventListener
   e.stopPropagation();
   const k = th.dataset.sort;
   // öneri / güven ilk tıklamada en iyi üstte (azalan), diğerleri artan
-  if (st.sort === k) st.desc = !st.desc; else { st.sort = k; st.desc = k === "guven"; }
+  if ((st.sort || "ip") === k) { st.sort = k; st.desc = !st.desc; } else { st.sort = k; st.desc = k === "guven"; }
   st.page = 1; load();
 }));
 $("#next").addEventListener("click", () => { st.page++; load(); });

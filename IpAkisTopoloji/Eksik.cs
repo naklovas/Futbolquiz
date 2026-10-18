@@ -115,7 +115,8 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
                                : f.OrderBy(r => r.Oneri?.Uygulama == null).ThenBy(r => r.Oneri?.Uygulama ?? "", cmp)).ThenBy(r => IpKey(r.Ip)),
             "guven" => (azalan ? f.OrderByDescending(r => r.Oneri?.Guven ?? -1) : f.OrderBy(r => r.Oneri == null).ThenBy(r => r.Oneri?.Guven ?? 0)).ThenBy(r => IpKey(r.Ip)),
             "durum" => Ord(r => r.Oneri?.Durum ?? "\uffff", cmp).ThenByDescending(r => r.Oneri?.Guven ?? 0),
-            _ => f.OrderBy(r => r.Oneri == null ? 1 : 0).ThenByDescending(r => r.Oneri?.Guven ?? 0).ThenBy(r => IpKey(r.Ip)).ThenBy(r => PortN(r.Port))
+            // varsayılan: IP + port (sabit; kullanıcı: tahmin bitince satır öneriye göre başka sayfaya kayıyordu)
+            _ => f.OrderBy(r => IpKey(r.Ip)).ThenBy(r => PortN(r.Port))
         }).ToList();
         int size = Math.Clamp(boyut, 20, 1000), page = Math.Max(1, sayfa);
         string bilgi;

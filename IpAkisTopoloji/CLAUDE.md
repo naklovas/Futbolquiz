@@ -278,7 +278,7 @@ erişim talepleri) — DB → şema → tablo ve kim erişiyor bilgisi buradan b
   tarih + örnek no; boş porta denk gelen hedef uygulama en üstte. Prompt'ta "çok güçlü" kanıt.
   Kullanıcı: IP bazen yalnız DESCRIPTION / BRIEF_DESCRIPTION'da → aynı sorguda o iki kolon da (IP ve sunucu adı LIKE) aranır; ayrı
   "açıklama + port" sorgusu (SmPortAsync) kaldırıldı (sunucu başına tek REQUESTM1 sorgusu). Uygulama alanı boş talepler de listelenir
-  (boş portu anan önce, IP'nin geçtiği yerin ±150 karakteri `Snippet`); hiç talep yoksa "bulunamadı" satırı (sessiz kalmaz). Arama gerekçede de ("Kahin"). Sıralama: başlıklar IP / Port / Sunucu / Öneri (önerisi olmayan sonda) / güven / durum (`sirala`, `yon`).
+  (boş portu anan önce, IP'nin geçtiği yerin ±150 karakteri `Snippet`); hiç talep yoksa "bulunamadı" satırı (sessiz kalmaz). Arama gerekçede de ("Kahin"). Sıralama: başlıklar IP / Port / Sunucu / Öneri (önerisi olmayan sonda) / güven / durum (`sirala`, `yon`). Varsayılan sıra IP + port (sabit; önceki "öneriliyi üste al" varsayılanında tahmin bitince satır başka sayfaya kayıyordu).
 - **VIP**: sorgulanan IP VIP ise üyeler + GW'ler aynı sorguya eklenir, üyeler "VIP ÜYESİ" (GW→üye trafiği varsa ✓).
   Gidilen IP VIP ise "VIP → n ÜYE"; gelen IP LB GW ise "LB GW"; sorgulanan sunucu havuz üyesiyse VIP kartı.
 - **Uygulama görünümü** (`/api/apps`, `/api/app`): `[kullanan uygulamalar] → [UYGULAMA: VIP'ler + segment grupları] → [bağımlı olunanlar]`,
