@@ -253,7 +253,8 @@ erişim talepleri) — DB → şema → tablo ve kim erişiyor bilgisi buradan b
   SUBMIT_DATE — canlıda OPEN_TIME YOK, "Invalid column name" verdi) ≥ son `Eksik:SmYil`
   (varsayılan Islev:SmYil=3) yıl, NOLOCK, TOP 500; sunucu/port ataması C#'ta (IP tam, port tam sayı), sunucu başına en yeni 10; ZT_ kolonu yoksa (207) yalnız iki kolon. Kullanıcının canlı örneği:
   2.71.51.16:5000 boş, CB'de c:\bbpgm\atm_monitoring_service\terminaldurum.restservice.exe, sunucu adı zb1pwatmvzsra01 ("atm").
-  AI (`IslevService.ChatAsync`, `Paket`=3 sunucu/istek, `Paralel`=2, `MaxIp`=200/çalıştırma): adaydan harfi harfine seçer ya da
+  AI (`IslevService.ChatAsync`; kullanıcı: 20'lik toplu kanıt REQUESTM1 ile çok uzadı → SUNUCU SUNUCU: kanıt topla → hemen AI'a sor
+  (tek sunucu/istek) → kaydet, aynı anda `Paralel`=3 sunucu; `Paket` kaldırıldı; `MaxIp`=200/çalıştırma): adaydan harfi harfine seçer ya da
   yeni=true; "Altyapı: …"; kanıt yoksa null. Sonuç ERT'ye YAZILMAZ: `Eksik:OneriTablosu` dbo.DF_ERT_UYGULAMA_ONERI (`sql/ert_oneri.sql`;
   yoksa bellekte + uyarı), DURUM AI / Onaylandı / Reddedildi / Elle; onaylanan / elle girilene AI dokunmaz. Uçlar: `/api/eksik`
   (ara, durum yok|ai|onay|red, altyapi, sayfa), `/api/eksik/durum`, `/kanit?ip=`, POST `/calistir {ips?, hepsi, yeniden, saat}`,

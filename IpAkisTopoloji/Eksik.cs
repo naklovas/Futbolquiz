@@ -645,39 +645,33 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
         // Etiket alanı özet için: bu çalıştırmada kaç sunucu / bekleyen toplam
         Set(d => d with { Asama = "Kanıtlar toplanıyor", Toplam = total,
             Etiket = todo.Count < allIps ? $"bu çalıştırmada {todo.Count} / {allIps} sunucu ({allPorts - total} port sonraki çalıştırmalara kaldı)" : $"{allIps} sunucu" });
-        int paket = Math.Clamp(cfg.GetValue("Eksik:Paket", 3), 1, 10), paralel = Math.Clamp(cfg.GetValue("Eksik:Paralel", 2), 1, 6);
+        // Sunucu sunucu (kullanıcı: 20'lik toplu kanıt toplama SM tablosuyla çok uzadı): her sunucunun kanıtı toplanır, hemen AI'a
+        // sorulur ve kaydedilir; aynı anda Eksik:Paralel (varsayılan 3) sunucu. İlk öneriler hemen gelir.
+        int paralel = Math.Clamp(cfg.GetValue("Eksik:Paralel", 3), 1, 8);
         using var gate = new SemaphoreSlim(paralel);
-        // Kanıtlar 20'şer IP'lik gruplarla (Carbon Black tek sorgu), AI paketleri paralel
-        foreach (var grp in todo.Keys.Chunk(20))
+        Set(d => d with { Asama = $"Kanıt + AI (sunucu sunucu, aynı anda {paralel})" });
+        var tasks = todo.Keys.Select(async ip =>
         {
-            ct.ThrowIfCancellationRequested();
-            Set(d => d with { Asama = "Kanıtlar toplanıyor" });
-            var texts = await BuildAsync(grp.ToList(), todo, env, hours, ct);
-            lock (_gate) foreach (var kv in texts) _kanit[kv.Key] = kv.Value;
-            Set(d => d with { Asama = "AI önerileri" });
-            var tasks = grp.Chunk(paket).Select(async chunk =>
+            await gate.WaitAsync(ct);   // iptalde burada çıkar (semafor alınmadan; finally'ye girmez)
+            try
             {
-                await gate.WaitAsync(ct);
-                try
+                var texts = await BuildAsync([ip], todo, env, hours, ct);
+                lock (_gate) _kanit[ip] = texts.GetValueOrDefault(ip) ?? "";
+                var got = await AskAsync([ip], todo, texts, env, ct);
+                foreach (var port in todo[ip])
                 {
-                    var got = await AskAsync(chunk, todo, texts, env, ct);
-                    foreach (var ip in chunk)
-                        foreach (var port in todo[ip])
-                        {
-                            var o = got.GetValueOrDefault((ip, port)) ?? new EksikOneri(null, false, 0, "AI bu port için cevap vermedi.", Ai, "AI", DateTime.Now);
-                            await SaveAsync(ip, port, o, texts.GetValueOrDefault(ip), ct);
-                        }
-                    Set(d => d with { Biten = d.Biten + chunk.Sum(ip => todo[ip].Count) });
+                    var o = got.GetValueOrDefault((ip, port)) ?? new EksikOneri(null, false, 0, "AI bu port için cevap vermedi.", Ai, "AI", DateTime.Now);
+                    await SaveAsync(ip, port, o, texts.GetValueOrDefault(ip), ct);
                 }
-                catch (Exception ex) when (ex is not OperationCanceledException)
-                {
-                    Fail($"{string.Join(", ", chunk)}: {ex.Message}");
-                    Set(d => d with { Biten = d.Biten + chunk.Sum(ip => todo[ip].Count) });
-                }
-                finally { gate.Release(); }
-            });
-            await Task.WhenAll(tasks);
-        }
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException) { Fail($"{ip}: {ex.Message}"); }
+            finally
+            {
+                Set(d => d with { Biten = d.Biten + todo[ip].Count });
+                gate.Release();
+            }
+        }).ToList();
+        await Task.WhenAll(tasks);
     }
 
     // Kullanıcının genel bilgiler dosyası (Eksik:BilgiDosyasi; .txt, UTF-8 ya da Windows-1254): her AI isteğinin başına eklenir.
