@@ -252,13 +252,18 @@ async function decide(k, ip, port, cur) {
   try { await post("api/eksik/karar", { ip, port, karar: k, uygulama }); load(); } catch (e) { alert(e.message); }
 }
 
-async function kanit(ip) {
+async function kanit(ip, yeni) {
   $("#drawerHost").innerHTML = `<aside class="drawer"><div class="dh"><div><h3>${esc(ip)} · AI'a giden kanıtlar</h3>
-      <div class="sub">ERT, segment, VIP, sanal sunucu, SM, komşu sunucular, Carbon Black ve aday uygulamalar</div></div>
-      <button id="dclose">Kapat</button></div><pre id="kpre"><span class="spinner"></span> Toplanıyor (Carbon Black sorgusu birkaç saniye sürebilir)…</pre></aside>`;
+      <div class="sub" id="ksub">${yeni ? "Şimdi yeniden toplanıyor (AI'a sorulmaz)" : "Son AI isteğinde giden metin (kaydedilmiş)"}</div></div>
+      <div style="display:flex;gap:6px"><button id="dnew" title="Kanıtları şimdi yeniden toplar (Carbon Black, SM, MSY/ÇSY…); AI'a sormaz, öneriyi değiştirmez">↻ yeniden topla</button><button id="dclose">Kapat</button></div></div>
+      <pre id="kpre"><span class="spinner"></span> ${yeni ? "Toplanıyor (Carbon Black ve SM sorguları biraz sürebilir)…" : "Yükleniyor…"}</pre></aside>`;
   $("#dclose").addEventListener("click", () => $("#drawerHost").innerHTML = "");
-  try { const b = await api("api/eksik/kanit?" + new URLSearchParams({ ip })); if ($("#kpre")) $("#kpre").textContent = b.metin || "(boş)"; }
-  catch (e) { if ($("#kpre")) $("#kpre").textContent = "Alınamadı: " + e.message; }
+  $("#dnew").addEventListener("click", () => kanit(ip, true));
+  try {
+    const b = await api("api/eksik/kanit?" + new URLSearchParams({ ip, ...(yeni ? { yeni: "true" } : {}) }));
+    if ($("#kpre")) $("#kpre").textContent = b.metin || "(boş)";
+    if ($("#ksub") && yeni) $("#ksub").textContent = "Şimdi toplandı (AI'a sorulmadı; öneriyi yenilemek için satırı seçip 'Seçilenlere öner')";
+  } catch (e) { if ($("#kpre")) $("#kpre").textContent = "Alınamadı: " + e.message; }
 }
 
 $("#q").addEventListener("input", e => { clearTimeout(st.timer); st.timer = setTimeout(() => { st.q = e.target.value.trim(); st.page = 1; load(); }, 350); });

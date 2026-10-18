@@ -227,10 +227,11 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
     static string Norm(string s) => new(s.ToLowerInvariant().Where(char.IsLetterOrDigit).ToArray());
 
     // ---------------- Kanıt (AI'a giden metin) ----------------
-    public async Task<string> EvidenceAsync(string ip, CancellationToken ct)
+    // yeni = false: son AI isteğinde giden (kayıtlı) metin; true: kanıtlar şimdi yeniden toplanır (AI'a sorulmaz)
+    public async Task<string> EvidenceAsync(string ip, CancellationToken ct, bool yeni = false)
     {
-        lock (_gate) if (_kanit.TryGetValue(ip, out var k)) return k;
-        try
+        if (!yeni) lock (_gate) if (_kanit.TryGetValue(ip, out var k)) return k;
+        if (!yeni) try
         {
             await using var conn = new SqlConnection(ConnStr);
             await conn.OpenAsync(ct);

@@ -694,10 +694,10 @@ app.MapGet("/api/eksik/ip", async (string ip, EksikService eksik, CancellationTo
     try { return Results.Ok(await eksik.ForIpAsync(v, ct)); }
     catch (Exception ex) { return Results.Json(new { error = ex.Message }, statusCode: 502); }
 });
-app.MapGet("/api/eksik/kanit", async (string ip, EksikService eksik, CancellationToken ct) =>
+app.MapGet("/api/eksik/kanit", async (string ip, bool? yeni, EksikService eksik, CancellationToken ct) =>
 {
     if (!LookupQuery.TryParseIpv4(ip, out string v)) return Results.BadRequest(new { error = "Geçersiz IP." });
-    try { return Results.Ok(new { ip = v, metin = await eksik.EvidenceAsync(v, ct) }); }
+    try { return Results.Ok(new { ip = v, metin = await eksik.EvidenceAsync(v, ct, yeni ?? false), yeni = yeni ?? false }); }
     catch (Exception ex) { return Results.Json(new { error = ex.Message }, statusCode: 502); }
 });
 app.MapPost("/api/eksik/calistir", (EksikCalistir req, HttpContext ctx, IConfiguration cfg, EksikService eksik) =>
