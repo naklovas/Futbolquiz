@@ -17,7 +17,8 @@ using Microsoft.Data.SqlClient;
 // Takma / TakmaKaynak: kullanıcı kümeyi yeniden adlandırdıysa yeni ad ve AI'ın verdiği asıl küme adı (yeniden kümelemede korunur).
 record IslevDetay(string? Islev, string? Rol, int Guven, string? Gerekce, string? KumeAciklama, string? Tarih, string? Kaynak,
     string? Takma = null, string? TakmaKaynak = null);
-record IslevSunucu(string Ip, string? Hostname, List<string> Apps, string? Muhafiz, string? Rol, int? Guven, bool Elle);
+// AltEtiket: ana etiket seçiliyken sunucunun alt etiketi ("ANA/ALT" → "ALT")
+record IslevSunucu(string Ip, string? Hostname, List<string> Apps, string? Muhafiz, string? Rol, int? Guven, bool Elle, string? AltEtiket = null);
 record IslevVip(string Vip, string? Pool, string? App, List<IslevSunucu> Sunucular);
 record IslevSegment(string Ad, string? Cidr, List<IslevVip> Vipler, List<IslevSunucu> Sunucular, string? Tenant = null);
 record IslevKume(string Ad, string? Aciklama, int Sunucu, List<IslevSegment> Segmentler);
@@ -25,7 +26,11 @@ record IslevDurum(bool Calisiyor, string? Asama, int Toplam, int Biten, int Hata
     string? Baslatan, DateTimeOffset? Baslangic, DateTimeOffset? Bitis, List<string> Hatalar);
 // Coklu: birden çok kurum (tenant) gösteriliyor → arayüz kurum bazında gruplar; tek kurum seçiliyse gruplama yok.
 record IslevHarita(string Etiket, int Toplam, int Siniflanan, List<IslevKume> Kumeler, IslevDurum Durum, bool Yazabilir, string? Uyari,
-    bool Coklu = false, List<string>? Tenantlar = null);
+    bool Coklu = false, List<string>? Tenantlar = null)
+{
+    public string? Aciklama { get; init; }                // etiketin açıklaması (DF_ETIKET_ACIKLAMA)
+    public List<EtiketSayi> AltEtiketler { get; init; } = [];   // ana etiket seçiliyse altları (ad = alt kısım), sayı ve açıklama
+}
 record IslevCalistir(string? Etiket, bool Hepsi, bool SadeceKumele);
 record IslevDuzelt(List<string>? Ips, string? Kume, string? Aciklama = null);
 record IslevAd(string? Etiket, string? Eski, string? Yeni);
@@ -200,8 +205,10 @@ sealed class IslevService(IConfiguration cfg, IHttpClientFactory factory, Envant
             var hosts = env.AppsOnIp(ip);
             return new IslevSunucu(ip, hosts.Select(h => h.UnixName).OfType<string>().FirstOrDefault(), env.AppNamesOnIp(ip).Take(4).ToList(),
                 hosts.Select(h => h.VarlikMuhafizi).OfType<string>().FirstOrDefault(), x.Detay?.Rol ?? x.Detay?.Islev, x.Detay?.Guven,
-                x.Detay?.Kaynak?.StartsWith("Elle") == true);
+                x.Detay?.Kaynak?.StartsWith("Elle") == true, AltOf(ip));
         }
+        string? AltOf(string ip) => tag.Contains('/') ? null
+            : env.TagsOf(ip).FirstOrDefault(t => t.StartsWith(tag + "/", StringComparison.OrdinalIgnoreCase))?[(tag.Length + 1)..];
         string KumeOf(string ip) => res.TryGetValue(ip, out var x) && !string.IsNullOrWhiteSpace(x.Kume) ? x.Kume! : Sinifsiz;
         var cmp = StringComparer.Create(new System.Globalization.CultureInfo("tr-TR"), true);
         var kumeler = ips.GroupBy(KumeOf, StringComparer.OrdinalIgnoreCase).Select(g =>
@@ -221,7 +228,11 @@ sealed class IslevService(IConfiguration cfg, IHttpClientFactory factory, Envant
             return new IslevKume(g.Key, aciklama, g.Count(), segs);
         })
         .OrderBy(k => k.Ad == Sinifsiz).ThenByDescending(k => k.Sunucu).ToList();
-        return new IslevHarita(tag, ips.Count, ips.Count(ip => KumeOf(ip) != Sinifsiz), kumeler, Durum, yazabilir, uyari, coklu, shown);
+        var (desc, _) = await EtiketAciklama.GetAsync(cfg, ct);
+        var alts = ips.Select(AltOf).OfType<string>().GroupBy(a => a, StringComparer.OrdinalIgnoreCase)
+            .Select(g => new EtiketSayi(g.Key, g.Count(), desc.GetValueOrDefault(tag + "/" + g.Key))).OrderByDescending(a => a.Sunucu).ToList();
+        return new IslevHarita(tag, ips.Count, ips.Count(ip => KumeOf(ip) != Sinifsiz), kumeler, Durum, yazabilir, uyari, coklu, shown)
+            { Aciklama = desc.GetValueOrDefault(tag), AltEtiketler = alts };
     }
 
     // ---------------- Elle düzeltme ----------------
@@ -359,13 +370,18 @@ sealed class IslevService(IConfiguration cfg, IHttpClientFactory factory, Envant
     {
         var kat = Kategoriler();
         string katalog = string.Join("\n", kat.Select(k => $"- {k.Ad}: {k.Aciklama}"));
+        // Kullanıcının etikete / alt etiketlere yazdığı açıklamalar (sunucu metninde "Etiketler: ANA/ALT" satırı var)
+        var (desc, _) = await EtiketAciklama.GetAsync(cfg, ct);
+        string anaEtiket = EtiketService.Parent(tag);
+        var notes = desc.Where(d => EtiketService.Matches(d.Key, anaEtiket)).OrderBy(d => d.Key).Select(d => $"- {d.Key}: {d.Value}").ToList();
+        string etiketNot = notes.Count == 0 ? "" : "Etiket açıklamaları (kullanıcının yazdığı; ANA/ALT = alt etiket):\n" + string.Join("\n", notes) + "\n";
         var sb = new StringBuilder();
         sb.AppendLine($$"""
             Bir bankanın veri merkezinde çalışan kıdemli bir altyapı mimarısın. Aşağıdaki sunucular kullanıcı tarafından "{{tag}}" olarak
             etiketlendi; hepsi bu ekosistemle ilişkili ama işlevleri farklı olabilir (ör. veri ambarı için: kaynak sistem veritabanı,
             ETL / veri entegrasyonu, staging, veri ambarı veritabanı (Exadata vb.), raporlama / BI, dosya aktarımı, uygulama / web,
             izleme / yönetim, yedekleme, test / geliştirme).
-
+            {{etiketNot}}
             Her sunucu için verilen kanıtlara (envanter, uygulama ve port kayıtları, VIP, sanal sunucu notları, kurulum talepleri,
             iş istekleri) bakarak sunucunun İŞLEVİNİ belirle. Port numarasından çok iş isteklerindeki açıklamalara ve uygulama
             adlarına ağırlık ver. Kanıt yetersizse islev "Belirsiz" ve güveni düşük yaz; uydurma.

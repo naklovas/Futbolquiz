@@ -4,15 +4,18 @@
 // (Carbon Black / AppResponse / Firewall, seçili tarih aralığı) eğri oklarla çizilir; kalınlık trafik, kırmızı kesik = engellenen.
 // Elemana tıklayınca ekranın ortasında ayrıntı penceresi: VIP üyeleri, bağlar, etiket dışı trafik; üyeye tıklayınca sunucu
 // ayrıntısı (AI rolü / gerekçesi, IP düzeyinde akışlar). Veri: /api/islev/topoloji (KumeTopoloji.cs).
+// Versiyon: canlı çizim bitince "Versiyon olarak kaydet" (harita + topoloji, /api/islev/versiyon); kayıtlı versiyon
+// ktShowSaved ile sorgusuz açılır (islev.js iv.ver).
 // ============================================================================
 
-const kt = { tag: "", data: null, scale: 1, mode: "kume", expanded: new Set(), cols: 0, per: 5, alt: "uygulama", infra: false, abort: null, hover: null, pos: null, stack: [] };
+const kt = { tag: "", data: null, raw: null, liveMap: null, saved: null, meta: {}, scale: 1, mode: "kume", expanded: new Set(), cols: 0, per: 5, alt: "uygulama", infra: false, abort: null, hover: null, pos: null, stack: [] };
 
 (function ktStyle() {
   const css = `
   .kt-bar { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin:2px 0 12px; }
   .kt-bar .sp { flex:1; }
   .kt-bar label { display:flex; gap:6px; align-items:center; font-size:12.5px; color:var(--text); }
+  .kt-saved { font-size:12px; font-weight:600; color:#8a6412; background:#d9a33c22; border:1px solid #d9a33c; border-radius:999px; padding:3px 10px; }
   .kt-src { display:flex; gap:8px; flex-wrap:wrap; font-size:12px; color:var(--muted); margin-bottom:10px; }
   .kt-wrap { border:1px solid var(--line); border-radius:10px; background:var(--bg); overflow:auto; position:relative; }
   .kt-svg { display:block; }
@@ -75,7 +78,8 @@ const kt = { tag: "", data: null, scale: 1, mode: "kume", expanded: new Set(), c
 
 async function ktRun(tag) {
   setUiMode("topo");
-  kt.tag = tag; kt.stack = [];
+  kt.tag = tag; kt.stack = []; kt.saved = null; kt.liveMap = null;
+  ivSetVer(tag, null);   // canlı çizim
   ivStopPoll();
   const srcs = selectedSources();
   if (!srcs.length) { alert("En az bir kaynak seçin."); return; }
@@ -87,14 +91,20 @@ async function ktRun(tag) {
   $("#main").innerHTML = `<div class="panel empty"><span class="spinner"></span> "${esc(tag)}" kümelerinin trafiği sorgulanıyor (VIP'ler ve sunucular)…
     <button id="ktCancel" style="margin-left:10px">Vazgeç</button></div>`;
   $("#ktCancel").addEventListener("click", () => { kt.abort.abort(); runIslev(tag); });
+  // Versiyon kaydı için aynı kurum seçimiyle işlev haritası da alınır (topolojiyle birlikte saklanır)
+  const mapP = fetch("api/islev?" + new URLSearchParams({ etiket: tag, tenant: tenantParam() }), { signal: kt.abort.signal })
+    .then(r => r.ok ? r.json() : null).catch(() => null);
   try {
     const r = await fetch("api/islev/topoloji?" + p, { signal: kt.abort.signal });
-    const b = await r.json().catch(() => ({ error: `HTTP ${r.status}` }));
+    const text = await r.text();
+    let b; try { b = JSON.parse(text); } catch { b = { error: `HTTP ${r.status}` }; }
     if (!r.ok) throw new Error(b.error || `HTTP ${r.status}`);
+    kt.liveMap = await mapP;
+    if (kt.liveMap) iv.canWrite = kt.liveMap.yazabilir;
     if (uiMode !== "topo") return;
-    // Birden çok kurum: kutu = kurum × küme; anahtar "Kurum · Küme", kutu başlığında yalnız küme adı (kurum çerçevede)
-    if (b.coklu) b.kumeler.forEach(k => { k.kume = k.ad; k.ad = `${k.tenant} · ${k.ad}`; });
-    kt.data = b;
+    kt.raw = text;
+    kt.meta = { start: p.get("start"), end: p.get("end"), appliance: p.get("appliance"), sources: p.get("sources"), tenant: p.get("tenant") };
+    kt.data = ktPrepare(b);
     ktShell();
   } catch (e) {
     if (e.name === "AbortError") return;
@@ -140,11 +150,13 @@ function ktShell() {
   const pill = (n, s) => s ? `<span class="pill ${s.ok ? "ok" : s.error === "Sorgulanmadı" ? "skip" : "err"}" title="${esc(s.error || (s.messages || []).join(" · "))}">${n}${s.ok ? ` · ${fmt(s.rows)} satır` : ""}</span>` : "";
   const nVip = d.kumeler.reduce((a, k) => a + k.elemanlar.filter(e => e.tur === "vip").length, 0);
   const nSrv = d.kumeler.reduce((a, k) => a + k.elemanlar.filter(e => e.tur !== "vip").length, 0);
+  const hasAlt = d.kumeler.some(k => k.elemanlar.some(e => e.altEtiket));
+  if (kt.alt === "alt" && !hasAlt) kt.alt = "uygulama";
   $("#main").innerHTML = `
   <section class="panel">
     <div class="eg-head">
       <div><h2>Küme topolojisi · ${esc(d.etiket)}</h2>
-        <div class="eg-sub">${esc($("#start").value.replace("T", " "))} – ${esc($("#end").value.replace("T", " "))} · kutular işlev kümeleri, içlerinde VIP'ler ve VIP'e bağlı olmayan sunucular · oklar aralarındaki trafik</div></div>
+        <div class="eg-sub">${kt.saved ? `<b>Kayıtlı versiyon</b> (${esc(verWhen(kt.saved.tarih))} · ${esc(String(kt.saved.kaydeden || "").split("\\").pop())}) · ` : ""}${esc((kt.meta.start || "").replace("T", " "))} – ${esc((kt.meta.end || "").replace("T", " "))} · kutular işlev kümeleri, içlerinde VIP'ler ve VIP'e bağlı olmayan sunucular · oklar aralarındaki trafik</div></div>
       <div class="eg-stats">
         <div class="eg-stat"><b>${d.kumeler.length}</b><span>Küme</span></div>
         <div class="eg-stat"><b>${nVip}</b><span>VIP</span></div>
@@ -154,14 +166,15 @@ function ktShell() {
     </div>
     <div class="kt-bar">
       <button id="ktBack">← İşlev haritası</button>
+      <span id="ktVer" style="display:flex;gap:8px;align-items:center"></span>
       <div class="seg"><button data-ktm="kume" class="${kt.mode === "kume" ? "on" : ""}" title="Kümeler arası toplam trafik; elemanın üstüne gelince kendi bağları çizilir">Küme bağları</button><button data-ktm="eleman" class="${kt.mode === "eleman" ? "on" : ""}" title="Bütün VIP / sunucu bağları kanallardan">Tüm eleman bağları</button></div>
-      <label>Kutu içi grup <select id="ktAlt"><option value="uygulama"${kt.alt === "uygulama" ? " selected" : ""}>Uygulama (ERT)</option><option value="yok"${kt.alt !== "uygulama" ? " selected" : ""}>Yok</option></select></label>
+      <label>Kutu içi grup <select id="ktAlt">${[["uygulama", "Uygulama (ERT)"], ...(hasAlt ? [["alt", "Alt etiket"]] : []), ["yok", "Yok"]].map(([v, t]) => `<option value="${v}"${kt.alt === v ? " selected" : ""}>${t}</option>`).join("")}</select></label>
       <label>Kutu içi <select id="ktPer">${[2, 3, 4, 5, 6].map(v => `<option${v === kt.per ? " selected" : ""}>${v}</option>`).join("")}</select></label>
       <label>Sütun <select id="ktCols">${[["0", "Otomatik"], ["2", "2"], ["3", "3"], ["4", "4"], ["5", "5"]].map(([v, t]) => `<option value="${v}"${+v === kt.cols ? " selected" : ""}>${t}</option>`).join("")}</select></label>
       <label><input type="checkbox" id="ktInfra" ${kt.infra ? "checked" : ""}> Altyapı portları (DNS, AD, RDP…)</label>
       <span class="sp"></span>
       <button id="ktZo" title="Uzaklaştır">−</button><button id="ktFit">Sığdır</button><button id="ktZi" title="Yakınlaştır">+</button>
-      <button id="ktAgain" class="primary">Yeniden sorgula</button>
+      <button id="ktAgain" title="Trafiği seçili tarih aralığı için yeniden sorgular (canlı)">Yeniden sorgula</button>
     </div>
     <div class="kt-src">${pill("Carbon Black", d.splunk)}${pill("AppResponse", d.appResponse)}${pill("Firewall", d.firewall)}
       <span>${d.sorgulanan} IP sorgulandı${d.sorgulanan < d.toplam ? ` (etikette ${d.toplam} sunucu; üst sınır Islev:TopolojiMaxIp)` : ""} · ${(d.elapsedMs / 1000).toFixed(1)} sn</span></div>
@@ -169,6 +182,7 @@ function ktShell() {
     <div class="legend" style="margin-top:8px"><span>◯ VIP</span><span>▭ sunucu</span><span>— trafik (kalınlık = hacim)</span><span style="color:var(--err)">- - engellenen</span><span>Elemanın üstüne gelin: kendi bağları · tıklayın: ayrıntı</span><span>Ctrl + tekerlek: yakınlaştır · boş yerde sürükle: kaydır</span><span>Küme adının üstüne gelin: kümenin bağları</span></div>
   </section>`;
   $("#ktBack").addEventListener("click", () => runIslev(kt.tag));
+  ktBarVer();
   $("#ktAgain").addEventListener("click", () => ktRun(kt.tag));
   document.querySelectorAll("[data-ktm]").forEach(b => b.addEventListener("click", () => { kt.mode = b.dataset.ktm; ktShell(); }));
   $("#ktAlt").addEventListener("change", e => { kt.alt = e.target.value; ktDraw(); });
@@ -182,6 +196,83 @@ function ktShell() {
   kt.scale = ktFitScale();
   ktDraw();
   ktZoomPan();
+}
+
+// Birden çok kurum: kutu = kurum × küme; anahtar "Kurum · Küme", kutu başlığında yalnız küme adı (kurum çerçevede)
+function ktPrepare(b) {
+  if (b.coklu) b.kumeler.forEach(k => { k.kume = k.ad; k.ad = `${k.tenant} · ${k.ad}`; });
+  return b;
+}
+
+// Kayıtlı versiyonun topolojisi: trafik yeniden sorgulanmaz
+async function ktShowSaved(tag) {
+  setUiMode("topo");
+  ivStopPoll();
+  kt.tag = tag; kt.stack = [];
+  $("#main").innerHTML = `<div class="panel empty"><span class="spinner"></span> Kayıtlı topoloji yükleniyor…</div>`;
+  try {
+    await tnLoad(tag);
+    await ivVersions();
+    if (!iv.ver.id) iv.ver.id = iv.ver.list[0]?.id ?? null;
+    if (!iv.ver.id) { ktRun(tag); return; }
+    const v = await ivVerData(iv.ver.id);
+    if (uiMode !== "topo") return;
+    kt.saved = v.ozet; kt.raw = null; kt.liveMap = null;
+    kt.meta = verParams(v.ozet);
+    kt.data = ktPrepare(structuredClone(v.topoloji));
+    history.replaceState(null, "", "?" + new URLSearchParams({ topo: tag, ciz: "1", ver: iv.ver.id }));
+    ktShell();
+  } catch (e) {
+    $("#main").innerHTML = `<div class="panel empty" style="color:var(--err)">${esc(e.message)} <button onclick="runIslev(kt.tag, null)" style="margin-left:10px">İşlev haritasına dön</button></div>`;
+  }
+}
+
+// Canlı çizimi versiyon olarak kaydet (harita + topoloji); etiket başına son N tutulur
+async function ktSave() {
+  const aciklama = prompt(`"${kt.tag}" için bu çizim (işlev haritası + topoloji) versiyon olarak kaydedilsin mi?\n`
+    + `Etiket başına son ${iv.ver.tutulan || 3} versiyon tutulur, daha eskisi silinir.\n\nKısa açıklama (isteğe bağlı):`, "");
+  if (aciklama === null) return;
+  const btn = $("#ktSave"); if (btn) { btn.disabled = true; btn.textContent = "Kaydediliyor…"; }
+  try {
+    let harita = kt.liveMap;
+    if (!harita) {
+      const r = await fetch("api/islev?" + new URLSearchParams({ etiket: kt.tag, tenant: kt.meta.tenant || "" }));
+      harita = r.ok ? await r.json() : null;
+      if (!harita) throw new Error("İşlev haritası alınamadı.");
+    }
+    harita = { ...harita, yazabilir: false, durum: null, uyari: null };
+    const topoloji = JSON.parse(kt.raw);
+    const r = await fetch("api/islev/versiyon", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ etiket: kt.tag, kurum: kt.meta.tenant || null, aciklama, parametre: kt.meta, harita, topoloji }) });
+    const b = await r.json().catch(() => ({ error: `HTTP ${r.status}` }));
+    if (!r.ok) throw new Error(b.error || `HTTP ${r.status}`);
+    Object.assign(iv.ver, { list: b.versiyonlar, tutulan: b.tutulan, loaded: true, id: b.id });
+    const oz = b.versiyonlar.find(v => v.id === b.id);
+    iv.ver.data = { ozet: oz, harita, topoloji };
+    kt.saved = oz;
+    history.replaceState(null, "", "?" + new URLSearchParams({ topo: kt.tag, ciz: "1", ver: b.id }));
+    ktBarVer();
+  } catch (e) {
+    alert("Versiyon kaydedilemedi: " + e.message);
+    if (btn) { btn.disabled = false; btn.textContent = "💾 Versiyon olarak kaydet"; }
+  }
+}
+
+// Araç çubuğundaki versiyon bölümü: seçici + (canlıysa) kaydet düğmesi ya da kayıt bilgisi
+function ktBarVer() {
+  const box = $("#ktVer");
+  if (!box) return;
+  const cur = kt.saved;
+  box.innerHTML = `<label>Versiyon <select id="ktVerSel">${verOptions("Canlı · trafiği yeniden sorgula")}</select></label>
+    ${cur ? `<span class="kt-saved" title="${esc(verLabel(cur))}">✓ Kayıtlı · ${esc(verWhen(cur.tarih))}</span>`
+      : kt.raw && iv.canWrite !== false ? `<button id="ktSave" class="primary" title="Bu çizimi (işlev haritası + topoloji) kaydeder; sayfayı açan herkes yeniden sorgulamadan görür">💾 Versiyon olarak kaydet</button>` : ""}`;
+  if (!cur) $("#ktVerSel").value = "";
+  $("#ktVerSel").addEventListener("change", e => {
+    if (e.target.value) { iv.ver.id = +e.target.value; ktShowSaved(kt.tag); }
+    else if (confirm("Trafik seçili tarih aralığı için yeniden sorgulansın mı?")) ktRun(kt.tag);
+    else e.target.value = cur ? String(cur.id) : "";
+  });
+  $("#ktSave")?.addEventListener("click", ktSave);
 }
 
 // Yerleşim: kümeler 3–4 sütunluk ızgarada (veri akış sırasına göre okuma düzeninde); kutu içinde elemanlar 2 sütunlu karo.
@@ -223,10 +314,10 @@ function ktPlan(k, tc) {
   const { TH, TG, HEAD } = KT, v = ktVisible(k), items = [];
   let y = HEAD;
   const put = list => { list.forEach((t, j) => items.push({ ...t, col: j % tc, y: y + Math.floor(j / tc) * (TH + TG) })); y += Math.ceil(list.length / tc) * (TH + TG); };
-  if (kt.alt === "uygulama") {
-    const g = new Map();
-    v.show.forEach(e => { const a = e.uygulama || "Uygulama kaydı yok"; (g.get(a) || g.set(a, []).get(a)).push(e); });
-    const groups = [...g.entries()].sort((a, b) => (a[0] === "Uygulama kaydı yok") - (b[0] === "Uygulama kaydı yok") || b[1].length - a[1].length || a[0].localeCompare(b[0], "tr"));
+  if (kt.alt === "uygulama" || kt.alt === "alt") {
+    const none = kt.alt === "alt" ? "Alt etiketi yok" : "Uygulama kaydı yok", g = new Map();
+    v.show.forEach(e => { const a = (kt.alt === "alt" ? e.altEtiket : e.uygulama) || none; (g.get(a) || g.set(a, []).get(a)).push(e); });
+    const groups = [...g.entries()].sort((a, b) => (a[0] === none) - (b[0] === none) || b[1].length - a[1].length || a[0].localeCompare(b[0], "tr"));
     for (const [ad, es] of groups) { items.push({ hdr: ad, n: es.length, y }); y += KT_AH; put(es.map(e => ({ e }))); }
     if (v.idle.length) { items.push({ hdr: "Trafiksiz", n: v.idle.length, y }); y += KT_AH; put([{ idle: v.idle }]); }
   } else put([...v.show.map(e => ({ e })), ...(v.idle.length ? [{ idle: v.idle }] : [])]);
@@ -572,7 +663,7 @@ function ktServer(ip) {
   const g = u.guven == null ? "" : `%${u.guven}`;
   const bg = ktModal(`${ktHead(`▭ ${esc(u.hostname || ip)}`, `<span class="ip">${esc(ip)}</span> · ${esc(kume)}${el.tur === "vip" ? ` · VIP ${esc(el.ip)}:${esc(el.port || "")} üyesi` : ""} · ${esc(el.segment || "")}`, kt.stack.length > 1)}
     <div class="mb">
-      <dl class="kv"><dt>Küme</dt><dd><b>${esc(kume)}</b></dd>${el.uygulama ? `<dt>Uygulama (ERT)</dt><dd>${esc(el.uygulama)}</dd>` : ""}<dt>AI rolü</dt><dd>${esc(u.rol || "—")} ${g ? `<span class="eg-sub">(güven ${g}${u.elle ? ", elle atandı" : ""})</span>` : ""}</dd>
+      <dl class="kv"><dt>Küme</dt><dd><b>${esc(kume)}</b></dd>${el.uygulama ? `<dt>Uygulama (ERT)</dt><dd>${esc(el.uygulama)}</dd>` : ""}${el.altEtiket ? `<dt>Alt etiket</dt><dd>${esc(el.altEtiket)}</dd>` : ""}<dt>AI rolü</dt><dd>${esc(u.rol || "—")} ${g ? `<span class="eg-sub">(güven ${g}${u.elle ? ", elle atandı" : ""})</span>` : ""}</dd>
         <dt>Trafik</dt><dd>${fmt(u.gelen)} gelen · ${fmt(u.giden)} giden (etiketli sunucularla)</dd></dl>
       <div id="ktWhy" class="eg-sub"><span class="spinner"></span> AI gerekçesi ve kanıtlar yükleniyor…</div>
       <div class="two"><div><h4>Gelen</h4>${ft(flows.filter(a => a.dst === ip), "in")}</div><div><h4>Giden</h4>${ft(flows.filter(a => a.src === ip), "out")}</div></div>

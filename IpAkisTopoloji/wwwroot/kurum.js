@@ -87,6 +87,7 @@ document.addEventListener("click", () => { if (tn.open) { tn.open = false; tnRen
 // Seçim değişince açık olan görünüm yeniden yüklenir
 function tnApply() {
   if (uiMode !== "topo") return;
+  if (iv.ver?.id) iv.ver.id = null;   // kayıtlı versiyon başka kurum seçimiyle gösterilemez → canlıya geç
   if (kt.data && document.getElementById("ktSvg")) ktRun(kt.tag);
   else if (iv.tag) ivLoad();
 }

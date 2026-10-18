@@ -33,7 +33,8 @@ topoloji çizer ve şirket içi AI'a etki analizi yaptırır. Canlıda IIS'te, W
 | `Islev.cs` | İşlev haritası: etiketli sunucuların AI ile işlev kümelemesi (ERT AI_KUME / AI_DETAY), SM / MSY / ÇSY kanıtları |
 | `KumeTopoloji.cs` | Küme topolojisi: işlev kümeleri kutu, içinde VIP / VIP'siz sunucu elemanları, aralarındaki trafik |
 | `wwwroot/kurum.js` | Kurum (segment Domain) çoklu seçimi: işlev haritası ve küme topolojisi süzme / gruplama |
-| `Etiket.cs` | Sunucu etiketleme: ERT TAG kolonu okuma/yazma (Topoloji ve Sunucu etiketleme sekmeleri) |
+| `Etiket.cs` | Sunucu etiketleme: ERT TAG kolonu okuma/yazma, alt etiket (ANA/ALT), etiket açıklamaları |
+| `Versiyon.cs` | İşlev haritası + küme topolojisi versiyonları (etiket başına son 3) |
 | `F5Waf.cs` | F5 ASM / Bot Defense güvenlik logları (Splunk index=f5): erişimde engel kararı, IP görünümünde URI listesi |
 | `PortBilgisi.cs` | Port → işlev ve kesilirse duracak iş (AI prompt'u için) |
 | `AuthHelper.cs` | Kullanıcının verdiği DokuPanel yetki helper'ı (namespace `AppRel`), anahtar config'den |
@@ -130,7 +131,7 @@ topoloji çizer ve şirket içi AI'a etki analizi yaptırır. Canlıda IIS'te, W
   - `dbo.ERT_HOSTIPADDRESS` (IPADDRESS, PORT, VIP_IP, VIP_PORT, APPNAME, WEBSITE, UNIXNAME, SERVICENAME, VARLIKMUHAFIZI,
     SUNUCUISLETENBIRIM, UYGULAMAVARLIKSAHIBI): uygulama eşleşmesi sırası IP+PORT → VIP_IP+VIP_PORT → IP → VIP_IP.
     APPNAME "Sistem Portudur" → "Sistem Portudur: RDP" gibi (SystemPorts; `Envanter:SistemPortlari` ile ek/override).
-  - **Etiket** (veri ambarı işi için; kullanıcı kararı: HER ŞEY ERT tablosunda, ayrı tablo YOK): `ERT_HOSTIPADDRESS.TAG NVARCHAR(200)`
+  - **Etiket** (veri ambarı işi için; kullanıcı kararı: etiketler ERT tablosunda, etiket için ayrı tablo YOK — yalnız açıklama ve versiyonlar için küçük DF_ tabloları): `ERT_HOSTIPADDRESS.TAG NVARCHAR(200)`
     (`Envanter:EtiketKolonu`, varsayılan TAG; virgülle birden çok, büyük harfe çevrilir; kolon yoksa sessizce etiketsiz). İleride
     Entropi'den dolacak. `Etiket.cs` (EtiketService): liste (`/api/etiket/sunucular?ip=&sunucu=&uygulama=&muhafiz=&segment=&etiket=&sirala=&yon=&sayfa=&boyut=`; etiket: "" tümü, "-" etiketsiz, "*" etiketli; filtre/sıralama/sayfalama sunucuda, liste envanter anlık görüntüsü başına önbellekli) ve yazma
     (`POST /api/etiket {ips, ekle|kaldir}`: IP'nin mevcut TAG'i DB'den okunur, IP'nin TÜM satırları UPDATE, sonra envanter zorla
@@ -185,6 +186,20 @@ topoloji çizer ve şirket içi AI'a etki analizi yaptırır. Canlıda IIS'te, W
     "Küme bağları" modu kümeler arası toplam. Hover vurgusu, ok üzerinde ipucu. Elemana tıkla → ortada pencere (VIP: üyeler,
     kümelerden gelen/giden, etiket dışı; üyeye tıkla → sunucu: AI rolü, /api/islev/profil gerekçe ve kanıtlar, IP düzeyi akışlar,
     "IP topolojisini aç"), "← geri" yığını, Esc kapatır. Backend `KtTest` benzeri sahte envanterle doğrulandı (scratch, repoda yok).
+  - **Alt etiket + açıklama**: alt etiket ayrı kolon DEĞİL, TAG içinde `ANA/ALT` (ör. `MOBILBANKACILIK/MOBIL APP`); `EnvanterSnapshot`
+    sunucuyu hem alt hem ana etikete sayar (`TagIps("ANA")` altları da getirir, `EtiketService.Matches/Parent`). Etiketleme çubuğunda
+    "Etiket" + "Alt etiket" kutuları, haplarda ana etiket seçilince altları ikinci satırda, rozet "ANA › ALT". Açıklamalar ayrı tablo
+    `Etiket:AciklamaTablosu` (dbo.DF_ETIKET_ACIKLAMA; `EtiketAciklama`, 5 dk önbellek), `POST /api/etiket/aciklama {etiket, aciklama}`;
+    "Etiket açıklamaları" paneli ve işlev haritası başlığında "✎ düzenle"; açıklamalar AI sınıflandırma prompt'una eklenir.
+    İşlev haritasında alt etiket rozetleri (IslevSunucu.AltEtiket, IslevHarita.AltEtiketler/Aciklama), alt etikete tıklayınca yalnız o alt
+    etiket; topolojide "Kutu içi grup: Alt etiket" (KtEleman.AltEtiket). TAG uzunluğu `Etiket:MaxUzunluk` (kolon büyütülürse artırılır).
+  - **Versiyonlar** (`Versiyon.cs`, tablo `Islev:VersiyonTablosu` dbo.DF_TOPOLOJI_VERSIYON, betik `sql/etiket_versiyon.sql`): canlı küme
+    topolojisi bitince "💾 Versiyon olarak kaydet" → işlev haritası (aynı kurum seçimiyle `api/islev`, ktRun'da paralel alınır) + topoloji
+    JSON'u + parametre (aralık, kaynak, kurum) kaydedilir; etiket başına son `Islev:VersiyonSayisi`=3 (kayıtta eskiler silinir).
+    `/api/islev/versiyonlar?etiket=`, `/api/islev/versiyon/{id}` (GET/DELETE), `POST /api/islev/versiyon`. Kullanıcı kararı: her seferinde
+    topoloji çizilmesin → Topoloji sekmesi açılınca etiketin EN SON versiyonu gösterilir (`iv.ver`, URL `&ver=ID`, `&canli=1`); "Görünüm"
+    seçicisinde "Canlı" = güncel veri (düzenleme / AI / yeniden çizim yalnız canlıda); versiyonda "Kayıtlı topolojiyi aç" sorgusuz çizer
+    (`ktShowSaved`). Kurum seçimi değişince canlıya geçer.
   - **Kurum seçimi** (`wwwroot/kurum.js`, Topoloji sekmesinde Etiket'in yanında): KonsolideSegmentler4.**Domain** (kullanıcı düzeltti:
     Tenant DEĞİL; kodda adlar hâlâ tenant/TenantOf) — sunucunun segmentinin Domain'i; yoksa "(kurum yok)". `/api/tenantlar?etiket=` (kurum + sunucu sayısı). Çoklu seçimli açılır kutu: arama,
     "Tümü" (boş seçim = tümü; hepsi tek tek seçilirse yine tümü), Uygula; seçim localStorage `df.tenant`. `/api/islev` ve

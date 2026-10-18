@@ -4,9 +4,13 @@
 // AI'a giden bilgi: ERT, segment, VIP, MSY, ÇSY, Envanter Kahini, SM kurulum talepleri ve iş istekleri (Islev.cs).
 // Sınıflandırma sunucuda arka planda çalışır; ilerleme /api/islev/durum ile izlenir. Sunucuya tıklayınca ayrıntı
 // çekmecesi: AI gerekçesi, küme düzeltme, AI'a giden kanıtlar. topoloji.html / etiket.js yardımcılarını kullanır.
+// Versiyonlar (Versiyon.cs): küme topolojisi çizilip bitince harita + topoloji birlikte kaydedilir (etiket başına son 3).
+// Sayfa açılınca etiketin en son versiyonu gösterilir (trafik yeniden sorgulanmaz); "Canlı" seçilince güncel veri.
 // ============================================================================
 
-const iv = { tag: "", data: null, q: "", poll: null, sel: null, seq: 0, pick: null };
+const iv = { tag: "", data: null, q: "", poll: null, sel: null, seq: 0, pick: null, canWrite: false, descEdit: false,
+  // ver.id: undefined = henüz seçilmedi (en son versiyon açılır), null = canlı, sayı = kayıtlı versiyon
+  ver: { tag: null, list: [], tutulan: 3, id: undefined, data: null, uyari: null, loaded: false } };
 
 (function ivStyle() {
   const css = `
@@ -68,15 +72,37 @@ const iv = { tag: "", data: null, q: "", poll: null, sel: null, seq: 0, pick: nu
   .iv-drawer .fix { display:flex; gap:6px; flex-wrap:wrap; }
   .iv-drawer .fix input { flex:1; min-width:180px; }
   .iv-drawer table { font-size:12px; }
+  .iv-ver { display:flex; gap:10px; align-items:center; flex-wrap:wrap; font-size:12.5px; border:1px solid var(--line); border-radius:10px;
+    padding:8px 12px; margin:0 0 12px; background:var(--bg); }
+  .iv-ver.saved { border-color:#d9a33c; background:#d9a33c1f; }
+  .iv-ver select { max-width:460px; }
+  .iv-ver .note { color:var(--muted); }
+  .iv-desc { margin-top:6px; font-size:13px; line-height:1.45; max-width:900px; }
+  .iv-desc a { font-size:12px; color:var(--muted); margin-left:6px; text-decoration:none; }
+  .iv-desc a:hover { color:var(--in); }
+  .iv-desc textarea { width:100%; max-width:720px; box-sizing:border-box; font:inherit; font-size:13px; padding:6px 8px; border:1px solid var(--line); border-radius:6px; background:var(--panel); color:var(--text); }
+  .iv-subs { display:flex; gap:6px; flex-wrap:wrap; align-items:center; margin-top:8px; font-size:12px; color:var(--muted); }
+  .iv-subs button { border:1px solid var(--line); background:var(--panel); border-radius:999px; padding:2px 10px; font-size:12px; cursor:pointer; color:var(--text); }
+  .iv-subs button:hover { border-color:var(--in); }
+  .iv-subs button i { font-style:normal; color:var(--muted); margin-left:4px; }
+  .iv-srv .el.alt { border-color:hsl(var(--h) 55% 50% / .5); color:hsl(var(--h) 50% 38%); }
   .iv-drawer pre { white-space:pre-wrap; font-size:11.5px; background:var(--bg); border:1px solid var(--line); border-radius:8px; padding:10px; max-height:320px; overflow:auto; }`;
   const st = document.createElement("style"); st.textContent = css; document.head.appendChild(st);
 })();
 
 function ivStopPoll() { clearTimeout(iv.poll); iv.poll = null; }
 
-async function runIslev(tag) {
+// Etiket değişince versiyon durumu sıfırlanır; ver verilirse o versiyon (null = canlı) seçilir
+function ivSetVer(tag, id) {
+  if (iv.ver.tag !== tag) iv.ver = { tag, list: [], tutulan: 3, id: undefined, data: null, uyari: null, loaded: false };
+  if (id !== undefined) iv.ver.id = id;
+}
+
+async function runIslev(tag, ver) {
   setUiMode("topo");
-  iv.tag = tag; iv.sel = null; iv.q = "";
+  ivSetVer(tag, ver);
+  iv.tag = tag; iv.sel = null; iv.q = ""; iv.descEdit = false;
+  if ($("#topoTag") && [...$("#topoTag").options].some(o => o.value === tag)) $("#topoTag").value = tag;
   history.replaceState(null, "", "?" + new URLSearchParams({ topo: tag }));
   $("#main").innerHTML = `<div class="panel empty"><span class="spinner"></span> "${esc(tag)}" işlev haritası yükleniyor…</div>`;
   await ivLoad();
@@ -86,9 +112,22 @@ async function ivLoad() {
   const my = ++iv.seq;
   try {
     await tnLoad(iv.tag);
-    const r = await fetch("api/islev?" + new URLSearchParams({ etiket: iv.tag, tenant: tenantParam() }));
-    const b = await r.json().catch(() => ({ error: `HTTP ${r.status}` }));
-    if (!r.ok) throw new Error(b.error || `HTTP ${r.status}`);
+    await ivVersions();
+    if (iv.ver.id === undefined) iv.ver.id = iv.ver.list[0]?.id ?? null;   // varsayılan: en son kayıtlı versiyon
+    history.replaceState(null, "", "?" + new URLSearchParams({ topo: iv.tag, ...(iv.ver.id ? { ver: iv.ver.id } : iv.ver.list.length ? { canli: "1" } : {}) }));
+    let b;
+    if (iv.ver.id) {
+      try {
+        const v = await ivVerData(iv.ver.id);
+        b = { ...v.harita, yazabilir: false, durum: null, uyari: null };
+      } catch (e) { iv.ver.id = null; alert("Versiyon açılamadı, canlı veri gösteriliyor: " + e.message); }
+    }
+    if (!b) {
+      const r = await fetch("api/islev?" + new URLSearchParams({ etiket: iv.tag, tenant: tenantParam() }));
+      b = await r.json().catch(() => ({ error: `HTTP ${r.status}` }));
+      if (!r.ok) throw new Error(b.error || `HTTP ${r.status}`);
+      iv.canWrite = b.yazabilir;
+    }
     if (my !== iv.seq || uiMode !== "topo") return;
     iv.data = b;
     ivRender();
@@ -101,17 +140,22 @@ async function ivLoad() {
 function ivRender() {
   const d = iv.data, w = d.yazabilir, run = d.durum?.calisiyor && d.durum.etiket === iv.tag;
   const kumeSay = d.kumeler.filter(k => k.ad !== "Sınıflanmamış").length;
+  const root = tagParent(d.etiket), isSub = d.etiket.includes("/");
   $("#main").innerHTML = `
   <section class="panel">
     <div class="eg-head">
-      <div><h2>İşlev haritası · ${esc(d.etiket)}</h2>
-        <div class="eg-sub">AI, etiketli sunucuları envanter, sanal sunucu notları ve SM iş isteklerine bakarak işlevlerine göre kümeledi · Küme → Segment → VIP → Sunucu</div></div>
+      <div><h2>İşlev haritası · ${tagLabel(d.etiket)}</h2>
+        <div class="eg-sub">AI, etiketli sunucuları envanter, sanal sunucu notları ve SM iş isteklerine bakarak işlevlerine göre kümeledi · Küme → Segment → VIP → Sunucu</div>
+        <div class="iv-desc" id="ivDesc"></div>
+        ${isSub ? `<div class="iv-subs"><button data-ivtag="${esc(root)}">← ${esc(root)} (tüm alt etiketler)</button></div>`
+          : d.altEtiketler?.length ? `<div class="iv-subs">Alt etiketler: ${d.altEtiketler.map(a => `<button data-ivtag="${esc(root + "/" + a.ad)}" title="${esc(a.aciklama || "Yalnız bu alt etiketin haritası")}">${esc(a.ad)}<i>${a.sunucu}</i></button>`).join("")}</div>` : ""}</div>
       <div class="eg-stats">
         <div class="eg-stat"><b>${fmt(d.toplam)}</b><span>Sunucu</span></div>
         <div class="eg-stat"><b>${fmt(d.siniflanan)}</b><span>Sınıflanan</span></div>
         <div class="eg-stat"><b>${fmt(kumeSay)}</b><span>Küme</span></div>
       </div>
     </div>
+    <div id="ivVer"></div>
     ${d.uyari ? `<div class="iv-warn"><b>AI kolonları eksik.</b> Sonuçlar ERT tablosuna yazılır; önce kolonları ekleyin:<code>${esc(d.uyari.replace(/^.*Ekleyin: /, ""))}</code></div>` : ""}
     <div class="iv-tools">
       <input type="search" id="ivQ" placeholder="Sunucu, IP, rol, VIP ara…" value="${esc(iv.q)}">
@@ -120,7 +164,7 @@ function ivRender() {
       <button id="ivAll" ${run || d.uyari ? "disabled" : ""} title="Elle düzeltilenler hariç tüm sunucuları yeniden sınıflar">Hepsini yeniden</button>
       <button id="ivClu" ${run || d.uyari || !d.siniflanan ? "disabled" : ""} title="Sunucuları yeniden sormadan yalnız kümeleri yeniden oluşturur">Yeniden kümele</button>` : ""}
       ${w ? `<button id="ivPick" class="${iv.pick ? "on" : ""}" title="Sunucuları seçip yeni bir kümeye ya da var olan bir kümeye taşıyın">${iv.pick ? "Seçimi bitir" : "+ Yeni küme / taşı"}</button>` : ""}
-      <button id="ivTopo" class="primary" title="Kümeleri kutu kutu, içlerinde VIP'ler ve sunucularla; aralarındaki trafikle çizer (seçili tarih aralığı)">Topoloji çiz</button>
+      <button id="ivTopo" class="primary" title="${iv.ver.id ? "Bu versiyonda kaydedilmiş topolojiyi açar (trafik yeniden sorgulanmaz)" : "Kümeleri kutu kutu, içlerinde VIP'ler ve sunucularla; aralarındaki trafikle çizer (seçili tarih aralığı)"}">${iv.ver.id ? "Kayıtlı topolojiyi aç" : "Topoloji çiz"}</button>
       <button id="ivDep" title="Etiketli sunucuların uygulama görünümündeki eski bağımlılık çizimi">Eski çizim</button>
     </div>
     <div id="ivRunBox"></div>
@@ -128,7 +172,8 @@ function ivRender() {
     <div class="iv-grid" id="ivGrid"></div>
   </section>
   <div id="ivDrawerHost"></div>`;
-  ivGrid(); ivRunBox(); ivPickBar();
+  ivGrid(); ivRunBox(); ivPickBar(); ivVerBar(); ivDescBox();
+  document.querySelectorAll("[data-ivtag]").forEach(b => b.addEventListener("click", () => runIslev(b.dataset.ivtag)));
   $("#ivQ").addEventListener("input", e => { iv.q = e.target.value; ivGrid(); });
   $("#ivRun")?.addEventListener("click", () => ivStart({ hepsi: false }));
   $("#ivAll")?.addEventListener("click", () => {
@@ -136,18 +181,18 @@ function ivRender() {
   });
   $("#ivClu")?.addEventListener("click", () => ivStart({ sadeceKumele: true }));
   $("#ivPick")?.addEventListener("click", () => { iv.pick = iv.pick ? null : new Set(); ivCloseDrawer(); ivRender(); });
-  $("#ivTopo").addEventListener("click", () => ktRun(iv.tag));
+  $("#ivTopo").addEventListener("click", () => iv.ver.id ? ktShowSaved(iv.tag) : ktRun(iv.tag));
   $("#ivDep").addEventListener("click", () => { ivStopPoll(); runApp("etiket:" + iv.tag, "topo"); });
   if (iv.sel) ivDrawer(iv.sel);
 }
 
 function ivGrid() {
   const q = iv.q.trim().toLocaleLowerCase("tr");
-  const hit = s => !q || [s.ip, s.hostname, s.rol, s.muhafiz, ...(s.apps || [])].some(v => v && v.toLocaleLowerCase("tr").includes(q));
+  const hit = s => !q || [s.ip, s.hostname, s.rol, s.muhafiz, s.altEtiket, ...(s.apps || [])].some(v => v && v.toLocaleLowerCase("tr").includes(q));
   const srv = s => {
     const g = s.guven == null ? "" : s.guven >= 75 ? "g3" : s.guven >= 50 ? "g2" : "g1";
     return `<div class="iv-srv${iv.sel === s.ip ? " on" : ""}${iv.pick ? " pk" : ""}${iv.pick?.has(s.ip) ? " picked" : ""}" data-ivip="${esc(s.ip)}" title="${s.guven != null ? `AI güveni %${s.guven}` : "Sınıflanmamış"}">
-      <span class="dot ${g}"></span><span class="nm">${esc(s.hostname || s.ip)}${s.elle ? `<span class="el">elle</span>` : ""}</span><span class="ip">${esc(s.ip)}</span>
+      <span class="dot ${g}"></span><span class="nm">${esc(s.hostname || s.ip)}${s.altEtiket ? `<span class="el alt" title="Alt etiket">${esc(s.altEtiket)}</span>` : ""}${s.elle ? `<span class="el">elle</span>` : ""}</span><span class="ip">${esc(s.ip)}</span>
       <span class="rl">${esc(s.rol || (s.apps || []).join(", ") || "—")}</span></div>`;
   };
   const cards = iv.data.kumeler.map(k => {
@@ -394,3 +439,87 @@ document.addEventListener("click", e => {
   inp.addEventListener("keydown", ev => { if (ev.key === "Enter") save(); else if (ev.key === "Escape") { ev.stopPropagation(); box.remove(); } });
 });
 document.addEventListener("keydown", e => { if (e.key === "Escape" && iv.sel) ivCloseDrawer(); });
+
+// ---------- Etiket açıklaması (başlığın altında; yazma yetkisi varsa düzenlenir) ----------
+function ivDescBox() {
+  const box = $("#ivDesc"), d = iv.data;
+  if (!box) return;
+  const can = iv.canWrite && !iv.ver.id;
+  if (iv.descEdit) {
+    box.innerHTML = `<textarea id="ivDescTa" rows="3" maxlength="2000" placeholder="Bu etiket (ya da alt etiket) neyi kapsar? AI sınıflandırması da bu açıklamayı kullanır.">${esc(d.aciklama || "")}</textarea>
+      <div style="display:flex;gap:6px;margin-top:4px"><button class="primary" id="ivDescSave">Kaydet</button><button id="ivDescNo">Vazgeç</button></div>`;
+    $("#ivDescTa").focus();
+    $("#ivDescNo").addEventListener("click", () => { iv.descEdit = false; ivDescBox(); });
+    $("#ivDescSave").addEventListener("click", async () => {
+      try {
+        const r = await fetch("api/etiket/aciklama", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ etiket: d.etiket, aciklama: $("#ivDescTa").value }) });
+        const b = await r.json().catch(() => ({ error: `HTTP ${r.status}` }));
+        if (!r.ok) throw new Error(b.error || `HTTP ${r.status}`);
+        d.aciklama = b.aciklama; iv.descEdit = false; ivDescBox(); loadTopoTags?.(true);
+      } catch (e) { alert("Açıklama kaydedilemedi: " + e.message); }
+    });
+    return;
+  }
+  box.innerHTML = d.aciklama
+    ? `<b>Açıklama:</b> ${esc(d.aciklama)}${can ? `<a href="#" id="ivDescEd">✎ düzenle</a>` : ""}`
+    : can ? `<a href="#" id="ivDescEd" style="margin:0">+ Etiket açıklaması ekle</a>` : "";
+  $("#ivDescEd")?.addEventListener("click", e => { e.preventDefault(); iv.descEdit = true; ivDescBox(); });
+}
+
+// ---------- Versiyonlar ----------
+async function ivVersions(force) {
+  if (iv.ver.loaded && !force) return;
+  try {
+    const r = await fetch("api/islev/versiyonlar?" + new URLSearchParams({ etiket: iv.ver.tag }));
+    const b = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(b.error || `HTTP ${r.status}`);
+    Object.assign(iv.ver, { list: b.versiyonlar || [], tutulan: b.tutulan || 3, uyari: b.uyari || null, loaded: true });
+  } catch (e) { Object.assign(iv.ver, { list: [], uyari: "Versiyonlar okunamadı: " + e.message, loaded: true }); }
+}
+
+async function ivVerData(id) {
+  if (iv.ver.data?.ozet?.id === id) return iv.ver.data;
+  const r = await fetch("api/islev/versiyon/" + id);
+  const b = await r.json().catch(() => ({ error: `HTTP ${r.status}` }));
+  if (!r.ok) throw new Error(b.error || `HTTP ${r.status}`);
+  return iv.ver.data = b;
+}
+
+function verWhen(t) { return new Date(t).toLocaleString("tr-TR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }); }
+function verParams(v) { try { return JSON.parse(v.parametre || "{}"); } catch { return {}; } }
+function verLabel(v) {
+  return `${verWhen(v.tarih)} · ${String(v.kaydeden || "").split("\\").pop()} · ${v.kume} küme${v.kurum ? " · " + v.kurum : ""}${v.aciklama ? " · " + v.aciklama : ""}`;
+}
+// Versiyon seçici: <select> içeriği (live = canlı seçeneğinin metni)
+function verOptions(live) {
+  return `<option value="">${esc(live)}</option>` + iv.ver.list.map((v, i) =>
+    `<option value="${v.id}"${v.id === iv.ver.id ? " selected" : ""}>${i === 0 ? "En son · " : ""}${esc(verLabel(v))}</option>`).join("");
+}
+function verRange(v) {
+  const p = verParams(v), f = x => (x || "").replace("T", " ");
+  return p.start ? `${f(p.start)} – ${f(p.end)}` : "";
+}
+
+function ivVerBar() {
+  const box = $("#ivVer");
+  if (!box) return;
+  const cur = iv.ver.list.find(v => v.id === iv.ver.id);
+  if (iv.ver.uyari && !iv.ver.list.length) { box.innerHTML = `<div class="iv-ver"><span class="note">Versiyonlar: ${esc(iv.ver.uyari)}</span></div>`; return; }
+  box.innerHTML = `<div class="iv-ver${cur ? " saved" : ""}">
+    <label>Görünüm <select id="ivVerSel">${verOptions("Canlı (güncel veri)")}</select></label>
+    ${cur ? `<span><b>Kayıtlı versiyon</b> · trafik aralığı ${esc(verRange(cur))} · harita ve topoloji kayıttan; düzenlemek ya da yeniden çizmek için "Canlı"yı seçin</span>
+      ${iv.canWrite ? `<button id="ivVerDel" title="Bu versiyonu siler">Sil</button>` : ""}`
+      : `<span class="note">${iv.ver.list.length ? `${iv.ver.list.length} kayıtlı versiyon · ` : "Henüz kayıtlı versiyon yok · "}topoloji çizilip bitince "Versiyon olarak kaydet" ile kaydedilir (son ${iv.ver.tutulan} tutulur)</span>`}
+  </div>`;
+  $("#ivVerSel").addEventListener("change", e => { iv.ver.id = e.target.value ? +e.target.value : null; iv.pick = null; ivCloseDrawer(); ivLoad(); });
+  $("#ivVerDel")?.addEventListener("click", async () => {
+    if (!confirm(`${verLabel(cur)} versiyonu silinsin mi?`)) return;
+    try {
+      const r = await fetch("api/islev/versiyon/" + cur.id, { method: "DELETE" });
+      const b = await r.json().catch(() => ({ error: `HTTP ${r.status}` }));
+      if (!r.ok) throw new Error(b.error || `HTTP ${r.status}`);
+      iv.ver.id = null; iv.ver.data = null;
+      await ivVersions(true); await ivLoad();
+    } catch (e) { alert("Silinemedi: " + e.message); }
+  });
+}

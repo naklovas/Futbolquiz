@@ -67,8 +67,10 @@ async function loadTopoTags(force) {
     const b = r.ok ? await r.json() : null;
     const tags = b?.etiketler ?? [];
     const cur = topoWanted ?? $("#topoTag").value;
+    globalThis.topoTagList = tags;
+    // Alt etiketler ("ANA/ALT") ana etiketin altında girintili
     $("#topoTag").innerHTML = tags.length
-      ? tags.map(t => `<option value="${esc(t.ad)}"${t.ad === cur ? " selected" : ""}>${esc(t.ad)} · ${t.sunucu} sunucu</option>`).join("")
+      ? tags.map(t => `<option value="${esc(t.ad)}"${t.ad === cur ? " selected" : ""}${t.aciklama ? ` title="${esc(t.aciklama)}"` : ""}>${t.ad.includes("/") ? "&nbsp;&nbsp;&nbsp;└ " + esc(t.ad.split("/")[1]) : esc(t.ad)} · ${t.sunucu} sunucu</option>`).join("")
       : `<option value="">(henüz etiket yok)</option>`;
     if (b?.ipler) tagMap = b.ipler;
   } catch { /* liste gelmezse boş */ }
@@ -78,8 +80,12 @@ async function runTopo() {
   const tag = topoWanted ?? $("#topoTag").value;
   topoWanted = null;
   if (!tag) { alert("Henüz etiketli sunucu yok. Sunucu etiketleme sekmesinden sunuculara etiket ekleyin."); return; }
-  // ?topo=X&ciz=1: doğrudan küme topolojisi
-  if (new URLSearchParams(location.search).get("ciz") === "1") ktRun(tag); else runIslev(tag);
+  // ?topo=X&ciz=1: doğrudan küme topolojisi; &ver=ID: kayıtlı versiyon (canli=1: güncel veri)
+  const qs = new URLSearchParams(location.search), ver = +qs.get("ver") || (qs.get("canli") === "1" ? null : undefined);
+  if (qs.get("ciz") === "1") {
+    ivSetVer(tag, ver ?? null);
+    if (ver) ktShowSaved(tag); else ktRun(tag);
+  } else runIslev(tag, ver);
 }
 
 async function loadAppCatalog() {

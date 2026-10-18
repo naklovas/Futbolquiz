@@ -527,12 +527,13 @@ app.MapGet("/api/app", async (string? name, string? start, string? end, int? app
 
 // Sunucu etiketleri (VERIAMBARI vb.): etiket listesi (sunucu sayısıyla) + etiketli IP'ler. Uygulama listesinde
 // "etiket:<ad>" olarak seçilir; IP kartında sorgulanan IP'nin etiketleri gösterilir.
-app.MapGet("/api/etiketler", async (EnvanterService envanter, CancellationToken ct) =>
+app.MapGet("/api/etiketler", async (IConfiguration cfg, EnvanterService envanter, CancellationToken ct) =>
 {
     try
     {
         var env = await envanter.GetAsync(false, ct);
-        return Results.Ok(new { etiketler = env.TagCatalog().Select(t => new { ad = t.Tag, sunucu = t.Count }), ipler = env.TaggedIps });
+        var (desc, _) = await EtiketAciklama.GetAsync(cfg, ct);
+        return Results.Ok(new { etiketler = EtiketService.Catalog(env, desc), ipler = env.TaggedIps });
     }
     catch (Exception ex)
     {
@@ -550,8 +551,9 @@ app.MapGet("/api/etiket/sunucular", async (string? ip, string? sunucu, string? u
         var env = await envanter.GetAsync(false, ct);
         var list = EtiketService.List(env, new EtiketFiltre(ip, sunucu, uygulama, muhafiz, segment, etiket?.Trim(), sirala,
             yon == "desc", sayfa ?? 1, boyut ?? 100));
-        return Results.Ok(new { list.Sunucular, list.Toplam, list.Tum, list.Etiketli, list.Etiketler,
-            yazabilir = EtiketService.CanWrite(cfg, ctx.User?.Identity?.Name) });
+        var (desc, uyari) = await EtiketAciklama.GetAsync(cfg, ct);
+        return Results.Ok(new { list.Sunucular, list.Toplam, list.Tum, list.Etiketli, etiketler = EtiketService.Catalog(env, desc),
+            aciklamaUyari = uyari, yazabilir = EtiketService.CanWrite(cfg, ctx.User?.Identity?.Name) });
     }
     catch (Exception ex) { return Results.Json(new { error = ex.Message }, statusCode: 502); }
 });
@@ -565,13 +567,30 @@ app.MapPost("/api/etiket", async (EtiketIstek req, HttpContext ctx, IConfigurati
     if (ips.Count == 0 || ips.Count > 500) return Results.BadRequest(new { error = "1–500 arası geçerli IP seçin." });
     string? add = EtiketService.NormalizeTag(req.Ekle), remove = EtiketService.NormalizeTag(req.Kaldir);
     if (add == null && remove == null)
-        return Results.BadRequest(new { error = "Etiket geçersiz: harf, rakam, _ - . ve boşluk; en çok 50 karakter." });
+        return Results.BadRequest(new { error = "Etiket geçersiz: harf, rakam, _ - . ve boşluk; en çok 50 karakter. Alt etiket: ANA/ALT." });
     try
     {
         int n = await EtiketService.ApplyAsync(cfg, ips, add, remove, user, app.Logger, ct);
         var env = await envanter.GetAsync(true, ct);   // yeni etiketler hemen görünsün
         var rows = ips.Select(ip => EtiketService.Row(env, ip)).OfType<EtiketSunucu>().ToList();
         return Results.Ok(new EtiketSonuc(n, rows));
+    }
+    catch (InvalidOperationException ex) { return Results.BadRequest(new { error = ex.Message }); }
+    catch (Microsoft.Data.SqlClient.SqlException ex) { return Results.Json(new { error = "SQL: " + ex.Message }, statusCode: 502); }
+});
+
+// Etiket / alt etiket açıklaması (boş = sil). Etiketin envanterde olması gerekmez (önceden yazılabilir).
+app.MapPost("/api/etiket/aciklama", async (EtiketAciklamaIstek req, HttpContext ctx, IConfiguration cfg, CancellationToken ct) =>
+{
+    string user = ctx.User?.Identity?.Name ?? "?";
+    if (!EtiketService.CanWrite(cfg, ctx.User?.Identity?.Name))
+        return Results.Json(new { error = $"Etiket yazma yetkiniz yok ({user})." }, statusCode: 403);
+    string? tag = EtiketService.NormalizeTag(req.Etiket);
+    if (tag == null) return Results.BadRequest(new { error = "Etiket geçersiz." });
+    try
+    {
+        await EtiketAciklama.SetAsync(cfg, tag, req.Aciklama, user, app.Logger, ct);
+        return Results.Ok(new { etiket = tag, aciklama = string.IsNullOrWhiteSpace(req.Aciklama) ? null : req.Aciklama.Trim() });
     }
     catch (InvalidOperationException ex) { return Results.BadRequest(new { error = ex.Message }); }
     catch (Microsoft.Data.SqlClient.SqlException ex) { return Results.Json(new { error = "SQL: " + ex.Message }, statusCode: 502); }
@@ -653,6 +672,49 @@ app.MapGet("/api/islev/topoloji", async (string etiket, string? tenant, string? 
 });
 
 app.MapGet("/api/islev/durum", (IslevService islev) => Results.Ok(islev.Durum));
+
+// Versiyonlar (Versiyon.cs): işlev haritası + küme topolojisi birlikte; etiket başına son Islev:VersiyonSayisi (3).
+app.MapGet("/api/islev/versiyonlar", async (string etiket, IConfiguration cfg, CancellationToken ct) =>
+{
+    try { return Results.Ok(new { versiyonlar = await VersiyonService.ListAsync(cfg, etiket.Trim(), ct), tutulan = VersiyonService.Keep(cfg) }); }
+    catch (InvalidOperationException ex) { return Results.Ok(new { versiyonlar = Array.Empty<VersiyonOzet>(), tutulan = VersiyonService.Keep(cfg), uyari = ex.Message }); }
+    catch (Exception ex) { return Results.Json(new { error = ex.Message }, statusCode: 502); }
+});
+
+app.MapGet("/api/islev/versiyon/{id:int}", async (int id, IConfiguration cfg, CancellationToken ct) =>
+{
+    try
+    {
+        if (await VersiyonService.GetAsync(cfg, id, ct) is not { } v) return Results.NotFound(new { error = "Versiyon bulunamadı (silinmiş olabilir)." });
+        // Kayıtlı JSON'lar yeniden ayrıştırılmadan gömülür
+        string json = $"{{\"ozet\":{JsonSerializer.Serialize(v.Ozet, new JsonSerializerOptions(JsonSerializerDefaults.Web))},\"harita\":{v.Harita},\"topoloji\":{v.Topoloji}}}";
+        return Results.Content(json, "application/json; charset=utf-8");
+    }
+    catch (Exception ex) { return Results.Json(new { error = ex.Message }, statusCode: 502); }
+});
+
+app.MapPost("/api/islev/versiyon", async (VersiyonKaydet req, HttpContext ctx, IConfiguration cfg, CancellationToken ct) =>
+{
+    string user = ctx.User?.Identity?.Name ?? "?";
+    if (!EtiketService.CanWrite(cfg, ctx.User?.Identity?.Name))
+        return Results.Json(new { error = $"Versiyon kaydetme yetkiniz yok ({user})." }, statusCode: 403);
+    if (string.IsNullOrWhiteSpace(req.Etiket)) return Results.BadRequest(new { error = "Etiket gerekli." });
+    try
+    {
+        int id = await VersiyonService.SaveAsync(cfg, req.Etiket.Trim(), req, user, app.Logger, ct);
+        return Results.Ok(new { id, versiyonlar = await VersiyonService.ListAsync(cfg, req.Etiket.Trim(), ct), tutulan = VersiyonService.Keep(cfg) });
+    }
+    catch (InvalidOperationException ex) { return Results.BadRequest(new { error = ex.Message }); }
+    catch (Microsoft.Data.SqlClient.SqlException ex) { return Results.Json(new { error = "SQL: " + ex.Message }, statusCode: 502); }
+});
+
+app.MapDelete("/api/islev/versiyon/{id:int}", async (int id, HttpContext ctx, IConfiguration cfg, CancellationToken ct) =>
+{
+    string user = ctx.User?.Identity?.Name ?? "?";
+    if (!EtiketService.CanWrite(cfg, ctx.User?.Identity?.Name)) return Results.Json(new { error = "Yetkiniz yok." }, statusCode: 403);
+    try { return await VersiyonService.DeleteAsync(cfg, id, user, app.Logger, ct) ? Results.Ok(new { silindi = id }) : Results.NotFound(new { error = "Versiyon bulunamadı." }); }
+    catch (Exception ex) { return Results.Json(new { error = ex.Message }, statusCode: 502); }
+});
 
 // Bir sunucunun AI'a giden bilgi özeti + ham kayıtlar (SM talepleri bağlantılarıyla).
 app.MapGet("/api/islev/profil", async (string ip, IslevService islev, CancellationToken ct) =>
