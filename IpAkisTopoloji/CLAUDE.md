@@ -272,13 +272,12 @@ erişim talepleri) — DB → şema → tablo ve kim erişiyor bilgisi buradan b
   Genel bilgiler dosyası (`Eksik:BilgiDosyasi`, kullanıcının .txt'si; göreli yol uygulama klasörüne göre; UTF-8 ya da Windows-1254;
   `BilgiMaxKarakter`=15000; tarih değişince yeniden okunur): HER AI isteğinin başına eklenir (model istekler arası hatırlamaz);
   sayfada "AI'a her istekte giden genel bilgi dosyası: … karakter" satırı.
-  SM YAPISAL ALANLAR (`SmFieldsAsync`, kullanıcı REQUESTM1 kolon listesini verdi): ZT_HEDEF (IP) / ZT_HEDEFHOSTNAME + ZT_HEDEFPORT / ZT_PORT
-  → ZT_HEDEFUYGULAMA (ikizi ZT_HEDEFUGULAMA); ZT_KAYNAK / ZT_KAYNAKHOSTNAME → ZT_KAYNAKUYGULAMA; ZT_DNSHOST_IPADDR / _HOSTNAME →
-  ZT_DNSHOST_UYGULAMA. Tek sorgu / 20 sunucu, SUBMIT_DATE ≥ SmYil, TOP 2000; C#'ta IP tam, port tam sayı; uygulama başına sayı + son
-  tarih + örnek no; boş porta denk gelen hedef uygulama en üstte. Prompt'ta "çok güçlü" kanıt.
-  Kullanıcı: IP bazen yalnız DESCRIPTION / BRIEF_DESCRIPTION'da → aynı sorguda o iki kolon da (IP ve sunucu adı LIKE) aranır; ayrı
-  "açıklama + port" sorgusu (SmPortAsync) kaldırıldı (sunucu başına tek REQUESTM1 sorgusu). Uygulama alanı boş talepler de listelenir
-  (boş portu anan önce, IP'nin geçtiği yerin ±150 karakteri `Snippet`); hiç talep yoksa "bulunamadı" satırı (sessiz kalmaz). Arama gerekçede de ("Kahin"). Sıralama: başlıklar IP / Port / Sunucu / Öneri (önerisi olmayan sonda) / güven / durum (`sirala`, `yon`). Varsayılan sıra IP + port (sabit; önceki "öneriliyi üste al" varsayılanında tahmin bitince satır başka sayfaya kayıyordu).
+  SM TALEPLERİ (`SmFieldsAsync`) — KULLANICININ SORGUSU BİREBİR (ZT_HEDEF / ZT_KAYNAK / ZT_DNSHOST_* alanlarında ARAMA YAPILMAZ, kullanıcı
+  düzeltti): IP ya da UNIXNAME `DESCRIPTION` / `BRIEF_DESCRIPTION` / `ZT_KAYNAKACIKLAMA` / `ZT_HEDEFACIKLAMA`'da LIKE; ZT_ kolonları
+  yoksa (207) yalnız ilk ikisi. Port filtresi DESCRIPTION / BRIEF_DESCRIPTION'da (ZT_HEDEFPORT / ZT_PORT da sayılır): boş portu anan
+  talepler başa, diğerleri de listede (en yeni 10). Satırda kısa açıklama + IP'nin geçtiği yerin ±150 karakteri (`Snippet`) + talepte
+  doluysa ZT_HEDEFUYGULAMA / ZT_KAYNAKUYGULAMA (ek bilgi). Tek sorgu / sunucu, SUBMIT_DATE (`Eksik:SmTarihKolonu`; canlıda OPEN_TIME
+  YOK) ≥ SmYil, TOP 300. Bulunamazsa / okunamazsa açık satır (sessiz kalmaz).
 - **VIP**: sorgulanan IP VIP ise üyeler + GW'ler aynı sorguya eklenir, üyeler "VIP ÜYESİ" (GW→üye trafiği varsa ✓).
   Gidilen IP VIP ise "VIP → n ÜYE"; gelen IP LB GW ise "LB GW"; sorgulanan sunucu havuz üyesiyse VIP kartı.
 - **Uygulama görünümü** (`/api/apps`, `/api/app`): `[kullanan uygulamalar] → [UYGULAMA: VIP'ler + segment grupları] → [bağımlı olunanlar]`,

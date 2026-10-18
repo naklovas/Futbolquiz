@@ -289,12 +289,11 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
         return outp;
     }
 
-    // SM yapısal alanları (kullanıcının paylaştığı REQUESTM1 şeması): erişim taleplerinde ZT_HEDEF (IP) + ZT_HEDEFPORT / ZT_PORT +
-    // ZT_HEDEFUYGULAMA (yazım hatalı ikizi ZT_HEDEFUGULAMA), ZT_HEDEFHOSTNAME; kaynak tarafı ZT_KAYNAK + ZT_KAYNAKUYGULAMA;
-    // DNS kaydı taleplerinde ZT_DNSHOST_IPADDR + ZT_DNSHOST_HOSTNAME + ZT_DNSHOST_UYGULAMA. Serbest metin aramasından çok daha güçlü:
-    // "bu IP'nin bu portuna erişim istenirken hedef uygulama X yazılmış". Uygulama adı başına sayı, son tarih ve örnek talep no.
-    // IP / sunucu adı bazen yalnız DESCRIPTION / BRIEF_DESCRIPTION'da yazar (kullanıcı) → onlar da aranır, IP'nin geçtiği yerin
-    // çevresi gösterilir. Tek sorgu / sunucu (önceki ayrı "açıklama + port" sorgusu bununla birleşti). Tarih Eksik:SmTarihKolonu (SUBMIT_DATE).
+    // SM talepleri (kullanıcının sorgusu birebir): IP ya da sunucu adı (UNIXNAME) DESCRIPTION / BRIEF_DESCRIPTION / ZT_KAYNAKACIKLAMA /
+    // ZT_HEDEFACIKLAMA'da geçen talepler. Port filtresi kullanıcının sorgusundaki gibi DESCRIPTION / BRIEF_DESCRIPTION'da: boş portu
+    // anan talepler başa alınır (port geçmeyenler de sunucunun ne iş yaptığını anlattığı için listede kalır). ZT_*ACIKLAMA kolonları
+    // yoksa (207) yalnız DESCRIPTION / BRIEF_DESCRIPTION (kullanıcının 2. sorgusu). Bulunan talebin ZT_HEDEFUYGULAMA / ZT_KAYNAKUYGULAMA
+    // doluysa ek bilgi olarak yazılır (arama o alanlarda YAPILMAZ). Tek sorgu / sunucu, tarih Eksik:SmTarihKolonu (SUBMIT_DATE) ≥ SmYil.
     async Task<Dictionary<string, string>> SmFieldsAsync(List<string> ips, Dictionary<string, List<string>> ports, EnvanterSnapshot env, CancellationToken ct)
     {
         var outp = new Dictionary<string, string>();
@@ -306,49 +305,48 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
         var since = DateTime.Today.AddYears(-Math.Clamp(cfg.GetValue("Eksik:SmYil", cfg.GetValue("Islev:SmYil", 3)), 1, 20));
         var rows = new List<Dictionary<string, string>>();
         string? err = null;
-        string[] cols = ["NUMBER", dateCol, "ZT_HEDEF", "ZT_HEDEFHOSTNAME", "ZT_HEDEFPORT", "ZT_PORT", "ZT_HEDEFUYGULAMA", "ZT_HEDEFUGULAMA",
-            "ZT_KAYNAK", "ZT_KAYNAKHOSTNAME", "ZT_KAYNAKUYGULAMA", "ZT_DNSHOST_IPADDR", "ZT_DNSHOST_HOSTNAME", "ZT_DNSHOST_UYGULAMA", "BRIEF_DESCRIPTION", "DESCRIPTION"];
         foreach (var table in tables.Where(t => System.Text.RegularExpressions.Regex.IsMatch(t, @"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*){0,2}$")))
         {
-            try
+            async Task Query(bool zt)
             {
+                string[] text = zt ? ["DESCRIPTION", "BRIEF_DESCRIPTION", "ZT_KAYNAKACIKLAMA", "ZT_HEDEFACIKLAMA"] : ["DESCRIPTION", "BRIEF_DESCRIPTION"];
+                string[] extra = zt ? ["ZT_HEDEFPORT", "ZT_PORT", "ZT_HEDEFUYGULAMA", "ZT_HEDEFUGULAMA", "ZT_KAYNAKUYGULAMA"] : [];
                 await using var conn = new SqlConnection(ConnStr);
                 await conn.OpenAsync(ct);
                 await using var cmd = new SqlCommand("", conn) { CommandTimeout = cfg.GetValue("Islev:SqlTimeoutSaniye", 180) };
                 int n = 0;
-                string P(string v, bool like) { string name = "@f" + n++; cmd.Parameters.AddWithValue(name, like ? $"%{v}%" : v); return name; }
-                var conds = new List<string>();
-                foreach (var (ip, host) in want)
-                {
-                    string l = P(ip, true);
-                    // IP bazen yalnız açıklamalarda yazıyor (kullanıcı): DESCRIPTION / BRIEF_DESCRIPTION da aranır
-                    conds.Add($"req.ZT_HEDEF LIKE {l} OR req.ZT_KAYNAK LIKE {l} OR req.ZT_DNSHOST_IPADDR LIKE {l} OR req.BRIEF_DESCRIPTION LIKE {l} OR req.DESCRIPTION LIKE {l}");
-                    if (host is { Length: >= 4 })
-                    {
-                        string h = P(host, false), hl = P(host, true);
-                        conds.Add($"req.ZT_HEDEFHOSTNAME = {h} OR req.ZT_KAYNAKHOSTNAME = {h} OR req.ZT_DNSHOST_HOSTNAME = {h} OR req.BRIEF_DESCRIPTION LIKE {hl} OR req.DESCRIPTION LIKE {hl}");
-                    }
-                }
+                string P(string v) { string name = "@f" + n++; cmd.Parameters.AddWithValue(name, $"%{v}%"); return name; }
+                var conds = want.SelectMany(x => new[] { x.ip }.Concat(x.host is { Length: >= 4 } h ? [h] : []))
+                    .Distinct(StringComparer.OrdinalIgnoreCase).Select(P).SelectMany(p => text.Select(c => $"req.[{c}] LIKE {p}")).ToList();
                 cmd.Parameters.AddWithValue("@since", since);
+                string sel = string.Join(", ", new[] { "req.[NUMBER]", $"req.[{dateCol}]" }
+                    .Concat(text.Select(c => c == "DESCRIPTION" ? "LEFT(CAST(req.[DESCRIPTION] AS nvarchar(max)), 3000)" : $"CAST(req.[{c}] AS nvarchar(max))"))
+                    .Concat(extra.Select(c => $"req.[{c}]")));
                 cmd.CommandText = $"""
-                    SELECT TOP (2000) {string.Join(", ", cols.Select(c => c == "DESCRIPTION" ? "LEFT(CAST(req.DESCRIPTION AS nvarchar(max)), 3000)" : $"req.[{c}]"))}
+                    SELECT TOP (300) {sel}
                     FROM {table} req WITH (NOLOCK)
                     WHERE req.[{dateCol}] >= @since AND ({string.Join(" OR ", conds)})
                     ORDER BY req.[{dateCol}] DESC
                     """;
+                var names = new[] { "NUMBER", "TARIH" }.Concat(text).Concat(extra).ToArray();
                 await using var r = await cmd.ExecuteReaderAsync(ct);
                 while (await r.ReadAsync(ct))
                 {
                     var row = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-                    for (int i = 0; i < cols.Length; i++)
+                    for (int i = 0; i < names.Length; i++)
                     {
                         if (r.IsDBNull(i)) continue;
                         object v = r.GetValue(i);
                         string s = v is DateTime dt ? dt.ToString("yyyy-MM-dd") : v is byte[] ? IslevService.ParseHexOrBinary(v) : Convert.ToString(v) ?? "";
-                        if (!string.IsNullOrWhiteSpace(s)) row[i == 1 ? "TARIH" : cols[i]] = s.Trim();
+                        if (!string.IsNullOrWhiteSpace(s)) row[names[i]] = s.Trim();
                     }
                     rows.Add(row);
                 }
+            }
+            try { await Query(true); }
+            catch (SqlException ex) when (ex.Number == 207)
+            {
+                try { await Query(false); } catch (SqlException ex2) { err = $"{table}: {ex2.Message}"; }
             }
             catch (SqlException ex) { err = $"{table}: {ex.Message}"; }
         }
@@ -357,63 +355,29 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
         static bool HasPort(string? text, string port) => text != null && port.Length > 0 && System.Text.RegularExpressions.Regex.IsMatch(text, $@"(?<!\d){port}(?!\d)");
         foreach (var (ip, host) in want)
         {
-            bool Same(string? h) => host is { Length: >= 4 } && h != null && h.Split(',', ';', ' ').Any(x => string.Equals(x.Trim().Split('.')[0], host.Split('.')[0], StringComparison.OrdinalIgnoreCase));
-            var miss = ports.GetValueOrDefault(ip) ?? [];
-            // (başlık, uygulama) → (sayı, son tarih, örnek no)
-            var agg = new Dictionary<(string, string), (int N, string? Son, string? No)>();
-            void Add(string head, string? app, Dictionary<string, string> r)
+            var miss = (ports.GetValueOrDefault(ip) ?? []).Where(p => p.Length > 0).ToList();
+            string All(Dictionary<string, string> r) => string.Join(" ", G(r, "BRIEF_DESCRIPTION"), G(r, "DESCRIPTION"), G(r, "ZT_KAYNAKACIKLAMA"), G(r, "ZT_HEDEFACIKLAMA"));
+            var mine = rows.Where(r => HasIp(All(r), ip) || (host is { Length: >= 4 } && All(r).Contains(host, StringComparison.OrdinalIgnoreCase)))
+                .DistinctBy(r => G(r, "NUMBER"))
+                // kullanıcının port filtresi: DESCRIPTION / BRIEF_DESCRIPTION'da port (ZT_HEDEFPORT / ZT_PORT da sayılır)
+                .Select(r => (r, ps: miss.Where(p => HasPort(string.Join(" ", G(r, "BRIEF_DESCRIPTION"), G(r, "DESCRIPTION"), G(r, "ZT_HEDEFPORT"), G(r, "ZT_PORT")), p)).ToList()))
+                .OrderByDescending(x => x.ps.Count > 0).ThenByDescending(x => G(x.r, "TARIH")).Take(10).ToList();
+            if (mine.Count > 0)
             {
-                if (string.IsNullOrWhiteSpace(app)) return;
-                var k = (head, app.Trim());
-                var cur = agg.GetValueOrDefault(k);
-                agg[k] = (cur.N + 1, cur.Son ?? G(r, "TARIH"), cur.No ?? G(r, "NUMBER"));
-            }
-            var matched = new List<(Dictionary<string, string> R, string Rol)>();
-            foreach (var r in rows)
-            {
-                string? hedefApp = G(r, "ZT_HEDEFUYGULAMA", "ZT_HEDEFUGULAMA");
-                bool isH = HasIp(G(r, "ZT_HEDEF"), ip) || Same(G(r, "ZT_HEDEFHOSTNAME")), isK = HasIp(G(r, "ZT_KAYNAK"), ip) || Same(G(r, "ZT_KAYNAKHOSTNAME")),
-                     isD = HasIp(G(r, "ZT_DNSHOST_IPADDR"), ip) || Same(G(r, "ZT_DNSHOST_HOSTNAME"));
-                string descAll = string.Join(" ", G(r, "BRIEF_DESCRIPTION"), G(r, "DESCRIPTION"));
-                bool isA = !isH && !isK && !isD && (HasIp(descAll, ip) || (host is { Length: >= 4 } && descAll.Contains(host, StringComparison.OrdinalIgnoreCase)));
-                if (isH || isK || isD || isA) matched.Add((r, isH ? "hedef" : isK ? "kaynak" : isD ? "DNS" : "açıklamada geçiyor"));
-                if (HasIp(G(r, "ZT_HEDEF"), ip) || Same(G(r, "ZT_HEDEFHOSTNAME")))
+                int withPort = mine.Count(x => x.ps.Count > 0);
+                var sb = new StringBuilder($"SM TALEPLERİ (açıklamalarında bu sunucunun IP'si / adı geçen, en yeni; {withPort} tanesinde boş port da geçiyor):\n");
+                foreach (var (r, ps) in mine)
                 {
-                    string portText = string.Join(" ", G(r, "ZT_HEDEFPORT"), G(r, "ZT_PORT"));
-                    var hit = miss.Where(p => HasPort(portText, p)).ToList();
-                    Add(hit.Count > 0 ? $"port {string.Join(",", hit)} (boş port) için erişim talebi → HEDEF UYGULAMA"
-                                      : $"bu sunucuya erişim talebi (port {Cut(portText.Trim(), 40)}) → HEDEF UYGULAMA", hedefApp, r);
-                }
-                if (HasIp(G(r, "ZT_KAYNAK"), ip) || Same(G(r, "ZT_KAYNAKHOSTNAME")))
-                    Add("bu sunucu KAYNAK olarak erişim istemiş → KAYNAK UYGULAMA", G(r, "ZT_KAYNAKUYGULAMA"), r);
-                if (HasIp(G(r, "ZT_DNSHOST_IPADDR"), ip) || Same(G(r, "ZT_DNSHOST_HOSTNAME")))
-                    Add($"DNS kaydı talebi ({G(r, "ZT_DNSHOST_HOSTNAME")}) → UYGULAMA", G(r, "ZT_DNSHOST_UYGULAMA"), r);
-            }
-            if (agg.Count > 0)
-            {
-                var sb = new StringBuilder("SM TALEPLERİNİN YAPISAL ALANLARI (REQUESTM1 ZT_HEDEFUYGULAMA / ZT_KAYNAKUYGULAMA / ZT_DNSHOST_UYGULAMA):\n");
-                foreach (var ((head, app), v) in agg.OrderBy(x => x.Key.Item1.StartsWith("port") ? 0 : 1).ThenByDescending(x => x.Value.N).Take(12))
-                    sb.AppendLine($"- {head}: \"{app}\" ({v.N} talep, son {v.Son}, ör. {v.No})");
-                foreach (var (r, _) in matched.Where(m => m.Rol == "açıklamada geçiyor").DistinctBy(m => G(m.R, "NUMBER")).Take(5))
-                    sb.AppendLine($"- açıklamada geçiyor: {G(r, "NUMBER")} {G(r, "TARIH")}: {Cut(G(r, "BRIEF_DESCRIPTION"), 160)}"
-                        + (Snippet(G(r, "DESCRIPTION"), ip, host) is { Length: > 0 } sn ? $" … {sn}" : ""));
-                outp[ip] = sb.ToString();
-            }
-            else if (err != null) outp[ip] = $"SM YAPISAL ALANLAR: okunamadı ({Cut(err, 150)})\n";
-            else if (matched.Count > 0)
-            {
-                // Talep var ama uygulama alanları boş: talepleri yine de göster (kısa açıklama + port çoğu zaman yeterli ipucu)
-                var sb = new StringBuilder($"SM TALEPLERİ (bu sunucunun geçtiği {matched.Count} talep; yapısal uygulama alanları boş; boş portu anan talepler önce):\n");
-                foreach (var (r, rol) in matched.DistinctBy(m => G(m.R, "NUMBER"))
-                             .OrderByDescending(m => miss.Any(p => HasPort(string.Join(" ", G(m.R, "ZT_HEDEFPORT"), G(m.R, "ZT_PORT"), G(m.R, "BRIEF_DESCRIPTION"), G(m.R, "DESCRIPTION")), p))).Take(8))
-                {
-                    var ports2 = miss.Where(p => HasPort(string.Join(" ", G(r, "ZT_HEDEFPORT"), G(r, "ZT_PORT"), G(r, "BRIEF_DESCRIPTION"), G(r, "DESCRIPTION")), p)).ToList();
-                    sb.AppendLine($"- {G(r, "NUMBER")} {G(r, "TARIH")} [{rol}{(ports2.Count > 0 ? "; boş port " + string.Join(",", ports2) + " geçiyor" : "")}]: {Cut(G(r, "BRIEF_DESCRIPTION"), 160)}"
-                        + (Snippet(G(r, "DESCRIPTION"), ip, host) is { Length: > 0 } sn ? $" … {sn}" : ""));
+                    string? app = G(r, "ZT_HEDEFUYGULAMA", "ZT_HEDEFUGULAMA");
+                    sb.AppendLine($"- {G(r, "NUMBER")} {G(r, "TARIH")}{(ps.Count > 0 ? $" [boş port {string.Join(",", ps)} geçiyor]" : "")}: {Cut(G(r, "BRIEF_DESCRIPTION"), 160)}"
+                        + (Snippet(string.Join(" · ", G(r, "DESCRIPTION"), G(r, "ZT_HEDEFACIKLAMA"), G(r, "ZT_KAYNAKACIKLAMA")), ip, host) is { Length: > 0 } sn ? $" … {sn}" : "")
+                        + (app != null ? $" [talepteki hedef uygulama: {app}]" : "")
+                        + (G(r, "ZT_KAYNAKUYGULAMA") is { } ka ? $" [kaynak uygulama: {ka}]" : ""));
                 }
                 outp[ip] = sb.ToString();
             }
-            else outp[ip] = $"SM TALEPLERİ: son {DateTime.Today.Year - since.Year} yılda bu sunucunun (IP {ip}{(host != null ? ", ad " + host : "")}) hedef, kaynak ya da DNS olduğu talep bulunamadı.\n";
+            else if (err != null) outp[ip] = $"SM TALEPLERİ: okunamadı ({Cut(err, 150)})\n";
+            else outp[ip] = $"SM TALEPLERİ: son {DateTime.Today.Year - since.Year} yılda açıklamalarında bu sunucunun IP'si ({ip}){(host != null ? " ya da adı (" + host + ")" : "")} geçen talep bulunamadı.\n";
         }
         return outp;
     }
@@ -681,9 +645,8 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
             çalıştığını bul.
 
             Kanıtların gücü (güçlüden zayıfa): o portu kabul eden exe'nin adı ve klasör yolu (ör. d:\apps\odeme.api\odeme.exe);
-            SM erişim taleplerinde o IP:port için yazılmış HEDEF UYGULAMA (çok güçlü; birden çok uygulama varsa en sık / en yeni
-            olanı tercih et); aynı satırdaki WEBSITE (IIS site adı) ve SERVICENAME; o IP ve portun geçtiği SM talepleri
-            (erişim / kurulum talebinde uygulama adı çoğu zaman yazar); aynı sunucunun diğer portlarındaki uygulamalar; VIP ve havuz
+            açıklamalarında bu sunucu ve boş port geçen SM talepleri (erişim / kurulum talebinde uygulama adı çoğu zaman yazar;
+            talepteki hedef uygulama alanı varsa çok güçlü); aynı satırdaki WEBSITE (IIS site adı) ve SERVICENAME; aynı sunucunun diğer portlarındaki uygulamalar; VIP ve havuz
             komşuları; BENZER ADLI SUNUCULARIN (aynı ad, farklı numara) uygulamaları; aynı segmentte aynı portu kullanan
             sunucuların uygulamaları; bu porta bağlanan istemci uygulamalar ve exe'nin bağlandığı yerler; sanal sunucu notları;
             iş istekleri; sunucu adındaki kısaltmalar (ör. "atm", "sql", "web"). ntoskrnl.exe görünüyorsa port HTTP.sys üzerindendir; asıl uygulama aynı sunucudaki ve adı WEBSITE ile
