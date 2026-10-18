@@ -227,6 +227,7 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
                 }.OfType<string>().DefaultIfEmpty("başka bilgi yok")));
             }
             sb.Append(Neighbors(env, ip, miss));
+            sb.Append(await SmPortAsync(ip, env.AppsOnIp(ip).Select(h => h.UnixName).OfType<string>().FirstOrDefault(), miss, ct));
             if (cb.TryGetValue(ip, out var c)) sb.Append(c.Text(env, ip, miss));
             else sb.AppendLine($"Carbon Black (son {hours} saat): bu sunucuda ağ olayı yok (ajan yok ya da trafik yok).");
             var cands = Candidates(env, ip, sb.ToString());
@@ -234,6 +235,65 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
             outp[ip] = sb.ToString();
         }
         return outp;
+    }
+
+    // SM talepleri (IP + port): açıklamasında sunucunun IP'si ya da adı VE boş portlardan biri geçen en yeni talepler
+    // (kullanıcının diğer projesindeki sorgu). SM verisi ERT ile aynı doku DB'sinde: Eksik:SmTablolari (varsayılan dbo.REQUESTM1).
+    // ZT_*ACIKLAMA kolonları olmayan şemada yalnız DESCRIPTION / BRIEF_DESCRIPTION. Port eşleşmesi C#'ta tam sayı olarak doğrulanır.
+    async Task<string> SmPortAsync(string ip, string? host, List<string> ports, CancellationToken ct)
+    {
+        var ps = ports.Where(p => p.Length > 0 && p.All(char.IsDigit)).ToList();
+        if (ps.Count == 0) return "";
+        var tables = cfg.GetSection("Eksik:SmTablolari").GetChildren().Select(c => c.Value).OfType<string>().ToList();
+        if (tables.Count == 0) tables = ["dbo.REQUESTM1"];
+        var hits = new List<(string No, DateTime? T, string Text, List<string> Ports)>();
+        string? err = null;
+        foreach (var table in tables.Where(t => System.Text.RegularExpressions.Regex.IsMatch(t, @"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*){0,2}$")))
+        {
+            async Task Query(bool zt)
+            {
+                await using var conn = new SqlConnection(ConnStr);
+                await conn.OpenAsync(ct);
+                await using var cmd = new SqlCommand("", conn) { CommandTimeout = cfg.GetValue("Islev:SqlTimeoutSaniye", 180) };
+                var cols = zt ? new[] { "req.DESCRIPTION", "req.BRIEF_DESCRIPTION", "req.ZT_KAYNAKACIKLAMA", "req.ZT_HEDEFACIKLAMA" }
+                              : new[] { "req.DESCRIPTION", "req.BRIEF_DESCRIPTION" };
+                cmd.Parameters.AddWithValue("@ip", $"%{ip}%");
+                var who = cols.Select(c => $"{c} LIKE @ip").ToList();
+                if (!string.IsNullOrWhiteSpace(host) && host.Length >= 4)
+                {
+                    cmd.Parameters.AddWithValue("@h", $"%{host}%");
+                    who.AddRange(cols.Select(c => $"{c} LIKE @h"));
+                }
+                var port = ps.Select((p, i) => { cmd.Parameters.AddWithValue($"@p{i}", $"%{p}%"); return $"req.DESCRIPTION LIKE @p{i} OR req.BRIEF_DESCRIPTION LIKE @p{i}"; }).ToList();
+                cmd.CommandText = $"""
+                    SELECT TOP (30) req.NUMBER, req.OPEN_TIME, req.BRIEF_DESCRIPTION, LEFT(CAST(req.DESCRIPTION AS nvarchar(max)), 800)
+                        {(zt ? ", req.ZT_KAYNAKACIKLAMA, req.ZT_HEDEFACIKLAMA" : "")}
+                    FROM {table} req WITH (NOLOCK)
+                    WHERE ({string.Join(" OR ", who)}) AND ({string.Join(" OR ", port)})
+                    ORDER BY req.OPEN_TIME DESC
+                    """;
+                await using var r = await cmd.ExecuteReaderAsync(ct);
+                while (await r.ReadAsync(ct))
+                {
+                    string Txt(int i) => i < r.FieldCount && !r.IsDBNull(i) ? Convert.ToString(r.GetValue(i)) ?? "" : "";
+                    var found = ps.Where(p => System.Text.RegularExpressions.Regex.IsMatch(Txt(2) + " " + Txt(3), $@"(?<!\d){p}(?!\d)")).ToList();
+                    if (found.Count == 0) continue;
+                    string text = string.Join(" · ", new[] { Txt(2), Txt(3), zt ? Txt(4) : "", zt ? Txt(5) : "" }.Where(x => x.Length > 0));
+                    hits.Add((Txt(0), r.IsDBNull(1) ? null : r.GetDateTime(1), System.Text.RegularExpressions.Regex.Replace(text, @"\s+", " "), found));
+                }
+            }
+            try { await Query(true); }
+            catch (SqlException ex) when (ex.Number == 207)
+            {
+                try { await Query(false); } catch (SqlException ex2) { err = $"{table}: {ex2.Message}"; }
+            }
+            catch (SqlException ex) { err = $"{table}: {ex.Message}"; }
+        }
+        if (hits.Count == 0) return err != null ? $"SM TALEPLERİ (IP + port): okunamadı ({Cut(err, 150)})\n" : "";
+        var sb = new StringBuilder("SM TALEPLERİ (açıklamasında bu sunucu VE boş port geçen, en yeni):\n");
+        foreach (var h in hits.DistinctBy(h => h.No).OrderByDescending(h => h.T).Take(10))
+            sb.AppendLine($"- {h.No} {h.T:yyyy-MM-dd} [port {string.Join(",", h.Ports)}]: {Cut(h.Text, 400)}");
+        return sb.ToString();
     }
 
     // Komşu ipuçları: benzer adlı sunucular (ad sonundaki sayı atılınca aynı: zb1pwatmvzsra01/02…), aynı segmentte aynı portu
@@ -459,7 +519,8 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
             çalıştığını bul.
 
             Kanıtların gücü (güçlüden zayıfa): o portu kabul eden exe'nin adı ve klasör yolu (ör. d:\apps\odeme.api\odeme.exe);
-            aynı satırdaki WEBSITE (IIS site adı) ve SERVICENAME; aynı sunucunun diğer portlarındaki uygulamalar; VIP ve havuz
+            aynı satırdaki WEBSITE (IIS site adı) ve SERVICENAME; o IP ve portun geçtiği SM talepleri
+            (erişim / kurulum talebinde uygulama adı çoğu zaman yazar); aynı sunucunun diğer portlarındaki uygulamalar; VIP ve havuz
             komşuları; BENZER ADLI SUNUCULARIN (aynı ad, farklı numara) uygulamaları; aynı segmentte aynı portu kullanan
             sunucuların uygulamaları; bu porta bağlanan istemci uygulamalar ve exe'nin bağlandığı yerler; sanal sunucu notları;
             iş istekleri; sunucu adındaki kısaltmalar (ör. "atm", "sql", "web"). ntoskrnl.exe görünüyorsa port HTTP.sys üzerindendir; asıl uygulama aynı sunucudaki ve adı WEBSITE ile
