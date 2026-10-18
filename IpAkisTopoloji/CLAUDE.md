@@ -219,6 +219,8 @@ elemanlarına erişmek ve ETL'i kontrol etmeye kadar gitmek (DB → tablo → ko
 hangi tabloya yüklüyor; işlev kümeleri ve küme topolojisi bunun üstüne kurulacak). Açık kalan küçük fikir: küme topolojisinde
 VIP tarafında veri yokken GW → üye trafiğini VIP penceresinde "LB GW üzerinden (kaynak bilinmiyor)" olarak göstermek (şu an atlanıyor).
 Açık soru: ERT Entropi'den truncate ile yeniden yükleniyorsa TAG / AI_KUME / AI_DETAY kaybolur (kullanıcıya soruldu, cevap yok).
+3. faz için ipucu: doku.dbo.REQUESTM1'de ZT_DWHORTAM, ZT_DWH_DBNAME, ZT_DWH_SCHEMANAME, ZT_DWH_TABLENAME kolonları var (DWH tablo
+erişim talepleri) — DB → şema → tablo ve kim erişiyor bilgisi buradan başlanabilir.
 
 ## Özellikler (hepsi canlıda istenip yapıldı)
 - **IP görünümü**: 5 sütun `[segment] → [gelen sunucu] → [SORGULANAN IP] → [gidilen sunucu] → [segment]`.
@@ -268,7 +270,11 @@ Açık soru: ERT Entropi'den truncate ile yeniden yükleniyorsa TAG / AI_KUME / 
   girdi; prompt: önceki AI tahmini, tek dayanaksa güven ≤60 ve "yalnız Kahin tahmini", çelişirse diğer kanıtlar.
   Genel bilgiler dosyası (`Eksik:BilgiDosyasi`, kullanıcının .txt'si; göreli yol uygulama klasörüne göre; UTF-8 ya da Windows-1254;
   `BilgiMaxKarakter`=15000; tarih değişince yeniden okunur): HER AI isteğinin başına eklenir (model istekler arası hatırlamaz);
-  sayfada "AI'a her istekte giden genel bilgi dosyası: … karakter" satırı. Arama gerekçede de ("Kahin"). Sıralama: başlıklar IP / Port / Sunucu / Öneri (önerisi olmayan sonda) / güven / durum (`sirala`, `yon`).
+  sayfada "AI'a her istekte giden genel bilgi dosyası: … karakter" satırı.
+  SM YAPISAL ALANLAR (`SmFieldsAsync`, kullanıcı REQUESTM1 kolon listesini verdi): ZT_HEDEF (IP) / ZT_HEDEFHOSTNAME + ZT_HEDEFPORT / ZT_PORT
+  → ZT_HEDEFUYGULAMA (ikizi ZT_HEDEFUGULAMA); ZT_KAYNAK / ZT_KAYNAKHOSTNAME → ZT_KAYNAKUYGULAMA; ZT_DNSHOST_IPADDR / _HOSTNAME →
+  ZT_DNSHOST_UYGULAMA. Tek sorgu / 20 sunucu, SUBMIT_DATE ≥ SmYil, TOP 2000; C#'ta IP tam, port tam sayı; uygulama başına sayı + son
+  tarih + örnek no; boş porta denk gelen hedef uygulama en üstte. Prompt'ta "çok güçlü" kanıt. Arama gerekçede de ("Kahin"). Sıralama: başlıklar IP / Port / Sunucu / Öneri (önerisi olmayan sonda) / güven / durum (`sirala`, `yon`).
 - **VIP**: sorgulanan IP VIP ise üyeler + GW'ler aynı sorguya eklenir, üyeler "VIP ÜYESİ" (GW→üye trafiği varsa ✓).
   Gidilen IP VIP ise "VIP → n ÜYE"; gelen IP LB GW ise "LB GW"; sorgulanan sunucu havuz üyesiyse VIP kartı.
 - **Uygulama görünümü** (`/api/apps`, `/api/app`): `[kullanan uygulamalar] → [UYGULAMA: VIP'ler + segment grupları] → [bağımlı olunanlar]`,

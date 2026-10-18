@@ -254,6 +254,7 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
         var profiles = await islev.ProfilesAsync(ips, env, ct);
         var cb = await CarbonBlackAsync(ips, hours, ct);
         var sm = await SmPortAsync(ips, ports, env, ct);
+        var smf = await SmFieldsAsync(ips, ports, env, ct);
         var outp = new Dictionary<string, string>();
         foreach (var ip in ips)
         {
@@ -274,6 +275,7 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
                 }.OfType<string>().DefaultIfEmpty("başka bilgi yok")));
             }
             sb.Append(Neighbors(env, ip, miss));
+            if (smf.TryGetValue(ip, out var smfText)) sb.Append(smfText);
             if (sm.TryGetValue(ip, out var smText)) sb.Append(smText);
             if (cb.TryGetValue(ip, out var c)) sb.Append(c.Text(env, ip, miss));
             else sb.AppendLine($"Carbon Black (son {hours} saat): bu sunucuda ağ olayı yok (ajan yok ya da trafik yok).");
@@ -354,6 +356,109 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
                 outp[ip] = sb.ToString();
             }
             else if (err != null) outp[ip] = $"SM TALEPLERİ (IP + port): okunamadı ({Cut(err, 150)})\n";
+        }
+        return outp;
+    }
+
+    // SM yapısal alanları (kullanıcının paylaştığı REQUESTM1 şeması): erişim taleplerinde ZT_HEDEF (IP) + ZT_HEDEFPORT / ZT_PORT +
+    // ZT_HEDEFUYGULAMA (yazım hatalı ikizi ZT_HEDEFUGULAMA), ZT_HEDEFHOSTNAME; kaynak tarafı ZT_KAYNAK + ZT_KAYNAKUYGULAMA;
+    // DNS kaydı taleplerinde ZT_DNSHOST_IPADDR + ZT_DNSHOST_HOSTNAME + ZT_DNSHOST_UYGULAMA. Serbest metin aramasından çok daha güçlü:
+    // "bu IP'nin bu portuna erişim istenirken hedef uygulama X yazılmış". Uygulama adı başına sayı, son tarih ve örnek talep no.
+    async Task<Dictionary<string, string>> SmFieldsAsync(List<string> ips, Dictionary<string, List<string>> ports, EnvanterSnapshot env, CancellationToken ct)
+    {
+        var outp = new Dictionary<string, string>();
+        var want = ips.Select(ip => (ip, host: env.AppsOnIp(ip).Select(h => h.UnixName).OfType<string>().FirstOrDefault())).ToList();
+        if (want.Count == 0) return outp;
+        var tables = cfg.GetSection("Eksik:SmTablolari").GetChildren().Select(c => c.Value).OfType<string>().ToList();
+        if (tables.Count == 0) tables = ["dbo.REQUESTM1"];
+        string dateCol = cfg["Eksik:SmTarihKolonu"] is { Length: > 0 } dc && System.Text.RegularExpressions.Regex.IsMatch(dc, "^[A-Za-z_][A-Za-z0-9_]*$") ? dc : "SUBMIT_DATE";
+        var since = DateTime.Today.AddYears(-Math.Clamp(cfg.GetValue("Eksik:SmYil", cfg.GetValue("Islev:SmYil", 3)), 1, 20));
+        var rows = new List<Dictionary<string, string>>();
+        string? err = null;
+        string[] cols = ["NUMBER", dateCol, "ZT_HEDEF", "ZT_HEDEFHOSTNAME", "ZT_HEDEFPORT", "ZT_PORT", "ZT_HEDEFUYGULAMA", "ZT_HEDEFUGULAMA",
+            "ZT_KAYNAK", "ZT_KAYNAKHOSTNAME", "ZT_KAYNAKUYGULAMA", "ZT_DNSHOST_IPADDR", "ZT_DNSHOST_HOSTNAME", "ZT_DNSHOST_UYGULAMA"];
+        foreach (var table in tables.Where(t => System.Text.RegularExpressions.Regex.IsMatch(t, @"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*){0,2}$")))
+        {
+            try
+            {
+                await using var conn = new SqlConnection(ConnStr);
+                await conn.OpenAsync(ct);
+                await using var cmd = new SqlCommand("", conn) { CommandTimeout = cfg.GetValue("Islev:SqlTimeoutSaniye", 180) };
+                int n = 0;
+                string P(string v, bool like) { string name = "@f" + n++; cmd.Parameters.AddWithValue(name, like ? $"%{v}%" : v); return name; }
+                var conds = new List<string>();
+                foreach (var (ip, host) in want)
+                {
+                    string l = P(ip, true);
+                    conds.Add($"req.ZT_HEDEF LIKE {l} OR req.ZT_KAYNAK LIKE {l} OR req.ZT_DNSHOST_IPADDR LIKE {l}");
+                    if (host is { Length: >= 4 })
+                    {
+                        string h = P(host, false);
+                        conds.Add($"req.ZT_HEDEFHOSTNAME = {h} OR req.ZT_KAYNAKHOSTNAME = {h} OR req.ZT_DNSHOST_HOSTNAME = {h}");
+                    }
+                }
+                cmd.Parameters.AddWithValue("@since", since);
+                cmd.CommandText = $"""
+                    SELECT TOP (2000) {string.Join(", ", cols.Select(c => $"req.[{c}]"))}
+                    FROM {table} req WITH (NOLOCK)
+                    WHERE req.[{dateCol}] >= @since AND ({string.Join(" OR ", conds)})
+                    ORDER BY req.[{dateCol}] DESC
+                    """;
+                await using var r = await cmd.ExecuteReaderAsync(ct);
+                while (await r.ReadAsync(ct))
+                {
+                    var row = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                    for (int i = 0; i < cols.Length; i++)
+                    {
+                        if (r.IsDBNull(i)) continue;
+                        object v = r.GetValue(i);
+                        string s = v is DateTime dt ? dt.ToString("yyyy-MM-dd") : v is byte[] ? IslevService.ParseHexOrBinary(v) : Convert.ToString(v) ?? "";
+                        if (!string.IsNullOrWhiteSpace(s)) row[i == 1 ? "TARIH" : cols[i]] = s.Trim();
+                    }
+                    rows.Add(row);
+                }
+            }
+            catch (SqlException ex) { err = $"{table}: {ex.Message}"; }
+        }
+        static string? G(Dictionary<string, string> r, params string[] keys) => keys.Select(k => r.GetValueOrDefault(k)).FirstOrDefault(v => !string.IsNullOrWhiteSpace(v));
+        static bool HasIp(string? text, string ip) => text != null && System.Text.RegularExpressions.Regex.IsMatch(text, $@"(?<![\d.]){System.Text.RegularExpressions.Regex.Escape(ip)}(?![\d])");
+        static bool HasPort(string? text, string port) => text != null && port.Length > 0 && System.Text.RegularExpressions.Regex.IsMatch(text, $@"(?<!\d){port}(?!\d)");
+        foreach (var (ip, host) in want)
+        {
+            bool Same(string? h) => host is { Length: >= 4 } && h != null && h.Split(',', ';', ' ').Any(x => string.Equals(x.Trim().Split('.')[0], host.Split('.')[0], StringComparison.OrdinalIgnoreCase));
+            var miss = ports.GetValueOrDefault(ip) ?? [];
+            // (başlık, uygulama) → (sayı, son tarih, örnek no)
+            var agg = new Dictionary<(string, string), (int N, string? Son, string? No)>();
+            void Add(string head, string? app, Dictionary<string, string> r)
+            {
+                if (string.IsNullOrWhiteSpace(app)) return;
+                var k = (head, app.Trim());
+                var cur = agg.GetValueOrDefault(k);
+                agg[k] = (cur.N + 1, cur.Son ?? G(r, "TARIH"), cur.No ?? G(r, "NUMBER"));
+            }
+            foreach (var r in rows)
+            {
+                string? hedefApp = G(r, "ZT_HEDEFUYGULAMA", "ZT_HEDEFUGULAMA");
+                if (HasIp(G(r, "ZT_HEDEF"), ip) || Same(G(r, "ZT_HEDEFHOSTNAME")))
+                {
+                    string portText = string.Join(" ", G(r, "ZT_HEDEFPORT"), G(r, "ZT_PORT"));
+                    var hit = miss.Where(p => HasPort(portText, p)).ToList();
+                    Add(hit.Count > 0 ? $"port {string.Join(",", hit)} (boş port) için erişim talebi → HEDEF UYGULAMA"
+                                      : $"bu sunucuya erişim talebi (port {Cut(portText.Trim(), 40)}) → HEDEF UYGULAMA", hedefApp, r);
+                }
+                if (HasIp(G(r, "ZT_KAYNAK"), ip) || Same(G(r, "ZT_KAYNAKHOSTNAME")))
+                    Add("bu sunucu KAYNAK olarak erişim istemiş → KAYNAK UYGULAMA", G(r, "ZT_KAYNAKUYGULAMA"), r);
+                if (HasIp(G(r, "ZT_DNSHOST_IPADDR"), ip) || Same(G(r, "ZT_DNSHOST_HOSTNAME")))
+                    Add($"DNS kaydı talebi ({G(r, "ZT_DNSHOST_HOSTNAME")}) → UYGULAMA", G(r, "ZT_DNSHOST_UYGULAMA"), r);
+            }
+            if (agg.Count > 0)
+            {
+                var sb = new StringBuilder("SM TALEPLERİNİN YAPISAL ALANLARI (REQUESTM1 ZT_HEDEFUYGULAMA / ZT_KAYNAKUYGULAMA / ZT_DNSHOST_UYGULAMA):\n");
+                foreach (var ((head, app), v) in agg.OrderBy(x => x.Key.Item1.StartsWith("port") ? 0 : 1).ThenByDescending(x => x.Value.N).Take(12))
+                    sb.AppendLine($"- {head}: \"{app}\" ({v.N} talep, son {v.Son}, ör. {v.No})");
+                outp[ip] = sb.ToString();
+            }
+            else if (err != null) outp[ip] = $"SM YAPISAL ALANLAR: okunamadı ({Cut(err, 150)})\n";
         }
         return outp;
     }
@@ -615,7 +720,8 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
             çalıştığını bul.
 
             Kanıtların gücü (güçlüden zayıfa): o portu kabul eden exe'nin adı ve klasör yolu (ör. d:\apps\odeme.api\odeme.exe);
-            aynı satırdaki WEBSITE (IIS site adı) ve SERVICENAME; o IP ve portun geçtiği SM talepleri
+            SM erişim taleplerinde o IP:port için yazılmış HEDEF UYGULAMA (çok güçlü; birden çok uygulama varsa en sık / en yeni
+            olanı tercih et); aynı satırdaki WEBSITE (IIS site adı) ve SERVICENAME; o IP ve portun geçtiği SM talepleri
             (erişim / kurulum talebinde uygulama adı çoğu zaman yazar); aynı sunucunun diğer portlarındaki uygulamalar; VIP ve havuz
             komşuları; BENZER ADLI SUNUCULARIN (aynı ad, farklı numara) uygulamaları; aynı segmentte aynı portu kullanan
             sunucuların uygulamaları; bu porta bağlanan istemci uygulamalar ve exe'nin bağlandığı yerler; sanal sunucu notları;
