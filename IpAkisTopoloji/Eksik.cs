@@ -220,7 +220,8 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
             foreach (var g in empty)
             {
                 var h = g.First();
-                sb.AppendLine($"- port {(g.Key == "" ? "(yok)" : g.Key)}: " + string.Join(", ", new[]
+                string pi = PortBilgisi.Find(g.Key, cfg) is { } info ? $" (bilinen kullanım: {info.Name})" : "";
+                sb.AppendLine($"- port {(g.Key == "" ? "(yok)" : g.Key)}{pi}: " + string.Join(", ", new[]
                 {
                     h.Website is { } w ? "WEBSITE=" + w : null, h.ServiceName is { } sv ? "SERVICENAME=" + sv : null,
                     h.VipIp is { } vi ? $"VIP={vi}:{h.VipPort}" : null, h.UnixName is { } un ? "UNIXNAME=" + un : null,
@@ -544,6 +545,11 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
             - Uygulama adını mümkünse "ADAY UYGULAMALAR" listesinden HARFİ HARFİNE seç ("yeni": false).
             - Hiçbir aday uymuyor ama kanıt açıkça bir uygulamayı gösteriyorsa kısa bir ad öner ("yeni": true).
             - Port bir altyapı / araç hizmetiyse (izleme ajanı, yedekleme, antivirüs, yönetim) "uygulama": "Altyapı: <ne>" yaz.
+            - Port bir veritabanı ya da ara katman portuysa (1433 SQL Server, 1521 Oracle, 5432, 1414 MQ… ya da exe sqlservr.exe,
+              oracle.exe, tnslsnr.exe) "SQL Server" gibi teknoloji adı YAZMA: veritabanı hangi uygulamaya aitse onu bul
+              (bu porta bağlanan istemci uygulamalar, aynı sunucunun diğer portları, benzer adlı sunucular, SM talepleri).
+              Gerekçede teknolojiyi belirt (ör. "1433 SQL Server; istemcileri KREDİ uygulaması"). Sahibi bulunamazsa
+              uygulama null, gerekçede "SQL Server veritabanı, sahibi belirsiz" yaz.
             - Kanıt yetersizse "uygulama": null ve güven düşük yaz. Uydurma.
 
             Yalnızca JSON dizi döndür, başka metin yazma. Her boş port için bir eleman:
