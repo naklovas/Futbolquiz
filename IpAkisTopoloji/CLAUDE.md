@@ -234,6 +234,9 @@ Açık soru: ERT Entropi'den truncate ile yeniden yükleniyorsa TAG / AI_KUME / 
   (ör. canlıda 9000 → d:\aspnetcore\zb.wall.p5\core\zb.app.wall.exe, HTTP.sys'li ASP.NET Core) CB'de "yalnız giden" görünür; satırda
   "HTTP.sys (Windows çekirdeği)" notu (`HTTPSYS`), kesin eşleme sunucuda `netsh http show servicestate`. Surec SPL'inde Windows yolu
   kesilmiyordu (`[\\/]` yerine `[\\\\/]` olmalı) → düzeltildi, ayrıca C#'ta `ExeName` ve tam yol `ProcNode.Yol` (ipucunda).
+  HTTP.sys portunda asıl exe tahmini (`httpSysApp`): ERT'de o port için WEBSITE (IIS site adı; kullanıcı: "IIS adı WEBSITE kolonunda") /
+  APPNAME / SERVICENAME, sunucudaki bir exe'nin tam yolunda (harf-rakam sadeleştirilmiş) geçiyorsa → "asıl uygulama büyük ihtimalle X";
+  geçmiyorsa kelimelerin ≥2'si ve ≥2/3'ü yolda. Canlı örnek: 9000 · WEBSITE "ZB.Wall.P5" → d:\aspnetcore\zb.wall.p5\core\zb.app.wall.exe.
 - **VIP**: sorgulanan IP VIP ise üyeler + GW'ler aynı sorguya eklenir, üyeler "VIP ÜYESİ" (GW→üye trafiği varsa ✓).
   Gidilen IP VIP ise "VIP → n ÜYE"; gelen IP LB GW ise "LB GW"; sorgulanan sunucu havuz üyesiyse VIP kartı.
 - **Uygulama görünümü** (`/api/apps`, `/api/app`): `[kullanan uygulamalar] → [UYGULAMA: VIP'ler + segment grupları] → [bağımlı olunanlar]`,

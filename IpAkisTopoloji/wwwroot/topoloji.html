@@ -692,6 +692,27 @@ function listenTable(t) {
   }
   if (!rows.size) return `<div class="unk">Seçili aralıkta bu sunucuda Carbon Black ağ olayı görülmedi (ajan yok ya da trafik yok).</div>`;
   const ertApps = port => [...new Set(t.apps.filter(a => String(a.port ?? "") === port).map(a => a.appName).filter(Boolean))];
+  // HTTP.sys portu (ntoskrnl): ERT'deki WEBSITE (IIS site adı) / uygulama / servis adı, sunucudaki bir exe'nin yolunda geçiyorsa
+  // asıl uygulama odur (canlı örnek: 9000 · ERT WEBSITE "ZB.Wall.P5" → d:\aspnetcore\zb.wall.p5\core\zb.app.wall.exe)
+  const norm = x => String(x || "").toLocaleLowerCase("tr").replace(/[^a-z0-9]/g, "");
+  const exes = (pr.body.processes ?? []).filter(n => !HTTPSYS.test(exeShort(n.name))).map(n => ({ name: exeShort(n.name), yol: n.yol || n.name, key: norm(n.yol || n.name) }));
+  const httpSysApp = port => {
+    const names = [...new Set(t.apps.filter(a => String(a.port ?? "") === port).flatMap(a => [a.website, a.appName, a.serviceName]).filter(x => x && norm(x).length >= 4))];
+    for (const nm of names) {
+      const k = norm(nm), hit = [...new Map(exes.filter(e => e.key.includes(k)).map(e => [e.name.toLowerCase(), e])).values()];
+      if (hit.length) return { nm, hit };
+    }
+    // Yolda birebir geçmiyorsa kelime benzerliği: adın kelimelerinin en az 2'si ve 2/3'ü exe yolunda (ör. "ZB.Wall.P5" ~ zb.app.wall.exe)
+    const words = x => String(x || "").toLocaleLowerCase("tr").split(/[^a-z0-9]+/).filter(w => w.length >= 2 && !["exe", "dll", "app", "core", "web", "api", "service"].includes(w));
+    for (const nm of names) {
+      const ws = [...new Set(words(nm))];
+      if (ws.length < 2) continue;
+      const hit = [...new Map(exes.filter(e => { const ew = new Set(words(e.yol)); const n = ws.filter(w => ew.has(w)).length; return n >= 2 && n >= ws.length * 2 / 3; })
+        .map(e => [e.name.toLowerCase(), e])).values()];
+      if (hit.length) return { nm, hit };
+    }
+    return null;
+  };
   const list = [...rows.values()].sort((a, b) => a.out - b.out || (+a.port || 1e9) - (+b.port || 1e9) || b.hits - a.hits || b.outHits - a.outHits);
   const nExe = new Set(list.map(r => r.name.toLowerCase())).size;
   return `<div class="small muted" style="margin:-4px 0 6px">${fmt(nExe)} farklı exe · ${fmt(list.filter(r => !r.out).length)} port satırı${list.some(r => r.out) ? ` · ${fmt(list.filter(r => r.out).length)} exe yalnız dışarı bağlanıyor` : ""}</div>
@@ -700,7 +721,8 @@ function listenTable(t) {
       <tbody>${list.map(r => { const apps = r.out ? [] : ertApps(r.port), infra = PROC_INFRA.has(r.port); return `<tr${infra ? ` class="muted" title="Altyapı portu"` : ""}>
         <td class="mono">${r.out ? `<span class="small muted">— yalnız giden</span>` : r.port ? esc(r.port) : `<span class="small muted" title="Carbon Black olayında yerel port yok">?</span>`}${infra ? ` <span class="small muted">altyapı</span>` : ""}</td>
         <td><b class="mono"${r.yol ? ` title="${esc(r.yol)}"` : ""}>${esc(exeShort(r.name))}</b>${HTTPSYS.test(exeShort(r.name)) && !r.out
-          ? `<div class="small muted" title="Bu portu Windows HTTP.sys sürücüsü dinliyor: bağlantıyı çekirdek kabul eder, isteği URL kaydına göre asıl uygulamaya iletir. Carbon Black bağlantıyı bu yüzden ntoskrnl.exe / System adına yazar. Asıl uygulama exe'si (ör. HTTP.sys ile çalışan bir ASP.NET Core uygulaması ya da w3wp.exe) bu tabloda 'yalnız giden' olarak görünebilir; sunucuda 'netsh http show servicestate' kesin olarak gösterir.">HTTP.sys (Windows çekirdeği) · asıl uygulama ayrı exe ⓘ</div>` : ""}</td>
+          ? (m => m ? `<div class="small" style="color:var(--in)" title="ERT'de bu port için kayıtlı ad (${esc(m.nm)}) şu exe'nin yolunda geçiyor: ${esc(m.hit.map(e => e.yol).join(" · "))}">→ asıl uygulama büyük ihtimalle <b class="mono">${esc(m.hit.map(e => e.name).join(", "))}</b> <span class="muted">(yolu ERT'deki "${esc(m.nm)}" ile eşleşiyor)</span></div>` : "")(httpSysApp(r.port))
+            + `<div class="small muted" title="Bu portu Windows HTTP.sys sürücüsü dinliyor: bağlantıyı çekirdek kabul eder, isteği URL kaydına göre asıl uygulamaya iletir. Carbon Black bağlantıyı bu yüzden ntoskrnl.exe / System adına yazar. Asıl uygulama exe'si (ör. HTTP.sys ile çalışan bir ASP.NET Core uygulaması ya da w3wp.exe) bu tabloda 'yalnız giden' olarak görünebilir; sunucuda 'netsh http show servicestate' kesin olarak gösterir.">HTTP.sys (Windows çekirdeği) · asıl uygulama ayrı exe ⓘ</div>` : ""}</td>
         <td class="mono small">${esc([...r.pids].join(", ") || "—")}</td>
         <td class="num">${r.out ? "" : fmt(r.hits)}</td><td class="num">${r.out ? "" : fmt(r.peers)}</td><td class="num">${r.out && r.outHits ? fmt(r.outHits) : ""}</td>
         <td>${r.out ? "" : apps.length ? esc(apps.join(", ")) : `<span class="small muted">kayıt yok</span>`}</td></tr>`; }).join("")}</tbody></table></div>`;
