@@ -208,6 +208,7 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
     {
         var profiles = await islev.ProfilesAsync(ips, env, ct);
         var cb = await CarbonBlackAsync(ips, hours, ct);
+        var sm = await SmPortAsync(ips, ports, env, ct);
         var outp = new Dictionary<string, string>();
         foreach (var ip in ips)
         {
@@ -227,7 +228,7 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
                 }.OfType<string>().DefaultIfEmpty("başka bilgi yok")));
             }
             sb.Append(Neighbors(env, ip, miss));
-            sb.Append(await SmPortAsync(ip, env.AppsOnIp(ip).Select(h => h.UnixName).OfType<string>().FirstOrDefault(), miss, ct));
+            if (sm.TryGetValue(ip, out var smText)) sb.Append(smText);
             if (cb.TryGetValue(ip, out var c)) sb.Append(c.Text(env, ip, miss));
             else sb.AppendLine($"Carbon Black (son {hours} saat): bu sunucuda ağ olayı yok (ajan yok ya da trafik yok).");
             var cands = Candidates(env, ip, sb.ToString());
@@ -239,14 +240,19 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
 
     // SM talepleri (IP + port): açıklamasında sunucunun IP'si ya da adı VE boş portlardan biri geçen en yeni talepler
     // (kullanıcının diğer projesindeki sorgu). SM verisi ERT ile aynı doku DB'sinde: Eksik:SmTablolari (varsayılan dbo.REQUESTM1).
-    // ZT_*ACIKLAMA kolonları olmayan şemada yalnız DESCRIPTION / BRIEF_DESCRIPTION. Port eşleşmesi C#'ta tam sayı olarak doğrulanır.
-    async Task<string> SmPortAsync(string ip, string? host, List<string> ports, CancellationToken ct)
+    // Tablo büyük: tek sorgu tüm grup (≤20 sunucu) için, yalnız son Eksik:SmYil (varsayılan Islev:SmYil = 3) yıl; hangi talebin
+    // hangi sunucu / porta ait olduğu C#'ta ayrılır (port tam sayı olarak). ZT_*ACIKLAMA yoksa yalnız DESCRIPTION / BRIEF_DESCRIPTION.
+    async Task<Dictionary<string, string>> SmPortAsync(List<string> ips, Dictionary<string, List<string>> ports, EnvanterSnapshot env, CancellationToken ct)
     {
-        var ps = ports.Where(p => p.Length > 0 && p.All(char.IsDigit)).ToList();
-        if (ps.Count == 0) return "";
+        var want = ips.Select(ip => (ip, host: env.AppsOnIp(ip).Select(h => h.UnixName).OfType<string>().FirstOrDefault(),
+                ps: (ports.GetValueOrDefault(ip) ?? []).Where(p => p.Length > 0 && p.All(char.IsDigit)).ToList()))
+            .Where(x => x.ps.Count > 0).ToList();
+        var outp = new Dictionary<string, string>();
+        if (want.Count == 0) return outp;
         var tables = cfg.GetSection("Eksik:SmTablolari").GetChildren().Select(c => c.Value).OfType<string>().ToList();
         if (tables.Count == 0) tables = ["dbo.REQUESTM1"];
-        var hits = new List<(string No, DateTime? T, string Text, List<string> Ports)>();
+        var since = DateTime.Today.AddYears(-Math.Clamp(cfg.GetValue("Eksik:SmYil", cfg.GetValue("Islev:SmYil", 3)), 1, 20));
+        var rows = new List<(string No, DateTime? T, string Who, string Desc, string Text)>();
         string? err = null;
         foreach (var table in tables.Where(t => System.Text.RegularExpressions.Regex.IsMatch(t, @"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*){0,2}$")))
         {
@@ -257,29 +263,26 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
                 await using var cmd = new SqlCommand("", conn) { CommandTimeout = cfg.GetValue("Islev:SqlTimeoutSaniye", 180) };
                 var cols = zt ? new[] { "req.DESCRIPTION", "req.BRIEF_DESCRIPTION", "req.ZT_KAYNAKACIKLAMA", "req.ZT_HEDEFACIKLAMA" }
                               : new[] { "req.DESCRIPTION", "req.BRIEF_DESCRIPTION" };
-                cmd.Parameters.AddWithValue("@ip", $"%{ip}%");
-                var who = cols.Select(c => $"{c} LIKE @ip").ToList();
-                if (!string.IsNullOrWhiteSpace(host) && host.Length >= 4)
-                {
-                    cmd.Parameters.AddWithValue("@h", $"%{host}%");
-                    who.AddRange(cols.Select(c => $"{c} LIKE @h"));
-                }
-                var port = ps.Select((p, i) => { cmd.Parameters.AddWithValue($"@p{i}", $"%{p}%"); return $"req.DESCRIPTION LIKE @p{i} OR req.BRIEF_DESCRIPTION LIKE @p{i}"; }).ToList();
+                int n = 0;
+                string P(string v) { string name = "@w" + n++; cmd.Parameters.AddWithValue(name, $"%{v}%"); return name; }
+                var who = want.SelectMany(x => new[] { x.ip }.Concat(x.host is { Length: >= 4 } h ? [h] : []))
+                    .Distinct(StringComparer.OrdinalIgnoreCase).Select(P).SelectMany(p => cols.Select(c => $"{c} LIKE {p}")).ToList();
+                var port = want.SelectMany(x => x.ps).Distinct().Select(P).Select(p => $"req.DESCRIPTION LIKE {p} OR req.BRIEF_DESCRIPTION LIKE {p}").ToList();
+                cmd.Parameters.AddWithValue("@since", since);
                 cmd.CommandText = $"""
-                    SELECT TOP (30) req.NUMBER, req.OPEN_TIME, req.BRIEF_DESCRIPTION, LEFT(CAST(req.DESCRIPTION AS nvarchar(max)), 800)
+                    SELECT TOP (500) req.NUMBER, req.OPEN_TIME, req.BRIEF_DESCRIPTION, LEFT(CAST(req.DESCRIPTION AS nvarchar(max)), 800)
                         {(zt ? ", req.ZT_KAYNAKACIKLAMA, req.ZT_HEDEFACIKLAMA" : "")}
                     FROM {table} req WITH (NOLOCK)
-                    WHERE ({string.Join(" OR ", who)}) AND ({string.Join(" OR ", port)})
+                    WHERE req.OPEN_TIME >= @since AND ({string.Join(" OR ", who)}) AND ({string.Join(" OR ", port)})
                     ORDER BY req.OPEN_TIME DESC
                     """;
                 await using var r = await cmd.ExecuteReaderAsync(ct);
                 while (await r.ReadAsync(ct))
                 {
                     string Txt(int i) => i < r.FieldCount && !r.IsDBNull(i) ? Convert.ToString(r.GetValue(i)) ?? "" : "";
-                    var found = ps.Where(p => System.Text.RegularExpressions.Regex.IsMatch(Txt(2) + " " + Txt(3), $@"(?<!\d){p}(?!\d)")).ToList();
-                    if (found.Count == 0) continue;
-                    string text = string.Join(" · ", new[] { Txt(2), Txt(3), zt ? Txt(4) : "", zt ? Txt(5) : "" }.Where(x => x.Length > 0));
-                    hits.Add((Txt(0), r.IsDBNull(1) ? null : r.GetDateTime(1), System.Text.RegularExpressions.Regex.Replace(text, @"\s+", " "), found));
+                    string all = string.Join(" · ", new[] { Txt(2), Txt(3), zt ? Txt(4) : "", zt ? Txt(5) : "" }.Where(x => x.Length > 0));
+                    rows.Add((Txt(0), r.IsDBNull(1) ? null : r.GetDateTime(1), all, Txt(2) + " " + Txt(3),
+                        System.Text.RegularExpressions.Regex.Replace(all, @"\s+", " ")));
                 }
             }
             try { await Query(true); }
@@ -289,11 +292,22 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
             }
             catch (SqlException ex) { err = $"{table}: {ex.Message}"; }
         }
-        if (hits.Count == 0) return err != null ? $"SM TALEPLERİ (IP + port): okunamadı ({Cut(err, 150)})\n" : "";
-        var sb = new StringBuilder("SM TALEPLERİ (açıklamasında bu sunucu VE boş port geçen, en yeni):\n");
-        foreach (var h in hits.DistinctBy(h => h.No).OrderByDescending(h => h.T).Take(10))
-            sb.AppendLine($"- {h.No} {h.T:yyyy-MM-dd} [port {string.Join(",", h.Ports)}]: {Cut(h.Text, 400)}");
-        return sb.ToString();
+        foreach (var (ip, host, ps) in want)
+        {
+            // IP tam (10.1.1.1, 10.1.1.10'a uymasın), sunucu adı içinde; port tam sayı olarak açıklamada
+            var mine = rows.Where(r => System.Text.RegularExpressions.Regex.IsMatch(r.Who, $@"(?<![\d.]){System.Text.RegularExpressions.Regex.Escape(ip)}(?![\d])")
+                                       || (host is { Length: >= 4 } && r.Who.Contains(host, StringComparison.OrdinalIgnoreCase)))
+                .Select(r => (r, found: ps.Where(p => System.Text.RegularExpressions.Regex.IsMatch(r.Desc, $@"(?<!\d){p}(?!\d)")).ToList()))
+                .Where(x => x.found.Count > 0).DistinctBy(x => x.r.No).OrderByDescending(x => x.r.T).Take(10).ToList();
+            if (mine.Count > 0)
+            {
+                var sb = new StringBuilder("SM TALEPLERİ (açıklamasında bu sunucu VE boş port geçen, en yeni):\n");
+                foreach (var (r, found) in mine) sb.AppendLine($"- {r.No} {r.T:yyyy-MM-dd} [port {string.Join(",", found)}]: {Cut(r.Text, 400)}");
+                outp[ip] = sb.ToString();
+            }
+            else if (err != null) outp[ip] = $"SM TALEPLERİ (IP + port): okunamadı ({Cut(err, 150)})\n";
+        }
+        return outp;
     }
 
     // Komşu ipuçları: benzer adlı sunucular (ad sonundaki sayı atılınca aynı: zb1pwatmvzsra01/02…), aynı segmentte aynı portu

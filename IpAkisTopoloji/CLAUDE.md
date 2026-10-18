@@ -247,7 +247,8 @@ Açık soru: ERT Entropi'den truncate ile yeniden yükleniyorsa TAG / AI_KUME / 
   havuz komşuları, benzer ad, segment+port, muhafızın uygulamaları, adı kanıtla kelime örtüşen ERT uygulamaları).
   SM talepleri IP + port (`SmPortAsync`, kullanıcının diğer projesinden gelen sorgu): `Eksik:SmTablolari` (varsayılan dbo.REQUESTM1; SM
   ERT ile aynı doku DB'sinde), DESCRIPTION / BRIEF_DESCRIPTION / ZT_KAYNAKACIKLAMA / ZT_HEDEFACIKLAMA'da IP ya da UNIXNAME VE
-  DESCRIPTION / BRIEF_DESCRIPTION'da port (C#'ta tam sayı doğrulaması), NOLOCK, TOP 30 → en yeni 10; ZT_ kolonu yoksa (207) yalnız iki kolon. Kullanıcının canlı örneği:
+  DESCRIPTION / BRIEF_DESCRIPTION'da port. Kullanıcı: tablo büyük → tek sorgu 20 sunuculuk grup için, OPEN_TIME ≥ son `Eksik:SmYil`
+  (varsayılan Islev:SmYil=3) yıl, NOLOCK, TOP 500; sunucu/port ataması C#'ta (IP tam, port tam sayı), sunucu başına en yeni 10; ZT_ kolonu yoksa (207) yalnız iki kolon. Kullanıcının canlı örneği:
   2.71.51.16:5000 boş, CB'de c:\bbpgm\atm_monitoring_service\terminaldurum.restservice.exe, sunucu adı zb1pwatmvzsra01 ("atm").
   AI (`IslevService.ChatAsync`, `Paket`=3 sunucu/istek, `Paralel`=2, `MaxIp`=200/çalıştırma): adaydan harfi harfine seçer ya da
   yeni=true; "Altyapı: …"; kanıt yoksa null. Sonuç ERT'ye YAZILMAZ: `Eksik:OneriTablosu` dbo.DF_ERT_UYGULAMA_ONERI (`sql/ert_oneri.sql`;
