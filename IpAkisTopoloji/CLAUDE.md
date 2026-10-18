@@ -256,6 +256,10 @@ Açık soru: ERT Entropi'den truncate ile yeniden yükleniyorsa TAG / AI_KUME / 
   (ara, durum yok|ai|onay|red, altyapi, sayfa), `/api/eksik/durum`, `/kanit?ip=`, POST `/calistir {ips?, hepsi, yeniden, saat}`,
   `/durdur`, `/karar {ip, port, karar: onay|red|elle|sil, uygulama}`, `/csv?hepsi=` (Excel, ; ayraçlı, BOM). Yazma yetkisi
   `Etiket:Yazanlar`. Kullanıcı: alt sayfalara ayrı yetki kontrolü SONRA eklenecek.
+  Kullanıcı istekleri: otomatik / dinamik portlar (≥ `Eksik:DinamikPortBaslangic`=49152) HİÇ listelenmez; test segmentleri
+  (segment Domain'inde `Eksik:TestIfadeleri`=["test"]) altyapı portları gibi seçmeli ("Test segmentleri" kutucuğu, varsayılan gizli,
+  işaretli değilse "AI ile öner" onları göndermez). IP sorgulama kartında ERT tablosuna "AI önerisi" kolonu (yalnız uygulama adı boş
+  satır varsa; `/api/eksik/ip?ip=` port → öneri, `aiSuggest`/`loadOneri`; öneri yoksa "öneri yok ↗" eksik sayfasına).
 - **VIP**: sorgulanan IP VIP ise üyeler + GW'ler aynı sorguya eklenir, üyeler "VIP ÜYESİ" (GW→üye trafiği varsa ✓).
   Gidilen IP VIP ise "VIP → n ÜYE"; gelen IP LB GW ise "LB GW"; sorgulanan sunucu havuz üyesiyse VIP kartı.
 - **Uygulama görünümü** (`/api/apps`, `/api/app`): `[kullanan uygulamalar] → [UYGULAMA: VIP'ler + segment grupları] → [bağımlı olunanlar]`,

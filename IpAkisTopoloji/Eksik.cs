@@ -13,10 +13,10 @@ using Microsoft.Data.SqlClient;
 // ---------------------------------------------------------------------------
 record EksikOneri(string? Uygulama, bool Yeni, int Guven, string? Gerekce, string Durum, string? Kaynak, DateTime Tarih);
 record EksikSatir(string Ip, string Port, string? Hostname, string? Segment, string? Website, string? Servis, string? Muhafiz,
-    string? Birim, List<string> Diger, bool Altyapi, EksikOneri? Oneri);
+    string? Birim, List<string> Diger, bool Altyapi, EksikOneri? Oneri, bool Test = false);
 record EksikListe(List<EksikSatir> Satirlar, int Toplam, int TumSatir, int TumIp, int Onerili, int Onayli, IslevDurum Durum,
     bool Yazabilir, string? Uyari);
-record EksikCalistir(List<string>? Ips, bool Hepsi, bool Yeniden, int? Saat);
+record EksikCalistir(List<string>? Ips, bool Hepsi, bool Yeniden, int? Saat, bool Test = false);
 record EksikKarar(string? Ip, string? Port, string? Karar, string? Uygulama);
 
 sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, EnvanterService envanter, IslevService islev,
@@ -40,28 +40,44 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
     // ---------------- Eksik satırlar ----------------
     static string Key(string? port) => port ?? "";
 
-    public static List<(string Ip, string Port, HostApp Row)> Missing(EnvanterSnapshot env) =>
+    // Otomatik (dinamik) portlar hiç listelenmez: Eksik:DinamikPortBaslangic (varsayılan 49152) ve üstü (kullanıcı kararı)
+    public static List<(string Ip, string Port, HostApp Row)> Missing(EnvanterSnapshot env, int dyn = 49152) =>
         env.HostIps.SelectMany(ip => env.AppsOnIp(ip).Where(h => string.IsNullOrWhiteSpace(h.AppName))
+                .Where(h => !(int.TryParse(h.Port, out int n) && n >= dyn))
                 .GroupBy(h => Key(h.Port)).Select(g => (ip, g.Key, g.First())))
             .ToList();
+    int Dyn => cfg.GetValue("Eksik:DinamikPortBaslangic", 49152);
 
-    public async Task<EksikListe> ListAsync(string? ara, string? durum, bool altyapi, int sayfa, int boyut, bool yazabilir, CancellationToken ct)
+    // Test segmenti: KonsolideSegmentler4.Domain'inde Eksik:TestIfadeleri (varsayılan "test") geçiyor; varsayılan olarak gizli, AI'a gitmez
+    bool IsTest(EnvanterSnapshot env, string ip)
+    {
+        var words = cfg.GetSection("Eksik:TestIfadeleri").GetChildren().Select(c => c.Value).OfType<string>().ToList();
+        if (words.Count == 0) words = ["test"];
+        string? d = env.FindSegment(ip)?.Domain;
+        return d != null && words.Any(w => d.Contains(w, StringComparison.OrdinalIgnoreCase));
+    }
+
+    // IP sorgulama kartı: bu IP'nin port başına önerisi (ERT tablosundaki "AI önerisi" kolonu)
+    public async Task<Dictionary<string, EksikOneri>> ForIpAsync(string ip, CancellationToken ct) =>
+        (await LoadAsync(false, ct)).Where(kv => kv.Key.Item1 == ip && kv.Value.Durum != "").ToDictionary(kv => kv.Key.Item2, kv => kv.Value);
+
+    public async Task<EksikListe> ListAsync(string? ara, string? durum, bool altyapi, int sayfa, int boyut, bool yazabilir, CancellationToken ct, bool test = false)
     {
         var env = await envanter.GetAsync(false, ct);
         var infra = AppTopology.InfraPorts(cfg);
         var oneri = await LoadAsync(false, ct);
-        var all = Missing(env);
+        var all = Missing(env, Dyn);
         var rows = all.Select(m =>
         {
             var hosts = env.AppsOnIp(m.Ip);
             oneri.TryGetValue((m.Ip, m.Port), out var o);
             return new EksikSatir(m.Ip, m.Port, hosts.Select(h => h.UnixName).OfType<string>().FirstOrDefault(), env.FindSegment(m.Ip)?.Label,
                 m.Row.Website, m.Row.ServiceName, m.Row.VarlikMuhafizi ?? hosts.Select(h => h.VarlikMuhafizi).OfType<string>().FirstOrDefault(),
-                m.Row.SunucuIsletenBirim, env.AppNamesOnIp(m.Ip).Take(4).ToList(), infra.Contains(m.Port), o);
+                m.Row.SunucuIsletenBirim, env.AppNamesOnIp(m.Ip).Take(4).ToList(), infra.Contains(m.Port), o, IsTest(env, m.Ip));
         }).ToList();
         string? q = ara?.Trim();
         bool Has(string? v) => v != null && v.Contains(q!, StringComparison.CurrentCultureIgnoreCase);
-        var f = rows.Where(r => altyapi || !r.Altyapi)
+        var f = rows.Where(r => altyapi || !r.Altyapi).Where(r => test || !r.Test)
             .Where(r => string.IsNullOrEmpty(q) || Has(r.Ip) || Has(r.Port) || Has(r.Hostname) || Has(r.Website) || Has(r.Servis)
                         || Has(r.Muhafiz) || Has(r.Segment) || Has(r.Oneri?.Uygulama) || r.Diger.Any(Has))
             .Where(r => durum switch
@@ -195,7 +211,7 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
         }
         catch (SqlException) { /* tablo yoksa yeniden üretilir */ }
         var env = await envanter.GetAsync(false, ct);
-        var miss = Missing(env).Where(m => m.Ip == ip).Select(m => m.Port).ToList();
+        var miss = Missing(env, Dyn).Where(m => m.Ip == ip).Select(m => m.Port).ToList();
         var texts = await BuildAsync([ip], miss.Count > 0 ? new() { [ip] = miss } : new() { [ip] = [] }, env, Hours(null), ct);
         return texts.GetValueOrDefault(ip) ?? "";
     }
@@ -480,8 +496,9 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
         var have = await LoadAsync(true, ct);
         var wanted = req.Ips is { Count: > 0 } ? req.Ips.ToHashSet() : null;
         // Hedef: istenen IP'ler ya da önerisi olmayanlar; altyapı portları ve onaylanmış / elle girilmiş olanlar atlanır
-        var todo = Missing(env).Where(m => !infra.Contains(m.Port))
+        var todo = Missing(env, Dyn).Where(m => !infra.Contains(m.Port))
             .Where(m => wanted == null || wanted.Contains(m.Ip))
+            .Where(m => wanted != null || req.Test || !IsTest(env, m.Ip))   // test segmentleri yalnız seçilirse
             .Where(m => !have.TryGetValue((m.Ip, m.Port), out var o) || (o.Durum is not (Onay or Elle) && (req.Yeniden || wanted != null)))
             .GroupBy(m => m.Ip).OrderByDescending(g => g.Count())
             .Take(Math.Clamp(cfg.GetValue("Eksik:MaxIp", 200), 1, 5000))
@@ -585,9 +602,9 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
     // hepsi = false: yalnız onaylanan / elle girilenler; true: önerisi olan tüm satırlar
     public async Task<string> CsvAsync(bool hepsi, CancellationToken ct)
     {
-        var rows = (await ListAsync(null, hepsi ? null : "onay", true, 1, 1000, false, ct)) is var first && first.Toplam > 1000
+        var rows = (await ListAsync(null, hepsi ? null : "onay", true, 1, 1000, false, ct, true)) is var first && first.Toplam > 1000
             ? (await Task.WhenAll(Enumerable.Range(1, (first.Toplam + 999) / 1000)
-                .Select(p => ListAsync(null, hepsi ? null : "onay", true, p, 1000, false, ct)))).SelectMany(l => l.Satirlar).ToList()
+                .Select(p => ListAsync(null, hepsi ? null : "onay", true, p, 1000, false, ct, true)))).SelectMany(l => l.Satirlar).ToList()
             : first.Satirlar;
         var sb = new StringBuilder("\uFEFFIP;PORT;SUNUCU;SEGMENT;WEBSITE;SERVICENAME;MUHAFIZ;AYNI SUNUCUDAKİ UYGULAMALAR;ÖNERİLEN UYGULAMA;YENİ AD;GÜVEN;DURUM;KARAR VEREN;GEREKÇE\r\n");
         static string C(string? s) => "\"" + (s ?? "").Replace("\"", "\"\"") + "\"";

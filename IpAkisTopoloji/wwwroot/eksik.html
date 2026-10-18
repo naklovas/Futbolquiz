@@ -91,7 +91,7 @@
 <header>
   <img src="deltaflow.svg" alt="">
   <div><h1>ERT eksikleri · uygulama adı önerisi</h1>
-    <div class="sub">ERT_HOSTIPADDRESS'te uygulama adı boş portlar · AI kanıtlara bakarak önerir · onaylananlar Excel'e aktarılır (ERT'ye yazılmaz)</div></div>
+    <div class="sub">ERT_HOSTIPADDRESS'te uygulama adı boş portlar (otomatik / dinamik portlar 49152+ hariç) · AI kanıtlara bakarak önerir · onaylananlar Excel'e aktarılır (ERT'ye yazılmaz)</div></div>
   <span class="sp"></span>
   <a href="./">← DeltaFlow</a>
   <span id="me"></span>
@@ -107,6 +107,7 @@
         <option value="onay">Onaylanan / elle</option><option value="red">Reddedilen</option>
       </select>
       <label title="RDP, SMB, DNS gibi altyapı portları (AI'a gönderilmez)"><input type="checkbox" id="alt"> Altyapı portları</label>
+      <label title="Segment Domain'inde 'test' geçen sunucular (varsayılan gizli; işaretliyken 'AI ile öner' onları da gönderir)"><input type="checkbox" id="test"> Test segmentleri</label>
       <span class="sp"></span>
       <label title="Carbon Black kanıtları için geriye bakılacak süre">CB aralığı <select id="saat"><option value="1">1 saat</option><option value="6">6 saat</option><option value="24" selected>24 saat</option><option value="72">3 gün</option><option value="168">7 gün</option></select></label>
       <button id="runSel" disabled title="Seçili satırların sunucularını AI'a gönderir (önceki AI önerisi yenilenir; onaylananlara dokunulmaz)">Seçilenlere öner</button>
@@ -127,7 +128,7 @@
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const fmt = n => Number(n || 0).toLocaleString("tr-TR");
-const st = { q: "", durum: "", alt: false, page: 1, size: 200, data: null, sel: new Set(), poll: null, timer: null, seq: 0 };
+const st = { q: "", durum: "", alt: false, test: false, page: 1, size: 200, data: null, sel: new Set(), poll: null, timer: null, seq: 0 };
 const key = r => r.ip + "|" + r.port;
 
 async function api(url, opt) {
@@ -141,7 +142,7 @@ const post = (url, body) => api(url, { method: "POST", headers: { "Content-Type"
 async function load() {
   const my = ++st.seq;
   try {
-    const p = new URLSearchParams({ sayfa: st.page, boyut: st.size, altyapi: st.alt });
+    const p = new URLSearchParams({ sayfa: st.page, boyut: st.size, altyapi: st.alt, test: st.test });
     if (st.q) p.set("ara", st.q);
     if (st.durum) p.set("durum", st.durum);
     const b = await api("api/eksik?" + p);
@@ -172,7 +173,7 @@ function render() {
       <td class="ip"><a href="./?ip=${encodeURIComponent(r.ip)}" target="_blank" rel="noopener" title="IP topolojisini aç">${esc(r.ip)}</a>
         <div><a href="#" data-kanit="${esc(r.ip)}" class="small" style="font-family:inherit;font-weight:400;color:var(--muted)">kanıtlar</a></div></td>
       <td class="mono">${esc(r.port || "—")}${r.altyapi ? `<div class="small muted">altyapı</div>` : ""}</td>
-      <td>${esc(r.hostname || "—")}<div class="small muted">${esc(r.segment || "")}</div></td>
+      <td>${esc(r.hostname || "—")}<div class="small muted">${esc(r.segment || "")}${r.test ? ` <span class="st new">test</span>` : ""}</div></td>
       <td class="small">${info.map(esc).join("<br>") || `<span class="muted">—</span>`}</td>
       <td class="chips">${r.diger.map(a => `<span>${esc(a)}</span>`).join("") || `<span class="muted small" style="border:0;background:none">—</span>`}</td>
       <td class="sug">${o ? `<div>${o.uygulama ? `<b>${esc(o.uygulama)}</b>` : `<span class="muted">öneri yok</span>`}${o.uygulama && o.durum !== "Elle" ? `<span class="conf" title="güven %${g}"><i style="width:${g}%;background:${col}"></i></span><span class="small muted">%${g}</span>` : ""}
@@ -246,9 +247,10 @@ async function kanit(ip) {
 $("#q").addEventListener("input", e => { clearTimeout(st.timer); st.timer = setTimeout(() => { st.q = e.target.value.trim(); st.page = 1; load(); }, 350); });
 $("#durum").addEventListener("change", e => { st.durum = e.target.value; st.page = 1; load(); });
 $("#alt").addEventListener("change", e => { st.alt = e.target.checked; st.page = 1; load(); });
+$("#test").addEventListener("change", e => { st.test = e.target.checked; st.page = 1; load(); });
 $("#prev").addEventListener("click", () => { st.page--; load(); });
 $("#next").addEventListener("click", () => { st.page++; load(); });
-$("#runAll").addEventListener("click", () => { if (confirm("Önerisi olmayan satırlar AI'a gönderilsin mi? Sunucu sayısına göre uzun sürebilir; sayfa kapansa da arka planda devam eder.")) start({ hepsi: true }); });
+$("#runAll").addEventListener("click", () => { if (confirm("Önerisi olmayan satırlar AI'a gönderilsin mi? Sunucu sayısına göre uzun sürebilir; sayfa kapansa da arka planda devam eder.")) start({ hepsi: true, test: st.test }); });
 $("#runSel").addEventListener("click", () => start({ ips: [...new Set([...st.sel].map(k => k.split("|")[0]))], yeniden: true }));
 $("#all").addEventListener("change", e => { st.data.satirlar.forEach(r => e.target.checked ? st.sel.add(key(r)) : st.sel.delete(key(r))); render(); });
 $("#body").addEventListener("change", e => { const c = e.target.closest("[data-sel]"); if (!c) return; c.checked ? st.sel.add(c.dataset.sel) : st.sel.delete(c.dataset.sel); render(); });

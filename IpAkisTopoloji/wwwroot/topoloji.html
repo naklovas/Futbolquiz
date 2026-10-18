@@ -421,6 +421,7 @@ async function run() {
     runF5Uri(params);
     // Dinleyen süreçler (uygulama tablosundaki "Çalışan süreç" kolonu; Süreçler sekmesi de hazır olur)
     if ($("#srcSplunk").checked) runProc(params);
+    if (body.target?.apps?.some(x => !x.appName)) loadOneri(body.target.ip);
   } catch (e) {
     const msg = e.name === "AbortError" ? "Sorgu iptal edildi." : e.message;
     $("#main").innerHTML = `<div class="panel empty" style="color:var(--err)">${esc(msg)}</div>`;
@@ -651,11 +652,13 @@ function renderTarget(d) {
 // "Bu makinedeki uygulamalar" (ERT) ve altında ERT'den bağımsız "Gelen portlar ve çalışan süreçler" (Carbon Black: sunucunun
 // kendi ajanı, seçili aralıkta gelen bağlantı kabul eden exe'ler; /api/surec IP sorgusundan sonra arka planda çekilir).
 function targetApps(t) {
+  const anyEmpty = t.apps.some(a => !a.appName);
   const ert = t.apps.length ? `<div class="tbl-wrap" style="max-height:220px"><table>
-      <thead><tr><th>Port</th><th>Uygulama</th><th>Servis</th><th>Unix/Host</th><th>Varlık muhafızı</th><th>İşleten birim</th><th>Varlık sahibi</th></tr></thead>
+      <thead><tr><th>Port</th><th>Uygulama</th>${anyEmpty ? `<th title="Uygulama adı boş satırlar için ERT eksikleri sayfasındaki AI önerisi">AI önerisi</th>` : ""}<th>Servis</th><th>Unix/Host</th><th>Varlık muhafızı</th><th>İşleten birim</th><th>Varlık sahibi</th></tr></thead>
       <tbody>${[...t.apps].sort((a, b) => (+a.port || 0) - (+b.port || 0)).map(a => `<tr>
         <td class="mono">${esc(a.port ?? "")}${a.vipIp ? `<div class="small muted">VIP ${esc(a.vipIp)}:${esc(a.vipPort ?? "")}</div>` : ""}</td>
         <td><b>${esc(a.appName ?? "")}</b>${a.website ? `<div class="small muted">${esc(a.website)}</div>` : ""}</td>
+        ${anyEmpty ? `<td>${aiSuggest(t.ip, a)}</td>` : ""}
         <td>${esc(a.serviceName ?? "")}</td><td>${esc(a.unixName ?? "")}</td>
         <td>${esc(a.varlikMuhafizi ?? "")}</td><td>${esc(a.sunucuIsletenBirim ?? "")}</td><td>${esc(a.uygulamaVarlikSahibi ?? "")}</td>
       </tr>`).join("")}</tbody></table></div>`
@@ -729,6 +732,27 @@ function listenTable(t) {
         <td class="mono small">${esc([...r.pids].join(", ") || "—")}</td>
         <td class="num">${r.out ? "" : fmt(r.hits)}</td><td class="num">${r.out ? "" : fmt(r.peers)}</td><td class="num">${r.out && r.outHits ? fmt(r.outHits) : ""}</td>
         <td>${r.out ? "" : apps.length ? esc(apps.join(", ")) : `<span class="small muted">kayıt yok</span>`}</td></tr>`; }).join("")}</tbody></table></div>`;
+}
+// "AI önerisi" kolonu: ERT eksikleri sayfasının önerileri (/api/eksik/ip); uygulama adı boş satırlarda
+function aiSuggest(ip, a) {
+  if (a.appName) return "";
+  const o = state.oneri?.ip === ip ? state.oneri.map?.[a.port ?? ""] : null;
+  if (!o) return `<a class="small muted" href="eksik.html" target="_blank" rel="noopener" title="ERT eksikleri sayfasında AI'a öner">öneri yok ↗</a>`;
+  if (!o.uygulama) return `<span class="small muted" title="${esc(o.gerekce || "")}">AI bulamadı</span>`;
+  const ok = o.durum === "Onaylandı" || o.durum === "Elle";
+  return `<span title="${esc(o.gerekce || "")}"><b style="color:${ok ? "var(--ok)" : "var(--in)"}">${esc(o.uygulama)}</b>
+    <span class="small muted">${ok ? esc(o.durum.toLowerCase()) : `AI · %${o.guven}`}${o.yeni ? " · yeni ad" : ""}${o.durum === "Reddedildi" ? " · reddedildi" : ""}</span></span>`;
+}
+async function loadOneri(ip) {
+  state.oneri = { ip, map: null };
+  try {
+    const r = await fetch("api/eksik/ip?" + new URLSearchParams({ ip }));
+    if (!r.ok) return;
+    const map = await r.json();
+    if (state.oneri?.ip !== ip) return;
+    state.oneri.map = map;
+    updateTargetApps();
+  } catch { /* öneri yoksa kolon boş kalır */ }
 }
 function updateTargetApps() {
   const box = $("#tgtApps");

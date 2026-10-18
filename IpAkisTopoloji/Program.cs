@@ -675,13 +675,20 @@ app.MapGet("/api/islev/topoloji", async (string etiket, string? tenant, string? 
 app.MapGet("/api/islev/durum", (IslevService islev) => Results.Ok(islev.Durum));
 
 // ERT eksikleri (Eksik.cs, wwwroot/eksik.html): APPNAME'i boş (IP, port) satırlarına AI'dan uygulama önerisi; ERT'ye yazılmaz.
-app.MapGet("/api/eksik", async (string? ara, string? durum, bool? altyapi, int? sayfa, int? boyut, HttpContext ctx, IConfiguration cfg,
+app.MapGet("/api/eksik", async (string? ara, string? durum, bool? altyapi, bool? test, int? sayfa, int? boyut, HttpContext ctx, IConfiguration cfg,
     EksikService eksik, CancellationToken ct) =>
 {
-    try { return Results.Ok(await eksik.ListAsync(ara, durum, altyapi ?? false, sayfa ?? 1, boyut ?? 200, EtiketService.CanWrite(cfg, ctx.User?.Identity?.Name), ct)); }
+    try { return Results.Ok(await eksik.ListAsync(ara, durum, altyapi ?? false, sayfa ?? 1, boyut ?? 200, EtiketService.CanWrite(cfg, ctx.User?.Identity?.Name), ct, test ?? false)); }
     catch (Exception ex) { return Results.Json(new { error = ex.Message }, statusCode: 502); }
 });
 app.MapGet("/api/eksik/durum", (EksikService eksik) => Results.Ok(eksik.Durum));
+// IP sorgulama kartı: "Bu makinedeki uygulamalar" tablosundaki AI önerisi kolonu (port → öneri)
+app.MapGet("/api/eksik/ip", async (string ip, EksikService eksik, CancellationToken ct) =>
+{
+    if (!LookupQuery.TryParseIpv4(ip, out string v)) return Results.BadRequest(new { error = "Geçersiz IP." });
+    try { return Results.Ok(await eksik.ForIpAsync(v, ct)); }
+    catch (Exception ex) { return Results.Json(new { error = ex.Message }, statusCode: 502); }
+});
 app.MapGet("/api/eksik/kanit", async (string ip, EksikService eksik, CancellationToken ct) =>
 {
     if (!LookupQuery.TryParseIpv4(ip, out string v)) return Results.BadRequest(new { error = "Geçersiz IP." });
