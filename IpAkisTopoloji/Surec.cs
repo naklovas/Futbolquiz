@@ -9,7 +9,7 @@ record ProcPeer(string Ip, string Port, long Hits, SegmentInfo? Segment, List<st
 // Portlar: dinlenen port başına tüm gelen bağlantılar ve farklı karşı IP sayısı (Inbound ilk 40 karşı IP ile sınırlı, bu değil)
 record ProcPort(string Port, long Hits, int Peers);
 record ProcNode(string Key, string Name, string? Pid, long InHits, long OutHits, List<string> ListenPorts, List<string> LocalApps,
-    List<ProcPeer> Inbound, List<ProcPeer> Outbound, List<ProcPort>? Portlar = null);
+    List<ProcPeer> Inbound, List<ProcPeer> Outbound, List<ProcPort>? Portlar = null, string? Yol = null);
 
 record ProcessFlowResponse(string Ip, List<ProcNode> Processes, SourceStatus Splunk, SourceStatus Envanter, long ElapsedMs);
 
@@ -23,13 +23,14 @@ static class ProcessFlowBuilder
         static string? V(Dictionary<string, string> r, string k) => r.TryGetValue(k, out var v) ? EnvanterSnapshot.Clean(v) : null;
 
         var all = sp.Rows
-            .Select(r => (proc: V(r, "process") ?? "bilinmeyen süreç", pid: V(r, "pid"), dir: V(r, "yon"),
-                peer: V(r, "peer"), port: V(r, "port") ?? "", hits: long.TryParse(V(r, "count"), out long c) ? c : 1))
+            // Ad: yolun son parçası (Windows "d:\…\x.exe" ve "/…/x" ikisi de); tam yol ayrıca (Yol)
+            .Select(r => (proc: ExeName(V(r, "process") ?? V(r, "yol")) ?? "bilinmeyen süreç", pid: V(r, "pid"), dir: V(r, "yon"),
+                peer: V(r, "peer"), port: V(r, "port") ?? "", hits: long.TryParse(V(r, "count"), out long c) ? c : 1, yol: V(r, "yol")))
             .Where(r => r.dir is "in" or "out")
             .ToList();
         // Çizim için karşı IP'si olmayan, kendine (aynı IP / 127.0.0.1) giden bağlantılar atlanır; ama süreç listesi ve port
         // sayıları (Portlar, Giden) hepsinden hesaplanır — "Gelen portlar ve çalışan süreçler" tablosunda süreç kaybolmasın.
-        static bool Drawn((string proc, string? pid, string? dir, string? peer, string port, long hits) r, string target) =>
+        static bool Drawn((string proc, string? pid, string? dir, string? peer, string port, long hits, string? yol) r, string target) =>
             r.peer != null && r.peer != target && r.peer != "127.0.0.1";
 
         // Süreç kopyası (PID) ayrı düğüm: IIS'te her uygulama havuzu ayrı w3wp.exe'dir, karışmasınlar.
@@ -53,11 +54,14 @@ static class ProcessFlowBuilder
                     g.Where(r => r.dir == "in").Sum(r => r.hits), g.Where(r => r.dir == "out").Sum(r => r.hits),
                     listen, localApps, inbound, Peers("out"),
                     g.Where(r => r.dir == "in").GroupBy(r => r.port)
-                        .Select(x => new ProcPort(x.Key, x.Sum(r => r.hits), x.Select(r => r.peer).OfType<string>().Distinct().Count())).ToList());
+                        .Select(x => new ProcPort(x.Key, x.Sum(r => r.hits), x.Select(r => r.peer).OfType<string>().Distinct().Count())).ToList(),
+                    g.Select(r => r.yol).FirstOrDefault(y => y is { Length: > 1 }));
             })
             .OrderByDescending(p => p.InHits + p.OutHits)
             .ToList();
     }
+
+    static string? ExeName(string? p) => string.IsNullOrWhiteSpace(p) ? null : p.Trim().Split('\\', '/').Last() is { Length: > 0 } n ? n : p.Trim();
 
     public static ProcPeer Peer(string target, string ip, string port, long hits, string dir, EnvanterSnapshot? env)
     {

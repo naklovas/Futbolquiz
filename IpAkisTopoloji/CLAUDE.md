@@ -230,6 +230,10 @@ Açık soru: ERT Entropi'den truncate ile yeniden yükleniyorsa TAG / AI_KUME / 
   Bu sunucuda ağ olayı görülen TÜM exe'ler (kullanıcı: "Splunk'ta daha çok exe var, burada 1 satır" → yalnız gelen bağlantılı süreçler
   gösteriliyordu ve kendine / karşı IP'siz olaylar Surec.Build'de atılıyordu; artık süreç listesi tüm satırlardan, çizim filtreli):
   gelen bağlantısı olmayanlar "— yalnız giden" satırı (giden sayısıyla), yerel portu olmayan "?". Başlıkta kullanılan aralık yazılır.
+  HTTP.sys: bir portu ntoskrnl.exe / System (PID 4) "dinliyorsa" bağlantıyı çekirdek kabul ediyor (HTTP.sys URL kaydı); asıl uygulama
+  (ör. canlıda 9000 → d:\aspnetcore\zb.wall.p5\core\zb.app.wall.exe, HTTP.sys'li ASP.NET Core) CB'de "yalnız giden" görünür; satırda
+  "HTTP.sys (Windows çekirdeği)" notu (`HTTPSYS`), kesin eşleme sunucuda `netsh http show servicestate`. Surec SPL'inde Windows yolu
+  kesilmiyordu (`[\\/]` yerine `[\\\\/]` olmalı) → düzeltildi, ayrıca C#'ta `ExeName` ve tam yol `ProcNode.Yol` (ipucunda).
 - **VIP**: sorgulanan IP VIP ise üyeler + GW'ler aynı sorguya eklenir, üyeler "VIP ÜYESİ" (GW→üye trafiği varsa ✓).
   Gidilen IP VIP ise "VIP → n ÜYE"; gelen IP LB GW ise "LB GW"; sorgulanan sunucu havuz üyesiyse VIP kartı.
 - **Uygulama görünümü** (`/api/apps`, `/api/app`): `[kullanan uygulamalar] → [UYGULAMA: VIP'ler + segment grupları] → [bağımlı olunanlar]`,

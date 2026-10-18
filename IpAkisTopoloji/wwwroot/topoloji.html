@@ -660,6 +660,10 @@ function targetApps(t) {
   const rng = state.lastParams ? `${(state.lastParams.get("start") || "").replace("T", " ")} – ${(state.lastParams.get("end") || "").replace("T", " ")}` : "seçili aralık";
   return ert + `<h2 style="margin-top:14px">Gelen portlar ve çalışan süreçler <span class="small muted" style="font-weight:400">Carbon Black · ${esc(rng)} · bu sunucuda ağ bağlantısı görülen tüm exe'ler</span></h2>${listenTable(t)}`;
 }
+// Ad tam yol gelirse son parçası (eski sürümde Splunk regex'i Windows yolunu kesmiyordu)
+const exeShort = n => String(n || "").split(/[\\/]/).pop() || n;
+// HTTP.sys: gelen bağlantıyı çekirdek kabul eder (PID 4 / System)
+const HTTPSYS = /^(ntoskrnl\.exe|system)$/i;
 function listenTable(t) {
   const pr = state.proc;
   if (!pr) return `<div class="unk">Carbon Black (Splunk) kaynağı seçili değil.</div>`;
@@ -670,7 +674,7 @@ function listenTable(t) {
   for (const n of pr.body.processes ?? []) {
     if (!(n.portlar ?? n.listenPorts ?? []).length) {
       const k = "~out|" + n.name.toLowerCase();
-      const r = rows.get(k) ?? { port: "", out: true, name: n.name, pids: new Set(), hits: 0, peers: 0, outHits: 0 };
+      const r = rows.get(k) ?? { port: "", out: true, name: n.name, yol: n.yol, pids: new Set(), hits: 0, peers: 0, outHits: 0 };
       if (n.pid) r.pids.add(n.pid);
       r.outHits += n.outHits || 0; rows.set(k, r);
       continue;
@@ -681,7 +685,7 @@ function listenTable(t) {
     });
     for (const x of ports) {
       const k = x.port + "|" + n.name.toLowerCase();
-      const r = rows.get(k) ?? { port: x.port, name: n.name, pids: new Set(), hits: 0, peers: 0, outHits: 0 };
+      const r = rows.get(k) ?? { port: x.port, name: n.name, yol: n.yol, pids: new Set(), hits: 0, peers: 0, outHits: 0 };
       if (n.pid && !r.pids.has(n.pid)) { r.pids.add(n.pid); r.outHits += n.outHits || 0; }
       r.hits += x.hits; r.peers += x.peers; rows.set(k, r);
     }
@@ -695,7 +699,8 @@ function listenTable(t) {
       <thead><tr><th>Gelen port</th><th>Çalışan süreç (exe)</th><th>PID</th><th class="num">Gelen bağlantı</th><th class="num">Karşı IP</th><th class="num">Giden bağlantı</th><th>ERT'deki uygulama</th></tr></thead>
       <tbody>${list.map(r => { const apps = r.out ? [] : ertApps(r.port), infra = PROC_INFRA.has(r.port); return `<tr${infra ? ` class="muted" title="Altyapı portu"` : ""}>
         <td class="mono">${r.out ? `<span class="small muted">— yalnız giden</span>` : r.port ? esc(r.port) : `<span class="small muted" title="Carbon Black olayında yerel port yok">?</span>`}${infra ? ` <span class="small muted">altyapı</span>` : ""}</td>
-        <td><b class="mono">${esc(r.name)}</b></td>
+        <td><b class="mono"${r.yol ? ` title="${esc(r.yol)}"` : ""}>${esc(exeShort(r.name))}</b>${HTTPSYS.test(exeShort(r.name)) && !r.out
+          ? `<div class="small muted" title="Bu portu Windows HTTP.sys sürücüsü dinliyor: bağlantıyı çekirdek kabul eder, isteği URL kaydına göre asıl uygulamaya iletir. Carbon Black bağlantıyı bu yüzden ntoskrnl.exe / System adına yazar. Asıl uygulama exe'si (ör. HTTP.sys ile çalışan bir ASP.NET Core uygulaması ya da w3wp.exe) bu tabloda 'yalnız giden' olarak görünebilir; sunucuda 'netsh http show servicestate' kesin olarak gösterir.">HTTP.sys (Windows çekirdeği) · asıl uygulama ayrı exe ⓘ</div>` : ""}</td>
         <td class="mono small">${esc([...r.pids].join(", ") || "—")}</td>
         <td class="num">${r.out ? "" : fmt(r.hits)}</td><td class="num">${r.out ? "" : fmt(r.peers)}</td><td class="num">${r.out && r.outHits ? fmt(r.outHits) : ""}</td>
         <td>${r.out ? "" : apps.length ? esc(apps.join(", ")) : `<span class="small muted">kayıt yok</span>`}</td></tr>`; }).join("")}</tbody></table></div>`;

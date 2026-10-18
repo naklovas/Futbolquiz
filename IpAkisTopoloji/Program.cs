@@ -1037,11 +1037,12 @@ static class SplunkService
         string spl = $"""
             search index={index} sourcetype="{sourcetype}" TERM({q.Ip}) local_ip="{q.Ip}"
             | eval yon=if(lower(direction)=="outbound", "out", "in"),
-                   process=replace(process_path, "^.*[\\/]", ""),
+                   process=replace(process_path, "^.*[\\\\/]", ""),
+                   yol=coalesce(process_path, "-"),
                    pid=coalesce('{pidField}', "-"),
                    peer=remote_ip,
                    port=if(yon=="out", remote_port, local_port)
-            | stats count by process pid yon peer port
+            | stats count by process pid yon peer port yol
             | sort 0 - count
             """;
         return await ExportAsync(spl, q, cfg, http, ct, "Splunk");
