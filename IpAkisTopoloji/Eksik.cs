@@ -359,7 +359,7 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
         {
             bool Same(string? h) => host is { Length: >= 4 } && h != null && h.Split(',', ';', ' ').Any(x => string.Equals(x.Trim().Split('.')[0], host.Split('.')[0], StringComparison.OrdinalIgnoreCase));
             var miss = (ports.GetValueOrDefault(ip) ?? []).Where(p => p.Length > 0).ToList();
-            var mine = rows.Select(r =>
+            var all = rows.Select(r =>
                 {
                     bool hedef = HasIp(G(r, "ZT_HEDEF"), ip) || Same(G(r, "ZT_HEDEFHOSTNAME"));
                     bool kaynak = HasIp(G(r, "ZT_KAYNAK"), ip) || Same(G(r, "ZT_KAYNAKHOSTNAME"));
@@ -367,7 +367,8 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
                     var ps = hedef ? miss.Where(p => HasPort(G(r, "ZT_HEDEFPORT"), p)).ToList() : [];
                     return (r, hedef, kaynak, ps);
                 })
-                .Where(x => x.hedef || x.kaynak).DistinctBy(x => G(x.r, "NUMBER"))
+                .Where(x => x.hedef || x.kaynak).DistinctBy(x => G(x.r, "NUMBER")).ToList();
+            var mine = all
                 .OrderByDescending(x => x.ps.Count > 0).ThenByDescending(x => x.hedef).ThenByDescending(x => G(x.r, "TARIH")).Take(10).ToList();
             if (mine.Count == 0)
             {
@@ -375,7 +376,18 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
                     : $"SM TALEPLERİ: son {DateTime.Today.Year - since.Year} yılda bu sunucunun (IP {ip}{(host != null ? ", ad " + host : "")}) ZT_HEDEF / ZT_KAYNAK olduğu talep bulunamadı.\n";
                 continue;
             }
-            var sb = new StringBuilder($"SM TALEPLERİ (bu sunucunun hedef ya da kaynak olduğu erişim talepleri, en yeni; {mine.Count(x => x.hedef)} hedef, {mine.Count(x => x.kaynak && !x.hedef)} kaynak):\n");
+            var sb = new StringBuilder();
+            // Aranan (boş) port başına açık özet: bu porta erişim talebi var mı (tüm eşleşen talepler üzerinden, yalnız ilk 10 değil)
+            foreach (var p in miss)
+            {
+                var hit = all.Where(x => x.ps.Contains(p)).OrderByDescending(x => G(x.r, "TARIH")).ToList();
+                sb.AppendLine(hit.Count > 0
+                    ? $"PORT {p}'E ERİŞİM TALEBİ VAR: {hit.Count} talepte bu sunucu hedef ve ZT_HEDEFPORT {p} içeriyor (son {G(hit[0].r, "TARIH")}; {string.Join(", ", hit.Take(5).Select(x => G(x.r, "NUMBER")))})"
+                      + (hit.Select(x => G(x.r, "ZT_HEDEFUYGULAMA", "ZT_HEDEFUGULAMA")).OfType<string>().GroupBy(a => a, StringComparer.OrdinalIgnoreCase).OrderByDescending(g => g.Count()).FirstOrDefault() is { } ga
+                          ? $"; talepteki hedef uygulama: {ga.Key} ({ga.Count()})" : "")
+                    : $"PORT {p}'E ERİŞİM TALEBİ YOK (son {DateTime.Today.Year - since.Year} yılda bu sunucuya ZT_HEDEFPORT {p} olan talep bulunamadı)");
+            }
+            sb.AppendLine($"SM TALEPLERİ (bu sunucunun hedef ya da kaynak olduğu erişim talepleri, en yeni; {mine.Count(x => x.hedef)} hedef, {mine.Count(x => x.kaynak && !x.hedef)} kaynak):");
             foreach (var (r, hedef, kaynak, ps) in mine)
             {
                 string rol = hedef && kaynak ? "bu sunucu HEM HEDEF HEM KAYNAK" : hedef ? $"bu sunucu HEDEF (kaynak: {Cut(G(r, "ZT_KAYNAK", "ZT_KAYNAKHOSTNAME"), 60)})"

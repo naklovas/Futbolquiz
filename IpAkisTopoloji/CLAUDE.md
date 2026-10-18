@@ -277,7 +277,8 @@ erişim talepleri) — DB → şema → tablo ve kim erişiyor bilgisi buradan b
   ZT_KAYNAKACIKLAMA — sunucunun rolüne göre etiketli ("Hedef açıklaması (BU SUNUCU)" / "Kaynak açıklaması (karşı taraf)" ya da tersi).
   Hedef + boş port (YALNIZ ZT_HEDEFPORT, kullanıcı) önce, sonra hedef, sonra kaynak; en yeni 10. Talepte doluysa
   ZT_HEDEFUYGULAMA / ZT_KAYNAKUYGULAMA ek satır. Tek sorgu / sunucu, SUBMIT_DATE (`Eksik:SmTarihKolonu`; canlıda OPEN_TIME YOK) ≥ SmYil,
-  TOP 300. Bulunamazsa / okunamazsa açık satır. (Ara sürümlerde açıklama kolonlarında LIKE araması denendi; kullanıcı düzeltti.)
+  TOP 300. Bölüm başında her boş port için ayrı özet (kullanıcı): "PORT 5000'E ERİŞİM TALEBİ VAR: N talep (son tarih; talep no'ları;
+  talepteki en sık hedef uygulama)" ya da "… YOK" — tüm eşleşen talepler üzerinden. Bulunamazsa / okunamazsa açık satır. (Ara sürümlerde açıklama kolonlarında LIKE araması denendi; kullanıcı düzeltti.)
 - **VIP**: sorgulanan IP VIP ise üyeler + GW'ler aynı sorguya eklenir, üyeler "VIP ÜYESİ" (GW→üye trafiği varsa ✓).
   Gidilen IP VIP ise "VIP → n ÜYE"; gelen IP LB GW ise "LB GW"; sorgulanan sunucu havuz üyesiyse VIP kartı.
 - **Uygulama görünümü** (`/api/apps`, `/api/app`): `[kullanan uygulamalar] → [UYGULAMA: VIP'ler + segment grupları] → [bağımlı olunanlar]`,
