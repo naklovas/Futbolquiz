@@ -292,7 +292,7 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
     // SM talepleri (kullanıcı tarifi): sunucu ZT_HEDEF / ZT_KAYNAK'ta (IP) ya da ZT_HEDEFHOSTNAME / ZT_KAYNAKHOSTNAME'de (UNIXNAME) aranır;
     // bulunan talebin DESCRIPTION, BRIEF_DESCRIPTION, ZT_KAYNAKACIKLAMA, ZT_HEDEFACIKLAMA alanları AI'a gider. Sunucunun talepte HEDEF mi
     // KAYNAK mı olduğu yazılır: hedefse ZT_HEDEFACIKLAMA bu sunucuyu, ZT_KAYNAKACIKLAMA karşı tarafı anlatır (kaynaksa tersi). Hedef olup
-    // boş portu (ZT_HEDEFPORT / ZT_PORT / açıklamalar) anan talepler başa; en yeni 10. Talepte doluysa ZT_HEDEFUYGULAMA / ZT_KAYNAKUYGULAMA
+    // ZT_HEDEFPORT'u boş portu içeren talepler başa; en yeni 10. Talepte doluysa ZT_HEDEFUYGULAMA / ZT_KAYNAKUYGULAMA
     // ek bilgi. Tek sorgu / sunucu, tarih Eksik:SmTarihKolonu (SUBMIT_DATE; canlıda OPEN_TIME yok) ≥ SmYil.
     async Task<Dictionary<string, string>> SmFieldsAsync(List<string> ips, Dictionary<string, List<string>> ports, EnvanterSnapshot env, CancellationToken ct)
     {
@@ -363,7 +363,8 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
                 {
                     bool hedef = HasIp(G(r, "ZT_HEDEF"), ip) || Same(G(r, "ZT_HEDEFHOSTNAME"));
                     bool kaynak = HasIp(G(r, "ZT_KAYNAK"), ip) || Same(G(r, "ZT_KAYNAKHOSTNAME"));
-                    var ps = hedef ? miss.Where(p => HasPort(string.Join(" ", G(r, "ZT_HEDEFPORT"), G(r, "ZT_PORT"), G(r, "BRIEF_DESCRIPTION"), G(r, "DESCRIPTION")), p)).ToList() : [];
+                    // port eşleşmesi yalnız ZT_HEDEFPORT'ta (kullanıcı)
+                    var ps = hedef ? miss.Where(p => HasPort(G(r, "ZT_HEDEFPORT"), p)).ToList() : [];
                     return (r, hedef, kaynak, ps);
                 })
                 .Where(x => x.hedef || x.kaynak).DistinctBy(x => G(x.r, "NUMBER"))
@@ -379,7 +380,7 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
             {
                 string rol = hedef && kaynak ? "bu sunucu HEM HEDEF HEM KAYNAK" : hedef ? $"bu sunucu HEDEF (kaynak: {Cut(G(r, "ZT_KAYNAK", "ZT_KAYNAKHOSTNAME"), 60)})"
                     : $"bu sunucu KAYNAK (hedef: {Cut(G(r, "ZT_HEDEF", "ZT_HEDEFHOSTNAME"), 60)})";
-                string port = string.Join(" ", G(r, "ZT_HEDEFPORT"), G(r, "ZT_PORT")).Trim();
+                string port = G(r, "ZT_HEDEFPORT") ?? "";
                 sb.AppendLine($"- {G(r, "NUMBER")} {G(r, "TARIH")} · {rol}{(port.Length > 0 ? $" · hedef port {Cut(port, 40)}" : "")}{(ps.Count > 0 ? $" · BOŞ PORT {string.Join(",", ps)}" : "")}");
                 if (G(r, "BRIEF_DESCRIPTION") is { } bd) sb.AppendLine($"    Kısa açıklama: {Cut(bd, 200)}");
                 // açıklamaları sunucunun rolüne göre etiketle

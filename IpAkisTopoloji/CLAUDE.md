@@ -275,7 +275,7 @@ erişim talepleri) — DB → şema → tablo ve kim erişiyor bilgisi buradan b
   SM TALEPLERİ (`SmFieldsAsync`, kullanıcının son tarifi): ARAMA sunucu IP'si ZT_HEDEF / ZT_KAYNAK'ta (LIKE + C#'ta tam IP), UNIXNAME
   ZT_HEDEFHOSTNAME / ZT_KAYNAKHOSTNAME'de; AI'A GİDEN bulunan talebin DESCRIPTION (ilk 400), BRIEF_DESCRIPTION, ZT_HEDEFACIKLAMA,
   ZT_KAYNAKACIKLAMA — sunucunun rolüne göre etiketli ("Hedef açıklaması (BU SUNUCU)" / "Kaynak açıklaması (karşı taraf)" ya da tersi).
-  Hedef + boş port (ZT_HEDEFPORT / ZT_PORT / açıklamalar) önce, sonra hedef, sonra kaynak; en yeni 10. Talepte doluysa
+  Hedef + boş port (YALNIZ ZT_HEDEFPORT, kullanıcı) önce, sonra hedef, sonra kaynak; en yeni 10. Talepte doluysa
   ZT_HEDEFUYGULAMA / ZT_KAYNAKUYGULAMA ek satır. Tek sorgu / sunucu, SUBMIT_DATE (`Eksik:SmTarihKolonu`; canlıda OPEN_TIME YOK) ≥ SmYil,
   TOP 300. Bulunamazsa / okunamazsa açık satır. (Ara sürümlerde açıklama kolonlarında LIKE araması denendi; kullanıcı düzeltti.)
 - **VIP**: sorgulanan IP VIP ise üyeler + GW'ler aynı sorguya eklenir, üyeler "VIP ÜYESİ" (GW→üye trafiği varsa ✓).
