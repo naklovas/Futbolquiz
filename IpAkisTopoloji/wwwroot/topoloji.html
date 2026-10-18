@@ -78,6 +78,7 @@
   .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
   .seg button { border: 0; border-radius: 0; padding: 5px 12px; }
   .seg button.on { background: var(--text); color: var(--panel); }
+  button.mini { padding: 1px 7px; font-size: 11px; text-transform: none; letter-spacing: 0; margin-left: 6px; font-weight: 500; }
   .seg a.tablink { display: inline-flex; align-items: center; padding: 5px 12px; color: var(--muted); text-decoration: none; border-left: 1px solid var(--line); }
   .seg a.tablink:hover { color: var(--in); }
   .legend { font-size: 12px; color: var(--muted); display: flex; gap: 14px; }
@@ -654,7 +655,7 @@ function renderTarget(d) {
 function targetApps(t) {
   const anyEmpty = t.apps.some(a => !a.appName);
   const ert = t.apps.length ? `<div class="tbl-wrap" style="max-height:220px"><table>
-      <thead><tr><th>Port</th><th>Uygulama</th>${anyEmpty ? `<th title="Uygulama adı boş satırlar için ERT eksikleri sayfasındaki AI önerisi">AI önerisi</th>` : ""}<th>Servis</th><th>Unix/Host</th><th>Varlık muhafızı</th><th>İşleten birim</th><th>Varlık sahibi</th></tr></thead>
+      <thead><tr><th>Port</th><th>Uygulama</th>${anyEmpty ? `<th title="Uygulama adı boş satırlar için ERT eksikleri sayfasındaki AI önerisi">AI önerisi <button type="button" id="aiRefresh" class="mini" title="Bu sunucunun uygulama adı boş portları için AI tahminini şimdi yeniden yapar (kanıtlar yeniden toplanır; onaylanan / elle girilenlere dokunulmaz)"${state.oneri?.busy ? " disabled" : ""}>${state.oneri?.busy ? "tahmin ediliyor…" : "↻ yenile"}</button></th>` : ""}<th>Servis</th><th>Unix/Host</th><th>Varlık muhafızı</th><th>İşleten birim</th><th>Varlık sahibi</th></tr></thead>
       <tbody>${[...t.apps].sort((a, b) => (+a.port || 0) - (+b.port || 0)).map(a => `<tr>
         <td class="mono">${esc(a.port ?? "")}${a.vipIp ? `<div class="small muted">VIP ${esc(a.vipIp)}:${esc(a.vipPort ?? "")}</div>` : ""}</td>
         <td><b>${esc(a.appName ?? "")}</b>${a.website ? `<div class="small muted">${esc(a.website)}</div>` : ""}</td>
@@ -744,16 +745,35 @@ function aiSuggest(ip, a) {
     <span class="small muted">${ok ? esc(o.durum.toLowerCase()) : `AI · %${o.guven}`}${o.yeni ? " · yeni ad" : ""}${o.durum === "Reddedildi" ? " · reddedildi" : ""}</span></span>`;
 }
 async function loadOneri(ip) {
-  state.oneri = { ip, map: null };
+  if (state.oneri?.ip !== ip) state.oneri = { ip, map: null };
   try {
     const r = await fetch("api/eksik/ip?" + new URLSearchParams({ ip }));
     if (!r.ok) return;
     const map = await r.json();
     if (state.oneri?.ip !== ip) return;
     state.oneri.map = map;
+    state.oneri.busy = false;
     updateTargetApps();
   } catch { /* öneri yoksa kolon boş kalır */ }
 }
+// "↻ yenile": tek sunucu için AI tahmini (/api/eksik/calistir {ips:[ip], yeniden}); iş bitene kadar durum izlenir
+async function refreshOneri(ip) {
+  state.oneri = { ...(state.oneri?.ip === ip ? state.oneri : { ip, map: null }), busy: true };
+  updateTargetApps();
+  try {
+    const r = await fetch("api/eksik/calistir", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ips: [ip], yeniden: true }) });
+    const b = await r.json().catch(() => ({ error: `HTTP ${r.status}` }));
+    if (!r.ok) throw new Error(b.error || `HTTP ${r.status}`);
+    for (let i = 0; i < 200; i++) {   // en çok ~10 dk
+      await new Promise(z => setTimeout(z, 3000));
+      if (state.oneri?.ip !== ip) return;
+      const d = await (await fetch("api/eksik/durum")).json();
+      if (!d.calisiyor) { if (d.mesaj) alert("AI tahmini: " + d.mesaj); break; }
+    }
+  } catch (e) { alert("AI tahmini yapılamadı: " + e.message); }
+  if (state.oneri?.ip === ip) { state.oneri.busy = false; await loadOneri(ip); updateTargetApps(); }
+}
+document.addEventListener("click", e => { if (e.target.closest("#aiRefresh") && state.data?.target) refreshOneri(state.data.target.ip); });
 function updateTargetApps() {
   const box = $("#tgtApps");
   if (box && state.data?.target) box.innerHTML = targetApps(state.data.target);

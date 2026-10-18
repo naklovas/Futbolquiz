@@ -260,6 +260,10 @@ Açık soru: ERT Entropi'den truncate ile yeniden yükleniyorsa TAG / AI_KUME / 
   (segment Domain'inde `Eksik:TestIfadeleri`=["test"]) altyapı portları gibi seçmeli ("Test segmentleri" kutucuğu, varsayılan gizli,
   işaretli değilse "AI ile öner" onları göndermez). IP sorgulama kartında ERT tablosuna "AI önerisi" kolonu (yalnız uygulama adı boş
   satır varsa; `/api/eksik/ip?ip=` port → öneri, `aiSuggest`/`loadOneri`; öneri yoksa "öneri yok ↗" eksik sayfasına).
+  Kolon başlığında "↻ yenile" (`refreshOneri`: `/calistir {ips:[ip], yeniden}` → durum bitene kadar izlenir → öneriler yeniden okunur).
+  YETKİ (kullanıcı): TÜM boşları tahmin ettirme (calistir'da ips yok) yalnız `Eksik:TopluYetkililer` (varsayılan ["visikhan"], DOMAIN\
+  öneki fark etmez; `CanBulk`); diğer yazma yetkililer yalnız seçili sunucular (en çok 50) / tek sunucu yenileme. `/api/eksik`
+  TopluYetki döner, düğme pasif. Sıralama: başlıklar IP / Port / Sunucu / Öneri (önerisi olmayan sonda) / güven / durum (`sirala`, `yon`).
 - **VIP**: sorgulanan IP VIP ise üyeler + GW'ler aynı sorguya eklenir, üyeler "VIP ÜYESİ" (GW→üye trafiği varsa ✓).
   Gidilen IP VIP ise "VIP → n ÜYE"; gelen IP LB GW ise "LB GW"; sorgulanan sunucu havuz üyesiyse VIP kartı.
 - **Uygulama görünümü** (`/api/apps`, `/api/app`): `[kullanan uygulamalar] → [UYGULAMA: VIP'ler + segment grupları] → [bağımlı olunanlar]`,

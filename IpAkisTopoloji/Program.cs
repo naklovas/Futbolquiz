@@ -675,10 +675,15 @@ app.MapGet("/api/islev/topoloji", async (string etiket, string? tenant, string? 
 app.MapGet("/api/islev/durum", (IslevService islev) => Results.Ok(islev.Durum));
 
 // ERT eksikleri (Eksik.cs, wwwroot/eksik.html): APPNAME'i boş (IP, port) satırlarına AI'dan uygulama önerisi; ERT'ye yazılmaz.
-app.MapGet("/api/eksik", async (string? ara, string? durum, bool? altyapi, bool? test, int? sayfa, int? boyut, HttpContext ctx, IConfiguration cfg,
-    EksikService eksik, CancellationToken ct) =>
+app.MapGet("/api/eksik", async (string? ara, string? durum, bool? altyapi, bool? test, string? sirala, string? yon, int? sayfa, int? boyut, HttpContext ctx,
+    IConfiguration cfg, EksikService eksik, CancellationToken ct) =>
 {
-    try { return Results.Ok(await eksik.ListAsync(ara, durum, altyapi ?? false, sayfa ?? 1, boyut ?? 200, EtiketService.CanWrite(cfg, ctx.User?.Identity?.Name), ct, test ?? false)); }
+    try
+    {
+        string? user = ctx.User?.Identity?.Name;
+        var l = await eksik.ListAsync(ara, durum, altyapi ?? false, sayfa ?? 1, boyut ?? 200, EtiketService.CanWrite(cfg, user), ct, test ?? false, sirala, yon == "desc");
+        return Results.Ok(l with { TopluYetki = l.Yazabilir && eksik.CanBulk(user) });
+    }
     catch (Exception ex) { return Results.Json(new { error = ex.Message }, statusCode: 502); }
 });
 app.MapGet("/api/eksik/durum", (EksikService eksik) => Results.Ok(eksik.Durum));
@@ -699,6 +704,11 @@ app.MapPost("/api/eksik/calistir", (EksikCalistir req, HttpContext ctx, IConfigu
 {
     string user = ctx.User?.Identity?.Name ?? "?";
     if (!EtiketService.CanWrite(cfg, ctx.User?.Identity?.Name)) return Results.Json(new { error = $"Yetkiniz yok ({user})." }, statusCode: 403);
+    // Tüm boşları tahmin ettirme (IP listesi olmadan) yalnız Eksik:TopluYetkililer; seçili / tek sunucu yenilemesi yazma yetkisi olan herkese
+    if (req.Ips is not { Count: > 0 } && !eksik.CanBulk(user))
+        return Results.Json(new { error = $"Tüm boşları tahmin ettirme yetkiniz yok ({user}); seçili sunucular için önerebilirsiniz." }, statusCode: 403);
+    if (req.Ips is { Count: > 50 } && !eksik.CanBulk(user))
+        return Results.Json(new { error = "Bir seferde en çok 50 sunucu seçebilirsiniz." }, statusCode: 403);
     return eksik.Start(req, user) ? Results.Ok(eksik.Durum) : Results.Json(new { error = "Bir öneri işi zaten çalışıyor.", durum = eksik.Durum }, statusCode: 409);
 });
 app.MapPost("/api/eksik/durdur", (HttpContext ctx, IConfiguration cfg, EksikService eksik) =>

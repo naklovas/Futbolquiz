@@ -56,6 +56,11 @@
   .run .bar i { display: block; height: 100%; background: var(--in); transition: width .4s; }
   .grid { border: 1px solid var(--line); border-radius: 10px; overflow: auto; max-height: calc(100vh - 330px); }
   table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  th[data-sort], th [data-sort] { cursor: pointer; user-select: none; }
+  th .arr { margin-left: 3px; opacity: .35; }
+  th .on > .arr, th.on > .arr { opacity: 1; color: var(--in); }
+  th .sub2 { font-weight: 500; text-transform: none; letter-spacing: 0; margin-left: 6px; border: 1px solid var(--line); border-radius: 999px; padding: 0 6px; }
+  th .sub2.on { border-color: var(--in); color: var(--in); }
   th { position: sticky; top: 0; background: var(--bg); color: var(--muted); font-size: 11.5px; text-transform: uppercase; letter-spacing: .04em; text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--line); z-index: 1; }
   td { padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
   tr:hover td { background: var(--in-soft); }
@@ -117,7 +122,7 @@
     </div>
     <div id="run"></div>
     <div class="grid"><table>
-      <thead><tr><th style="width:30px"><input type="checkbox" id="all"></th><th>IP</th><th>Port</th><th>Sunucu / segment</th><th>ERT satırındaki bilgiler</th><th>Aynı sunucudaki uygulamalar</th><th>Öneri</th><th></th></tr></thead>
+      <thead><tr><th style="width:30px"><input type="checkbox" id="all"></th><th data-sort="ip">IP<span class="arr"></span></th><th data-sort="port">Port<span class="arr"></span></th><th data-sort="sunucu">Sunucu / segment<span class="arr"></span></th><th>ERT satırındaki bilgiler</th><th>Aynı sunucudaki uygulamalar</th><th data-sort="oneri" title="Öneriye göre sırala (önerisi olmayanlar sonda)">Öneri<span class="arr"></span> <span class="sub2" data-sort="guven" title="Güvene göre sırala">güven<span class="arr"></span></span> <span class="sub2" data-sort="durum" title="Duruma göre sırala">durum<span class="arr"></span></span></th><th></th></tr></thead>
       <tbody id="body"><tr><td colspan="8" class="empty"><span class="spinner"></span> Yükleniyor…</td></tr></tbody>
     </table></div>
     <div class="foot"><span id="count"></span>
@@ -129,7 +134,7 @@
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const fmt = n => Number(n || 0).toLocaleString("tr-TR");
-const st = { q: "", durum: "", alt: false, test: false, page: 1, size: 200, data: null, sel: new Set(), poll: null, timer: null, seq: 0 };
+const st = { q: "", durum: "", alt: false, test: false, sort: "", desc: false, page: 1, size: 200, data: null, sel: new Set(), poll: null, timer: null, seq: 0 };
 const key = r => r.ip + "|" + r.port;
 
 async function api(url, opt) {
@@ -146,6 +151,7 @@ async function load() {
     const p = new URLSearchParams({ sayfa: st.page, boyut: st.size, altyapi: st.alt, test: st.test });
     if (st.q) p.set("ara", st.q);
     if (st.durum) p.set("durum", st.durum);
+    if (st.sort) { p.set("sirala", st.sort); p.set("yon", st.desc ? "desc" : "asc"); }
     const b = await api("api/eksik?" + p);
     if (my !== st.seq) return;
     st.data = b;
@@ -160,7 +166,15 @@ function render() {
     .map(([l, n]) => `<div class="stat"><b>${fmt(n)}</b><span>${l}</span></div>`).join("");
   $("#warn").innerHTML = d.uyari ? `<div class="warn">${esc(d.uyari)}</div>` : w ? "" : `<div class="warn">Yalnız görüntüleme yetkiniz var.</div>`;
   const run = d.durum?.calisiyor;
-  $("#runAll").disabled = !w || run; $("#runSel").disabled = !w || run || !st.sel.size;
+  $("#runAll").disabled = !w || run || !d.topluYetki;
+  $("#runAll").title = d.topluYetki ? "Önerisi olmayan satırlar (altyapı portları hariç; en çok boş portu olan sunuculardan başlayarak)"
+    : "Tüm boşları tahmin ettirme yetkisi yalnız yetkili kullanıcıda; satır seçip 'Seçilenlere öner' kullanabilirsiniz";
+  $("#runSel").disabled = !w || run || !st.sel.size;
+  document.querySelectorAll("[data-sort]").forEach(th => {
+    const on = th.dataset.sort === st.sort;
+    th.classList.toggle("on", on);
+    th.querySelector(".arr").textContent = on ? (st.desc ? "▼" : "▲") : "↕";
+  });
   $("#runSel").textContent = st.sel.size ? `Seçilenlere öner (${st.sel.size})` : "Seçilenlere öner";
   runBox();
   const rows = d.satirlar;
@@ -250,6 +264,13 @@ $("#durum").addEventListener("change", e => { st.durum = e.target.value; st.page
 $("#alt").addEventListener("change", e => { st.alt = e.target.checked; st.page = 1; load(); });
 $("#test").addEventListener("change", e => { st.test = e.target.checked; st.page = 1; load(); });
 $("#prev").addEventListener("click", () => { st.page--; load(); });
+document.querySelectorAll("thead [data-sort]").forEach(th => th.addEventListener("click", e => {
+  e.stopPropagation();
+  const k = th.dataset.sort;
+  // öneri / güven ilk tıklamada en iyi üstte (azalan), diğerleri artan
+  if (st.sort === k) st.desc = !st.desc; else { st.sort = k; st.desc = k === "guven"; }
+  st.page = 1; load();
+}));
 $("#next").addEventListener("click", () => { st.page++; load(); });
 $("#runAll").addEventListener("click", () => {
   const max = +$("#max").value;

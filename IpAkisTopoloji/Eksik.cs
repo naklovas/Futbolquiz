@@ -15,7 +15,7 @@ record EksikOneri(string? Uygulama, bool Yeni, int Guven, string? Gerekce, strin
 record EksikSatir(string Ip, string Port, string? Hostname, string? Segment, string? Website, string? Servis, string? Muhafiz,
     string? Birim, List<string> Diger, bool Altyapi, EksikOneri? Oneri, bool Test = false);
 record EksikListe(List<EksikSatir> Satirlar, int Toplam, int TumSatir, int TumIp, int Onerili, int Onayli, IslevDurum Durum,
-    bool Yazabilir, string? Uyari);
+    bool Yazabilir, string? Uyari, bool TopluYetki = false);
 // Max: bu çalıştırmada en çok kaç sunucu (boş = Eksik:MaxIp; 0 = sınırsız)
 record EksikCalistir(List<string>? Ips, bool Hepsi, bool Yeniden, int? Saat, bool Test = false, int? Max = null);
 record EksikKarar(string? Ip, string? Port, string? Karar, string? Uygulama);
@@ -62,7 +62,18 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
     public async Task<Dictionary<string, EksikOneri>> ForIpAsync(string ip, CancellationToken ct) =>
         (await LoadAsync(false, ct)).Where(kv => kv.Key.Item1 == ip && kv.Value.Durum != "").ToDictionary(kv => kv.Key.Item2, kv => kv.Value);
 
-    public async Task<EksikListe> ListAsync(string? ara, string? durum, bool altyapi, int sayfa, int boyut, bool yazabilir, CancellationToken ct, bool test = false)
+    // Toplu tahmin (tüm boşlar) yalnız Eksik:TopluYetkililer'deki kullanıcılar (varsayılan visikhan; DOMAIN\ öneki fark etmez)
+    public bool CanBulk(string? user)
+    {
+        var allowed = cfg.GetSection("Eksik:TopluYetkililer").GetChildren().Select(c => c.Value).OfType<string>().ToList();
+        if (allowed.Count == 0) allowed = ["visikhan"];
+        string u = (user ?? "").Split('\\').Last();
+        return allowed.Any(a => string.Equals(a.Split('\\').Last(), u, StringComparison.OrdinalIgnoreCase));
+    }
+
+    // sirala: ip | port | sunucu | segment | oneri | guven | durum (yon: azalan)
+    public async Task<EksikListe> ListAsync(string? ara, string? durum, bool altyapi, int sayfa, int boyut, bool yazabilir, CancellationToken ct,
+        bool test = false, string? sirala = null, bool azalan = false)
     {
         var env = await envanter.GetAsync(false, ct);
         var infra = AppTopology.InfraPorts(cfg);
@@ -89,8 +100,23 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
                 "red" => r.Oneri?.Durum == Red,
                 _ => true
             })
-            .OrderBy(r => r.Oneri == null ? 1 : 0).ThenByDescending(r => r.Oneri?.Guven ?? 0).ThenBy(r => IpKey(r.Ip)).ThenBy(r => int.TryParse(r.Port, out var n) ? n : 0)
             .ToList();
+        var cmp = StringComparer.Create(new System.Globalization.CultureInfo("tr-TR"), true);
+        static int PortN(string p) => int.TryParse(p, out var n) ? n : -1;
+        IOrderedEnumerable<EksikSatir> Ord<T>(Func<EksikSatir, T> k, IComparer<T>? c = null) => azalan ? f.OrderByDescending(k, c) : f.OrderBy(k, c);
+        f = (sirala switch
+        {
+            "ip" => Ord(r => IpKey(r.Ip)).ThenBy(r => PortN(r.Port)),
+            "port" => Ord(r => PortN(r.Port)).ThenBy(r => IpKey(r.Ip)),
+            "sunucu" => Ord(r => r.Hostname ?? "\uffff", cmp).ThenBy(r => PortN(r.Port)),
+            "segment" => Ord(r => r.Segment ?? "\uffff", cmp).ThenBy(r => IpKey(r.Ip)),
+            // öneri: önerisi olmayanlar hep sonda
+            "oneri" => (azalan ? f.OrderBy(r => r.Oneri?.Uygulama == null).ThenByDescending(r => r.Oneri?.Uygulama ?? "", cmp)
+                               : f.OrderBy(r => r.Oneri?.Uygulama == null).ThenBy(r => r.Oneri?.Uygulama ?? "", cmp)).ThenBy(r => IpKey(r.Ip)),
+            "guven" => (azalan ? f.OrderByDescending(r => r.Oneri?.Guven ?? -1) : f.OrderBy(r => r.Oneri == null).ThenBy(r => r.Oneri?.Guven ?? 0)).ThenBy(r => IpKey(r.Ip)),
+            "durum" => Ord(r => r.Oneri?.Durum ?? "\uffff", cmp).ThenByDescending(r => r.Oneri?.Guven ?? 0),
+            _ => f.OrderBy(r => r.Oneri == null ? 1 : 0).ThenByDescending(r => r.Oneri?.Guven ?? 0).ThenBy(r => IpKey(r.Ip)).ThenBy(r => PortN(r.Port))
+        }).ToList();
         int size = Math.Clamp(boyut, 20, 1000), page = Math.Max(1, sayfa);
         return new EksikListe(f.Skip((page - 1) * size).Take(size).ToList(), f.Count, rows.Count, rows.Select(r => r.Ip).Distinct().Count(),
             rows.Count(r => r.Oneri != null), rows.Count(r => r.Oneri?.Durum is Onay or Elle), Durum, yazabilir, _uyari);
