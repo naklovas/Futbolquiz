@@ -119,7 +119,7 @@
       <label title="Bir çalıştırmada en çok kaç sunucu işlensin (en çok boş portu olanlardan başlanır). Kalanlar için yeniden basılır.">Sunucu <select id="max"><option value="100">100</option><option value="200" selected>200</option><option value="500">500</option><option value="1000">1000</option><option value="0">Tümü</option></select></label>
       <button id="runSel" disabled title="Seçili satırların sunucularını AI'a gönderir (önceki AI önerisi yenilenir; onaylananlara dokunulmaz)">Seçilenlere öner</button>
       <button id="runAll" class="primary" title="Önerisi olmayan tüm satırlar (altyapı portları hariç; en çok boş portu olan sunuculardan başlayarak)">AI ile öner (önerisi olmayanlar)</button>
-      <a id="csv" href="api/eksik/csv"><button type="button" title="Onaylanan ve elle girilen öneriler (Excel'de açılır)">Excel'e aktar</button></a>
+      <a id="csv" href="api/eksik/csv" hidden><button type="button" title="Onaylanan ve elle girilen öneriler (Excel'de açılır)">Excel'e aktar</button></a>
     </div>
     <div id="run"></div>
     <div class="grid"><table>
@@ -295,7 +295,10 @@ $("#body").addEventListener("click", e => {
   if (k) { e.preventDefault(); kanit(k.dataset.kanit); }
 });
 document.addEventListener("keydown", e => { if (e.key === "Escape") $("#drawerHost").innerHTML = ""; });
-fetch("api/me").then(r => r.ok ? r.json() : null).then(me => { if (me?.name) $("#me").textContent = "👤 " + me.name; }).catch(() => {});
+fetch("api/me").then(r => r.ok ? r.json() : null).then(me => {
+  if (me?.name) $("#me").textContent = "👤 " + me.name;
+  $("#csv").hidden = !me?.yetki?.disari;   // Excel'e aktarma yetkisi (DokuPanel, Yetki:Disari)
+}).catch(() => {});
 load();
 </script>
 </body>

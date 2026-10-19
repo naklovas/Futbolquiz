@@ -86,21 +86,10 @@ if (authEnabled)
             return;
         }
 
-        // Yazma yetkisi DokuPanel'deki ayrı site kaydından (Etiket:YazmaSiteAdi, ör. "DeltaFlow-Etiketleme"); yalnız API isteklerinde,
-        // kullanıcı başına aynı süre önbellekli. Sonuç EtiketService.CanWrite(cfg, ctx) içinde kullanılır.
-        if (cfg["Etiket:YazmaSiteAdi"] is { Length: > 0 } yazmaSite && context.Request.Path.StartsWithSegments("/api"))
-        {
-            string wkey = "yazma:" + user.ToLowerInvariant();
-            if (!cache.TryGetValue(wkey, out bool yazar))
-            {
-                var hataOnce = context.Items["AuthHata"];
-                yazar = await AuthHelper.YetkiKontrol(context, cfg, yazmaSite);
-                if (!yazar) app.Logger.LogInformation("Yazma yetkisi yok: {User} ({Site}) - {Hata}", user, yazmaSite, context.Items["AuthHata"]);
-                context.Items["AuthHata"] = hataOnce;
-                cache.Set(wkey, yazar, TimeSpan.FromMinutes(cfg.GetValue("Auth:CacheMinutes", 5)));
-            }
-            context.Items["DokuYazar"] = yazar;
-        }
+        // İşlem yetkileri (yazma, topoloji, dışa aktarma, toplu tahmin) DokuPanel'deki ayrı site kayıtlarından (Yetki.cs);
+        // yalnız API isteklerinde, kullanıcı + site başına önbellekli. Sonuç Yetki.Var(cfg, ctx, ...) içinde kullanılır.
+        if (context.Request.Path.StartsWithSegments("/api"))
+            await Yetki.YukleAsync(context, cfg, cache, app.Logger);
 
         if (context.Request.Path.StartsWithSegments("/api"))
             app.Logger.LogInformation("{User} {Method} {Path}{Query}", user, context.Request.Method, context.Request.Path, context.Request.QueryString);
@@ -151,7 +140,7 @@ app.UseStaticFiles(new StaticFileOptions
 });
 
 // Giriş yapan kullanıcı (başlıkta gösterilir)
-app.MapGet("/api/me", (HttpContext ctx) => new { name = ctx.User?.Identity?.Name });
+app.MapGet("/api/me", (HttpContext ctx, IConfiguration cfg) => new { name = ctx.User?.Identity?.Name, yetki = Yetki.Hepsi(cfg, ctx) });
 
 app.MapGet("/api/appliances", (IConfiguration cfg) =>
     cfg.GetSection("Servers").GetChildren()
@@ -494,7 +483,7 @@ app.MapGet("/api/apps", async (EnvanterService envanter, CancellationToken ct) =
 
 // Uygulama topolojisi: uygulamanın tüm sunucuları ve VIP'leri tek Splunk sorgusu / tek AppResponse
 // raporuyla sorgulanır; akışlar uygulama seviyesinde gruplanır.
-app.MapGet("/api/app", async (string? name, string? start, string? end, int? appliance, string? sources,
+app.MapGet("/api/app", async (string? name, string? start, string? end, int? appliance, string? sources, HttpContext ctx,
     IConfiguration cfg, IHttpClientFactory factory, EnvanterService envanter, CancellationToken ct) =>
 {
     var sw = Stopwatch.StartNew();
@@ -505,6 +494,7 @@ app.MapGet("/api/app", async (string? name, string? start, string? end, int? app
     string? tag = name?.Trim() is { } nm && nm.StartsWith("etiket:", StringComparison.OrdinalIgnoreCase) ? nm[7..].Trim() : null;
     if (tag != null)
     {
+        if (!Yetki.Var(cfg, ctx, Yetki.Topoloji)) return Yetki.Red(ctx, "Topoloji çizme");
         if (env.TagIps(tag).Count == 0)
             return Results.BadRequest(new { error = $"Bu etikette sunucu yok: {tag} (ERT tablosunun TAG kolonunda bu etiket var mı? Sunucu etiketleme sekmesinden eklenebilir.)" });
     }
@@ -650,6 +640,7 @@ app.MapGet("/api/islev", async (string etiket, string? tenant, HttpContext ctx, 
 app.MapGet("/api/islev/topoloji", async (string etiket, string? tenant, string? start, string? end, int? appliance, string? sources, HttpContext ctx,
     IConfiguration cfg, IHttpClientFactory factory, EnvanterService envanter, IslevService islev, CancellationToken ct) =>
 {
+    if (!Yetki.Var(cfg, ctx, Yetki.Topoloji)) return Yetki.Red(ctx, "Topoloji çizme");
     var sw = Stopwatch.StartNew();
     var (env, envErr) = await Capture(() => envanter.GetAsync(false, ct), ct);
     if (env == null) return Results.Json(new { error = "Envanter okunamadı: " + envErr }, statusCode: 502);
@@ -704,9 +695,8 @@ app.MapGet("/api/eksik", async (string? ara, string? durum, bool? altyapi, bool?
 {
     try
     {
-        string? user = ctx.User?.Identity?.Name;
         var l = await eksik.ListAsync(ara, durum, altyapi ?? false, sayfa ?? 1, boyut ?? 200, EtiketService.CanWrite(cfg, ctx), ct, test ?? false, sirala, yon == "desc");
-        return Results.Ok(l with { TopluYetki = l.Yazabilir && eksik.CanBulk(user) });
+        return Results.Ok(l with { TopluYetki = Yetki.Var(cfg, ctx, Yetki.Toplu) });
     }
     catch (Exception ex) { return Results.Json(new { error = ex.Message }, statusCode: 502); }
 });
@@ -728,10 +718,11 @@ app.MapPost("/api/eksik/calistir", (EksikCalistir req, HttpContext ctx, IConfigu
 {
     string user = ctx.User?.Identity?.Name ?? "?";
     if (!EtiketService.CanWrite(cfg, ctx)) return Results.Json(new { error = $"Yetkiniz yok ({user})." }, statusCode: 403);
-    // Tüm boşları tahmin ettirme (IP listesi olmadan) yalnız Eksik:TopluYetkililer; seçili / tek sunucu yenilemesi yazma yetkisi olan herkese
-    if (req.Ips is not { Count: > 0 } && !eksik.CanBulk(user))
+    // Tüm boşları tahmin ettirme (IP listesi olmadan) yalnız toplu yetkisi olanlar (Yetki:Toplu); seçili / tek sunucu yenilemesi yazma yetkisi olan herkese
+    bool toplu = Yetki.Var(cfg, ctx, Yetki.Toplu);
+    if (req.Ips is not { Count: > 0 } && !toplu)
         return Results.Json(new { error = $"Tüm boşları tahmin ettirme yetkiniz yok ({user}); seçili sunucular için önerebilirsiniz." }, statusCode: 403);
-    if (req.Ips is { Count: > 50 } && !eksik.CanBulk(user))
+    if (req.Ips is { Count: > 50 } && !toplu)
         return Results.Json(new { error = "Bir seferde en çok 50 sunucu seçebilirsiniz." }, statusCode: 403);
     return eksik.Start(req, user) ? Results.Ok(eksik.Durum) : Results.Json(new { error = "Bir öneri işi zaten çalışıyor.", durum = eksik.Durum }, statusCode: 409);
 });
@@ -749,8 +740,8 @@ app.MapPost("/api/eksik/karar", async (EksikKarar req, HttpContext ctx, IConfigu
     catch (InvalidOperationException ex) { return Results.BadRequest(new { error = ex.Message }); }
     catch (Microsoft.Data.SqlClient.SqlException ex) { return Results.Json(new { error = "SQL: " + ex.Message }, statusCode: 502); }
 });
-app.MapGet("/api/eksik/csv", async (bool? hepsi, EksikService eksik, CancellationToken ct) =>
-    Results.File(Encoding.UTF8.GetBytes(await eksik.CsvAsync(hepsi ?? false, ct)), "text/csv; charset=utf-8",
+app.MapGet("/api/eksik/csv", async (bool? hepsi, HttpContext ctx, IConfiguration cfg, EksikService eksik, CancellationToken ct) =>
+    !Yetki.Var(cfg, ctx, Yetki.Disari) ? Yetki.Red(ctx, "Dışa aktarma") : Results.File(Encoding.UTF8.GetBytes(await eksik.CsvAsync(hepsi ?? false, ct)), "text/csv; charset=utf-8",
         $"ert_uygulama_onerileri_{DateTime.Now:yyyyMMdd_HHmm}.csv"));
 
 // Versiyonlar (Versiyon.cs): işlev haritası + küme topolojisi birlikte; etiket başına son Islev:VersiyonSayisi (3).

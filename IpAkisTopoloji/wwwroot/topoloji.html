@@ -218,9 +218,12 @@
   .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--line); border-top-color: var(--in); border-radius: 50%; animation: spin 1s linear infinite; vertical-align: middle; }
   @keyframes spin { to { transform: rotate(360deg); } }
   .grid2 { display: grid; gap: 16px; }
+/* İşlem yetkileri (/api/me → yetki; DokuPanel, Yetki.cs): yüklenene kadar ve yetki yoksa dışa aktarma / topoloji çizme düğmeleri gizli */
+body.no-disari #dlSvg, body.no-disari #dlPng, body.no-disari [data-csv] { display:none !important; }
+body.no-topoloji .need-topo, body.no-topoloji #ivDep, body.no-topoloji #ktAgain { display:none !important; }
 </style>
 </head>
-<body>
+<body class="no-disari no-topoloji">
 <header>
   <div class="brand">
     <img src="deltaflow.svg" alt="DeltaFlow logosu">
@@ -1899,6 +1902,7 @@ function renderSummary() {
 
 // ---------- Görüntü indirme ----------
 function exportImage(kind) {
+  if (!yetki.disari) return yetkiYok("Dışa aktarma");
   const src = $("#topoSvg"); if (!src) return;
   const clone = src.cloneNode(true);
   const props = ["fill", "stroke", "stroke-width", "stroke-dasharray", "opacity", "font-size", "font-weight", "font-family", "font-style"];
@@ -2036,6 +2040,7 @@ function renderTables() {
 }
 
 function exportCsv(dir) {
+  if (!yetki.disari) return yetkiYok("Dışa aktarma");
   const cols = COLS[dir];
   const q = v => `"${String(v ?? "").replace(/"/g, '""')}"`;
   const lines = [cols.map(c => q(c.h)).join(";"), ...visibleEdges(dir).map(e => cols.map(c => q(c.v(e))).join(";"))];
@@ -2098,7 +2103,15 @@ function wireEnvToggles(onChange) {
   document.querySelectorAll("[data-env]").forEach(cb => cb.addEventListener("change", () => { envShow[cb.dataset.env] = cb.checked; onChange(); }));
 }
 
-fetch("api/me").then(r => r.ok ? r.json() : null).then(me => { if (me?.name) $("#me").textContent = "👤 " + me.name; }).catch(() => {});
+// İşlem yetkileri: yazma, topoloji, disari (Excel / SVG / PNG), toplu — sunucu da ayrıca kontrol eder
+let yetki = {};
+fetch("api/me").then(r => r.ok ? r.json() : null).then(me => {
+  if (me?.name) $("#me").textContent = "👤 " + me.name;
+  yetki = me?.yetki || {};
+  document.body.classList.toggle("no-disari", !yetki.disari);
+  document.body.classList.toggle("no-topoloji", !yetki.topoloji);
+}).catch(() => {});
+function yetkiYok(ne) { alert(`${ne} yetkiniz yok. Yetki DokuPanel'den verilir.`); }
 loadAppliances().then(() => { const m = initForm(); if (m) uiMode = m; /* adres çubuğundaki aralık o sekmenin aralığıdır */ if (m === "app") runApp(); else if (m === "topo") runTopo(); else if (m === "erisim") runAccess(); else if (m === "etiket") runEtiket(); else if (m === "ip") run(); });
 </script>
 <script src="uygulama.js"></script>

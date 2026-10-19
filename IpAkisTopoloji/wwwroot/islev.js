@@ -165,7 +165,7 @@ function ivRender() {
       <button id="ivAll" ${run || d.uyari ? "disabled" : ""} title="Elle düzeltilenler hariç tüm sunucuları yeniden sınıflar">Hepsini yeniden</button>
       <button id="ivClu" ${run || d.uyari || !d.siniflanan ? "disabled" : ""} title="Sunucuları yeniden sormadan yalnız kümeleri yeniden oluşturur">Yeniden kümele</button>` : ""}
       ${w ? `<button id="ivPick" class="${iv.pick ? "on" : ""}" title="Sunucuları seçip yeni bir kümeye ya da var olan bir kümeye taşıyın">${iv.pick ? "Seçimi bitir" : "+ Yeni küme / taşı"}</button>` : ""}
-      <button id="ivTopo" class="primary" title="${iv.ver.id ? "Bu versiyonda kaydedilmiş topolojiyi açar (trafik yeniden sorgulanmaz)" : "Kümeleri kutu kutu, içlerinde VIP'ler ve sunucularla; aralarındaki trafikle çizer (seçili tarih aralığı)"}">${iv.ver.id ? "Kayıtlı topolojiyi aç" : "Topoloji çiz"}</button>
+      <button id="ivTopo" class="primary${iv.ver.id ? "" : " need-topo"}" title="${iv.ver.id ? "Bu versiyonda kaydedilmiş topolojiyi açar (trafik yeniden sorgulanmaz)" : "Kümeleri kutu kutu, içlerinde VIP'ler ve sunucularla; aralarındaki trafikle çizer (seçili tarih aralığı)"}">${iv.ver.id ? "Kayıtlı topolojiyi aç" : "Topoloji çiz"}</button>
       ${!iv.ver.id && iv.ver.list.length ? `<button id="ivLast" title="En son kaydedilen topolojiyi trafiği yeniden sorgulamadan açar">Son kayıtlı topoloji</button>` : ""}
       <button id="ivDep" title="Etiketli sunucuların uygulama görünümündeki eski bağımlılık çizimi">Eski çizim</button>
     </div>

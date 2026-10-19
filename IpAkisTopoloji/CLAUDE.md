@@ -38,6 +38,7 @@ topoloji çizer ve şirket içi AI'a etki analizi yaptırır. Canlıda IIS'te, W
 | `Versiyon.cs` | İşlev haritası + küme topolojisi versiyonları (etiket başına son 3) |
 | `F5Waf.cs` | F5 ASM / Bot Defense güvenlik logları (Splunk index=f5): erişimde engel kararı, IP görünümünde URI listesi |
 | `PortBilgisi.cs` | Port → işlev ve kesilirse duracak iş (AI prompt'u için) |
+| `Yetki.cs` | İşlem yetkileri (yazma, topoloji, dışa aktarma, toplu tahmin) — DokuPanel site kayıtları |
 | `AuthHelper.cs` | Kullanıcının verdiği DokuPanel yetki helper'ı (namespace `AppRel`), anahtar config'den |
 
 ## Veri kaynakları
@@ -308,10 +309,16 @@ erişim talepleri) — DB → şema → tablo ve kim erişiyor bilgisi buradan b
   Enter gönderir; ODM/TEST değişince soru/cevap korunur.
 - **Auth**: Negotiate (Windows Auth; IIS'te IIS'e bırakır) + her istekte `AuthHelper.YetkiKontrol` (DokuPanel),
   sonuç kullanıcı başına cache; yetkisiz sayfa/403 JSON; `/api/me` başlıkta kullanıcı; `Auth:Enabled=false` yerelde.
-  YAZMA YETKİSİ (kullanıcı: "herkes etiketleme yapamamalı"): DokuPanel'de kod değişmeden ikinci site kaydı (ör. "DeltaFlow-Etiketleme")
-  → `Etiket:YazmaSiteAdi`; auth ara katmanı /api isteklerinde `AuthHelper.YetkiKontrol(ctx, cfg, siteAdi)` ile sorar (kullanıcı başına
-  `Auth:CacheMinutes` önbellek) → `context.Items["DokuYazar"]` → `EtiketService.CanWrite(cfg, ctx)` (tüm yazma uçları: etiket, açıklama,
-  işlev haritası, versiyon, ERT eksikleri). Boşsa eski `Etiket:Yazanlar` listesi (boş = herkes). DokuPanel'e ulaşılamazsa yazma kapalı.
+  İŞLEM YETKİLERİ (`Yetki.cs`; kullanıcı: "herkes etiketleme yapamamalı", "topoloji, işlev, toplu tahmin hepsi DokuPanel'den, yetkisiz
+  Excel'e bile çıktı alamasın"): DokuPanel'de kod değişmeden her yetki için ayrı site kaydı → `Yetki:Yazma` (etiket, açıklama, işlev
+  haritası, versiyon, ERT eksikleri; boşsa eski `Etiket:YazmaSiteAdi`, o da boşsa `Etiket:Yazanlar`), `Yetki:Topoloji` (küme topolojisi
+  `/api/islev/topoloji` ve `/api/app?name=etiket:`; boşsa Yazma), `Yetki:Disari` (Excel/CSV, SVG, PNG; `/api/eksik/csv` sunucuda,
+  tarayıcıdaki CSV/SVG/PNG düğmeleri gizli + fonksiyonda kontrol; boşsa Yazma), `Yetki:Toplu` (ERT eksiklerinde tüm boşlar / 50+ sunucu;
+  Yazma da gerekir; boşsa `Eksik:TopluYetkililer`, varsayılan visikhan). Auth ara katmanı /api isteklerinde yapılandırılmış siteleri
+  `AuthHelper.YetkiKontrol(ctx, cfg, siteAdi)` ile sorar (kullanıcı + site başına `Auth:CacheMinutes`; aynı ad tek sorgu) →
+  `context.Items["Yetki"]` → `Yetki.Var(cfg, ctx, tür)`. `/api/me` → `yetki {yazma, topoloji, disari, toplu}`; topoloji.html body
+  `no-disari` / `no-topoloji` sınıfları (yüklenene kadar gizli). DokuPanel'e ulaşılamazsa o işlem kapalı. Görüntüleme (IP / uygulama
+  sorgusu, işlev haritası, kayıtlı versiyonlar) yalnız sayfa yetkisiyle açık.
 - Marka: **DeltaFlow** adı ve logosu.
 
 ## Kullanıcının tercihleri / kurallar

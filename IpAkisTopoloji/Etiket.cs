@@ -5,7 +5,7 @@ using Microsoft.Data.SqlClient;
 // Sunucu etiketleme: ERT_HOSTIPADDRESS tablosunun etiket kolonu (Envanter:EtiketKolonu, varsayılan TAG) okunur ve yazılır.
 // Bir IP'nin tüm satırları aynı etiket metnini taşır ("VERIAMBARI,ETL"). Yazma: önce IP'nin mevcut etiketleri DB'den okunur,
 // ekle / kaldır uygulanır, IP'nin bütün satırları güncellenir; ardından envanter yeniden yüklenir.
-// Yetki: Etiket:Yazanlar listesi doluysa yalnız o kullanıcılar yazar (boş = sayfaya girebilen herkes). Her değişiklik loglanır.
+// Yetki: Yetki.cs (Yetki:Yazma, DokuPanel site kaydı). Her değişiklik loglanır.
 // Alt etiket: "ANA/ALT" (ör. MOBILBANKACILIK/MOBIL APP) aynı TAG kolonunda; ana etiket seçilince alt etiketli sunucular da gelir.
 // Açıklamalar (ana ve alt etiket): ayrı küçük tablo Etiket:AciklamaTablosu (varsayılan dbo.DF_ETIKET_ACIKLAMA, sql/etiket_versiyon.sql).
 // ---------------------------------------------------------------------------
@@ -47,22 +47,9 @@ static class EtiketService
         string.Equals(serverTag, wanted, StringComparison.OrdinalIgnoreCase)
         || (!wanted.Contains('/') && serverTag.StartsWith(wanted + "/", StringComparison.OrdinalIgnoreCase));
 
-    // Yazma (etiketleme, işlev haritası düzenleme, AI çalıştırma, ERT eksikleri kararları) yetkisi:
-    //  - Etiket:YazmaSiteAdi doluysa DokuPanel'deki o site kaydının kişi / AD grupları (auth ara katmanı sorar, önbellekli;
-    //    sonuç context.Items["DokuYazar"]). DokuPanel'e ulaşılamazsa yazma kapalı.
-    //  - boşsa eski davranış: Etiket:Yazanlar listesi (boş = sayfaya girebilen herkes).
-    public static bool CanWrite(IConfiguration cfg, HttpContext ctx) =>
-        ctx.Items.TryGetValue("DokuYazar", out var v) && v is bool b ? b : CanWrite(cfg, ctx.User?.Identity?.Name);
-
-    public static bool CanWrite(IConfiguration cfg, string? user)
-    {
-        if (!string.IsNullOrWhiteSpace(cfg["Etiket:YazmaSiteAdi"]) && cfg.GetValue("Auth:Enabled", true)) return false;   // DokuPanel kararı yoksa yazma yok
-        var allowed = cfg.GetSection("Etiket:Yazanlar").Get<string[]>() ?? [];
-        if (allowed.Length == 0) return true;
-        string u = user ?? "";
-        return allowed.Any(a => string.Equals(a, u, StringComparison.OrdinalIgnoreCase)
-                                || string.Equals(a, u.Split('\\').Last(), StringComparison.OrdinalIgnoreCase));
-    }
+    // Yazma (etiketleme, işlev haritası düzenleme, AI çalıştırma, ERT eksikleri kararları) yetkisi: Yetki.cs (DokuPanel site kaydı
+    // Yetki:Yazma, boşsa Etiket:YazmaSiteAdi, o da boşsa Etiket:Yazanlar listesi).
+    public static bool CanWrite(IConfiguration cfg, HttpContext ctx) => Yetki.Var(cfg, ctx, Yetki.Yazma);
 
     // Envanterdeki tüm sunucular (IP başına bir satır); envanter anlık görüntüsü başına bir kez hesaplanır.
     static readonly System.Runtime.CompilerServices.ConditionalWeakTable<EnvanterSnapshot, List<EtiketSunucu>> Cache = new();

@@ -62,15 +62,6 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
     public async Task<Dictionary<string, EksikOneri>> ForIpAsync(string ip, CancellationToken ct) =>
         (await LoadAsync(false, ct)).Where(kv => kv.Key.Item1 == ip && kv.Value.Durum != "").ToDictionary(kv => kv.Key.Item2, kv => kv.Value);
 
-    // Toplu tahmin (tüm boşlar) yalnız Eksik:TopluYetkililer'deki kullanıcılar (varsayılan visikhan; DOMAIN\ öneki fark etmez)
-    public bool CanBulk(string? user)
-    {
-        var allowed = cfg.GetSection("Eksik:TopluYetkililer").GetChildren().Select(c => c.Value).OfType<string>().ToList();
-        if (allowed.Count == 0) allowed = ["visikhan"];
-        string u = (user ?? "").Split('\\').Last();
-        return allowed.Any(a => string.Equals(a.Split('\\').Last(), u, StringComparison.OrdinalIgnoreCase));
-    }
-
     // sirala: ip | port | sunucu | segment | oneri | guven | durum (yon: azalan)
     public async Task<EksikListe> ListAsync(string? ara, string? durum, bool altyapi, int sayfa, int boyut, bool yazabilir, CancellationToken ct,
         bool test = false, string? sirala = null, bool azalan = false)
