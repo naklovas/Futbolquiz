@@ -244,6 +244,23 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
     int Hours(int? h) => Math.Clamp(h ?? cfg.GetValue("Eksik:Saat", 24), 1, Math.Max(1, cfg.GetValue("MaxRangeHours", 24 * 7)));
 
     // Sunucu başına kanıt metni: işlev haritası bilgi özeti + Carbon Black + aday uygulamalar
+    // Ajan / araç ürünleri (kullanıcı: Dataskope ajanı kuruldu diye sunucu Dataskope uygulaması OLMAZ): SM talebinde, aday listesinde ya da
+    // AI önerisinde geçerse sunucunun iş uygulaması sayılmaz; yalnız boş portu kabul eden exe o ürüne aitse "Altyapı: <ürün>" olabilir.
+    static readonly string[] DefaultAjanlar = ["Dataskope", "Infraskope", "Carbon Black", "Splunk", "SiteScope", "Trend Micro", "Deep Security",
+        "McAfee", "Trellix", "Symantec", "Tanium", "Qualys", "Tenable", "Nessus", "CyberArk", "SCCM", "Zabbix", "Dynatrace", "AppDynamics",
+        "AppInternals", "Commvault", "Veeam", "NetBackup", "Guardium", "Imperva", "Varonis", "Forcepoint", "Ansible", "Nagios", "PRTG", "SolarWinds"];
+    string[] Ajanlar() => cfg.GetSection("Eksik:AjanUygulamalari").GetChildren().Select(c => c.Value).OfType<string>().Where(v => v.Trim() != "") is var l && l.Any()
+        ? l.ToArray() : DefaultAjanlar;
+    string? AjanOf(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return null;
+        string n = Norm(text);
+        return Ajanlar().FirstOrDefault(a => Norm(a) is { Length: >= 4 } na && n.Contains(na));
+    }
+    // Boş portu kabul eden exe (kanıttaki Carbon Black "- gelen port X" satırı) bu ajana mı ait
+    static bool PortExeHas(string? evidence, string port, string ajan) => evidence != null && port.Length > 0 &&
+        evidence.Split('\n').Any(l => (l.StartsWith($"- gelen port {port}:") || l.StartsWith($"- gelen port {port} (")) && Norm(l).Contains(Norm(ajan)));
+
     async Task<Dictionary<string, string>> BuildAsync(List<string> ips, Dictionary<string, List<string>> ports, EnvanterSnapshot env,
         int hours, CancellationToken ct)
     {
@@ -273,7 +290,9 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
             if (smf.TryGetValue(ip, out var smfText)) sb.Append(smfText);
             if (cb.TryGetValue(ip, out var c)) sb.Append(c.Text(env, ip, miss));
             else sb.AppendLine($"Carbon Black (son {hours} saat): bu sunucuda ağ olayı yok (ajan yok ya da trafik yok).");
-            var cands = Candidates(env, ip, sb.ToString());
+            string sofar = sb.ToString();
+            var cands = Candidates(env, ip, sofar)
+                .Where(c => AjanOf(c) is not { } a || miss.Any(p => PortExeHas(sofar, p, a))).ToList();   // ajan adları aday değil
             if (cands.Count > 0) sb.AppendLine("ADAY UYGULAMALAR (ERT'deki adlar): " + string.Join(" | ", cands));
             outp[ip] = sb.ToString();
         }
@@ -356,11 +375,13 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
                     bool kaynak = HasIp(G(r, "ZT_KAYNAK"), ip) || Same(G(r, "ZT_KAYNAKHOSTNAME"));
                     // port eşleşmesi yalnız ZT_HEDEFPORT'ta (kullanıcı)
                     var ps = hedef ? miss.Where(p => HasPort(G(r, "ZT_HEDEFPORT"), p)).ToList() : [];
-                    return (r, hedef, kaynak, ps);
+                    string? aj = AjanOf(string.Join(" ", new[] { "BRIEF_DESCRIPTION", "DESCRIPTION", "ZT_HEDEFACIKLAMA", "ZT_KAYNAKACIKLAMA",
+                        "ZT_HEDEFUYGULAMA", "ZT_HEDEFUGULAMA", "ZT_KAYNAKUYGULAMA" }.Select(k => G(r, k))));
+                    return (r, hedef, kaynak, ps, aj);
                 })
                 .Where(x => x.hedef || x.kaynak).DistinctBy(x => G(x.r, "NUMBER")).ToList();
             var mine = all
-                .OrderByDescending(x => x.ps.Count > 0).ThenByDescending(x => x.hedef).ThenByDescending(x => G(x.r, "TARIH")).Take(10).ToList();
+                .OrderBy(x => x.aj != null).ThenByDescending(x => x.ps.Count > 0).ThenByDescending(x => x.hedef).ThenByDescending(x => G(x.r, "TARIH")).Take(10).ToList();
             if (mine.Count == 0)
             {
                 outp[ip] = err != null ? $"SM TALEPLERİ: okunamadı ({Cut(err, 150)})\n"
@@ -371,19 +392,26 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
             // Aranan (boş) port başına açık özet: bu porta erişim talebi var mı (tüm eşleşen talepler üzerinden, yalnız ilk 10 değil)
             foreach (var p in miss)
             {
-                var hit = all.Where(x => x.ps.Contains(p)).OrderByDescending(x => G(x.r, "TARIH")).ToList();
+                var hitAll = all.Where(x => x.ps.Contains(p)).OrderByDescending(x => G(x.r, "TARIH")).ToList();
+                var hit = hitAll.Where(x => x.aj == null).ToList();
+                var ajHit = hitAll.Where(x => x.aj != null).ToList();
+                if (ajHit.Count > 0)
+                    sb.AppendLine($"PORT {p}: {ajHit.Count} talep AJAN / ARAÇ talebi ({string.Join(", ", ajHit.Select(x => x.aj).Distinct())}; {string.Join(", ", ajHit.Take(3).Select(x => G(x.r, "NUMBER")))}) — " +
+                        "bu ürünün sunucuya kurulumu / erişimi içindir, sunucunun iş uygulamasını GÖSTERMEZ.");
                 sb.AppendLine(hit.Count > 0
                     ? $"PORT {p}'E ERİŞİM TALEBİ VAR: {hit.Count} talepte bu sunucu hedef ve ZT_HEDEFPORT {p} içeriyor (son {G(hit[0].r, "TARIH")}; {string.Join(", ", hit.Take(5).Select(x => G(x.r, "NUMBER")))})"
                       + (hit.Select(x => G(x.r, "ZT_HEDEFUYGULAMA", "ZT_HEDEFUGULAMA")).OfType<string>().GroupBy(a => a, StringComparer.OrdinalIgnoreCase).OrderByDescending(g => g.Count()).FirstOrDefault() is { } ga
                           ? $"; talepteki hedef uygulama: {ga.Key} ({ga.Count()})" : "")
+                    : ajHit.Count > 0 ? $"PORT {p}'E İŞ UYGULAMASI İÇİN ERİŞİM TALEBİ YOK (yalnız ajan / araç talepleri var)"
                     : $"PORT {p}'E ERİŞİM TALEBİ YOK (son {DateTime.Today.Year - since.Year} yılda bu sunucuya ZT_HEDEFPORT {p} olan talep bulunamadı)");
             }
             sb.AppendLine($"SM TALEPLERİ (bu sunucunun hedef ya da kaynak olduğu erişim talepleri, en yeni; {mine.Count(x => x.hedef)} hedef, {mine.Count(x => x.kaynak && !x.hedef)} kaynak):");
-            foreach (var (r, hedef, kaynak, ps) in mine)
+            foreach (var (r, hedef, kaynak, ps, aj) in mine)
             {
                 string rol = hedef && kaynak ? "bu sunucu HEM HEDEF HEM KAYNAK" : hedef ? $"bu sunucu HEDEF (kaynak: {Cut(G(r, "ZT_KAYNAK", "ZT_KAYNAKHOSTNAME"), 60)})"
                     : $"bu sunucu KAYNAK (hedef: {Cut(G(r, "ZT_HEDEF", "ZT_HEDEFHOSTNAME"), 60)})";
                 string port = G(r, "ZT_HEDEFPORT") ?? "";
+                if (aj != null) sb.AppendLine($"- [AJAN / ARAÇ TALEBİ: {aj} — sunucunun uygulaması DEĞİL, uygulama kanıtı olarak kullanma]");
                 sb.AppendLine($"- {G(r, "NUMBER")} {G(r, "TARIH")} · {rol}{(port.Length > 0 ? $" · hedef port {Cut(port, 40)}" : "")}{(ps.Count > 0 ? $" · BOŞ PORT {string.Join(",", ps)}" : "")}");
                 if (G(r, "BRIEF_DESCRIPTION") is { } bd) sb.AppendLine($"    Kısa açıklama: {Cut(bd, 200)}");
                 // açıklamaları sunucunun rolüne göre etiketle
@@ -662,6 +690,11 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
             - Uygulama adını mümkünse "ADAY UYGULAMALAR" listesinden HARFİ HARFİNE seç ("yeni": false).
             - Hiçbir aday uymuyor ama kanıt açıkça bir uygulamayı gösteriyorsa kısa bir ad öner ("yeni": true).
             - Port bir altyapı / araç hizmetiyse (izleme ajanı, yedekleme, antivirüs, yönetim) "uygulama": "Altyapı: <ne>" yaz.
+            - AJAN / ARAÇ ÜRÜNLERİ (Dataskope, Carbon Black, Splunk, SiteScope, yedekleme, antivirüs, izleme…) sunucunun İŞ UYGULAMASI
+              DEĞİLDİR. Bir SM talebinde sunucuya böyle bir ajanın kurulduğu ya da o ürüne erişim açıldığı yazıyorsa bu, sunucunun o
+              uygulama olduğunu GÖSTERMEZ ("[AJAN / ARAÇ TALEBİ]" işaretli talepleri uygulama kanıtı sayma). Ajan adını yalnız boş
+              portu kabul eden exe o ürüne aitse "Altyapı: <ürün>" olarak yaz; aksi halde diğer kanıtlara (exe yolu, sunucu adı,
+              benzer adlı sunucular, WEBSITE…) bak, yoksa null.
             - Port bir veritabanı ya da ara katman portuysa (1433 SQL Server, 1521 Oracle, 5432, 1414 MQ… ya da exe sqlservr.exe,
               oracle.exe, tnslsnr.exe) "SQL Server" gibi teknoloji adı YAZMA: veritabanı hangi uygulamaya aitse onu bul
               (bu porta bağlanan istemci uygulamalar, aynı sunucunun diğer portları, benzer adlı sunucular, SM talepleri).
@@ -679,6 +712,11 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
         foreach (var ip in ips)
             sb.AppendLine().AppendLine($"=== Sunucu {ip} · boş portlar: {string.Join(", ", todo[ip].Select(p => p == "" ? "(port yok)" : p))}")
               .AppendLine(Cut(texts.GetValueOrDefault(ip), cfg.GetValue("Eksik:MaxKarakter", 6000)));
+        // Küçük model uzun kanıttan sonra baştaki kuralları unutabiliyor: en önemli kurallar sona tekrar
+        sb.AppendLine().AppendLine("""
+            HATIRLATMA (kanıtlardan önemli): genel bilgiler dosyasındaki kurallar SM taleplerinden önce gelir. Ajan / araç kurulum ya da
+            erişim talepleri (Dataskope vb.) sunucunun uygulamasını göstermez. Yalnızca JSON dizi döndür.
+            """);
         string answer = await islev.ChatAsync(sb.ToString(), ct);
         var outp = new Dictionary<(string, string), EksikOneri>();
         if (IslevService.ExtractJson(answer) is not { } root) throw new InvalidOperationException("AI cevabı JSON değil: " + Cut(answer, 200));
@@ -695,9 +733,16 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
             string? app = IslevService.Str(e, "uygulama");
             if (app is "null" or "-") app = null;
             bool yeni = false;
+            int guven = Math.Clamp(IslevService.Int(e, "guven"), 0, 100);
+            string? gerekce = IslevService.Str(e, "gerekce");
+            // Ajan / araç adı önerildiyse: portun exe'si o ürüne aitse "Altyapı: X", değilse öneri yok sayılır (gerekçe saklanır)
+            if (app != null && AjanOf(app) is { } ajan)
+            {
+                if (PortExeHas(texts.GetValueOrDefault(ip), port, ajan)) app = "Altyapı: " + ajan;
+                else { gerekce = $"Yok sayıldı: AI '{app}' önerdi ama {ajan} bir ajan / araç ürünü ve bu portu kabul eden exe ona ait değil. AI gerekçesi: {gerekce}"; app = null; guven = 0; }
+            }
             if (app != null && !app.StartsWith("Altyapı", StringComparison.OrdinalIgnoreCase)) app = Snap(env, app, out yeni);
-            outp[(ip, port)] = new EksikOneri(Cut(app, 200), yeni, Math.Clamp(IslevService.Int(e, "guven"), 0, 100), IslevService.Str(e, "gerekce"),
-                Ai, "AI", DateTime.Now);
+            outp[(ip, port)] = new EksikOneri(Cut(app, 200), yeni, guven, gerekce, Ai, "AI", DateTime.Now);
         }
         return outp;
     }
