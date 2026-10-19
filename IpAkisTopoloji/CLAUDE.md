@@ -240,6 +240,11 @@ erişim talepleri) — DB → şema → tablo ve kim erişiyor bilgisi buradan b
   HTTP.sys portunda asıl exe tahmini (`httpSysApp`): ERT'de o port için WEBSITE (IIS site adı; kullanıcı: "IIS adı WEBSITE kolonunda") /
   APPNAME / SERVICENAME, sunucudaki bir exe'nin tam yolunda (harf-rakam sadeleştirilmiş) geçiyorsa → "asıl uygulama büyük ihtimalle X";
   geçmiyorsa kelimelerin ≥2'si ve ≥2/3'ü yolda. Canlı örnek: 9000 · WEBSITE "ZB.Wall.P5" → d:\aspnetcore\zb.wall.p5\core\zb.app.wall.exe.
+- **"Bu sunucuda hangi uygulama çalışıyor?"** (IP kartı, Gelen portlar tablosunun üstündeki düğme; `SurecAi` Surec.cs, `POST /api/surec/ai`):
+  arayüzdeki /api/surec sonucu exe başına toplanıp (PID'ler, portlar, giden, bağlanan / bağlandığı uygulamalar) AI'a gider (yeniden
+  sorgulanmaz) + ERT kayıtları + segment + genel bilgiler dosyası. Kesin genel süreçler kodda ayıklanır (`GenelAd` / `GenelYol`: svchost,
+  splunkd, Trend Micro, Carbon Black, VMware Tools…; ntoskrnl/System tutulur — HTTP.sys). AI: iş uygulamalarına ad (ör. paloma.bulksms.exe,
+  odi4.exe), rol (hizmet veren port X / istemci), ERT karşılığı, güven, özet. Kaydedilmez (`state.procAi`, IP değişince sıfırlanır).
 - **ERT eksikleri** (`Eksik.cs`, `wwwroot/eksik.html` — ana sayfadan bağımsız sayfa, sekme çubuğunda "ERT eksikleri ↗"): ERT'de
   APPNAME'i boş (IP, port) satırları (`EksikService.Missing`; altyapı portları `Uygulama:AltyapiPortlari` ayrı, AI'a gitmez).
   Kanıt (sunucu başına, `BuildAsync`): IslevService.ProfilesAsync metni (ERT, segment, VIP, MSY, ÇSY, Kahin, SM) + boş satırın

@@ -201,6 +201,14 @@ app.MapGet("/api/firewall", async (string? ip, string? start, string? end,
 });
 
 // Sunucu içi akış: gelen bağlantıları hangi süreç karşılıyor, o süreç nereye gidiyor (Carbon Black).
+// "Bu sunucuda hangi uygulama çalışıyor?": arayüzdeki Carbon Black süreç listesi AI'a (Surec.cs SurecAi)
+app.MapPost("/api/surec/ai", async (SurecAiIstek req, EnvanterService envanter, IslevService islev, EksikService eksik, CancellationToken ct) =>
+{
+    if (!LookupQuery.TryParseIpv4(req.Ip, out _)) return Results.BadRequest(new { error = "Geçersiz IP." });
+    try { return Results.Ok(await SurecAi.RunAsync(req, await envanter.GetAsync(false, ct), islev, eksik, ct)); }
+    catch (Exception ex) when (ex is not OperationCanceledException) { return Results.Json(new { error = ex.Message }, statusCode: 502); }
+});
+
 app.MapGet("/api/surec", async (string? ip, string? start, string? end,
     IConfiguration cfg, IHttpClientFactory factory, EnvanterService envanter, CancellationToken ct) =>
 {

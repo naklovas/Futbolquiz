@@ -398,7 +398,7 @@ async function run() {
   history.replaceState(null, "", "?" + new URLSearchParams({ ip: params.get("ip"), start: params.get("start"), end: params.get("end") }));
 
   abort?.abort(); hopAbort?.abort(); aiAbort?.abort(); procAbort?.abort(); sessAbort?.abort();
-  state.proc = null; state.procSel = null; state.sess = null; state.jour = null; jourAbort?.abort();
+  state.proc = null; state.procAi = null; state.procSel = null; state.sess = null; state.jour = null; jourAbort?.abort();
   closeFlow();
   abort = new AbortController();
   $("#go").disabled = true; $("#cancel").hidden = false;
@@ -665,8 +665,52 @@ function targetApps(t) {
       </tr>`).join("")}</tbody></table></div>`
     : `<div class="unk">Bu IP için uygulama envanterinde kayıt yok.</div>`;
   const rng = state.lastParams ? `${(state.lastParams.get("start") || "").replace("T", " ")} – ${(state.lastParams.get("end") || "").replace("T", " ")}` : "seçili aralık";
-  return ert + `<h2 style="margin-top:14px">Gelen portlar ve çalışan süreçler <span class="small muted" style="font-weight:400">Carbon Black · ${esc(rng)} · bu sunucuda ağ bağlantısı görülen tüm exe'ler</span></h2>${listenTable(t)}`;
+  const canAi = state.proc?.status === "ok" && state.proc.body.processes?.length;
+  return ert + `<h2 style="margin-top:14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">Gelen portlar ve çalışan süreçler <span class="small muted" style="font-weight:400">Carbon Black · ${esc(rng)} · bu sunucuda ağ bağlantısı görülen tüm exe'ler</span>
+    ${canAi ? `<button type="button" id="procAiBtn" class="mini" style="margin-left:auto" title="Genel Windows / altyapı exe'lerini ayıklayıp bu sunucuda gerçekte hangi iş uygulamalarının çalıştığını ve hangisinin hizmet verdiğini AI'a sorar"${state.procAi?.status === "loading" ? " disabled" : ""}>${state.procAi?.status === "loading" ? "AI inceliyor…" : "🤖 Bu sunucuda hangi uygulama çalışıyor?"}</button>` : ""}</h2>
+    ${procAiBox(t.ip)}${listenTable(t)}`;
 }
+// "Bu sunucuda hangi uygulama çalışıyor?" (/api/surec/ai): arayüzdeki süreç listesi exe başına toplanıp AI'a gider
+function procAiBox(ip) {
+  const a = state.procAi;
+  if (!a || a.ip !== ip) return "";
+  if (a.status === "loading") return `<div class="small muted" style="margin:4px 0 8px"><span class="spinner"></span> AI süreçleri inceliyor…</div>`;
+  if (a.status === "error") return `<div class="unk" style="color:var(--err);margin-bottom:8px">AI: ${esc(a.error)}</div>`;
+  const b = a.body;
+  return `<div style="border:1px solid var(--line);border-left:3px solid var(--in);border-radius:8px;padding:8px 12px;margin:4px 0 10px;background:var(--bg)">
+    ${b.ozet ? `<div style="margin-bottom:6px"><b>${esc(b.ozet)}</b></div>` : ""}
+    ${b.uygulamalar.length ? `<table><thead><tr><th>Exe</th><th>Uygulama (AI)</th><th>Rol</th><th>ERT karşılığı</th><th class="num">Güven</th></tr></thead><tbody>
+      ${b.uygulamalar.map(u => `<tr title="${esc(u.gerekce || "")}"><td><b class="mono"${u.yol ? ` title="${esc(u.yol)}"` : ""}>${esc(u.exe)}</b></td><td>${esc(u.uygulama || "—")}</td>
+        <td class="small">${esc(u.rol || "")}</td><td>${u.ertKarsiligi ? esc(u.ertKarsiligi) : `<span class="small muted">yok</span>`}</td><td class="num">%${u.guven}</td></tr>`).join("")}</tbody></table>` : ""}
+    <div class="small muted" style="margin-top:4px">Ayıklanan genel süreçler: ${esc(b.ayiklanan.join(", ") || "—")} · ${(b.elapsedMs / 1000).toFixed(1)} sn · satırın üstüne gelince gerekçe</div>
+  </div>`;
+}
+async function runProcAi(ip) {
+  const procs = state.proc?.body?.processes || [];
+  // exe başına (PID kopyaları birleşik): portlar, giden sayısı, bağlanan / bağlandığı uygulamalar
+  const m = new Map();
+  for (const n of procs) {
+    const k = exeShort(n.name).toLowerCase();
+    const x = m.get(k) ?? { ad: exeShort(n.name), yol: n.yol || null, pidler: [], portlar: new Map(), giden: 0, gelenUygulamalar: new Set(), gidenUygulamalar: new Set() };
+    if (n.pid) x.pidler.push(n.pid);
+    for (const p of n.portlar ?? []) { const c = x.portlar.get(p.port) ?? { port: p.port, hits: 0, peers: 0 }; c.hits += p.hits; c.peers += p.peers; x.portlar.set(p.port, c); }
+    x.giden += n.outHits || 0;
+    (n.inbound || []).forEach(p => (p.apps || []).forEach(a => x.gelenUygulamalar.add(a)));
+    (n.outbound || []).forEach(p => (p.apps || []).forEach(a => x.gidenUygulamalar.add(a)));
+    m.set(k, x);
+  }
+  const surecler = [...m.values()].map(x => ({ ...x, portlar: [...x.portlar.values()], gelenUygulamalar: [...x.gelenUygulamalar].slice(0, 8), gidenUygulamalar: [...x.gidenUygulamalar].slice(0, 8) }));
+  state.procAi = { ip, status: "loading" }; updateTargetApps();
+  try {
+    const r = await fetch("api/surec/ai", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ip, surecler }) });
+    const b = await r.json().catch(() => ({ error: `HTTP ${r.status}` }));
+    if (!r.ok) throw new Error(b.error || `HTTP ${r.status}`);
+    if (state.procAi?.ip === ip) state.procAi = { ip, status: "ok", body: b };
+  } catch (e) { if (state.procAi?.ip === ip) state.procAi = { ip, status: "error", error: e.message }; }
+  updateTargetApps();
+}
+document.addEventListener("click", e => { if (e.target.closest("#procAiBtn") && state.data?.target) runProcAi(state.data.target.ip); });
+
 // Ad tam yol gelirse son parçası (eski sürümde Splunk regex'i Windows yolunu kesmiyordu)
 const exeShort = n => String(n || "").split(/[\\/]/).pop() || n;
 // HTTP.sys: gelen bağlantıyı çekirdek kabul eder (PID 4 / System)

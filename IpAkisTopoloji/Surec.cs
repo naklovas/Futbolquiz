@@ -83,3 +83,91 @@ static class ProcessFlowBuilder
         return new ProcPeer(ip, port, hits, env.FindSegment(ip), apps, members.Count > 0, lbGw);
     }
 }
+
+// ---------------------------------------------------------------------------
+// "Bu sunucuda hangi uygulama çalışıyor?" (IP kartı, Gelen portlar ve çalışan süreçler tablosunun üstündeki düğme): Carbon Black'te
+// görülen exe'ler (tam yol, dinlediği portlar, gelen / giden bağlantı, karşı uygulamalar) + ERT + segment + genel bilgiler dosyası AI'a
+// gider; AI genel Windows / altyapı süreçlerini (svchost, splunkd, antivirüs, Carbon Black ajanı…) ayıklar, iş uygulamalarını
+// (ör. paloma.bulksms.exe, odi4.exe) adlandırır ve hangisinin hizmet verdiğini (port) söyler. Veri arayüzde zaten olan /api/surec
+// sonucudur (yeniden sorgulanmaz). Sonuç kaydedilmez.
+// ---------------------------------------------------------------------------
+record SurecAiExe(string Ad, string? Yol, List<string>? Pidler, List<ProcPort>? Portlar, long Giden, List<string>? GelenUygulamalar, List<string>? GidenUygulamalar);
+record SurecAiIstek(string? Ip, List<SurecAiExe>? Surecler);
+record SurecAiUygulama(string Exe, string? Yol, string? Uygulama, string? Rol, string? ErtKarsiligi, int Guven, string? Gerekce);
+record SurecAiSonuc(string Ip, string? Ozet, List<SurecAiUygulama> Uygulamalar, List<string> Ayiklanan, long ElapsedMs);
+
+static class SurecAi
+{
+    // Kesin genel / altyapı süreçleri: AI'a "ayıklandı" olarak bildirilir, ayrıntısı gönderilmez
+    static readonly string[] GenelYol = [@"\windows\system32\", @"\windows\syswow64\", @"\splunkuniversalforwarder\", @"\trend micro\",
+        @"\carbon black\", @"\confer\", @"\vmware\vmware tools\", @"\windows defender\", @"\microsoft monitoring agent\", @"\zabbix", @"\nsclient"];
+    static readonly HashSet<string> GenelAd = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "svchost.exe", "lsass.exe", "services.exe", "wininit.exe", "winlogon.exe", "csrss.exe", "smss.exe", "dwm.exe", "explorer.exe",
+        "conhost.exe", "taskhostw.exe", "wmiprvse.exe", "spoolsv.exe", "rdpclip.exe", "splunkd.exe", "wget.exe", "msmpeng.exe",
+        "coreserviceshell.exe", "vmtoolsd.exe", "zabbix_agentd.exe", "repmgr.exe", "cb.exe", "lsm.exe", "wermgr.exe", "ccsvchst.exe"
+    };
+    public static bool Genel(SurecAiExe e) =>
+        GenelAd.Contains(e.Ad) || (e.Yol is { } y && GenelYol.Any(g => y.Contains(g, StringComparison.OrdinalIgnoreCase)) && !(e.Ad is "ntoskrnl.exe" or "System"));
+
+    public static async Task<SurecAiSonuc> RunAsync(SurecAiIstek req, EnvanterSnapshot env, IslevService islev, EksikService eksik, CancellationToken ct)
+    {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        string ip = req.Ip!;
+        var all = req.Surecler ?? [];
+        var genel = all.Where(Genel).Select(e => e.Ad).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        var is_ = all.Where(e => !Genel(e)).ToList();
+        if (is_.Count == 0)
+            return new SurecAiSonuc(ip, "Carbon Black'te yalnız Windows / altyapı süreçleri görüldü; iş uygulaması exe'si yok.", [], genel, sw.ElapsedMilliseconds);
+
+        var sb = new System.Text.StringBuilder();
+        if (eksik.Bilgi().Text is { Length: > 0 } bilgi)
+            sb.AppendLine("KURUMA ÖZEL GENEL BİLGİLER (kullanıcının hazırladığı):").AppendLine(bilgi.Trim()).AppendLine("--- genel bilgilerin sonu ---").AppendLine();
+        sb.AppendLine("""
+            Bir bankanın veri merkezinde kıdemli bir altyapı mimarısın. Aşağıda bir sunucuda Carbon Black'in ağ bağlantısı gördüğü exe'ler
+            var (tam yol, dinlediği portlar, gelen / giden bağlantı sayısı, bağlandığı ve kendisine bağlanan uygulamalar). Genel Windows ve
+            izleme / güvenlik ajanları zaten ayıklandı. Görevin: bu sunucuda gerçekte HANGİ İŞ UYGULAMALARININ çalıştığını bulmak.
+            - Her iş uygulaması exe'si için anlamlı bir uygulama adı ver (exe adından ve klasör yolundan; ör. c:\bbpgm\paloma\paloma.bulksms.exe →
+              "Paloma Toplu SMS"; odi4.exe → "Oracle Data Integrator ajanı").
+            - rol: port dinleyip gelen bağlantı alıyorsa "hizmet veren (port X)", yalnız dışarı bağlanıyorsa "istemci / arka plan işi".
+              ntoskrnl.exe / System bir portta görünüyorsa o port HTTP.sys üzerindendir; asıl uygulama yolu / adı ERT WEBSITE ile örtüşen exe'dir.
+            - ertKarsiligi: ERT'deki uygulama listesinden karşılığı varsa harfi harfine yaz, yoksa null.
+            - Hâlâ genel / altyapı olduğunu düşündüğün exe'leri listeye KOYMA.
+            - ozet: "Bu sunucu asıl olarak … uygulamasını çalıştırıyor; … portundan hizmet veriyor" gibi 1–2 cümle.
+            Yalnızca JSON döndür:
+            {"ozet":"…","uygulamalar":[{"exe":"…","uygulama":"…","rol":"…","ertKarsiligi":null,"guven":0-100,"gerekce":"tek cümle"}]}
+            """);
+        var hosts = env.AppsOnIp(ip);
+        sb.AppendLine().AppendLine($"### Sunucu {ip}" + (hosts.Select(h => h.UnixName).OfType<string>().FirstOrDefault() is { } hn ? $" ({hn})" : ""));
+        if (env.FindSegment(ip) is { } seg) sb.AppendLine($"Segment: {seg.Label}{(seg.Domain != null ? " · " + seg.Domain : "")}");
+        var ert = hosts.Where(h => h.AppName != null || h.Website != null || h.ServiceName != null)
+            .Select(h => $"port {h.Port ?? "-"}: {h.AppName ?? "(boş)"}{(h.Website != null ? " · WEBSITE " + h.Website : "")}{(h.ServiceName != null ? " · SERVICE " + h.ServiceName : "")}")
+            .Distinct().Take(20).ToList();
+        sb.AppendLine(ert.Count > 0 ? "ERT kayıtları:\n- " + string.Join("\n- ", ert) : "ERT kaydı yok.");
+        sb.AppendLine($"Ayıklanan genel süreçler: {string.Join(", ", genel.Take(25))}");
+        sb.AppendLine("İş uygulaması olabilecek exe'ler:");
+        foreach (var e in is_.OrderByDescending(e => e.Portlar?.Sum(p => p.Hits) ?? 0).ThenByDescending(e => e.Giden).Take(40))
+        {
+            string ports = e.Portlar is { Count: > 0 } ps ? string.Join(", ", ps.Select(p => $"{p.Port} ({p.Hits} bağlantı, {p.Peers} istemci)")) : "dinlediği port yok";
+            sb.AppendLine($"- {e.Ad} [{e.Yol}] · dinlediği portlar: {ports} · giden bağlantı: {e.Giden}"
+                + (e.GelenUygulamalar is { Count: > 0 } gu ? $" · bağlanan uygulamalar: {string.Join(", ", gu.Take(6))}" : "")
+                + (e.GidenUygulamalar is { Count: > 0 } gi ? $" · bağlandığı uygulamalar: {string.Join(", ", gi.Take(6))}" : ""));
+        }
+        string answer = await islev.ChatAsync(sb.ToString(), ct);
+        if (IslevService.ExtractJson(answer) is not { } root || root.ValueKind != System.Text.Json.JsonValueKind.Object)
+            throw new InvalidOperationException("AI cevabı JSON değil: " + (answer.Length > 200 ? answer[..200] : answer));
+        var list = new List<SurecAiUygulama>();
+        if (IslevService.Prop(root, "uygulamalar") is { ValueKind: System.Text.Json.JsonValueKind.Array } arr)
+            foreach (var x in arr.EnumerateArray())
+            {
+                string? exe = IslevService.Str(x, "exe");
+                if (exe == null) continue;
+                var src = is_.FirstOrDefault(e => string.Equals(e.Ad, exe, StringComparison.OrdinalIgnoreCase));
+                string? ertK = IslevService.Str(x, "ertKarsiligi") is { } k && k != "null"
+                    ? env.AppNames.FirstOrDefault(a => string.Equals(a, k, StringComparison.OrdinalIgnoreCase)) ?? k : null;
+                list.Add(new SurecAiUygulama(exe, src?.Yol, IslevService.Str(x, "uygulama"), IslevService.Str(x, "rol"), ertK,
+                    Math.Clamp(IslevService.Int(x, "guven"), 0, 100), IslevService.Str(x, "gerekce")));
+            }
+        return new SurecAiSonuc(ip, IslevService.Str(root, "ozet"), list, genel, sw.ElapsedMilliseconds);
+    }
+}
