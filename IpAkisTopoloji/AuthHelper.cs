@@ -7,12 +7,14 @@ namespace AppRel
         // Güvenlik anahtarı koda yazılmaz: appsettings.json -> AppSettings:DokuPanelKey
         // (DokuPanel tarafındakiyle birebir aynı olmalı).
 
-        public static async Task<bool> YetkiKontrol(HttpContext context, IConfiguration config)
+        // siteAdi verilirse AppSettings:CurrentSiteName yerine o site adı sorulur: DokuPanel'de ikinci bir site kaydı (ör.
+        // "DeltaFlow-Etiketleme") açılıp yazma yetkisi oradaki kişi / gruplara verilir (Etiket:YazmaSiteAdi). DokuPanel'de kod değişmez.
+        public static async Task<bool> YetkiKontrol(HttpContext context, IConfiguration config, string? siteAdi = null)
         {
             string DokuPanelApiUrl = config.GetValue<string>("AppSettings:DokuPanelApiUrl") ?? config.GetValue<string>("DokuPanelApiUrl") ?? "http://localhost/DokuPanel/api/config/get-groups-by-name?siteName=";
             string DokuPanelKey = config.GetValue<string>("AppSettings:DokuPanelKey") ?? "";
             // 1. Uygulama Kimliğini oku (appsettings.json içindeki AppSettings:CurrentSiteName)
-            string siteName = config.GetValue<string>("AppSettings:CurrentSiteName") ?? "BilinmeyenSite";
+            string siteName = siteAdi ?? config.GetValue<string>("AppSettings:CurrentSiteName") ?? "BilinmeyenSite";
 
             // Kullanıcı giriş yapmamışsa direkt reddet
             if (context.User?.Identity?.IsAuthenticated != true) return false;

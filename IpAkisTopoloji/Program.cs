@@ -86,6 +86,22 @@ if (authEnabled)
             return;
         }
 
+        // Yazma yetkisi DokuPanel'deki ayrı site kaydından (Etiket:YazmaSiteAdi, ör. "DeltaFlow-Etiketleme"); yalnız API isteklerinde,
+        // kullanıcı başına aynı süre önbellekli. Sonuç EtiketService.CanWrite(cfg, ctx) içinde kullanılır.
+        if (cfg["Etiket:YazmaSiteAdi"] is { Length: > 0 } yazmaSite && context.Request.Path.StartsWithSegments("/api"))
+        {
+            string wkey = "yazma:" + user.ToLowerInvariant();
+            if (!cache.TryGetValue(wkey, out bool yazar))
+            {
+                var hataOnce = context.Items["AuthHata"];
+                yazar = await AuthHelper.YetkiKontrol(context, cfg, yazmaSite);
+                if (!yazar) app.Logger.LogInformation("Yazma yetkisi yok: {User} ({Site}) - {Hata}", user, yazmaSite, context.Items["AuthHata"]);
+                context.Items["AuthHata"] = hataOnce;
+                cache.Set(wkey, yazar, TimeSpan.FromMinutes(cfg.GetValue("Auth:CacheMinutes", 5)));
+            }
+            context.Items["DokuYazar"] = yazar;
+        }
+
         if (context.Request.Path.StartsWithSegments("/api"))
             app.Logger.LogInformation("{User} {Method} {Path}{Query}", user, context.Request.Method, context.Request.Path, context.Request.QueryString);
         await next();
@@ -562,7 +578,7 @@ app.MapGet("/api/etiket/sunucular", async (string? ip, string? sunucu, string? u
             yon == "desc", sayfa ?? 1, boyut ?? 100));
         var (desc, uyari) = await EtiketAciklama.GetAsync(cfg, ct);
         return Results.Ok(new { list.Sunucular, list.Toplam, list.Tum, list.Etiketli, etiketler = EtiketService.Catalog(env, desc),
-            aciklamaUyari = uyari, yazabilir = EtiketService.CanWrite(cfg, ctx.User?.Identity?.Name) });
+            aciklamaUyari = uyari, yazabilir = EtiketService.CanWrite(cfg, ctx) });
     }
     catch (Exception ex) { return Results.Json(new { error = ex.Message }, statusCode: 502); }
 });
@@ -570,7 +586,7 @@ app.MapGet("/api/etiket/sunucular", async (string? ip, string? sunucu, string? u
 app.MapPost("/api/etiket", async (EtiketIstek req, HttpContext ctx, IConfiguration cfg, EnvanterService envanter, CancellationToken ct) =>
 {
     string user = ctx.User?.Identity?.Name ?? "?";
-    if (!EtiketService.CanWrite(cfg, ctx.User?.Identity?.Name))
+    if (!EtiketService.CanWrite(cfg, ctx))
         return Results.Json(new { error = $"Etiket yazma yetkiniz yok ({user})." }, statusCode: 403);
     var ips = (req.Ips ?? []).Select(i => i?.Trim()).Where(i => LookupQuery.TryParseIpv4(i, out _)).Select(i => i!).Distinct().ToList();
     if (ips.Count == 0 || ips.Count > 500) return Results.BadRequest(new { error = "1–500 arası geçerli IP seçin." });
@@ -592,7 +608,7 @@ app.MapPost("/api/etiket", async (EtiketIstek req, HttpContext ctx, IConfigurati
 app.MapPost("/api/etiket/aciklama", async (EtiketAciklamaIstek req, HttpContext ctx, IConfiguration cfg, CancellationToken ct) =>
 {
     string user = ctx.User?.Identity?.Name ?? "?";
-    if (!EtiketService.CanWrite(cfg, ctx.User?.Identity?.Name))
+    if (!EtiketService.CanWrite(cfg, ctx))
         return Results.Json(new { error = $"Etiket yazma yetkiniz yok ({user})." }, statusCode: 403);
     string? tag = EtiketService.NormalizeTag(req.Etiket);
     if (tag == null) return Results.BadRequest(new { error = "Etiket geçersiz." });
@@ -626,7 +642,7 @@ app.MapGet("/api/tenantlar", async (string? etiket, EnvanterService envanter, Ca
 
 app.MapGet("/api/islev", async (string etiket, string? tenant, HttpContext ctx, IConfiguration cfg, IslevService islev, CancellationToken ct) =>
 {
-    try { return Results.Ok(await islev.MapAsync(etiket.Trim(), EtiketService.CanWrite(cfg, ctx.User?.Identity?.Name), ct, TenantList(tenant))); }
+    try { return Results.Ok(await islev.MapAsync(etiket.Trim(), EtiketService.CanWrite(cfg, ctx), ct, TenantList(tenant))); }
     catch (Exception ex) { return Results.Json(new { error = ex.Message }, statusCode: 502); }
 });
 
@@ -689,7 +705,7 @@ app.MapGet("/api/eksik", async (string? ara, string? durum, bool? altyapi, bool?
     try
     {
         string? user = ctx.User?.Identity?.Name;
-        var l = await eksik.ListAsync(ara, durum, altyapi ?? false, sayfa ?? 1, boyut ?? 200, EtiketService.CanWrite(cfg, user), ct, test ?? false, sirala, yon == "desc");
+        var l = await eksik.ListAsync(ara, durum, altyapi ?? false, sayfa ?? 1, boyut ?? 200, EtiketService.CanWrite(cfg, ctx), ct, test ?? false, sirala, yon == "desc");
         return Results.Ok(l with { TopluYetki = l.Yazabilir && eksik.CanBulk(user) });
     }
     catch (Exception ex) { return Results.Json(new { error = ex.Message }, statusCode: 502); }
@@ -711,7 +727,7 @@ app.MapGet("/api/eksik/kanit", async (string ip, bool? yeni, EksikService eksik,
 app.MapPost("/api/eksik/calistir", (EksikCalistir req, HttpContext ctx, IConfiguration cfg, EksikService eksik) =>
 {
     string user = ctx.User?.Identity?.Name ?? "?";
-    if (!EtiketService.CanWrite(cfg, ctx.User?.Identity?.Name)) return Results.Json(new { error = $"Yetkiniz yok ({user})." }, statusCode: 403);
+    if (!EtiketService.CanWrite(cfg, ctx)) return Results.Json(new { error = $"Yetkiniz yok ({user})." }, statusCode: 403);
     // Tüm boşları tahmin ettirme (IP listesi olmadan) yalnız Eksik:TopluYetkililer; seçili / tek sunucu yenilemesi yazma yetkisi olan herkese
     if (req.Ips is not { Count: > 0 } && !eksik.CanBulk(user))
         return Results.Json(new { error = $"Tüm boşları tahmin ettirme yetkiniz yok ({user}); seçili sunucular için önerebilirsiniz." }, statusCode: 403);
@@ -721,14 +737,14 @@ app.MapPost("/api/eksik/calistir", (EksikCalistir req, HttpContext ctx, IConfigu
 });
 app.MapPost("/api/eksik/durdur", (HttpContext ctx, IConfiguration cfg, EksikService eksik) =>
 {
-    if (!EtiketService.CanWrite(cfg, ctx.User?.Identity?.Name)) return Results.Json(new { error = "Yetkiniz yok." }, statusCode: 403);
+    if (!EtiketService.CanWrite(cfg, ctx)) return Results.Json(new { error = "Yetkiniz yok." }, statusCode: 403);
     eksik.Stop();
     return Results.Ok(eksik.Durum);
 });
 app.MapPost("/api/eksik/karar", async (EksikKarar req, HttpContext ctx, IConfiguration cfg, EksikService eksik, CancellationToken ct) =>
 {
     string user = ctx.User?.Identity?.Name ?? "?";
-    if (!EtiketService.CanWrite(cfg, ctx.User?.Identity?.Name)) return Results.Json(new { error = $"Yetkiniz yok ({user})." }, statusCode: 403);
+    if (!EtiketService.CanWrite(cfg, ctx)) return Results.Json(new { error = $"Yetkiniz yok ({user})." }, statusCode: 403);
     try { await eksik.DecideAsync(req, user, ct); return Results.Ok(new { ok = true }); }
     catch (InvalidOperationException ex) { return Results.BadRequest(new { error = ex.Message }); }
     catch (Microsoft.Data.SqlClient.SqlException ex) { return Results.Json(new { error = "SQL: " + ex.Message }, statusCode: 502); }
@@ -760,7 +776,7 @@ app.MapGet("/api/islev/versiyon/{id:int}", async (int id, IConfiguration cfg, Ca
 app.MapPost("/api/islev/versiyon", async (VersiyonKaydet req, HttpContext ctx, IConfiguration cfg, CancellationToken ct) =>
 {
     string user = ctx.User?.Identity?.Name ?? "?";
-    if (!EtiketService.CanWrite(cfg, ctx.User?.Identity?.Name))
+    if (!EtiketService.CanWrite(cfg, ctx))
         return Results.Json(new { error = $"Versiyon kaydetme yetkiniz yok ({user})." }, statusCode: 403);
     if (string.IsNullOrWhiteSpace(req.Etiket)) return Results.BadRequest(new { error = "Etiket gerekli." });
     try
@@ -775,7 +791,7 @@ app.MapPost("/api/islev/versiyon", async (VersiyonKaydet req, HttpContext ctx, I
 app.MapDelete("/api/islev/versiyon/{id:int}", async (int id, HttpContext ctx, IConfiguration cfg, CancellationToken ct) =>
 {
     string user = ctx.User?.Identity?.Name ?? "?";
-    if (!EtiketService.CanWrite(cfg, ctx.User?.Identity?.Name)) return Results.Json(new { error = "Yetkiniz yok." }, statusCode: 403);
+    if (!EtiketService.CanWrite(cfg, ctx)) return Results.Json(new { error = "Yetkiniz yok." }, statusCode: 403);
     try { return await VersiyonService.DeleteAsync(cfg, id, user, app.Logger, ct) ? Results.Ok(new { silindi = id }) : Results.NotFound(new { error = "Versiyon bulunamadı." }); }
     catch (Exception ex) { return Results.Json(new { error = ex.Message }, statusCode: 502); }
 });
@@ -791,7 +807,7 @@ app.MapGet("/api/islev/profil", async (string ip, IslevService islev, Cancellati
 app.MapPost("/api/islev/calistir", (IslevCalistir req, HttpContext ctx, IConfiguration cfg, IslevService islev) =>
 {
     string user = ctx.User?.Identity?.Name ?? "?";
-    if (!EtiketService.CanWrite(cfg, ctx.User?.Identity?.Name))
+    if (!EtiketService.CanWrite(cfg, ctx))
         return Results.Json(new { error = $"Sınıflandırma başlatma yetkiniz yok ({user})." }, statusCode: 403);
     if (string.IsNullOrWhiteSpace(req.Etiket)) return Results.BadRequest(new { error = "Etiket seçin." });
     return islev.Start(req, req.Etiket.Trim(), user)
@@ -801,7 +817,7 @@ app.MapPost("/api/islev/calistir", (IslevCalistir req, HttpContext ctx, IConfigu
 
 app.MapPost("/api/islev/durdur", (HttpContext ctx, IConfiguration cfg, IslevService islev) =>
 {
-    if (!EtiketService.CanWrite(cfg, ctx.User?.Identity?.Name)) return Results.Json(new { error = "Yetkiniz yok." }, statusCode: 403);
+    if (!EtiketService.CanWrite(cfg, ctx)) return Results.Json(new { error = "Yetkiniz yok." }, statusCode: 403);
     islev.Stop();
     return Results.Ok(islev.Durum);
 });
@@ -809,7 +825,7 @@ app.MapPost("/api/islev/durdur", (HttpContext ctx, IConfiguration cfg, IslevServ
 app.MapPost("/api/islev/yeniden-adlandir", async (IslevAd req, HttpContext ctx, IConfiguration cfg, IslevService islev, CancellationToken ct) =>
 {
     string user = ctx.User?.Identity?.Name ?? "?";
-    if (!EtiketService.CanWrite(cfg, ctx.User?.Identity?.Name))
+    if (!EtiketService.CanWrite(cfg, ctx))
         return Results.Json(new { error = $"Yeniden adlandırma yetkiniz yok ({user})." }, statusCode: 403);
     string? eski = req.Eski?.Trim(), yeni = req.Yeni?.Trim(), tag = req.Etiket?.Trim();
     if (string.IsNullOrEmpty(tag) || string.IsNullOrEmpty(eski) || string.IsNullOrEmpty(yeni))
@@ -823,7 +839,7 @@ app.MapPost("/api/islev/yeniden-adlandir", async (IslevAd req, HttpContext ctx, 
 app.MapPost("/api/islev/duzelt", async (IslevDuzelt req, HttpContext ctx, IConfiguration cfg, IslevService islev, CancellationToken ct) =>
 {
     string user = ctx.User?.Identity?.Name ?? "?";
-    if (!EtiketService.CanWrite(cfg, ctx.User?.Identity?.Name))
+    if (!EtiketService.CanWrite(cfg, ctx))
         return Results.Json(new { error = $"Düzeltme yetkiniz yok ({user})." }, statusCode: 403);
     var ips = (req.Ips ?? []).Select(i => i?.Trim()).Where(i => LookupQuery.TryParseIpv4(i, out _)).Select(i => i!).Distinct().ToList();
     string? kume = string.IsNullOrWhiteSpace(req.Kume) ? null : req.Kume.Trim();

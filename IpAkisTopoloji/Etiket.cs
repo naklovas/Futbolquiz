@@ -47,8 +47,16 @@ static class EtiketService
         string.Equals(serverTag, wanted, StringComparison.OrdinalIgnoreCase)
         || (!wanted.Contains('/') && serverTag.StartsWith(wanted + "/", StringComparison.OrdinalIgnoreCase));
 
+    // Yazma (etiketleme, işlev haritası düzenleme, AI çalıştırma, ERT eksikleri kararları) yetkisi:
+    //  - Etiket:YazmaSiteAdi doluysa DokuPanel'deki o site kaydının kişi / AD grupları (auth ara katmanı sorar, önbellekli;
+    //    sonuç context.Items["DokuYazar"]). DokuPanel'e ulaşılamazsa yazma kapalı.
+    //  - boşsa eski davranış: Etiket:Yazanlar listesi (boş = sayfaya girebilen herkes).
+    public static bool CanWrite(IConfiguration cfg, HttpContext ctx) =>
+        ctx.Items.TryGetValue("DokuYazar", out var v) && v is bool b ? b : CanWrite(cfg, ctx.User?.Identity?.Name);
+
     public static bool CanWrite(IConfiguration cfg, string? user)
     {
+        if (!string.IsNullOrWhiteSpace(cfg["Etiket:YazmaSiteAdi"]) && cfg.GetValue("Auth:Enabled", true)) return false;   // DokuPanel kararı yoksa yazma yok
         var allowed = cfg.GetSection("Etiket:Yazanlar").Get<string[]>() ?? [];
         if (allowed.Length == 0) return true;
         string u = user ?? "";

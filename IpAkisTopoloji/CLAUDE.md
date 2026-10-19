@@ -308,6 +308,10 @@ erişim talepleri) — DB → şema → tablo ve kim erişiyor bilgisi buradan b
   Enter gönderir; ODM/TEST değişince soru/cevap korunur.
 - **Auth**: Negotiate (Windows Auth; IIS'te IIS'e bırakır) + her istekte `AuthHelper.YetkiKontrol` (DokuPanel),
   sonuç kullanıcı başına cache; yetkisiz sayfa/403 JSON; `/api/me` başlıkta kullanıcı; `Auth:Enabled=false` yerelde.
+  YAZMA YETKİSİ (kullanıcı: "herkes etiketleme yapamamalı"): DokuPanel'de kod değişmeden ikinci site kaydı (ör. "DeltaFlow-Etiketleme")
+  → `Etiket:YazmaSiteAdi`; auth ara katmanı /api isteklerinde `AuthHelper.YetkiKontrol(ctx, cfg, siteAdi)` ile sorar (kullanıcı başına
+  `Auth:CacheMinutes` önbellek) → `context.Items["DokuYazar"]` → `EtiketService.CanWrite(cfg, ctx)` (tüm yazma uçları: etiket, açıklama,
+  işlev haritası, versiyon, ERT eksikleri). Boşsa eski `Etiket:Yazanlar` listesi (boş = herkes). DokuPanel'e ulaşılamazsa yazma kapalı.
 - Marka: **DeltaFlow** adı ve logosu.
 
 ## Kullanıcının tercihleri / kurallar
