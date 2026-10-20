@@ -399,13 +399,16 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
             else sb.AppendLine($"Carbon Black (son {hours} saat): bu sunucuda ağ olayı yok (ajan yok ya da trafik yok).");
             sb.Append(DbHints(env, ip, miss, sb.ToString()));
             string profil = profiles.TryGetValue(ip, out var p) ? p.Metin.TrimEnd() : "";
+            // Envanter Kahini (kullanıcı: "çok dikkate alıyor, en son baksın"): 1. turda AI'a gitmez, sonda ayrı bölüm (AskAsync 2. tur)
+            profil = string.Join("\n", profil.Split('\n').Where(l => !l.StartsWith("Envanter Kahini: ")));
             string nb = Neighbors(env, ip, miss);
             string sofar = sb.ToString() + nb + profil;
             var cands = Candidates(env, ip, sofar)
                 .Where(c => AjanOf(c) is not { } a || miss.Any(p => PortExeHas(sofar, p, a))).ToList();   // ajan adları aday değil
             if (cands.Count > 0) sb.AppendLine("ADAY UYGULAMALAR (ERT'deki adlar): " + string.Join(" | ", cands));
             sb.Append(nb);
-            if (profil.Length > 0) sb.AppendLine("SUNUCU PROFİLİ (ERT, segment, VIP, sanal sunucu, Kahin, SM kurulum — ek bilgi):").AppendLine(profil);
+            if (profil.Length > 0) sb.AppendLine("SUNUCU PROFİLİ (ERT, segment, VIP, sanal sunucu, SM kurulum — ek bilgi):").AppendLine(profil);
+            if (p?.Kahin is { Count: > 0 } kh) { sb.AppendLine(KahinBas); foreach (var k in kh) sb.AppendLine("- " + k); }
             outp[ip] = sb.ToString();
         }
         return outp;
@@ -798,6 +801,14 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
         return (b.Text, $"genel bilgi dosyası: {System.IO.Path.GetFileName(path)} · {b.Text.Length:N0} karakter{(b.Cut ? " (Eksik:BilgiMaxKarakter sınırında kesildi)" : "")}");
     }
 
+    const string KahinBas = "ENVANTER KAHİNİ (önceki bir AI projesinin kayıtlı tahmini; yalnız diğer kanıtlarla bulunamazsa — 2. tur):";
+    static (string Ana, string? Kahin) SplitKahin(string? text)
+    {
+        if (text == null) return ("", null);
+        int i = text.IndexOf(KahinBas, StringComparison.Ordinal);
+        return i < 0 ? (text, null) : (text[..i], text[i..]);
+    }
+
     async Task<Dictionary<(string, string), EksikOneri>> AskAsync(string[] ips, Dictionary<string, List<string>> todo,
         Dictionary<string, string> texts, EnvanterSnapshot env, CancellationToken ct)
     {
@@ -837,7 +848,7 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
               Sahibi bulunamazsa uygulama null, gerekçede "SQL Server veritabanı, sahibi belirsiz" yaz.
             - "BU SUNUCUYU ANLATAN TALEP AÇIKLAMALARI" satırları talep sahibinin bu sunucu için yazdığı açıklamalardır (HEDEF ise
               ZT_HEDEFACIKLAMA, KAYNAK ise ZT_KAYNAKACIKLAMA). Bir sistem / uygulama / veritabanı adı geçiyorsa bunu exe yolundan sonra
-              EN GÜÇLÜ kanıt say ve gerekçede o açıklamayı alıntıla; Kahin, komşu ve segment ipuçlarını bunun önüne koyma. "Bu
+              EN GÜÇLÜ kanıt say ve gerekçede o açıklamayı alıntıla; komşu ve segment ipuçlarını bunun önüne koyma. "Bu
               sunucuya erişen taraflar" ise istemcilerdir, onların adını bu sunucuya yazma.
             - Bu sunucunun HEDEF olduğu bir talepte açıklama "<A> için / <A> karşılığı … <B>'nin DB'lerine / sunucularına / servisine
               erişim" diyorsa erişilen sistem <B> BU SUNUCUDUR (A karşı taraftır, isteyen uygulamadır). Ör. "KKB Karşılığı / Ziraat
@@ -845,41 +856,77 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
               istemci). Port veritabanı portu olsa da sahibi açıklamada adı geçen sistemdir; bu durumda null YAZMA. Adaylarda o sistemi
               içeren bir ad varsa onu seç, yoksa açıklamadaki kısa adı yaz ("yeni": true).
             - Kanıt yetersizse "uygulama": null ve güven düşük yaz. Uydurma.
-            - "Envanter Kahini" satırları daha önce BAŞKA BİR AI'ın yaptığı tahminlerdir, doğrulanmış bilgi değildir. Girdi olarak
-              kullan; ama öneri yalnız Kahin'e dayanıyorsa güven en fazla 60 olsun ve gerekçede "yalnız Kahin tahmini" yaz.
-              Kahin diğer kanıtlarla (exe yolu, SM talebi, WEBSITE, benzer adlı sunucular…) çelişirse diğer kanıtları tercih et;
-              destekleniyorsa gerekçede destekleyen kanıtı da yaz.
 
             Yalnızca JSON dizi döndür, başka metin yazma. Her boş port için bir eleman:
             [{"ip":"…","port":"…","uygulama":"… ya da null","yeni":false,"veritabani":false,"guven":0-100,"gerekce":"tek cümle; hangi kanıta dayandığın"}]
             """);
-        foreach (var ip in ips)
-            sb.AppendLine().AppendLine($"=== Sunucu {ip} · boş portlar: {string.Join(", ", todo[ip].Select(p => p == "" ? "(port yok)" : p))}")
-              .AppendLine(Cut(texts.GetValueOrDefault(ip), cfg.GetValue("Eksik:MaxKarakter", 6000)));
-        // Küçük model uzun kanıttan sonra baştaki kuralları unutabiliyor: en önemli kurallar sona tekrar
-        sb.AppendLine().AppendLine("""
-            HATIRLATMA (kanıtlardan önemli): genel bilgiler dosyasındaki kurallar SM taleplerinden önce gelir. "BU SUNUCUYU ANLATAN
-            TALEP AÇIKLAMALARI" bir sistem adı söylüyorsa öneriyi ona dayandır ve gerekçede alıntıla. Ajan / araç kurulum ya da
-            erişim talepleri (Dataskope vb.) sunucunun uygulamasını göstermez. Yalnızca JSON dizi döndür.
-            """);
-        string answer = await islev.ChatAsync(sb.ToString(), ct);
-        var outp = new Dictionary<(string, string), EksikOneri>();
+        string kurallar = sb.ToString();
+        int max = cfg.GetValue("Eksik:MaxKarakter", 6000);
+        // 1. tur: Kahin'siz kanıt. 2. tur (yalnız bulunamayan portlar, Kahin varsa): aynı kanıt + Kahin, son çare olarak.
+        string Prompt(Dictionary<string, List<string>> ports, bool kahin)
+        {
+            var q = new StringBuilder(kurallar);
+            if (kahin) q.AppendLine("""
+
+                2. TUR — ENVANTER KAHİNİ: aşağıdaki portlar için diğer kanıtlarla uygulama BULUNAMADI. Şimdi en sonda verilen "ENVANTER
+                KAHİNİ" bölümüne de bak. Kahin, daha önce başka bir AI projesinin yaptığı ve doğrulanmamış tahmindir; yalnız diğer
+                kanıtlarla ÇELİŞMİYORSA kullan, güven en fazla 50 olsun, gerekçeye "Kahin tahmini (son çare)" yaz. Kahin de
+                ikna edici değilse uygulama null.
+                """);
+            foreach (var ip in ports.Keys)
+            {
+                var (ana, kh) = SplitKahin(texts.GetValueOrDefault(ip));
+                q.AppendLine().AppendLine($"=== Sunucu {ip} · boş portlar: {string.Join(", ", ports[ip].Select(p => p == "" ? "(port yok)" : p))}")
+                 .AppendLine(Cut(ana, max));
+                if (kahin && kh != null) q.AppendLine(Cut(kh, 1500));
+            }
+            // Küçük model uzun kanıttan sonra baştaki kuralları unutabiliyor: en önemli kurallar sona tekrar
+            q.AppendLine().AppendLine("""
+                HATIRLATMA (kanıtlardan önemli): genel bilgiler dosyasındaki kurallar SM taleplerinden önce gelir. "BU SUNUCUYU ANLATAN
+                TALEP AÇIKLAMALARI" bir sistem adı söylüyorsa öneriyi ona dayandır ve gerekçede alıntıla. Ajan / araç kurulum ya da
+                erişim talepleri (Dataskope vb.) sunucunun uygulamasını göstermez. Yalnızca JSON dizi döndür.
+                """);
+            return q.ToString();
+        }
+        var outp = Parse(await islev.ChatAsync(Prompt(todo, false), ct), todo, false);
+        var again = todo.Where(kv => SplitKahin(texts.GetValueOrDefault(kv.Key)).Kahin != null)
+            .Select(kv => (kv.Key, ps: kv.Value.Where(p => !outp.TryGetValue((kv.Key, p), out var o) || o.Uygulama == null).ToList()))
+            .Where(x => x.ps.Count > 0).ToDictionary(x => x.Key, x => x.ps);
+        if (again.Count > 0)
+        {
+            try
+            {
+                foreach (var (k, o) in Parse(await islev.ChatAsync(Prompt(again, true), ct), again, true))
+                    if (o.Uygulama != null) outp[k] = o;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException) { /* 2. tur başarısızsa 1. tur sonucu kalır */ }
+        }
+        return outp;
+
+        Dictionary<(string, string), EksikOneri> Parse(string answer, Dictionary<string, List<string>> want, bool kahinTur)
+        {
+        var res = new Dictionary<(string, string), EksikOneri>();
         if (IslevService.ExtractJson(answer) is not { } root) throw new InvalidOperationException("AI cevabı JSON değil: " + Cut(answer, 200));
         var arr = root.ValueKind == JsonValueKind.Array ? root : default;
-        if (arr.ValueKind != JsonValueKind.Array) return outp;
+        if (arr.ValueKind != JsonValueKind.Array) return res;
         foreach (var e in arr.EnumerateArray())
         {
             if (e.ValueKind != JsonValueKind.Object) continue;
-            string? ip = IslevService.Str(e, "ip") ?? (ips.Length == 1 ? ips[0] : null);
-            if (ip == null || !todo.ContainsKey(ip)) continue;
-            string port = IslevService.Str(e, "port") ?? (todo[ip].Count == 1 ? todo[ip][0] : "");
+            string? ip = IslevService.Str(e, "ip") ?? (want.Count == 1 ? want.Keys.First() : null);
+            if (ip == null || !want.ContainsKey(ip)) continue;
+            string port = IslevService.Str(e, "port") ?? (want[ip].Count == 1 ? want[ip][0] : "");
             if (port is "(port yok)" or "null") port = "";
-            if (!todo[ip].Contains(port)) continue;
+            if (!want[ip].Contains(port)) continue;
             string? app = IslevService.Str(e, "uygulama");
             if (app is "null" or "-") app = null;
             bool yeni = false;
             int guven = Math.Clamp(IslevService.Int(e, "guven"), 0, 100);
             string? gerekce = IslevService.Str(e, "gerekce");
+            if (kahinTur && app != null)
+            {
+                guven = Math.Min(guven, 50);
+                if (gerekce?.Contains("Kahin", StringComparison.OrdinalIgnoreCase) != true) gerekce = "Kahin tahmini (son çare): " + gerekce;
+            }
             // Ajan / araç adı önerildiyse: portun exe'si o ürüne aitse "Altyapı: X", değilse öneri yok sayılır (gerekçe saklanır)
             if (app != null && AjanOf(app) is { } ajan)
             {
@@ -896,9 +943,10 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
                 if (db) app += " Veritabanı";
                 if (katNot != null) gerekce = $"{gerekce} [{katNot}]";
             }
-            outp[(ip, port)] = new EksikOneri(Cut(app, 200), yeni, guven, gerekce, Ai, "AI", DateTime.Now);
+            res[(ip, port)] = new EksikOneri(Cut(app, 200), yeni, guven, gerekce, Ai, "AI", DateTime.Now);
         }
-        return outp;
+        return res;
+        }
     }
 
     // ---------------- Excel (CSV) ----------------

@@ -312,6 +312,10 @@ erişim talepleri) — DB → şema → tablo ve kim erişiyor bilgisi buradan b
   boş portu ananlar önce) ve "Bu sunucuya erişen taraflar" (hedef taleplerin ZT_KAYNAKACIKLAMA'sı, istemci); prompt'ta en güçlü SM kanıtı.
   DB portları genişletildi (SQL Server/SSAS/AlwaysOn, Oracle 1521–1530/2483/2484/ONS, PostgreSQL/EDB/PgBouncer, MySQL, DB2, Informix,
   Sybase?, Teradata?, HANA, MongoDB, Cassandra, Redis, Elasticsearch?, Couchbase, Neo4j, ClickHouse?, Hive?, Impala, HBase…); "?" = yalnız süreçle.
+  ENVANTER KAHİNİ SON ÇARE (kullanıcı: "çok dikkate alıyor, en son baksın; o düzgün çalışsa burada tekrar yapmazdık"): Kahin satırları profilden
+  çıkarılıp kanıtın en sonuna `KahinBas` bölümü olarak konur (kayıtlı KANIT'ta görünür). AskAsync 1. tur Kahin'siz; uygulaması bulunamayan
+  portlar (Kahin verisi varsa) 2. turda Kahin'le yeniden sorulur: yalnız diğer kanıtlarla çelişmiyorsa, güven ≤ 50 (kodda da sınır),
+  gerekçe "Kahin tahmini (son çare)". 2. tur hata verirse 1. tur sonucu kalır.
 - **VIP**: sorgulanan IP VIP ise üyeler + GW'ler aynı sorguya eklenir, üyeler "VIP ÜYESİ" (GW→üye trafiği varsa ✓).
   Gidilen IP VIP ise "VIP → n ÜYE"; gelen IP LB GW ise "LB GW"; sorgulanan sunucu havuz üyesiyse VIP kartı.
 - **Uygulama görünümü** (`/api/apps`, `/api/app`): `[kullanan uygulamalar] → [UYGULAMA: VIP'ler + segment grupları] → [bağımlı olunanlar]`,
