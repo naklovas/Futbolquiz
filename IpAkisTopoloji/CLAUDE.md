@@ -306,6 +306,12 @@ erişim talepleri) — DB → şema → tablo ve kim erişiyor bilgisi buradan b
   hepsi tek bir katalog adında, tek bir katalog adının kelimeleri AI'ın adında (anahtar kelimelerin en az yarısı), harf-rakam içerme
   (ZB.Wall.P5 ↔ zbwall). Tek açık eşleşme → katalog yazımı (yeni=false); birden çok → serbest + gerekçede "birden çok benzer ad: …";
   hiç yok → serbest (yeni=true) + "ERT kataloğunda yok" (varsa "benzer: …"). Not gerekçenin sonuna [ … ] olarak eklenir.
+  KANIT SIRASI (kullanıcı: "kaynak / hedef açıklamasını önemsemiyor"): metin `Eksik:MaxKarakter`=6000'de kesildiği ve uzun profil başta
+  olduğu için SM / CB kesiliyordu → sıra: başlık, boş portlar, SM, CB, DB ipuçları, adaylar, komşular, SUNUCU PROFİLİ (sonda). SM bölümünde
+  önce "BU SUNUCUYU ANLATAN TALEP AÇIKLAMALARI" (hedefse ZT_HEDEFACIKLAMA, kaynaksa ZT_KAYNAKACIKLAMA; tüm talepler, tekil, sayı + son tarih,
+  boş portu ananlar önce) ve "Bu sunucuya erişen taraflar" (hedef taleplerin ZT_KAYNAKACIKLAMA'sı, istemci); prompt'ta en güçlü SM kanıtı.
+  DB portları genişletildi (SQL Server/SSAS/AlwaysOn, Oracle 1521–1530/2483/2484/ONS, PostgreSQL/EDB/PgBouncer, MySQL, DB2, Informix,
+  Sybase?, Teradata?, HANA, MongoDB, Cassandra, Redis, Elasticsearch?, Couchbase, Neo4j, ClickHouse?, Hive?, Impala, HBase…); "?" = yalnız süreçle.
 - **VIP**: sorgulanan IP VIP ise üyeler + GW'ler aynı sorguya eklenir, üyeler "VIP ÜYESİ" (GW→üye trafiği varsa ✓).
   Gidilen IP VIP ise "VIP → n ÜYE"; gelen IP LB GW ise "LB GW"; sorgulanan sunucu havuz üyesiyse VIP kartı.
 - **Uygulama görünümü** (`/api/apps`, `/api/app`): `[kullanan uygulamalar] → [UYGULAMA: VIP'ler + segment grupları] → [bağımlı olunanlar]`,

@@ -309,13 +309,32 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
 
     // Veritabanı sunucusu ipuçları (kullanıcı: DB sunucusunda öneri "<uygulama> Veritabanı" olmalı): bilinen DB portları
     // (Eksik:VeritabaniPortlari ile değişir), sunucu adında sql / db / ora kısaltmaları, portu kabul eden DB süreçleri.
+    // "?" ile bitenler başka uygulamalarca da sık kullanılır (ör. 5000, 9000): yalnız portu kabul eden süreç DB süreciyse sayılır
     static readonly Dictionary<string, string> DefaultDbPortlari = new()
     {
-        ["1433"] = "SQL Server", ["1434"] = "SQL Server", ["1521"] = "Oracle", ["1522"] = "Oracle", ["1523"] = "Oracle", ["1524"] = "Oracle",
-        ["1525"] = "Oracle", ["1526"] = "Oracle", ["1527"] = "Oracle", ["1529"] = "Oracle", ["5432"] = "PostgreSQL", ["3306"] = "MySQL",
-        ["50000"] = "DB2", ["27017"] = "MongoDB", ["9042"] = "Cassandra", ["5000"] = "Sybase ASE?"
+        ["1433"] = "SQL Server", ["1434"] = "SQL Server Browser", ["2382"] = "SQL Server Analysis Services (browser)", ["2383"] = "SQL Server Analysis Services",
+        ["4022"] = "SQL Server Service Broker", ["5022"] = "SQL Server AlwaysOn / mirroring uç noktası", ["1521"] = "Oracle", ["1522"] = "Oracle",
+        ["1523"] = "Oracle", ["1524"] = "Oracle", ["1525"] = "Oracle", ["1526"] = "Oracle / Informix",
+        ["1527"] = "Oracle", ["1528"] = "Oracle", ["1529"] = "Oracle", ["1530"] = "Oracle",
+        ["1630"] = "Oracle Connection Manager", ["2483"] = "Oracle (TCP)", ["2484"] = "Oracle (TCPS)", ["6200"] = "Oracle ONS (RAC)",
+        ["5432"] = "PostgreSQL", ["5433"] = "PostgreSQL / Vertica", ["5444"] = "EDB Postgres", ["6432"] = "PgBouncer (PostgreSQL)",
+        ["3306"] = "MySQL / MariaDB", ["33060"] = "MySQL X", ["4567"] = "Galera (MariaDB küme)", ["50000"] = "DB2",
+        ["50001"] = "DB2", ["446"] = "DB2 DRDA", ["523"] = "DB2 yönetim", ["9088"] = "Informix",
+        ["9089"] = "Informix", ["4100"] = "Sybase ASE?", ["5000"] = "Sybase ASE?", ["5001"] = "Sybase ASE?",
+        ["1025"] = "Teradata?", ["5480"] = "Netezza", ["8563"] = "Exasol", ["3050"] = "Firebird",
+        ["26257"] = "CockroachDB", ["30013"] = "SAP HANA", ["30015"] = "SAP HANA", ["30017"] = "SAP HANA",
+        ["30041"] = "SAP HANA", ["39013"] = "SAP HANA", ["39015"] = "SAP HANA", ["27017"] = "MongoDB",
+        ["27018"] = "MongoDB", ["27019"] = "MongoDB", ["9042"] = "Cassandra", ["9160"] = "Cassandra Thrift",
+        ["7000"] = "Cassandra küme içi?", ["7001"] = "Cassandra küme içi?", ["6379"] = "Redis", ["26379"] = "Redis Sentinel",
+        ["11211"] = "Memcached", ["9200"] = "Elasticsearch?", ["9300"] = "Elasticsearch küme içi?", ["8091"] = "Couchbase?",
+        ["8092"] = "Couchbase?", ["8093"] = "Couchbase?", ["11210"] = "Couchbase", ["7687"] = "Neo4j",
+        ["7474"] = "Neo4j HTTP?", ["8086"] = "InfluxDB?", ["8123"] = "ClickHouse HTTP?", ["9000"] = "ClickHouse?",
+        ["9440"] = "ClickHouse TLS", ["10000"] = "Hive?", ["21050"] = "Impala", ["16000"] = "HBase Master",
+        ["16020"] = "HBase RegionServer"
     };
-    static readonly string[] DbSurecleri = ["sqlservr", "oracle", "tnslsnr", "postgres", "mysqld", "db2sysc", "mongod", "ocssd", "sqlbrowser"];
+    static readonly string[] DbSurecleri = ["sqlservr", "sqlbrowser", "msmdsrv", "oracle", "tnslsnr", "ocssd", "cmadmin", "postgres", "edb-postgres", "pgbouncer",
+        "mysqld", "mariadbd", "db2sysc", "db2syscs", "oninit", "dataserver", "hdbindexserver", "hdbnameserver", "mongod", "mongos", "redis-server",
+        "memcached", "influxd", "clickhouse-server", "cockroach", "fbserver", "firebird", "tdatcmd", "nzstart"];
     static readonly System.Text.RegularExpressions.Regex DbAd = new(@"(sql|db|ora(?=\d|db|cl|$)|orcl|exa|dwh|pgs)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
     Dictionary<string, string> DbPortlari() =>
         cfg.GetSection("Eksik:VeritabaniPortlari").GetChildren().Where(c => c.Value is { Length: > 0 }).ToDictionary(c => c.Key, c => c.Value!) is { Count: > 0 } d
@@ -338,9 +357,8 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
         var parts = new List<string>();
         string? host = env.AppsOnIp(ip).Select(h => h.UnixName).OfType<string>().FirstOrDefault();
         if (host != null && DbAd.Match(host) is { Success: true } m) parts.Add($"sunucu adı '{host}' içinde '{m.Value}' (isimlendirme standardında veritabanı sunucusu)");
-        var dbp = DbPortlari();
         var ports = env.AppsOnIp(ip).Select(h => Key(h.Port)).Where(p => p.Length > 0).Distinct().ToList();
-        foreach (var p in ports.Where(p => DbPort(evidence, p, out _) || dbp.ContainsKey(p)))
+        foreach (var p in ports.Where(p => DbPort(evidence, p, out _)))   // "?"li portlar yalnız DB süreciyle
         {
             DbPort(evidence, p, out var tek);
             parts.Add($"port {p}{(tek != null ? $" ({tek.TrimEnd('?')}{(tek.EndsWith('?') ? "?" : "")})" : "")}{(miss.Contains(p) ? " — uygulama adı boş" : "")}{(DbSurec(PortLine(evidence, p)) is { } sr ? $", portu kabul eden süreç {sr}" : "")}");
@@ -359,7 +377,8 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
         {
             var sb = new StringBuilder();
             var miss = ports.GetValueOrDefault(ip) ?? [];
-            sb.AppendLine(profiles.TryGetValue(ip, out var p) ? p.Metin.TrimEnd() : $"### Sunucu {ip}");
+            string? host = env.AppsOnIp(ip).Select(h => h.UnixName).OfType<string>().FirstOrDefault();
+            sb.AppendLine($"### Sunucu {ip}{(host != null ? " · " + host : "")} · segment {env.FindSegment(ip)?.Label ?? "?"}");
             var empty = env.AppsOnIp(ip).Where(h => string.IsNullOrWhiteSpace(h.AppName) && miss.Contains(Key(h.Port))).GroupBy(h => Key(h.Port));
             sb.AppendLine("UYGULAMA ADI BOŞ PORTLAR (ERT satırı):");
             foreach (var g in empty)
@@ -373,15 +392,20 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
                     h.VarlikMuhafizi is { } vm ? "muhafız=" + vm : null, h.SunucuIsletenBirim is { } sb2 ? "işleten=" + sb2 : null
                 }.OfType<string>().DefaultIfEmpty("başka bilgi yok")));
             }
-            sb.Append(Neighbors(env, ip, miss));
+            // Sıra önemli (kullanıcı: SM açıklamaları önemsenmiyordu): metin Eksik:MaxKarakter'de kesilir ve uzun profil (ERT, MSY, ÇSY,
+            // Kahin…) başta olunca SM / CB kesiliyordu. Güçlü kanıtlar önce, komşular ve profil sonda.
             if (smf.TryGetValue(ip, out var smfText)) sb.Append(smfText);
             if (cb.TryGetValue(ip, out var c)) sb.Append(c.Text(env, ip, miss));
             else sb.AppendLine($"Carbon Black (son {hours} saat): bu sunucuda ağ olayı yok (ajan yok ya da trafik yok).");
             sb.Append(DbHints(env, ip, miss, sb.ToString()));
-            string sofar = sb.ToString();
+            string profil = profiles.TryGetValue(ip, out var p) ? p.Metin.TrimEnd() : "";
+            string nb = Neighbors(env, ip, miss);
+            string sofar = sb.ToString() + nb + profil;
             var cands = Candidates(env, ip, sofar)
                 .Where(c => AjanOf(c) is not { } a || miss.Any(p => PortExeHas(sofar, p, a))).ToList();   // ajan adları aday değil
             if (cands.Count > 0) sb.AppendLine("ADAY UYGULAMALAR (ERT'deki adlar): " + string.Join(" | ", cands));
+            sb.Append(nb);
+            if (profil.Length > 0) sb.AppendLine("SUNUCU PROFİLİ (ERT, segment, VIP, sanal sunucu, Kahin, SM kurulum — ek bilgi):").AppendLine(profil);
             outp[ip] = sb.ToString();
         }
         return outp;
@@ -493,6 +517,22 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
                     : ajHit.Count > 0 ? $"PORT {p}'E İŞ UYGULAMASI İÇİN ERİŞİM TALEBİ YOK (yalnız ajan / araç talepleri var)"
                     : $"PORT {p}'E ERİŞİM TALEBİ YOK (son {DateTime.Today.Year - since.Year} yılda bu sunucuya ZT_HEDEFPORT {p} olan talep bulunamadı)");
             }
+            // Kullanıcı: kaynak / hedef açıklamaları yeterince önemsenmiyordu → talepler içinde kaybolmasın diye önce TÜM eşleşen taleplerdeki
+            // BU SUNUCUYU anlatan açıklama (hedefse ZT_HEDEFACIKLAMA, kaynaksa ZT_KAYNAKACIKLAMA) tekilleştirilip sayısıyla, ayrıca hedef
+            // olduğu taleplerde erişen tarafın (ZT_KAYNAKACIKLAMA) açıklaması
+            string? Own(Dictionary<string, string> r, bool hedef) => G(r, hedef ? "ZT_HEDEFACIKLAMA" : "ZT_KAYNAKACIKLAMA");
+            var bunu = all.Where(x => x.aj == null).Select(x => (t: Own(x.r, x.hedef), x)).Where(y => y.t != null)
+                .GroupBy(y => Norm(y.t!)).Select(g => (t: g.First().t!, n: g.Count(), son: g.Max(y => G(y.x.r, "TARIH")), port: g.Any(y => y.x.ps.Count > 0)))
+                .OrderByDescending(z => z.port).ThenByDescending(z => z.n).ThenByDescending(z => z.son).Take(8).ToList();
+            if (bunu.Count > 0)
+            {
+                sb.AppendLine("BU SUNUCUYU ANLATAN TALEP AÇIKLAMALARI (talep sahibinin bu sunucu için yazdığı; EN GÜÇLÜ SM KANITI — sunucunun hangi sistem /");
+                sb.AppendLine("uygulama olduğunu doğrudan söyler):");
+                foreach (var z in bunu) sb.AppendLine($"  • \"{Cut(z.t, 250)}\" — {z.n} talep, son {z.son}{(z.port ? " · boş portu anan talepte" : "")}");
+            }
+            var karsi = all.Where(x => x.hedef && x.aj == null).Select(x => G(x.r, "ZT_KAYNAKACIKLAMA")).OfType<string>()
+                .GroupBy(Norm).OrderByDescending(g => g.Count()).Take(5).Select(g => $"\"{Cut(g.First(), 120)}\" ({g.Count()})").ToList();
+            if (karsi.Count > 0) sb.AppendLine("Bu sunucuya erişen taraflar (kaynak açıklaması; İSTEMCİLER, bu sunucunun uygulaması değil): " + string.Join("; ", karsi));
             sb.AppendLine($"SM TALEPLERİ (bu sunucunun hedef ya da kaynak olduğu erişim talepleri, en yeni; {mine.Count(x => x.hedef)} hedef, {mine.Count(x => x.kaynak && !x.hedef)} kaynak):");
             foreach (var (r, hedef, kaynak, ps, aj) in mine)
             {
@@ -795,6 +835,10 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
               SM talepleri, sunucu adındaki uygulama kısaltması) ve "uygulama" alanına yalnız UYGULAMA adını, "veritabani": true
               yaz (kod "<uygulama> Veritabanı" yapar). Gerekçede teknolojiyi belirt (ör. "1433 SQL Server; istemcileri KREDİ").
               Sahibi bulunamazsa uygulama null, gerekçede "SQL Server veritabanı, sahibi belirsiz" yaz.
+            - "BU SUNUCUYU ANLATAN TALEP AÇIKLAMALARI" satırları talep sahibinin bu sunucu için yazdığı açıklamalardır (HEDEF ise
+              ZT_HEDEFACIKLAMA, KAYNAK ise ZT_KAYNAKACIKLAMA). Bir sistem / uygulama / veritabanı adı geçiyorsa bunu exe yolundan sonra
+              EN GÜÇLÜ kanıt say ve gerekçede o açıklamayı alıntıla; Kahin, komşu ve segment ipuçlarını bunun önüne koyma. "Bu
+              sunucuya erişen taraflar" ise istemcilerdir, onların adını bu sunucuya yazma.
             - Bu sunucunun HEDEF olduğu bir talepte açıklama "<A> için / <A> karşılığı … <B>'nin DB'lerine / sunucularına / servisine
               erişim" diyorsa erişilen sistem <B> BU SUNUCUDUR (A karşı taraftır, isteyen uygulamadır). Ör. "KKB Karşılığı / Ziraat
               Katılım prod segmentinin KÖS Db'lerine erişim talebi" + bu sunucu HEDEF → uygulama "KÖS", veritabani true (KKB Karşılığı
@@ -814,7 +858,8 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
               .AppendLine(Cut(texts.GetValueOrDefault(ip), cfg.GetValue("Eksik:MaxKarakter", 6000)));
         // Küçük model uzun kanıttan sonra baştaki kuralları unutabiliyor: en önemli kurallar sona tekrar
         sb.AppendLine().AppendLine("""
-            HATIRLATMA (kanıtlardan önemli): genel bilgiler dosyasındaki kurallar SM taleplerinden önce gelir. Ajan / araç kurulum ya da
+            HATIRLATMA (kanıtlardan önemli): genel bilgiler dosyasındaki kurallar SM taleplerinden önce gelir. "BU SUNUCUYU ANLATAN
+            TALEP AÇIKLAMALARI" bir sistem adı söylüyorsa öneriyi ona dayandır ve gerekçede alıntıla. Ajan / araç kurulum ya da
             erişim talepleri (Dataskope vb.) sunucunun uygulamasını göstermez. Yalnızca JSON dizi döndür.
             """);
         string answer = await islev.ChatAsync(sb.ToString(), ct);
