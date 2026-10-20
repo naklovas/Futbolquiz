@@ -306,6 +306,11 @@ erişim talepleri) — DB → şema → tablo ve kim erişiyor bilgisi buradan b
   bağlantı kabul eden exe yolu ürün + server/manager/konsol (ör. …\symantec endpoint protection manager\apache\bin\httpd.exe). Ürün
   sunucusunda "Altyapı:" öneki atılır, AI'ın tam adı kalır; başka sunucudaki ajan portunda "Altyapı: <AI'ın tam adı>" (eskiden kısa ad:
   kullanıcı "neden sadece Symantec").
+  SEGMENT ADI ÜRÜN KANITI DEĞİL (kullanıcı: SEPM sunucusu WEBSENSE_11 segmentinde; AI segmentten genelleyip 1433'e "Forcepoint Web Security
+  Veritabanı" dedi, "o segment yalnız Forcepoint sunucularından oluşmuyor"): `UrunKaniti` segmenti saymaz; segment komşu satırları "zayıf ipucu"
+  etiketli; prompt "segmentten ürün türetme". Ürün reddedilince başka ürünün güçlü kanıtı varsa (`BaskaUrun`) gerekçede yazılır; DB portunda ve
+  o ürün aynı sunucuda ERT'de kayıtlıysa "<o ad> Veritabanı" (güven 60). Hedef olunan talebin "Kısa açıklama"sı da ürün kanıtı;
+  `AjanKelime` "sunucu kurulumu"nu ajan saymaz ("sunucuya X kurulumu" ajan).
   HEDEF talebinde "A karşılığı … B'nin DB'lerine erişim" → bu sunucu B (kullanıcı örneği: "KKB Karşılığı / Ziraat Katılım prod segmentinin
   KÖS Db'lerine erişim talebi" + HEDEF → "KÖS"; AI null diyordu). Prompt kuralı: DB portu olsa da sahibi açıklamadaki sistem, null yazma.
   VERİTABANI SUNUCUSU (kullanıcı: "DB sunucusunda uygulamanın yanına 'X Veritabanı' yazsın"): `DbHints` kanıta "VERİTABANI SUNUCUSU

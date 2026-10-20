@@ -315,30 +315,39 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
     // Forcepoint veritabanı): aynı sunucunun ERT uygulamalarında, sunucu adında ya da segment adında ürün (ya da eski adı) geçiyorsa
     // Ayrıca SM talebinde BU SUNUCUYU anlatan açıklama ürünün sunucusu olduğunu söylüyorsa (kullanıcı örneği: hedef açıklaması "Symantec
     // Endpoint Protection ürünü sunucusu"); "ajan / agent / kurulum" geçen açıklamalar sayılmaz (Dataskope ajanı kurulan kart sunucusu).
-    bool AjanSunucusu(EnvanterSnapshot env, string ip, string ajan, string? evidence = null)
+    // Ürün kanıtı: 2 = var (aynı sunucunun ERT uygulamaları, sunucu adı, bu sunucuyu anlatan SM açıklaması, hedef olduğu talebin kısa
+    // açıklaması, sanal sunucu notu, kurulum talebi, ürünün sunucu bileşeni exe'si), 0 = yok. Segment adı kanıt DEĞİL.
+    // Kullanıcı: WEBSENSE_11 segmentinde SEPM (Symantec) sunucusu var → segment adı tek başına ürünü belirlemez.
+    int UrunKaniti(EnvanterSnapshot env, string ip, string ajan, string? evidence)
     {
         var adlar = AjanAdlari(ajan).ToList();
         bool Has(string? t) => t != null && adlar.Any(Norm(t).Contains);
-        if (env.AppNamesOnIp(ip).Any(Has) || env.AppsOnIp(ip).Any(h => Has(h.UnixName)) || Has(env.FindSegment(ip)?.Label)) return true;
-        if (evidence == null) return false;
-        foreach (var l in evidence.Split('\n'))
+        if (env.AppNamesOnIp(ip).Any(Has) || env.AppsOnIp(ip).Any(h => Has(h.UnixName))) return 2;
+        if (evidence != null)
         {
-            // SM'de bu sunucuyu anlatan açıklama, sanal sunucu notu (MSY / ÇSY): "ürün + sunucu / manager / konsol…", ajan / kurulum değil
-            if ((l.Contains("(BU SUNUCU)") || l.StartsWith("  • ") || l.StartsWith("MSY sanal sunucu:") || l.StartsWith("ÇSY sanal sunucu:"))
-                && UrunSunucusuMetni(l, ajan)) return true;
-            // sanal sunucu notu ürünü anıyorsa ("Symantec Endpoint Protection ürünü") ajan kelimesi yoksa yeter
-            if ((l.StartsWith("MSY sanal sunucu:") || l.StartsWith("ÇSY sanal sunucu:")) && adlar.Any(Norm(l).Contains) && !AjanKelime.IsMatch(l)) return true;
-            // sunucu kurulum talebinin uygulama alanı ürün
-            if (l.StartsWith("Sunucu kurulum talebi") && l.IndexOf("| uygulama:", StringComparison.Ordinal) is int i and >= 0
-                && Has(l[(i + 11)..].Split('|')[0])) return true;
-            // gelen bağlantı kabul eden exe ürünün sunucu bileşeni (ör. ...\symantec endpoint protection manager\apache\bin\httpd.exe)
-            if (l.StartsWith("- gelen port ") && l.Split('[').Skip(1).Select(x => x.Split(']')[0])
-                .Any(path => Has(path) && SunucuKelime.IsMatch(path) && !AjanKelime.IsMatch(path))) return true;
+            bool hedefTalep = false;
+            foreach (var l in evidence.Split('\n'))
+            {
+                if (l.StartsWith("- ") && System.Text.RegularExpressions.Regex.IsMatch(l, @"^- \S+ \S+ · bu sunucu")) hedefTalep = l.Contains("bu sunucu HEDEF") || l.Contains("HEM HEDEF");
+                if ((l.Contains("(BU SUNUCU)") || l.StartsWith("  • ") || l.StartsWith("MSY sanal sunucu:") || l.StartsWith("ÇSY sanal sunucu:")
+                     || (hedefTalep && l.StartsWith("    Kısa açıklama:"))) && UrunSunucusuMetni(l, ajan)) return 2;
+                // sanal sunucu notu ürünü anıyorsa ("Symantec Endpoint Protection ürünü") ajan kelimesi yoksa yeter
+                if ((l.StartsWith("MSY sanal sunucu:") || l.StartsWith("ÇSY sanal sunucu:")) && adlar.Any(Norm(l).Contains) && !AjanKelime.IsMatch(l)) return 2;
+                if (l.StartsWith("Sunucu kurulum talebi") && l.IndexOf("| uygulama:", StringComparison.Ordinal) is int i and >= 0
+                    && Has(l[(i + 11)..].Split('|')[0])) return 2;
+                // gelen bağlantı kabul eden exe ürünün sunucu bileşeni (ör. ...\symantec endpoint protection manager\apache\bin\httpd.exe)
+                if (l.StartsWith("- gelen port ") && l.Split('[').Skip(1).Select(x => x.Split(']')[0])
+                    .Any(path => Has(path) && SunucuKelime.IsMatch(path) && !AjanKelime.IsMatch(path))) return 2;
+            }
         }
-        return false;
+        return 0;   // segment adı sayılmaz (kullanıcı: WEBSENSE segmentinde yalnız Forcepoint değil başka ürünlerin sunucuları da var)
     }
+    bool AjanSunucusu(EnvanterSnapshot env, string ip, string ajan, string? evidence = null) => UrunKaniti(env, ip, ajan, evidence) == 2;
+    string? BaskaUrun(EnvanterSnapshot env, string ip, string ajan, string? evidence) =>
+        Ajanlar().FirstOrDefault(a => Norm(a) != Norm(ajan) && UrunKaniti(env, ip, a, evidence) == 2);
     static readonly System.Text.RegularExpressions.Regex SunucuKelime = new(@"sunucu|server|y[öo]netim|manager|konsol|console|veritaban|database|\bdb\b", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-    static readonly System.Text.RegularExpressions.Regex AjanKelime = new(@"ajan|agent|kurulum|install|y[üu]kle", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+    // "sunucu kurulumu" ürünün sunucusunun kurulduğunu söyler; başka "kurulum" (sunucuya X kurulumu) ajan kurulumudur
+    static readonly System.Text.RegularExpressions.Regex AjanKelime = new(@"ajan|agent|client|istemci|(?<!sunucu\w*\s*)kurulum|install|y[üu]kle", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
     static bool UrunSunucusuMetni(string? t, string ajan) => t != null && AjanAdlari(ajan).Any(Norm(t).Contains)
         && SunucuKelime.IsMatch(t) && !AjanKelime.IsMatch(t);
     // Boş portu kabul eden exe (kanıttaki Carbon Black "- gelen port X" satırı) bu ajana mı ait
@@ -630,8 +639,8 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
         string? host = env.AppsOnIp(ip).Select(h => h.UnixName).OfType<string>().FirstOrDefault(), segL = env.FindSegment(ip)?.Label, st = Stem(host);
         if (Top(_byStem!, st) is { Length: > 0 } a) sb.AppendLine($"BENZER ADLI SUNUCULAR ({st}*) ERT'de: {a}");
         foreach (var p in miss.Where(p => p != ""))
-            if (Top(_bySegPort!, segL + "|" + p) is { Length: > 0 } b) sb.AppendLine($"AYNI SEGMENTTE ({segL}) {p} PORTUNU KULLANAN SUNUCULAR ERT'de: {b}");
-        if (Top(_bySeg!, segL, 6) is { Length: > 0 } c) sb.AppendLine($"SEGMENTİN ({segL}) YAYGIN UYGULAMALARI: {c}");
+            if (Top(_bySegPort!, segL + "|" + p) is { Length: > 0 } b) sb.AppendLine($"AYNI SEGMENTTE ({segL}) {p} PORTUNU KULLANAN SUNUCULAR ERT'de (zayıf ipucu): {b}");
+        if (Top(_bySeg!, segL, 6) is { Length: > 0 } c) sb.AppendLine($"SEGMENTİN ({segL}) YAYGIN UYGULAMALARI (ZAYIF ipucu — segmentte farklı ürünlerin sunucuları olabilir, segment adından ürün türetme): {c}");
         return sb.ToString();
     }
 
@@ -899,6 +908,9 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
               Katılım prod segmentinin KÖS Db'lerine erişim talebi" + bu sunucu HEDEF → uygulama "KÖS", veritabani true (KKB Karşılığı
               istemci). Port veritabanı portu olsa da sahibi açıklamada adı geçen sistemdir; bu durumda null YAZMA. Adaylarda o sistemi
               içeren bir ad varsa onu seç, yoksa açıklamadaki kısa adı yaz ("yeni": true).
+            - Segment adı ve aynı segmentteki diğer sunucular ZAYIF ipucudur (bir segmentte birden çok ürünün sunucusu olabilir; ör.
+              WEBSENSE segmentinde Symantec sunucusu). SM açıklaması, talebin kısa açıklaması, sanal sunucu notu ya da exe yolu başka bir
+              ürünü / uygulamayı söylüyorsa onu seç; segmentten ürün adı TÜRETME.
             - Kanıt yetersizse "uygulama": null ve güven düşük yaz. Uydurma.
 
             Yalnızca JSON dizi döndür, başka metin yazma. Her boş port için bir eleman:
@@ -982,7 +994,20 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
                     gerekce = $"{gerekce} [sunucu {ajan} ürününün kendi sunucusu (ERT / sunucu adı / segment / SM / sanal sunucu notu / exe yolu)]";
                 }
                 else if (PortExeHas(texts.GetValueOrDefault(ip), port, ajan)) app = "Altyapı: " + app;   // AI'ın tam ürün adı (kullanıcı: "neden sadece Symantec")
-                else { gerekce = $"Yok sayıldı: AI '{app}' önerdi ama {ajan} bir ajan / araç ürünü ve bu portu kabul eden exe ona ait değil. AI gerekçesi: {gerekce}"; app = null; guven = 0; }
+                else
+                {
+                    string? diger = BaskaUrun(env, ip, ajan, texts.GetValueOrDefault(ip));
+                    gerekce = $"Yok sayıldı: AI '{app}' önerdi ama {ajan} bir ajan / araç ürünü ve bu portu kabul eden exe ona ait değil"
+                        + (diger != null ? $"; kanıtlara göre sunucu {diger} ürününün sunucusu (segment adı ürünü belirlemez)" : "") + $". AI gerekçesi: {gerekce}";
+                    app = null; guven = 0;
+                    // veritabanı portu ve sunucu başka ürünün sunucusuysa: aynı sunucuda ERT'de o ürünün adı kayıtlıysa "<o ad> Veritabanı"
+                    if (diger != null && DbPort(texts.GetValueOrDefault(ip), port, out _)
+                        && env.AppNamesOnIp(ip).FirstOrDefault(n => AjanAdlari(diger).Any(Norm(n).Contains)) is { } urunAd)
+                    {
+                        app = urunAd + " Veritabanı"; guven = 60; yeni = false;
+                        gerekce += $" [veritabanı portu; sunucu {urunAd} sunucusu olduğu için '{app}' yazıldı]";
+                    }
+                }
             }
             if (app != null && !app.StartsWith("Altyapı", StringComparison.OrdinalIgnoreCase))
             {
