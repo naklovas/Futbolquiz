@@ -301,6 +301,11 @@ erişim talepleri) — DB → şema → tablo ve kim erişiyor bilgisi buradan b
   50000, 27017…; "5000 Sybase?" gibi soru işaretliler yalnız süreçle), sunucu adında sql/db/ora/orcl/exa/dwh (`DbAd`, ör. zbkossql01),
   portu kabul eden DB süreci (sqlservr, oracle, tnslsnr, postgres, mysqld, db2sysc…). AI JSON'a `veritabani` alanı; kod: AI işaretlediyse,
   port DB portu / DB süreci ise ya da ad "… DB/Veritabanı" ile bitiyorsa çekirdek ad katalogla eşlenir + " Veritabanı" (ör. "KÖS Veritabanı").
+  KATALOG KONTROLÜ (kullanıcı: "içerideki uygulama isimleri kontrol edilsin, yoksa serbest atsın"; `CatalogMatch`): AI'ın adı ERT
+  APPNAME kataloğuyla karşılaştırılır — birebir / harf-rakam eşit → o; değilse Tokens ile sırayla: aynı kelime kümesi, AI'ın kelimelerinin
+  hepsi tek bir katalog adında, tek bir katalog adının kelimeleri AI'ın adında (anahtar kelimelerin en az yarısı), harf-rakam içerme
+  (ZB.Wall.P5 ↔ zbwall). Tek açık eşleşme → katalog yazımı (yeni=false); birden çok → serbest + gerekçede "birden çok benzer ad: …";
+  hiç yok → serbest (yeni=true) + "ERT kataloğunda yok" (varsa "benzer: …"). Not gerekçenin sonuna [ … ] olarak eklenir.
 - **VIP**: sorgulanan IP VIP ise üyeler + GW'ler aynı sorguya eklenir, üyeler "VIP ÜYESİ" (GW→üye trafiği varsa ✓).
   Gidilen IP VIP ise "VIP → n ÜYE"; gelen IP LB GW ise "LB GW"; sorgulanan sunucu havuz üyesiyse VIP kartı.
 - **Uygulama görünümü** (`/api/apps`, `/api/app`): `[kullanan uygulamalar] → [UYGULAMA: VIP'ler + segment grupları] → [bağımlı olunanlar]`,

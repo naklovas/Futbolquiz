@@ -221,6 +221,52 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
     }
     static string Norm(string s) => new(s.ToLowerInvariant().Where(char.IsLetterOrDigit).ToArray());
 
+    // AI'ın yazdığı adı kurum içindeki uygulama adlarıyla (ERT kataloğu) karşılaştırır (kullanıcı: "içerideki uygulama isimleri kontrol
+    // edilsin, yoksa serbest atsın"): birebir / harf-rakam eşitse o; değilse kelime düzeyinde tek bir açık eşleşme varsa (AI'ın kelimelerinin
+    // hepsi katalog adında ya da katalog adının hepsi AI'ın adında; ya da biri diğerini harf-rakam olarak içeriyor) katalog yazımı.
+    // Birden çok eşit aday varsa ya da hiç yoksa AI'ın adı serbest kalır (yeni); not gerekçeye eklenir.
+    static readonly HashSet<string> GenelKelime = ["siste", "uygul", "servi", "web", "api", "yonet", "modul", "proje", "veri", "verit", "app",
+        "uygulama", "core", "test", "prod", "ortak", "genel", "islem", "batch", "zaman"];
+    string CatalogMatch(EnvanterSnapshot env, string name, out bool yeni, out string? not)
+    {
+        not = null;
+        string exact = Snap(env, name, out yeni);
+        if (!yeni) return exact;
+        PrepCatalog(env);
+        var a = IslevService.Tokens(name);
+        string na = Norm(name);
+        var key = a.Where(t => t.Length >= 3 && !GenelKelime.Contains(t)).ToHashSet();
+        if (key.Count == 0 && na.Length < 4) { not = "ERT kataloğunda yok"; return name; }
+        bool Anahtar(HashSet<string> t) => t.Any(x => x.Length >= 3 && !GenelKelime.Contains(x));
+        var cat = _catTok!.Where(c => !env.IsSystemApp(c.App)).ToList();
+        // 1) aynı kelime kümesi  2) AI'ın kelimelerinin hepsi katalog adında  3) katalog adının hepsi AI'ın adında  4) harf-rakam içerme
+        var esit = cat.Where(c => c.Tok.SetEquals(a)).Select(c => c.App).ToList();
+        var ust = cat.Where(c => key.Count > 0 && a.IsSubsetOf(c.Tok)).Select(c => c.App).ToList();
+        var altHam = cat.Where(c => Anahtar(c.Tok) && c.Tok.IsSubsetOf(a)).OrderByDescending(c => c.Tok.Count).ToList();
+        // katalog adı AI'ın adının en az yarısını (anahtar kelimelerde) karşılamalı: "KREDİ" ⊂ "Kredi Kartı Takip" tek başına yetmez
+        var alt = altHam.Where(c => c.Tok.Count(t => key.Contains(t)) * 2 >= key.Count).ToList();
+        var icer = cat.Where(c => na.Length >= 4 && Norm(c.App) is { Length: >= 4 } nc && (nc.Contains(na) || na.Contains(nc))).Select(c => c.App).ToList();
+        string? hit = null; List<string>? coklu = null;
+        if (esit.Count == 1) hit = esit[0];
+        else if (esit.Count > 1) coklu = esit;
+        else if (ust.Count == 1) hit = ust[0];
+        else if (ust.Count > 1) coklu = ust;
+        else if (alt.Count > 0 && (alt.Count == 1 || alt[0].Tok.Count > alt[1].Tok.Count)) hit = alt[0].App;
+        else if (alt.Count > 1) coklu = alt.Select(c => c.App).ToList();
+        else if (icer.Count == 1) hit = icer[0];
+        else if (icer.Count > 1) coklu = icer;
+        if (hit == null)
+        {
+            not = coklu != null ? "ERT kataloğunda birden çok benzer ad: " + string.Join(" | ", coklu.Take(4)) + (coklu.Count > 4 ? " …" : "") + " — serbest bırakıldı"
+                : altHam.Count > 0 ? "ERT kataloğunda tam karşılığı yok, serbest ad; benzer: " + string.Join(" | ", altHam.Take(3).Select(c => c.App))
+                : "ERT kataloğunda yok, serbest ad";
+            return name;
+        }
+        yeni = false;
+        not = $"ERT kataloğundaki '{hit}' adıyla eşlendi (AI: '{name}')";
+        return hit;
+    }
+
     // ---------------- Kanıt (AI'a giden metin) ----------------
     // yeni = false: son AI isteğinde giden (kayıtlı) metin; true: kanıtlar şimdi yeniden toplanır (AI'a sorulmaz)
     public async Task<string> EvidenceAsync(string ip, CancellationToken ct, bool yeni = false)
@@ -512,16 +558,21 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
     Dictionary<string, List<string>>? _byMuhafiz;
     List<(string App, HashSet<string> Tok)>? _catTok;
     EnvanterSnapshot? _candEnv;
-    List<string> Candidates(EnvanterSnapshot env, string ip, string evidence)
+    void PrepCatalog(EnvanterSnapshot env)
     {
-        if (!ReferenceEquals(_candEnv, env))
+        lock (_gate)
         {
+            if (ReferenceEquals(_candEnv, env)) return;
             _byMuhafiz = env.HostIps.SelectMany(i => env.AppsOnIp(i)).Where(h => h.VarlikMuhafizi != null && h.AppName != null && !env.IsSystemApp(h.AppName))
                 .GroupBy(h => h.VarlikMuhafizi!, StringComparer.OrdinalIgnoreCase)
                 .ToDictionary(g => g.Key, g => g.GroupBy(h => h.AppName!).OrderByDescending(x => x.Count()).Select(x => x.Key).Take(8).ToList(), StringComparer.OrdinalIgnoreCase);
             _catTok = env.AppNames.Select(a => (a, IslevService.Tokens(a))).Where(x => x.Item2.Count > 0).ToList();
             _candEnv = env;
         }
+    }
+    List<string> Candidates(EnvanterSnapshot env, string ip, string evidence)
+    {
+        PrepCatalog(env);
         var list = new List<string>();
         void Add(IEnumerable<string?> xs) { foreach (var x in xs) if (x != null && !env.IsSystemApp(x) && !list.Contains(x, StringComparer.OrdinalIgnoreCase)) list.Add(x); }
         Add(env.AppNamesOnIp(ip));
@@ -796,8 +847,9 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
                 var dbRx = new System.Text.RegularExpressions.Regex(@"\s*[-–(]?\s*(veritaban[ıi]|database|db)\)?\s*$", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
                 bool db = e.TryGetProperty("veritabani", out var vt) && vt.ValueKind == JsonValueKind.True || DbPort(texts.GetValueOrDefault(ip), port, out _)
                           || dbRx.IsMatch(app);
-                app = Snap(env, dbRx.Replace(app, "").Trim() is { Length: > 0 } core ? core : app, out yeni);
+                app = CatalogMatch(env, dbRx.Replace(app, "").Trim() is { Length: > 0 } core ? core : app, out yeni, out var katNot);
                 if (db) app += " Veritabanı";
+                if (katNot != null) gerekce = $"{gerekce} [{katNot}]";
             }
             outp[(ip, port)] = new EksikOneri(Cut(app, 200), yeni, guven, gerekce, Ai, "AI", DateTime.Now);
         }
