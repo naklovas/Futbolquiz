@@ -461,6 +461,49 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
         return outp;
     }
 
+    // SM açıklamalarında adı geçen sistemler: ERT kataloğundaki adlar (çok kelimeliyse kelimelerin hepsi, tek kelimeliyse adın kendisi metinde)
+    // ve ajan / ürün adları (ör. "Symantec Endpoint Protection ürünü" → "Symantec Endpoint Protection"; yalnız ürün sunucusu metniyse).
+    const string SmAdayBas = "SM AÇIKLAMALARINDA ADI GEÇEN SİSTEMLER (kodla çıkarıldı; bu sunucunun uygulaması için EN GÜÇLÜ aday):";
+    record SmAday(string Ad, int N, int Port);
+    List<SmAday> SmAdaylari(EnvanterSnapshot env, List<(string Text, bool Port)> texts)
+    {
+        if (texts.Count == 0) return [];
+        PrepCatalog(env);
+        var say = new Dictionary<string, (int n, int p)>(StringComparer.OrdinalIgnoreCase);
+        void Add(string ad, bool port) { var c = say.GetValueOrDefault(ad); say[ad] = (c.n + 1, c.p + (port ? 1 : 0)); }
+        foreach (var (text, port) in texts)
+        {
+            var tok = IslevService.Tokens(text);
+            var found = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var (app, ct) in _catTok!)
+            {
+                if (env.IsSystemApp(app)) continue;
+                var key = ct.Where(t => t.Length >= 3 && !GenelKelime.Contains(t)).ToList();
+                if (key.Count == 0) continue;
+                bool hit = key.Count >= 2 ? key.All(tok.Contains)
+                    : app.Trim().Length >= 3 && System.Text.RegularExpressions.Regex.IsMatch(text, $@"(?<![\p{{L}}\d]){System.Text.RegularExpressions.Regex.Escape(app.Trim())}(?![\p{{L}}\d])", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                if (hit) found.Add(app);
+            }
+            // aynı metinde hem "KÖS" hem "KÖS Raporlama" bulunduysa kısa olanı at
+            foreach (var a in found.Where(a => !found.Any(b => b.Length > a.Length && Norm(b).Contains(Norm(a)))).ToList()) Add(a, port);
+            if (AjanOf(text) is { } ajan && UrunSunucusuMetni(text, ajan)
+                && System.Text.RegularExpressions.Regex.Match(text, $@"(?i:{System.Text.RegularExpressions.Regex.Escape(ajan)})(\s+[A-ZÇĞİÖŞÜ][\wçğıöşüÇĞİÖŞÜ.]*){{0,3}}") is { Success: true } m
+                && !found.Any(f => Norm(f).Contains(Norm(ajan))))
+                Add(UrunAdi(m.Value), port);
+        }
+        return say.Select(kv => new SmAday(kv.Key, kv.Value.n, kv.Value.p)).OrderByDescending(a => a.Port).ThenByDescending(a => a.N).Take(4).ToList();
+    }
+    // "SYMANTEC ENDPOINT PROTECTION ÜRÜNÜ" → sondaki genel kelimeler atılır
+    static readonly HashSet<string> UrunSonEk = new(StringComparer.OrdinalIgnoreCase) { "ürünü", "ürün", "sunucusu", "sunucu", "sunucuları", "için", "server", "uygulaması", "yazılımı" };
+    static string UrunAdi(string s)
+    {
+        var w = s.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries).ToList();
+        while (w.Count > 1 && UrunSonEk.Contains(w[^1].Trim('.', ','))) w.RemoveAt(w.Count - 1);
+        return string.Join(' ', w);
+    }
+    static string? SmAdayOf(string? evidence) => evidence?.Split('\n').FirstOrDefault(l => l.StartsWith(SmAdayBas)) is { } l
+        ? l[SmAdayBas.Length..].Split(" | ")[0].Split(" (")[0].Trim() is { Length: > 0 } a ? a : null : null;
+
     // SM talepleri (kullanıcı tarifi): sunucu ZT_HEDEF / ZT_KAYNAK'ta (IP) ya da ZT_HEDEFHOSTNAME / ZT_KAYNAKHOSTNAME'de (UNIXNAME) aranır;
     // bulunan talebin DESCRIPTION, BRIEF_DESCRIPTION, ZT_KAYNAKACIKLAMA, ZT_HEDEFACIKLAMA alanları AI'a gider. Sunucunun talepte HEDEF mi
     // KAYNAK mı olduğu yazılır: hedefse ZT_HEDEFACIKLAMA bu sunucuyu, ZT_KAYNAKACIKLAMA karşı tarafı anlatır (kaynaksa tersi). Hedef olup
@@ -539,7 +582,8 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
                     var ps = hedef ? miss.Where(p => HasPort(G(r, "ZT_HEDEFPORT"), p)).ToList() : [];
                     string? aj = AjanOf(string.Join(" ", new[] { "BRIEF_DESCRIPTION", "DESCRIPTION", "ZT_HEDEFACIKLAMA", "ZT_KAYNAKACIKLAMA",
                         "ZT_HEDEFUYGULAMA", "ZT_HEDEFUGULAMA", "ZT_KAYNAKUYGULAMA" }.Select(k => G(r, k))));
-                    if (aj != null && (AjanSunucusu(env, ip, aj) || UrunSunucusuMetni(G(r, hedef ? "ZT_HEDEFACIKLAMA" : "ZT_KAYNAKACIKLAMA"), aj))) aj = null;   // ürünün kendi sunucusunda bu talepler gerçek uygulama kanıtı
+                    if (aj != null && (AjanSunucusu(env, ip, aj) || UrunSunucusuMetni(G(r, hedef ? "ZT_HEDEFACIKLAMA" : "ZT_KAYNAKACIKLAMA"), aj)
+                        || (hedef && (UrunSunucusuMetni(G(r, "BRIEF_DESCRIPTION"), aj) || UrunSunucusuMetni(Cut(G(r, "DESCRIPTION"), 400), aj))))) aj = null;   // ürünün kendi sunucusunda bu talepler gerçek uygulama kanıtı
                     return (r, hedef, kaynak, ps, aj);
                 })
                 .Where(x => x.hedef || x.kaynak).DistinctBy(x => G(x.r, "NUMBER")).ToList();
@@ -581,6 +625,21 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
                 sb.AppendLine("uygulama olduğunu doğrudan söyler):");
                 foreach (var z in bunu) sb.AppendLine($"  • \"{Cut(z.t, 250)}\" — {z.n} talep, son {z.son}{(z.port ? " · boş portu anan talepte" : "")}");
             }
+            // Hedef olduğu taleplerin kısa açıklamaları (kullanıcı: kısa açıklama / açıklama alanları da en kritik SM kanıtı)
+            var kisa = all.Where(x => x.hedef && x.aj == null).Select(x => (t: G(x.r, "BRIEF_DESCRIPTION"), x)).Where(y => y.t != null)
+                .GroupBy(y => Norm(y.t!)).Select(g => (t: g.First().t!, n: g.Count(), port: g.Any(y => y.x.ps.Count > 0)))
+                .OrderByDescending(z => z.port).ThenByDescending(z => z.n).Take(6).ToList();
+            if (kisa.Count > 0)
+            {
+                sb.AppendLine("BU SUNUCUNUN HEDEF OLDUĞU TALEPLERİN KISA AÇIKLAMALARI (sunucuya ne için erişildiğini / sunucunun ne olduğunu söyler):");
+                foreach (var z in kisa) sb.AppendLine($"  • \"{Cut(z.t, 200)}\" — {z.n} talep{(z.port ? " · boş portu anan talepte" : "")}");
+            }
+            // Açıklamalarda adı geçen sistemler (kodla çıkarılır; AI bulamazsa / Kahin'e giderse bu kullanılır — SmAday)
+            var adaylar = SmAdaylari(env, all.Where(x => x.aj == null && (x.hedef || Own(x.r, false) != null))
+                .Select(x => (string.Join(" · ", new[] { Own(x.r, x.hedef), x.hedef ? G(x.r, "BRIEF_DESCRIPTION") : null, x.hedef ? Cut(G(x.r, "DESCRIPTION"), 400) : null }
+                    .OfType<string>()), x.ps.Count > 0)).ToList());
+            if (adaylar.Count > 0)
+                sb.AppendLine(SmAdayBas + " " + string.Join(" | ", adaylar.Select(a => $"{a.Ad} ({a.N} talep{(a.Port > 0 ? $", boş portu anan {a.Port}" : "")})")));
             var karsi = all.Where(x => x.hedef && x.aj == null).Select(x => G(x.r, "ZT_KAYNAKACIKLAMA")).OfType<string>()
                 .GroupBy(Norm).OrderByDescending(g => g.Count()).Take(5).Select(g => $"\"{Cut(g.First(), 120)}\" ({g.Count()})").ToList();
             if (karsi.Count > 0) sb.AppendLine("Bu sunucuya erişen taraflar (kaynak açıklaması; İSTEMCİLER, bu sunucunun uygulaması değil): " + string.Join("; ", karsi));
@@ -896,6 +955,8 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
               SM talepleri, sunucu adındaki uygulama kısaltması) ve "uygulama" alanına yalnız UYGULAMA adını, "veritabani": true
               yaz (kod "<uygulama> Veritabanı" yapar). Gerekçede teknolojiyi belirt (ör. "1433 SQL Server; istemcileri KREDİ").
               Sahibi bulunamazsa uygulama null, gerekçede "SQL Server veritabanı, sahibi belirsiz" yaz.
+            - "SM AÇIKLAMALARINDA ADI GEÇEN SİSTEMLER" satırı varsa bu sunucunun uygulaması büyük olasılıkla oradaki İLK sistemdir; exe yolu
+              açıkça başka bir uygulamayı göstermiyorsa onu seç. "KISA AÇIKLAMALARI" da (BRIEF_DESCRIPTION) aynı derecede güçlüdür.
             - "BU SUNUCUYU ANLATAN TALEP AÇIKLAMALARI" satırları talep sahibinin bu sunucu için yazdığı açıklamalardır (HEDEF ise
               ZT_HEDEFACIKLAMA, KAYNAK ise ZT_KAYNAKACIKLAMA). Bir sistem / uygulama / veritabanı adı geçiyorsa bunu exe yolundan sonra
               EN GÜÇLÜ kanıt say ve gerekçede o açıklamayı alıntıla. Açıklama sunucunun NE OLDUĞUNU söylüyorsa (ör. "Symantec
@@ -957,6 +1018,24 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
                     if (o.Uygulama != null) outp[k] = o;
             }
             catch (Exception ex) when (ex is not OperationCanceledException) { /* 2. tur başarısızsa 1. tur sonucu kalır */ }
+        }
+        // SM son kontrol (kullanıcı: "SM kanıtları en kritik"): AI boş bıraktıysa ya da yalnız Kahin'e dayandıysa ve SM açıklamalarında adı
+        // geçen bir sistem varsa o yazılır (DB portunda "… Veritabanı"), gerekçede belirtilir
+        foreach (var (ip, ports) in todo)
+        {
+            if (SmAdayOf(texts.GetValueOrDefault(ip)) is not { } sm) continue;
+            foreach (var port in ports)
+            {
+                var o = outp.GetValueOrDefault((ip, port));
+                bool kahin = o?.Gerekce?.StartsWith("Kahin tahmini") == true;
+                if (o?.Uygulama != null && !kahin) continue;
+                if (o?.Uygulama != null && Norm(o.Uygulama).Contains(Norm(sm))) continue;
+                string ad = CatalogMatch(env, sm, out bool yeni, out var katNot);
+                if (DbPort(texts.GetValueOrDefault(ip), port, out _)) ad += " Veritabanı";
+                outp[(ip, port)] = new EksikOneri(Cut(ad, 200), yeni, 65,
+                    $"SM talep açıklamalarında adı geçen sistem: {sm}" + (o != null ? $" (AI: {(o.Uygulama ?? "öneri yok")} — {Cut(o.Gerekce, 200)})" : "") + (katNot != null ? $" [{katNot}]" : ""),
+                    Ai, "AI", DateTime.Now);
+            }
         }
         return outp;
 

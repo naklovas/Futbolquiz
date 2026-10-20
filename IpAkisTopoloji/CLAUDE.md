@@ -311,6 +311,13 @@ erişim talepleri) — DB → şema → tablo ve kim erişiyor bilgisi buradan b
   etiketli; prompt "segmentten ürün türetme". Ürün reddedilince başka ürünün güçlü kanıtı varsa (`BaskaUrun`) gerekçede yazılır; DB portunda ve
   o ürün aynı sunucuda ERT'de kayıtlıysa "<o ad> Veritabanı" (güven 60). Hedef olunan talebin "Kısa açıklama"sı da ürün kanıtı;
   `AjanKelime` "sunucu kurulumu"nu ajan saymaz ("sunucuya X kurulumu" ajan).
+  SM EN KRİTİK (kullanıcı: "kısa açıklamayı dikkate almıyor; erişim açıklaması, kısa açıklama, açıklama alanlarına dikkat etmeli"): asıl hata —
+  Symantec kurulum talebi ajan diye işaretlenip "sunucunun uygulaması DEĞİL" olarak gidiyordu (ajan kontrolü yalnız ZT_*ACIKLAMA'ya bakıyordu)
+  → artık hedef talepte BRIEF_DESCRIPTION / DESCRIPTION da. SM bölümüne "BU SUNUCUNUN HEDEF OLDUĞU TALEPLERİN KISA AÇIKLAMALARI" ve
+  `SmAdayBas` "SM AÇIKLAMALARINDA ADI GEÇEN SİSTEMLER" satırı (`SmAdaylari`: ERT katalog adları — çok kelimeli: tüm anahtar kelimeler, tek
+  kelimeli: adın kendisi metinde; ürün sunucusu metninde ürün adı + büyük harfli devamı, `UrunAdi` sondaki "ürünü/sunucusu"yu atar; boş portu
+  anan talep önce). Son kontrol: AI boş bıraktıysa ya da yalnız Kahin'e dayandıysa ilk SM sistemi yazılır (güven 65, DB portunda "… Veritabanı",
+  gerekçe "SM talep açıklamalarında adı geçen sistem: … (AI: …)"). Sahte envanterle test: Symantec iki talepten tek aday, "KÖS" (KÖS Raporlama değil).
   HEDEF talebinde "A karşılığı … B'nin DB'lerine erişim" → bu sunucu B (kullanıcı örneği: "KKB Karşılığı / Ziraat Katılım prod segmentinin
   KÖS Db'lerine erişim talebi" + HEDEF → "KÖS"; AI null diyordu). Prompt kuralı: DB portu olsa da sahibi açıklamadaki sistem, null yazma.
   VERİTABANI SUNUCUSU (kullanıcı: "DB sunucusunda uygulamanın yanına 'X Veritabanı' yazsın"): `DbHints` kanıta "VERİTABANI SUNUCUSU
