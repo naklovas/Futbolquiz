@@ -107,6 +107,8 @@ static class SurecAi
         "conhost.exe", "taskhostw.exe", "wmiprvse.exe", "spoolsv.exe", "rdpclip.exe", "splunkd.exe", "wget.exe", "msmpeng.exe",
         "coreserviceshell.exe", "vmtoolsd.exe", "zabbix_agentd.exe", "repmgr.exe", "cb.exe", "lsm.exe", "wermgr.exe", "ccsvchst.exe"
     };
+    public static bool GenelExe(string ad, string? yol) =>
+        GenelAd.Contains(ad) || (yol != null && GenelYol.Any(g => yol.Contains(g, StringComparison.OrdinalIgnoreCase)) && !(ad is "ntoskrnl.exe" or "System"));
     public static bool Genel(SurecAiExe e) =>
         GenelAd.Contains(e.Ad) || (e.Yol is { } y && GenelYol.Any(g => y.Contains(g, StringComparison.OrdinalIgnoreCase)) && !(e.Ad is "ntoskrnl.exe" or "System"));
 

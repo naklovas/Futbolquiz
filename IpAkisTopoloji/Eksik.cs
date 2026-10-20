@@ -461,6 +461,26 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
         return outp;
     }
 
+    // Önerilen ad ERT'deki işleten birim / varlık muhafızı / uygulama sahibi değerlerinden biri mi (katalogda aynı adlı uygulama yoksa)
+    HashSet<string>? _ekipler; EnvanterSnapshot? _ekipEnv;
+    string? EkipAdi(EnvanterSnapshot env, string ip, string app)
+    {
+        lock (_gate)
+            if (!ReferenceEquals(_ekipEnv, env))
+            {
+                _ekipler = env.HostIps.SelectMany(i => env.AppsOnIp(i)).SelectMany(h => new[] { h.SunucuIsletenBirim, h.VarlikMuhafizi, h.UygulamaVarlikSahibi })
+                    .OfType<string>().Select(Norm).Where(x => x.Length >= 4).ToHashSet();
+                _ekipEnv = env;
+            }
+        string n = Norm(System.Text.RegularExpressions.Regex.Replace(app, @"\s*(veritaban[ıi]|database|db)\s*$", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase));
+        if (n.Length < 4 || env.AppNames.Any(a => Norm(a) == n)) return null;
+        var h = env.AppsOnIp(ip);
+        if (h.Any(x => x.SunucuIsletenBirim is { } b && Norm(b) == n)) return "işleten birim";
+        if (h.Any(x => x.VarlikMuhafizi is { } m && Norm(m) == n)) return "varlık muhafızı";
+        if (h.Any(x => x.UygulamaVarlikSahibi is { } s && Norm(s) == n)) return "uygulama sahibi";
+        return _ekipler!.Contains(n) ? "işleten birim / muhafız / sahip listesi" : null;
+    }
+
     // SM açıklamalarında adı geçen sistemler: ERT kataloğundaki adlar (çok kelimeliyse kelimelerin hepsi, tek kelimeliyse adın kendisi metinde)
     // ve ajan / ürün adları (ör. "Symantec Endpoint Protection ürünü" → "Symantec Endpoint Protection"; yalnız ürün sunucusu metniyse).
     const string SmAdayBas = "SM AÇIKLAMALARINDA ADI GEÇEN SİSTEMLER (kodla çıkarıldı; bu sunucunun uygulaması için EN GÜÇLÜ aday):";
@@ -745,6 +765,26 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
     }
 
     // ---------------- Carbon Black ----------------
+    // Bilinen ürün exe'leri (kullanıcı: veri ambarı sunucusunda sas.exe çalışıyordu, AI bakmadı). Anahtar: exe adı ya da yol parçası.
+    static readonly (string Kalip, string Urun)[] BilinenUrunler =
+    [
+        ("sas.exe", "SAS"), ("\\sashome\\", "SAS"), ("\\sasfoundation\\", "SAS"), ("objspawn", "SAS"), ("sasstudio", "SAS"),
+        ("odi", "Oracle Data Integrator"), ("pmserver", "Informatica PowerCenter"), ("infaservice", "Informatica"), ("\\informatica\\", "Informatica"),
+        ("dtexec", "SQL Server Integration Services"), ("msdtssrvr", "SQL Server Integration Services"), ("msmdsrv", "SQL Server Analysis Services"),
+        ("reportingservicesservice", "SQL Server Reporting Services"), ("\\ssrs\\", "SQL Server Reporting Services"), ("\\power bi report server\\", "Power BI Report Server"),
+        ("mstrsvr", "MicroStrategy"), ("\\microstrategy\\", "MicroStrategy"), ("cogbootstrap", "IBM Cognos"), ("\\cognos\\", "IBM Cognos"),
+        ("nqsserver", "Oracle BI (OBIEE)"), ("\\qlik", "Qlik"), ("\\tableau", "Tableau"), ("\\datastage\\", "IBM DataStage"), ("\\talend", "Talend"),
+        ("\\pentaho", "Pentaho"), ("ctmag", "Control-M"), ("\\control-m", "Control-M"), ("\\bmc software\\control", "Control-M"),
+        ("amqrmppa", "IBM MQ"), ("\\ibm\\mq\\", "IBM MQ"), ("sapstartsrv", "SAP"), ("\\usr\\sap\\", "SAP"), ("\\biztalk", "BizTalk"),
+        ("\\tibco", "TIBCO"), ("\\websphere", "IBM WebSphere"), ("\\weblogic", "Oracle WebLogic"), ("\\jboss", "JBoss"), ("\\tomcat", "Apache Tomcat"),
+        ("\\elastic", "Elasticsearch"), ("\\kafka", "Kafka"), ("\\rabbitmq", "RabbitMQ"), ("\\ibm\\iib", "IBM Integration Bus"), ("\\ace\\", "IBM App Connect")
+    ];
+    static string? BilinenUrun(string yol)
+    {
+        string y = yol.Replace('/', '\\').ToLowerInvariant(), exe = y.Split('\\').Last();
+        return BilinenUrunler.FirstOrDefault(b => b.Kalip.Contains('\\') ? y.Contains(b.Kalip) : exe.StartsWith(b.Kalip)).Urun;
+    }
+
     sealed class Cb
     {
         public readonly List<(string Yon, string Port, string Yol, long Hits, int Peers, List<string> Ornek)> Rows = [];
@@ -752,6 +792,12 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
         {
             var sb = new StringBuilder();
             sb.AppendLine("CARBON BLACK (bu sunucudaki süreçlerin ağ bağlantıları):");
+            // Sunucuda çalışan iş programları (genel Windows / ajan süreçleri hariç) — sunucunun ne iş yaptığını en doğrudan gösterir
+            var progs = Rows.Select(r => r.Yol).Where(y => y != "-").Distinct(StringComparer.OrdinalIgnoreCase)
+                .Where(y => !SurecAi.GenelExe(y.Split('\\', '/').Last(), y)).Take(12).ToList();
+            if (progs.Count > 0)
+                sb.AppendLine("SUNUCUDA ÇALIŞAN İŞ PROGRAMLARI (genel sistem / ajan süreçleri hariç): " + string.Join("; ", progs.Select(y =>
+                    $"{y.Split('\\', '/').Last()} [{y}]{(BilinenUrun(y) is { } u ? $" = {u}" : "")}")));
             string Exe(string yol) => yol.Split('\\', '/').Last();
             string Peers(List<string> ips) => string.Join(", ", ips.Select(p =>
                 env.IsVipGw(p, out _) ? "LB GW" : env.AppNamesOnIp(p).FirstOrDefault() is { } a ? a : env.VipMembers(p).Count > 0 ? "VIP " + p : p).Distinct().Take(5));
@@ -969,6 +1015,10 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
               Katılım prod segmentinin KÖS Db'lerine erişim talebi" + bu sunucu HEDEF → uygulama "KÖS", veritabani true (KKB Karşılığı
               istemci). Port veritabanı portu olsa da sahibi açıklamada adı geçen sistemdir; bu durumda null YAZMA. Adaylarda o sistemi
               içeren bir ad varsa onu seç, yoksa açıklamadaki kısa adı yaz ("yeni": true).
+            - İşleten birim, varlık muhafızı ve uygulama sahibi EKİP / BİRİM adlarıdır (ör. "KATILIM VERİ AMBARI"); uygulama adı olarak
+              YAZMA. Uygulamayı programlardan bul: "SUNUCUDA ÇALIŞAN İŞ PROGRAMLARI" satırındaki exe'ler ve "= Ürün" etiketleri (ör.
+              sas.exe = SAS) sunucunun ne çalıştırdığını doğrudan gösterir; boş portu kabul eden exe yoksa bile sunucudaki iş programı
+              güçlü ipucudur.
             - Segment adı ve aynı segmentteki diğer sunucular ZAYIF ipucudur (bir segmentte birden çok ürünün sunucusu olabilir; ör.
               WEBSENSE segmentinde Symantec sunucusu). SM açıklaması, talebin kısa açıklaması, sanal sunucu notu ya da exe yolu başka bir
               ürünü / uygulamayı söylüyorsa onu seç; segmentten ürün adı TÜRETME.
@@ -1019,6 +1069,30 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
             }
             catch (Exception ex) when (ex is not OperationCanceledException) { /* 2. tur başarısızsa 1. tur sonucu kalır */ }
         }
+        // Program son kontrol: hâlâ boş kalan portta portu kabul eden exe bilinen bir ürünse o (güven 55); portun exe'si yoksa ve sunucuda
+        // tek bir bilinen ürün çalışıyorsa o (güven 45). SM kontrolünden sonra çalışır, SM varsa SM kazanır.
+        void ProgramKontrol()
+        {
+            foreach (var (ip, ports) in todo)
+            {
+                string? ev = texts.GetValueOrDefault(ip);
+                var sunucuUrun = ev?.Split('\n').FirstOrDefault(l => l.StartsWith("SUNUCUDA ÇALIŞAN İŞ PROGRAMLARI")) is { } pl
+                    ? System.Text.RegularExpressions.Regex.Matches(pl, @"\] = ([^;]+)").Select(m => m.Groups[1].Value.Trim()).Distinct().ToList() : [];
+                foreach (var port in ports)
+                {
+                    var o = outp.GetValueOrDefault((ip, port));
+                    if (o?.Uygulama != null && o.Gerekce?.StartsWith("Kahin tahmini") != true) continue;
+                    string? portUrun = PortLine(ev, port) is { } line ? line.Split('[').Skip(1).Select(x => BilinenUrun(x.Split(']')[0])).OfType<string>().FirstOrDefault() : null;
+                    string? urun = portUrun ?? (sunucuUrun.Count == 1 ? sunucuUrun[0] : null);
+                    if (urun == null) continue;
+                    string ad = CatalogMatch(env, urun, out bool yeni, out var katNot);
+                    if (DbPort(ev, port, out _)) ad += " Veritabanı";
+                    outp[(ip, port)] = new EksikOneri(ad, yeni, portUrun != null ? 55 : 45,
+                        (portUrun != null ? $"Portu kabul eden program bilinen ürün: {urun}" : $"Sunucuda çalışan tek bilinen iş programı: {urun}")
+                        + (o != null ? $" (AI: {(o.Uygulama ?? "öneri yok")} — {Cut(o.Gerekce, 200)})" : "") + (katNot != null ? $" [{katNot}]" : ""), Ai, "AI", DateTime.Now);
+                }
+            }
+        }
         // SM son kontrol (kullanıcı: "SM kanıtları en kritik"): AI boş bıraktıysa ya da yalnız Kahin'e dayandıysa ve SM açıklamalarında adı
         // geçen bir sistem varsa o yazılır (DB portunda "… Veritabanı"), gerekçede belirtilir
         foreach (var (ip, ports) in todo)
@@ -1037,6 +1111,7 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
                     Ai, "AI", DateTime.Now);
             }
         }
+        ProgramKontrol();
         return outp;
 
         Dictionary<(string, string), EksikOneri> Parse(string answer, Dictionary<string, List<string>> want, bool kahinTur)
@@ -1062,6 +1137,12 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
             {
                 guven = Math.Min(guven, 50);
                 if (gerekce?.Contains("Kahin", StringComparison.OrdinalIgnoreCase) != true) gerekce = "Kahin tahmini (son çare): " + gerekce;
+            }
+            // Ekip / birim adı uygulama değildir (kullanıcı: AI işleten birim "KATILIM VERİ AMBARI"nı uygulama diye önerdi)
+            if (app != null && EkipAdi(env, ip, app) is { } ekip)
+            {
+                gerekce = $"Yok sayıldı: AI '{app}' önerdi ama bu bir ekip / birim adı (ERT {ekip}), uygulama adı değil. AI gerekçesi: {gerekce}";
+                app = null; guven = 0;
             }
             // Ajan / araç adı önerildiyse: portun exe'si o ürüne aitse "Altyapı: X", değilse öneri yok sayılır (gerekçe saklanır)
             if (app != null && AjanOf(app) is { } ajan)

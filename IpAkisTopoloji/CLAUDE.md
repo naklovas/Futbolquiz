@@ -318,6 +318,12 @@ erişim talepleri) — DB → şema → tablo ve kim erişiyor bilgisi buradan b
   kelimeli: adın kendisi metinde; ürün sunucusu metninde ürün adı + büyük harfli devamı, `UrunAdi` sondaki "ürünü/sunucusu"yu atar; boş portu
   anan talep önce). Son kontrol: AI boş bıraktıysa ya da yalnız Kahin'e dayandıysa ilk SM sistemi yazılır (güven 65, DB portunda "… Veritabanı",
   gerekçe "SM talep açıklamalarında adı geçen sistem: … (AI: …)"). Sahte envanterle test: Symantec iki talepten tek aday, "KÖS" (KÖS Raporlama değil).
+  EKİP ADI UYGULAMA DEĞİL + PROGRAMLAR (kullanıcı: AI işleten birim "KATILIM VERİ AMBARI"nı uygulama diye önerdi, sunucuda sas.exe çalışıyordu
+  bakmadı): `EkipAdi` — öneri ERT'deki SUNUCUISLETENBIRIM / VARLIKMUHAFIZI / UYGULAMAVARLIKSAHIBI değerlerinden biriyse (aynı adlı katalog
+  uygulaması yoksa) "Yok sayıldı: … ekip / birim adı". CB bölümünün başına "SUNUCUDA ÇALIŞAN İŞ PROGRAMLARI" (genel süreçler hariç,
+  `SurecAi.GenelExe`) + bilinen ürün etiketi (`BilinenUrunler`: sas.exe / sashome = SAS, odi = ODI, pmserver = Informatica, SSIS/SSAS/SSRS,
+  MicroStrategy, Cognos, OBIEE, Qlik, Tableau, DataStage, Control-M, IBM MQ, SAP, Tomcat, WebLogic…). Son kontrol sırası: SM sistemi, sonra
+  `ProgramKontrol` (hâlâ boşsa / Kahin'se: portu kabul eden exe bilinen ürünse güven 55; sunucuda tek bilinen ürün varsa güven 45).
   HEDEF talebinde "A karşılığı … B'nin DB'lerine erişim" → bu sunucu B (kullanıcı örneği: "KKB Karşılığı / Ziraat Katılım prod segmentinin
   KÖS Db'lerine erişim talebi" + HEDEF → "KÖS"; AI null diyordu). Prompt kuralı: DB portu olsa da sahibi açıklamadaki sistem, null yazma.
   VERİTABANI SUNUCUSU (kullanıcı: "DB sunucusunda uygulamanın yanına 'X Veritabanı' yazsın"): `DbHints` kanıta "VERİTABANI SUNUCUSU
