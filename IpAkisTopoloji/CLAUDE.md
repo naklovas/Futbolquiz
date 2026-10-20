@@ -328,6 +328,9 @@ erişim talepleri) — DB → şema → tablo ve kim erişiyor bilgisi buradan b
   Enterprise Miner | [ZK] SAS IFRS TFRS9 → "serbest" kaldı; doğrusu [ZK] SAS IFRS TFRS9): `Secim` — kurum öneki ([ZK] / ZT ↔ sunucu adının
   ilk 2 harfi), aynı sunucunun diğer portlarında kayıtlı (+5), adı kanıtta (benzer adlı sunucular / SM / VIP; ADAY ve segment satırları hariç)
   (+3), ayırt edici kelime kanıtta / sunucu adında (+1); tek en yüksek → katalog adı, gerekçede neden. Prompt: genel ürün adı yazma.
+  Katalogda hiç karşılığı yoksa (kullanıcı: AI "SAS ALM" dedi → serbest kaldı) AYNI ÜRÜN AİLESİ (AI'ın anahtar kelimesi adında geçen kayıtlar)
+  arasından da `Secim`. Ek puanlar doğrudan envanterden: aynı ad kökündeki sunucu (zkprodsasalm01 ↔ zkprodsasalm02, sondaki sayı atılır) +3,
+  aynı önekle başlayan (son 3 harf atılmış kök, zkprodsas…) +1. Sahte envanterle: "SAS ALM" ve "SAS" → [ZK] SAS IFRS TFRS9.
   HEDEF talebinde "A karşılığı … B'nin DB'lerine erişim" → bu sunucu B (kullanıcı örneği: "KKB Karşılığı / Ziraat Katılım prod segmentinin
   KÖS Db'lerine erişim talebi" + HEDEF → "KÖS"; AI null diyordu). Prompt kuralı: DB portu olsa da sahibi açıklamadaki sistem, null yazma.
   VERİTABANI SUNUCUSU (kullanıcı: "DB sunucusunda uygulamanın yanına 'X Veritabanı' yazsın"): `DbHints` kanıta "VERİTABANI SUNUCUSU

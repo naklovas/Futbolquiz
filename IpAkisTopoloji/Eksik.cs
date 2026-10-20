@@ -263,9 +263,23 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
             not = $"ERT kataloğunda birden çok benzer ad ({string.Join(" | ", coklu.Take(4))}); bağlama göre '{sec.Ad}' seçildi: {sec.Neden} (AI: '{name}')";
             return sec.Ad;
         }
+        // Hiç eşleşme yoksa (kullanıcı: AI "SAS ALM" dedi, katalogda yok → serbest kaldı) aynı ürün ailesi (AI'ın anahtar kelimelerinden
+        // biri adında geçen katalog kayıtları: SAS → ZT SAS Enterprise Miner, [ZK] SAS IFRS TFRS9…) arasından bağlamla seç
+        if (hit == null && coklu == null)
+        {
+            var aile = cat.Where(c => c.Tok.Any(t => key.Contains(t))).Select(c => c.App).Take(15).ToList();
+            if (aile.Count > 0 && Secim(env, aile, a, ip, evidence) is { } sec2)
+            {
+                yeni = false;
+                not = $"ERT'de '{name}' yok; aynı ürün ailesinden ({string.Join(" | ", aile.Take(4))}{(aile.Count > 4 ? " …" : "")}) bağlama göre '{sec2.Ad}' seçildi: {sec2.Neden}";
+                return sec2.Ad;
+            }
+        }
         if (hit == null)
         {
             not = coklu != null ? "ERT kataloğunda birden çok benzer ad: " + string.Join(" | ", coklu.Take(4)) + (coklu.Count > 4 ? " …" : "") + " — serbest bırakıldı"
+                : cat.Where(c => c.Tok.Any(t => key.Contains(t))).Select(c => c.App).Take(4).ToList() is { Count: > 0 } aileNot
+                    ? "ERT kataloğunda tam karşılığı yok, serbest ad; aynı ürün ailesi: " + string.Join(" | ", aileNot) + " (bağlamdan seçilemedi)"
                 : altHam.Count > 0 ? "ERT kataloğunda tam karşılığı yok, serbest ad; benzer: " + string.Join(" | ", altHam.Take(3).Select(c => c.App))
                 : "ERT kataloğunda yok, serbest ad";
             return name;
@@ -296,6 +310,21 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
         string ev = string.Join("\n", (evidence ?? "").Split('\n').Where(l => !l.StartsWith("ADAY UYGULAMALAR") && !l.StartsWith("SEGMENTİN")
             && !l.StartsWith("AYNI SEGMENTTE") && !l.StartsWith(SmAdayBas)));
         var ayniSunucu = ip == null ? [] : env.AppNamesOnIp(ip);
+        // adı aynı kökle başlayan sunucular (zkprodsasalm01 → "zkprodsas…"): sondaki sayı ve son 3 harf atılır
+        var kardes = new HashSet<string>(StringComparer.OrdinalIgnoreCase); var ikiz = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        string? kok = host == null ? null : System.Text.RegularExpressions.Regex.Replace(host.Split('.')[0], @"\d+$", "").ToLowerInvariant();
+        if (kok is { Length: >= 6 })
+        {
+            string on2 = kok.Length >= 8 ? kok[..^3] : kok;
+            foreach (var i in env.HostIps)
+            {
+                if (i == ip) continue;
+                var hn2 = env.AppsOnIp(i).Select(h => h.UnixName?.Split('.')[0].ToLowerInvariant()).OfType<string>().FirstOrDefault();
+                if (hn2 == null) continue;
+                if (System.Text.RegularExpressions.Regex.Replace(hn2, @"\d+$", "") == kok) foreach (var n in env.AppNamesOnIp(i)) ikiz.Add(n);
+                else if (hn2.StartsWith(on2)) foreach (var n in env.AppNamesOnIp(i)) kardes.Add(n);
+            }
+        }
         var evTok = IslevService.Tokens(ev + " " + host);
         // sunucu adını parçala: zkprodsasalm01 → … "alm"
         string hn = Norm(host ?? "");
@@ -304,6 +333,8 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
             int p = 0; var neden = new List<string>();
             if (ayniSunucu.Contains(a, StringComparer.OrdinalIgnoreCase)) { p += 5; neden.Add("aynı sunucunun diğer portlarında ERT'de kayıtlı"); }
             else if (ev.Contains(a, StringComparison.OrdinalIgnoreCase)) { p += 3; neden.Add("adı kanıtta geçiyor (benzer adlı sunucular / SM / VIP)"); }
+            if (ikiz.Contains(a)) { p += 3; neden.Add($"benzer adlı sunucuda ({kok}NN) ERT'de kayıtlı"); }
+            else if (kardes.Contains(a)) { p += 1; neden.Add("adı aynı kökle başlayan sunucularda kayıtlı"); }
             var tok = IslevService.Tokens(a);
             foreach (var t in tok.Where(t => t.Length >= 3 && !aiTok.Contains(t) && !GenelKelime.Contains(t)))
                 if (evTok.Contains(t) || (t.Length >= 3 && hn.Contains(t))) { p++; neden.Add($"'{t}' kanıtta / sunucu adında"); }
