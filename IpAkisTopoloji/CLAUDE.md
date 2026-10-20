@@ -188,6 +188,9 @@ topoloji çizer ve şirket içi AI'a etki analizi yaptırır. Canlıda IIS'te, W
     "Küme bağları" modu kümeler arası toplam. Hover vurgusu, ok üzerinde ipucu. Elemana tıkla → ortada pencere (VIP: üyeler,
     kümelerden gelen/giden, etiket dışı; üyeye tıkla → sunucu: AI rolü, /api/islev/profil gerekçe ve kanıtlar, IP düzeyi akışlar,
     "IP topolojisini aç"), "← geri" yığını, Esc kapatır. Backend `KtTest` benzeri sahte envanterle doğrulandı (scratch, repoda yok).
+    "Kutular: İşlev | Segment" seçicisi (kullanıcı: "segment ya da işlev seçebileyim"; localStorage `df.ktBy`): `kt.src` sunucudan gelen
+    işlev kümeli veri, `ktView()` segment seçiliyse elemanları `segment`'e göre (çoklu kurumda kurum × segment) yeniden kutular; bağlar
+    eleman → eleman olduğundan yeniden sorgu yok. Segment kutusunun açıklaması "İşlevler: …", kutu içi grup "İşlev" (`e.islev`) seçeneği.
   - **Alt etiket + açıklama**: alt etiket ayrı kolon DEĞİL, TAG içinde `ANA/ALT` (ör. `MOBILBANKACILIK/MOBIL APP`); `EnvanterSnapshot`
     sunucuyu hem alt hem ana etikete sayar (`TagIps("ANA")` altları da getirir, `EtiketService.Matches/Parent`). Etiketleme çubuğunda
     "Etiket" + "Alt etiket" kutuları, haplarda ana etiket seçilince altları ikinci satırda, rozet "ANA › ALT". Açıklamalar ayrı tablo

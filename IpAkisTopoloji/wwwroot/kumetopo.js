@@ -8,7 +8,8 @@
 // ktShowSaved ile sorgusuz açılır (islev.js iv.ver).
 // ============================================================================
 
-const kt = { tag: "", data: null, raw: null, liveMap: null, saved: null, meta: {}, scale: 1, mode: "kume", expanded: new Set(), cols: 0, per: 5, alt: "uygulama", infra: false, abort: null, hover: null, pos: null, stack: [] };
+let ktBy = "islev"; try { ktBy = localStorage.getItem("df.ktBy") === "segment" ? "segment" : "islev"; } catch { }
+const kt = { by: ktBy, src: null, tag: "", data: null, raw: null, liveMap: null, saved: null, meta: {}, scale: 1, mode: "kume", expanded: new Set(), cols: 0, per: 5, alt: "uygulama", infra: false, abort: null, hover: null, pos: null, stack: [] };
 
 (function ktStyle() {
   const css = `
@@ -152,13 +153,15 @@ function ktShell() {
   const nSrv = d.kumeler.reduce((a, k) => a + k.elemanlar.filter(e => e.tur !== "vip").length, 0);
   const hasAlt = d.kumeler.some(k => k.elemanlar.some(e => e.altEtiket));
   if (kt.alt === "alt" && !hasAlt) kt.alt = "uygulama";
+  if (kt.alt === "islev" && kt.by !== "segment") kt.alt = "uygulama";
+  const kutu = kt.by === "segment" ? "Segment" : "Küme";
   $("#main").innerHTML = `
   <section class="panel">
     <div class="eg-head">
       <div><h2>Küme topolojisi · ${esc(d.etiket)}</h2>
-        <div class="eg-sub">${kt.saved ? `<b>Kayıtlı versiyon</b> (${esc(verWhen(kt.saved.tarih))} · ${esc(String(kt.saved.kaydeden || "").split("\\").pop())}) · ` : ""}${esc((kt.meta.start || "").replace("T", " "))} – ${esc((kt.meta.end || "").replace("T", " "))} · kutular işlev kümeleri, içlerinde VIP'ler ve VIP'e bağlı olmayan sunucular · oklar aralarındaki trafik</div></div>
+        <div class="eg-sub">${kt.saved ? `<b>Kayıtlı versiyon</b> (${esc(verWhen(kt.saved.tarih))} · ${esc(String(kt.saved.kaydeden || "").split("\\").pop())}) · ` : ""}${esc((kt.meta.start || "").replace("T", " "))} – ${esc((kt.meta.end || "").replace("T", " "))} · kutular ${kt.by === "segment" ? "segmentler" : "işlev kümeleri"}, içlerinde VIP'ler ve VIP'e bağlı olmayan sunucular · oklar aralarındaki trafik</div></div>
       <div class="eg-stats">
-        <div class="eg-stat"><b>${d.kumeler.length}</b><span>Küme</span></div>
+        <div class="eg-stat"><b>${d.kumeler.length}</b><span>${kutu}</span></div>
         <div class="eg-stat"><b>${nVip}</b><span>VIP</span></div>
         <div class="eg-stat"><b>${nSrv}</b><span>Tekil sunucu</span></div>
         <div class="eg-stat"><b>${fmt(d.baglar.length)}</b><span>Bağ</span></div>
@@ -167,8 +170,9 @@ function ktShell() {
     <div class="kt-bar">
       <button id="ktBack">← İşlev haritası</button>
       <span id="ktVer" style="display:flex;gap:8px;align-items:center"></span>
-      <div class="seg"><button data-ktm="kume" class="${kt.mode === "kume" ? "on" : ""}" title="Kümeler arası toplam trafik; elemanın üstüne gelince kendi bağları çizilir">Küme bağları</button><button data-ktm="eleman" class="${kt.mode === "eleman" ? "on" : ""}" title="Bütün VIP / sunucu bağları kanallardan">Tüm eleman bağları</button></div>
-      <label>Kutu içi grup <select id="ktAlt">${[["uygulama", "Uygulama (ERT)"], ...(hasAlt ? [["alt", "Alt etiket"]] : []), ["yok", "Yok"]].map(([v, t]) => `<option value="${v}"${kt.alt === v ? " selected" : ""}>${t}</option>`).join("")}</select></label>
+      <label title="Kutular işlev kümelerine mi segmentlere mi göre çizilsin (trafik yeniden sorgulanmaz)">Kutular <select id="ktBy"><option value="islev"${kt.by !== "segment" ? " selected" : ""}>İşlev</option><option value="segment"${kt.by === "segment" ? " selected" : ""}>Segment</option></select></label>
+      <div class="seg"><button data-ktm="kume" class="${kt.mode === "kume" ? "on" : ""}" title="Kutular arası toplam trafik; elemanın üstüne gelince kendi bağları çizilir">${kutu} bağları</button><button data-ktm="eleman" class="${kt.mode === "eleman" ? "on" : ""}" title="Bütün VIP / sunucu bağları kanallardan">Tüm eleman bağları</button></div>
+      <label>Kutu içi grup <select id="ktAlt">${[["uygulama", "Uygulama (ERT)"], ...(kt.by === "segment" ? [["islev", "İşlev"]] : []), ...(hasAlt ? [["alt", "Alt etiket"]] : []), ["yok", "Yok"]].map(([v, t]) => `<option value="${v}"${kt.alt === v ? " selected" : ""}>${t}</option>`).join("")}</select></label>
       <label>Kutu içi <select id="ktPer">${[2, 3, 4, 5, 6].map(v => `<option${v === kt.per ? " selected" : ""}>${v}</option>`).join("")}</select></label>
       <label>Sütun <select id="ktCols">${[["0", "Otomatik"], ["2", "2"], ["3", "3"], ["4", "4"], ["5", "5"]].map(([v, t]) => `<option value="${v}"${+v === kt.cols ? " selected" : ""}>${t}</option>`).join("")}</select></label>
       <label><input type="checkbox" id="ktInfra" ${kt.infra ? "checked" : ""}> Altyapı portları (DNS, AD, RDP…)</label>
@@ -185,6 +189,11 @@ function ktShell() {
   ktBarVer();
   $("#ktAgain").addEventListener("click", () => ktRun(kt.tag));
   document.querySelectorAll("[data-ktm]").forEach(b => b.addEventListener("click", () => { kt.mode = b.dataset.ktm; ktShell(); }));
+  $("#ktBy").addEventListener("change", e => {
+    kt.by = e.target.value; try { localStorage.setItem("df.ktBy", kt.by); } catch { }
+    if (kt.by === "segment" && kt.alt === "uygulama") kt.alt = "islev";
+    kt.expanded = new Set(); kt.data = ktView(); ktShell();
+  });
   $("#ktAlt").addEventListener("change", e => { kt.alt = e.target.value; ktDraw(); });
   $("#ktPer").addEventListener("change", e => { kt.per = +e.target.value; ktDraw(); kt.scale = ktFitScale(); ktDraw(); });
   $("#ktCols").addEventListener("change", e => { kt.cols = +e.target.value; ktDraw(); kt.scale = ktFitScale(); ktDraw(); });
@@ -199,9 +208,28 @@ function ktShell() {
 }
 
 // Birden çok kurum: kutu = kurum × küme; anahtar "Kurum · Küme", kutu başlığında yalnız küme adı (kurum çerçevede)
+// kt.src: sunucudan gelen (işlev kümeli) veri; kt.data: seçili kutu düzenine göre görünüm (ktView)
 function ktPrepare(b) {
   if (b.coklu) b.kumeler.forEach(k => { k.kume = k.ad; k.ad = `${k.tenant} · ${k.ad}`; });
-  return b;
+  b.kumeler.forEach(k => k.elemanlar.forEach(e => e.islev = k.kume || k.ad));
+  kt.src = b;
+  return ktView();
+}
+
+// Kutular: "islev" = işlev kümeleri (sunucudan gelen), "segment" = elemanlar segmentlerine göre (kurum seçiliyse kurum × segment).
+// Bağlar eleman → eleman olduğu için yeniden sorgu gerekmez; kutu içinde "İşlev" alt başlığı seçilebilir.
+function ktView() {
+  const b = kt.src;
+  if (kt.by !== "segment") return b;
+  const g = new Map();
+  for (const k of b.kumeler) for (const e of k.elemanlar) {
+    const seg = e.segment || "(segment yok)", key = b.coklu ? `${k.tenant} · ${seg}` : seg;
+    const x = g.get(key) || g.set(key, { ad: key, kume: seg, tenant: k.tenant, sunucu: 0, elemanlar: [], islevler: {} }).get(key);
+    x.elemanlar.push(e); x.sunucu += e.tur === "vip" ? e.uyeler.length : 1;
+    x.islevler[e.islev] = (x.islevler[e.islev] || 0) + 1;
+  }
+  const kumeler = [...g.values()].map(x => ({ ...x, aciklama: "İşlevler: " + Object.entries(x.islevler).sort((a, c) => c[1] - a[1]).map(([a, n]) => `${a} (${n})`).join(", ") }));
+  return { ...b, kumeler };
 }
 
 // Kayıtlı versiyonun topolojisi: trafik yeniden sorgulanmaz
@@ -314,9 +342,9 @@ function ktPlan(k, tc) {
   const { TH, TG, HEAD } = KT, v = ktVisible(k), items = [];
   let y = HEAD;
   const put = list => { list.forEach((t, j) => items.push({ ...t, col: j % tc, y: y + Math.floor(j / tc) * (TH + TG) })); y += Math.ceil(list.length / tc) * (TH + TG); };
-  if (kt.alt === "uygulama" || kt.alt === "alt") {
-    const none = kt.alt === "alt" ? "Alt etiketi yok" : "Uygulama kaydı yok", g = new Map();
-    v.show.forEach(e => { const a = (kt.alt === "alt" ? e.altEtiket : e.uygulama) || none; (g.get(a) || g.set(a, []).get(a)).push(e); });
+  if (kt.alt === "uygulama" || kt.alt === "alt" || kt.alt === "islev") {
+    const none = kt.alt === "alt" ? "Alt etiketi yok" : kt.alt === "islev" ? "İşlevi yok" : "Uygulama kaydı yok", g = new Map();
+    v.show.forEach(e => { const a = (kt.alt === "alt" ? e.altEtiket : kt.alt === "islev" ? e.islev : e.uygulama) || none; (g.get(a) || g.set(a, []).get(a)).push(e); });
     const groups = [...g.entries()].sort((a, b) => (a[0] === none) - (b[0] === none) || b[1].length - a[1].length || a[0].localeCompare(b[0], "tr"));
     for (const [ad, es] of groups) { items.push({ hdr: ad, n: es.length, y }); y += KT_AH; put(es.map(e => ({ e }))); }
     if (v.idle.length) { items.push({ hdr: "Trafiksiz", n: v.idle.length, y }); y += KT_AH; put([{ idle: v.idle }]); }
@@ -637,7 +665,7 @@ function ktOpen(id) {
   const disTable = (rows, side) => rows.length ? `<table><tbody>${rows.map(r => `<tr><td>${esc(r.ad)}</td><td>${esc(r.portlar.join(", "))}</td><td class="num">${fmt(r.hits)}</td></tr>`).join("")}</tbody></table>`
     : `<div class="eg-sub">Yok.</div>`;
   const bg = ktModal(`${ktHead(`<span style="color:hsl(${h} 55% 45%)">◉</span> VIP <span class="ip">${esc(e.ip)}${e.port ? ":" + esc(e.port) : ""}</span>`,
-      `${esc(e.ad)}${e.alt && e.alt !== e.ad ? " · havuz " + esc(e.alt) : ""} · ${esc(p.k)} · ${esc(e.segment || "")}`, kt.stack.length > 1)}
+      `${esc(e.ad)}${e.alt && e.alt !== e.ad ? " · havuz " + esc(e.alt) : ""} · ${esc(e.islev || p.k)} · ${esc(e.segment || "")}`, kt.stack.length > 1)}
     <div class="mb">
       <div class="stat"><div class="eg-stat"><b>${e.uyeler.length}</b><span>Üye</span></div><div class="eg-stat"><b>${fmt(e.gelen)}</b><span>Gelen</span></div><div class="eg-stat"><b>${fmt(e.giden)}</b><span>Giden (üyelerden)</span></div></div>
       <div><h4>Havuz üyeleri — tıklayın</h4><table><thead><tr><th>Sunucu</th><th>IP</th><th>Port</th><th>AI rolü</th><th class="num">Gelen</th><th class="num">Giden</th></tr></thead><tbody>
@@ -652,7 +680,7 @@ function ktOpen(id) {
 function ktServer(ip) {
   kt.stack.push(() => ktServer(ip));
   let u, el, kume;
-  for (const k of kt.data.kumeler) for (const e of k.elemanlar) { const x = e.uyeler.find(m => m.ip === ip); if (x && !u) { u = x; el = e; kume = k.ad; } }
+  for (const k of kt.data.kumeler) for (const e of k.elemanlar) { const x = e.uyeler.find(m => m.ip === ip); if (x && !u) { u = x; el = e; kume = e.islev || k.ad; } }
   if (!u) return;
   const elemOf = x => { for (const k of kt.data.kumeler) for (const e of k.elemanlar) if ((e.tur === "vip" && e.ip === x) || e.uyeler.some(m => m.ip === x)) return e; return null; };
   const flows = kt.data.akislar.filter(a => a.src === ip || a.dst === ip);
