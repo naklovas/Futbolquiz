@@ -227,7 +227,7 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
     // Birden çok eşit aday varsa ya da hiç yoksa AI'ın adı serbest kalır (yeni); not gerekçeye eklenir.
     static readonly HashSet<string> GenelKelime = ["siste", "uygul", "servi", "web", "api", "yonet", "modul", "proje", "veri", "verit", "app",
         "uygulama", "core", "test", "prod", "ortak", "genel", "islem", "batch", "zaman"];
-    string CatalogMatch(EnvanterSnapshot env, string name, out bool yeni, out string? not)
+    string CatalogMatch(EnvanterSnapshot env, string name, out bool yeni, out string? not, string? ip = null, string? evidence = null)
     {
         not = null;
         string exact = Snap(env, name, out yeni);
@@ -255,6 +255,14 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
         else if (alt.Count > 1) coklu = alt.Select(c => c.App).ToList();
         else if (icer.Count == 1) hit = icer[0];
         else if (icer.Count > 1) coklu = icer;
+        // Birden çok aday (kullanıcı: "SAS" → ZT SAS Enterprise Miner | [ZK] SAS Enterprise Miner | [ZK] SAS IFRS TFRS9…; doğrusu sunucu
+        // zkprodsasalm01 için [ZK] SAS IFRS TFRS9): bağlamla seç — Secim
+        if (hit == null && coklu is { Count: > 1 } && Secim(env, coklu, a, ip, evidence) is { } sec)
+        {
+            yeni = false;
+            not = $"ERT kataloğunda birden çok benzer ad ({string.Join(" | ", coklu.Take(4))}); bağlama göre '{sec.Ad}' seçildi: {sec.Neden} (AI: '{name}')";
+            return sec.Ad;
+        }
         if (hit == null)
         {
             not = coklu != null ? "ERT kataloğunda birden çok benzer ad: " + string.Join(" | ", coklu.Take(4)) + (coklu.Count > 4 ? " …" : "") + " — serbest bırakıldı"
@@ -265,6 +273,45 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
         yeni = false;
         not = $"ERT kataloğundaki '{hit}' adıyla eşlendi (AI: '{name}')";
         return hit;
+    }
+
+    // Benzer katalog adları arasından bağlamla seçim:
+    //  1) kurum öneki: adın başındaki [ZK] / ZT gibi kısa önek sunucu adının başıyla (zkprod… → ZK) aynı olanlar
+    //  2) kanıtta adın kendisi geçiyor mu (aynı sunucunun diğer portları, benzer adlı sunucular, adaylar, SM) — +3
+    //  3) adın ayırt edici kelimeleri (AI'ın adında olmayan: "ifrs", "miner"…) kanıtta / sunucu adında geçiyor mu — kelime başına +1
+    // Tek açık en yüksek puan varsa o; yoksa null (serbest kalır).
+    (string Ad, string Neden)? Secim(EnvanterSnapshot env, List<string> adaylar, HashSet<string> aiTok, string? ip, string? evidence)
+    {
+        string? host = ip == null ? null : env.AppsOnIp(ip).Select(h => h.UnixName).OfType<string>().FirstOrDefault();
+        var list = adaylar;
+        if (host is { Length: >= 2 })
+        {
+            string on = host[..2].ToLowerInvariant();
+            static string? Onek(string ad) => System.Text.RegularExpressions.Regex.Match(ad.Trim(), @"^\[?([A-Za-zÇĞİÖŞÜçğıöşü]{2,3})\]?[\s_-]") is { Success: true } m ? m.Groups[1].Value.ToLowerInvariant() : null;
+            var ayni = list.Where(a => Onek(a) == on).ToList();
+            if (ayni.Count > 0 && ayni.Count < list.Count) list = ayni;
+            if (list.Count == 1) return (list[0], $"kurum öneki sunucu adıyla aynı ({host})");
+        }
+        // aday listesi ve segment satırları her benzer adı içerebildiği için sayılmaz
+        string ev = string.Join("\n", (evidence ?? "").Split('\n').Where(l => !l.StartsWith("ADAY UYGULAMALAR") && !l.StartsWith("SEGMENTİN")
+            && !l.StartsWith("AYNI SEGMENTTE") && !l.StartsWith(SmAdayBas)));
+        var ayniSunucu = ip == null ? [] : env.AppNamesOnIp(ip);
+        var evTok = IslevService.Tokens(ev + " " + host);
+        // sunucu adını parçala: zkprodsasalm01 → … "alm"
+        string hn = Norm(host ?? "");
+        var puan = list.Select(a =>
+        {
+            int p = 0; var neden = new List<string>();
+            if (ayniSunucu.Contains(a, StringComparer.OrdinalIgnoreCase)) { p += 5; neden.Add("aynı sunucunun diğer portlarında ERT'de kayıtlı"); }
+            else if (ev.Contains(a, StringComparison.OrdinalIgnoreCase)) { p += 3; neden.Add("adı kanıtta geçiyor (benzer adlı sunucular / SM / VIP)"); }
+            var tok = IslevService.Tokens(a);
+            foreach (var t in tok.Where(t => t.Length >= 3 && !aiTok.Contains(t) && !GenelKelime.Contains(t)))
+                if (evTok.Contains(t) || (t.Length >= 3 && hn.Contains(t))) { p++; neden.Add($"'{t}' kanıtta / sunucu adında"); }
+            return (a, p, neden);
+        }).OrderByDescending(x => x.p).ToList();
+        if (puan.Count > 0 && puan[0].p > 0 && (puan.Count == 1 || puan[0].p > puan[1].p))
+            return (puan[0].a, string.Join(", ", puan[0].neden) + (list.Count < adaylar.Count ? $"; kurum öneki ({host})" : ""));
+        return null;
     }
 
     // ---------------- Kanıt (AI'a giden metin) ----------------
@@ -985,6 +1032,9 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
 
             Kurallar:
             - Uygulama adını mümkünse "ADAY UYGULAMALAR" listesinden HARFİ HARFİNE seç ("yeni": false).
+              Genel ürün adı (ör. "SAS") YAZMA; adaylarda aynı ürünün birden çok kaydı varsa (ZT SAS Enterprise Miner, [ZK] SAS IFRS TFRS9…)
+              sunucuya uyanı seç: kurum öneki sunucu adının başıyla aynı olan ([ZK] ↔ zkprod…), BENZER ADLI SUNUCULARDA / aynı sunucunun
+              diğer portlarında kayıtlı olan, adındaki ayırt edici kelime kanıtta ya da sunucu adında geçen.
             - Hiçbir aday uymuyor ama kanıt açıkça bir uygulamayı gösteriyorsa kısa bir ad öner ("yeni": true).
             - Port bir altyapı / araç hizmetiyse (izleme ajanı, yedekleme, antivirüs, yönetim) "uygulama": "Altyapı: <ne>" yaz.
             - AJAN / ARAÇ ÜRÜNLERİ (Dataskope, Carbon Black, Splunk, SiteScope, yedekleme, antivirüs, izleme…) sunucunun İŞ UYGULAMASI
@@ -1085,7 +1135,7 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
                     string? portUrun = PortLine(ev, port) is { } line ? line.Split('[').Skip(1).Select(x => BilinenUrun(x.Split(']')[0])).OfType<string>().FirstOrDefault() : null;
                     string? urun = portUrun ?? (sunucuUrun.Count == 1 ? sunucuUrun[0] : null);
                     if (urun == null) continue;
-                    string ad = CatalogMatch(env, urun, out bool yeni, out var katNot);
+                    string ad = CatalogMatch(env, urun, out bool yeni, out var katNot, ip, ev);
                     if (DbPort(ev, port, out _)) ad += " Veritabanı";
                     outp[(ip, port)] = new EksikOneri(ad, yeni, portUrun != null ? 55 : 45,
                         (portUrun != null ? $"Portu kabul eden program bilinen ürün: {urun}" : $"Sunucuda çalışan tek bilinen iş programı: {urun}")
@@ -1104,7 +1154,7 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
                 bool kahin = o?.Gerekce?.StartsWith("Kahin tahmini") == true;
                 if (o?.Uygulama != null && !kahin) continue;
                 if (o?.Uygulama != null && Norm(o.Uygulama).Contains(Norm(sm))) continue;
-                string ad = CatalogMatch(env, sm, out bool yeni, out var katNot);
+                string ad = CatalogMatch(env, sm, out bool yeni, out var katNot, ip, texts.GetValueOrDefault(ip));
                 if (DbPort(texts.GetValueOrDefault(ip), port, out _)) ad += " Veritabanı";
                 outp[(ip, port)] = new EksikOneri(Cut(ad, 200), yeni, 65,
                     $"SM talep açıklamalarında adı geçen sistem: {sm}" + (o != null ? $" (AI: {(o.Uygulama ?? "öneri yok")} — {Cut(o.Gerekce, 200)})" : "") + (katNot != null ? $" [{katNot}]" : ""),
@@ -1175,7 +1225,7 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
                 var dbRx = new System.Text.RegularExpressions.Regex(@"\s*[-–(]?\s*(veritaban[ıi]|database|db)\)?\s*$", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
                 bool db = e.TryGetProperty("veritabani", out var vt) && vt.ValueKind == JsonValueKind.True || DbPort(texts.GetValueOrDefault(ip), port, out _)
                           || dbRx.IsMatch(app);
-                app = CatalogMatch(env, dbRx.Replace(app, "").Trim() is { Length: > 0 } core ? core : app, out yeni, out var katNot);
+                app = CatalogMatch(env, dbRx.Replace(app, "").Trim() is { Length: > 0 } core ? core : app, out yeni, out var katNot, ip, texts.GetValueOrDefault(ip));
                 if (db) app += " Veritabanı";
                 if (katNot != null) gerekce = $"{gerekce} [{katNot}]";
             }

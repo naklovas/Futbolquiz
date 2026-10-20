@@ -324,6 +324,10 @@ erişim talepleri) — DB → şema → tablo ve kim erişiyor bilgisi buradan b
   `SurecAi.GenelExe`) + bilinen ürün etiketi (`BilinenUrunler`: sas.exe / sashome = SAS, odi = ODI, pmserver = Informatica, SSIS/SSAS/SSRS,
   MicroStrategy, Cognos, OBIEE, Qlik, Tableau, DataStage, Control-M, IBM MQ, SAP, Tomcat, WebLogic…). Son kontrol sırası: SM sistemi, sonra
   `ProgramKontrol` (hâlâ boşsa / Kahin'se: portu kabul eden exe bilinen ürünse güven 55; sunucuda tek bilinen ürün varsa güven 45).
+  BENZER KATALOG ADLARI ARASINDA SEÇİM (kullanıcı: zkprodsasalm01 için AI "SAS" dedi, katalogda ZT SAS Enterprise Miner | SAS Scoring | [ZK] SAS
+  Enterprise Miner | [ZK] SAS IFRS TFRS9 → "serbest" kaldı; doğrusu [ZK] SAS IFRS TFRS9): `Secim` — kurum öneki ([ZK] / ZT ↔ sunucu adının
+  ilk 2 harfi), aynı sunucunun diğer portlarında kayıtlı (+5), adı kanıtta (benzer adlı sunucular / SM / VIP; ADAY ve segment satırları hariç)
+  (+3), ayırt edici kelime kanıtta / sunucu adında (+1); tek en yüksek → katalog adı, gerekçede neden. Prompt: genel ürün adı yazma.
   HEDEF talebinde "A karşılığı … B'nin DB'lerine erişim" → bu sunucu B (kullanıcı örneği: "KKB Karşılığı / Ziraat Katılım prod segmentinin
   KÖS Db'lerine erişim talebi" + HEDEF → "KÖS"; AI null diyordu). Prompt kuralı: DB portu olsa da sahibi açıklamadaki sistem, null yazma.
   VERİTABANI SUNUCUSU (kullanıcı: "DB sunucusunda uygulamanın yanına 'X Veritabanı' yazsın"): `DbHints` kanıta "VERİTABANI SUNUCUSU
