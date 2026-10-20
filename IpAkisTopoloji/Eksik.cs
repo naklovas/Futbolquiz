@@ -320,7 +320,22 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
         var adlar = AjanAdlari(ajan).ToList();
         bool Has(string? t) => t != null && adlar.Any(Norm(t).Contains);
         if (env.AppNamesOnIp(ip).Any(Has) || env.AppsOnIp(ip).Any(h => Has(h.UnixName)) || Has(env.FindSegment(ip)?.Label)) return true;
-        return evidence != null && evidence.Split('\n').Where(l => l.Contains("(BU SUNUCU)") || l.StartsWith("  • ")).Any(l => UrunSunucusuMetni(l, ajan));
+        if (evidence == null) return false;
+        foreach (var l in evidence.Split('\n'))
+        {
+            // SM'de bu sunucuyu anlatan açıklama, sanal sunucu notu (MSY / ÇSY): "ürün + sunucu / manager / konsol…", ajan / kurulum değil
+            if ((l.Contains("(BU SUNUCU)") || l.StartsWith("  • ") || l.StartsWith("MSY sanal sunucu:") || l.StartsWith("ÇSY sanal sunucu:"))
+                && UrunSunucusuMetni(l, ajan)) return true;
+            // sanal sunucu notu ürünü anıyorsa ("Symantec Endpoint Protection ürünü") ajan kelimesi yoksa yeter
+            if ((l.StartsWith("MSY sanal sunucu:") || l.StartsWith("ÇSY sanal sunucu:")) && adlar.Any(Norm(l).Contains) && !AjanKelime.IsMatch(l)) return true;
+            // sunucu kurulum talebinin uygulama alanı ürün
+            if (l.StartsWith("Sunucu kurulum talebi") && l.IndexOf("| uygulama:", StringComparison.Ordinal) is int i and >= 0
+                && Has(l[(i + 11)..].Split('|')[0])) return true;
+            // gelen bağlantı kabul eden exe ürünün sunucu bileşeni (ör. ...\symantec endpoint protection manager\apache\bin\httpd.exe)
+            if (l.StartsWith("- gelen port ") && l.Split('[').Skip(1).Select(x => x.Split(']')[0])
+                .Any(path => Has(path) && SunucuKelime.IsMatch(path) && !AjanKelime.IsMatch(path))) return true;
+        }
+        return false;
     }
     static readonly System.Text.RegularExpressions.Regex SunucuKelime = new(@"sunucu|server|y[öo]netim|manager|konsol|console|veritaban|database|\bdb\b", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
     static readonly System.Text.RegularExpressions.Regex AjanKelime = new(@"ajan|agent|kurulum|install|y[üu]kle", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
@@ -960,8 +975,13 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
             // Ajan / araç adı önerildiyse: portun exe'si o ürüne aitse "Altyapı: X", değilse öneri yok sayılır (gerekçe saklanır)
             if (app != null && AjanOf(app) is { } ajan)
             {
-                if (AjanSunucusu(env, ip, ajan, texts.GetValueOrDefault(ip))) gerekce = $"{gerekce} [sunucu {ajan} ürününün kendi sunucusu (ERT / sunucu adı / segment)]";
-                else if (PortExeHas(texts.GetValueOrDefault(ip), port, ajan)) app = "Altyapı: " + ajan;
+                if (AjanSunucusu(env, ip, ajan, texts.GetValueOrDefault(ip)))
+                {
+                    // ürünün kendi sunucusunda ürün iş uygulamasıdır: "Altyapı:" öneki atılır, AI'ın tam adı kalır
+                    if (app.StartsWith("Altyapı:", StringComparison.OrdinalIgnoreCase)) app = app[8..].Trim();
+                    gerekce = $"{gerekce} [sunucu {ajan} ürününün kendi sunucusu (ERT / sunucu adı / segment / SM / sanal sunucu notu / exe yolu)]";
+                }
+                else if (PortExeHas(texts.GetValueOrDefault(ip), port, ajan)) app = "Altyapı: " + app;   // AI'ın tam ürün adı (kullanıcı: "neden sadece Symantec")
                 else { gerekce = $"Yok sayıldı: AI '{app}' önerdi ama {ajan} bir ajan / araç ürünü ve bu portu kabul eden exe ona ait değil. AI gerekçesi: {gerekce}"; app = null; guven = 0; }
             }
             if (app != null && !app.StartsWith("Altyapı", StringComparison.OrdinalIgnoreCase))

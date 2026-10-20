@@ -302,6 +302,10 @@ erişim talepleri) — DB → şema → tablo ve kim erişiyor bilgisi buradan b
   ajan/agent/kurulum YOK; `UrunSunucusuMetni`) — kullanıcı örneği: hedef açıklaması "Symantec Endpoint Protection ürünü sunucusu", AI
   "bu port için kanıt yok" deyip null vermişti. Prompt: açıklama sunucunun ne olduğunu söylüyorsa SUNUCU DÜZEYİNDE kesin kanıt, portta ayrı
   talep / exe olmasa da öneri o sistem (güven 70+), null yazma. Symantec takma adları: endpointprotection, sepm, sepmanager.
+  `AjanSunucusu` ayrıca: MSY / ÇSY sanal sunucu notu ürünü anıyor (ajan kelimesi yok), sunucu kurulum talebinin uygulama alanı ürün, gelen
+  bağlantı kabul eden exe yolu ürün + server/manager/konsol (ör. …\symantec endpoint protection manager\apache\bin\httpd.exe). Ürün
+  sunucusunda "Altyapı:" öneki atılır, AI'ın tam adı kalır; başka sunucudaki ajan portunda "Altyapı: <AI'ın tam adı>" (eskiden kısa ad:
+  kullanıcı "neden sadece Symantec").
   HEDEF talebinde "A karşılığı … B'nin DB'lerine erişim" → bu sunucu B (kullanıcı örneği: "KKB Karşılığı / Ziraat Katılım prod segmentinin
   KÖS Db'lerine erişim talebi" + HEDEF → "KÖS"; AI null diyordu). Prompt kuralı: DB portu olsa da sahibi açıklamadaki sistem, null yazma.
   VERİTABANI SUNUCUSU (kullanıcı: "DB sunucusunda uygulamanın yanına 'X Veritabanı' yazsın"): `DbHints` kanıta "VERİTABANI SUNUCUSU
