@@ -297,11 +297,26 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
         "AppInternals", "Commvault", "Veeam", "NetBackup", "Guardium", "Imperva", "Varonis", "Forcepoint", "Ansible", "Nagios", "PRTG", "SolarWinds"];
     string[] Ajanlar() => cfg.GetSection("Eksik:AjanUygulamalari").GetChildren().Select(c => c.Value).OfType<string>().Where(v => v.Trim() != "") is var l && l.Any()
         ? l.ToArray() : DefaultAjanlar;
+    // Ürünlerin eski / diğer adları (ör. Forcepoint'in eski adı Websense; segment adı WEBSENSE kalmış olabilir)
+    static readonly Dictionary<string, string[]> AjanTakma = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["forcepoint"] = ["websense"], ["trellix"] = ["mcafee", "fireeye"], ["carbonblack"] = ["bit9"],
+        ["trendmicro"] = ["apexone", "officescan"], ["deepsecurity"] = ["trendmicro"]
+    };
+    static IEnumerable<string> AjanAdlari(string ajan) => new[] { Norm(ajan) }.Concat(AjanTakma.GetValueOrDefault(Norm(ajan)) ?? []).Where(x => x.Length >= 4);
     string? AjanOf(string? text)
     {
         if (string.IsNullOrWhiteSpace(text)) return null;
         string n = Norm(text);
-        return Ajanlar().FirstOrDefault(a => Norm(a) is { Length: >= 4 } na && n.Contains(na));
+        return Ajanlar().FirstOrDefault(a => AjanAdlari(a).Any(n.Contains));
+    }
+    // Sunucu o ürünün KENDİ sunucusu mu (kullanıcı: WEBSENSE segmentindeki, ERT'de Forcepoint Data Discovery portları olan sunucuda 5432 =
+    // Forcepoint veritabanı): aynı sunucunun ERT uygulamalarında, sunucu adında ya da segment adında ürün (ya da eski adı) geçiyorsa
+    bool AjanSunucusu(EnvanterSnapshot env, string ip, string ajan)
+    {
+        var adlar = AjanAdlari(ajan).ToList();
+        bool Has(string? t) => t != null && adlar.Any(Norm(t).Contains);
+        return env.AppNamesOnIp(ip).Any(Has) || env.AppsOnIp(ip).Any(h => Has(h.UnixName)) || Has(env.FindSegment(ip)?.Label);
     }
     // Boş portu kabul eden exe (kanıttaki Carbon Black "- gelen port X" satırı) bu ajana mı ait
     static bool PortExeHas(string? evidence, string port, string ajan) => evidence != null && port.Length > 0 &&
@@ -404,7 +419,7 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
             string nb = Neighbors(env, ip, miss);
             string sofar = sb.ToString() + nb + profil;
             var cands = Candidates(env, ip, sofar)
-                .Where(c => AjanOf(c) is not { } a || miss.Any(p => PortExeHas(sofar, p, a))).ToList();   // ajan adları aday değil
+                .Where(c => AjanOf(c) is not { } a || AjanSunucusu(env, ip, a) || miss.Any(p => PortExeHas(sofar, p, a))).ToList();   // ajan adları aday değil (ürünün kendi sunucusu hariç)
             if (cands.Count > 0) sb.AppendLine("ADAY UYGULAMALAR (ERT'deki adlar): " + string.Join(" | ", cands));
             sb.Append(nb);
             if (profil.Length > 0) sb.AppendLine("SUNUCU PROFİLİ (ERT, segment, VIP, sanal sunucu, SM kurulum — ek bilgi):").AppendLine(profil);
@@ -492,6 +507,7 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
                     var ps = hedef ? miss.Where(p => HasPort(G(r, "ZT_HEDEFPORT"), p)).ToList() : [];
                     string? aj = AjanOf(string.Join(" ", new[] { "BRIEF_DESCRIPTION", "DESCRIPTION", "ZT_HEDEFACIKLAMA", "ZT_KAYNAKACIKLAMA",
                         "ZT_HEDEFUYGULAMA", "ZT_HEDEFUGULAMA", "ZT_KAYNAKUYGULAMA" }.Select(k => G(r, k))));
+                    if (aj != null && AjanSunucusu(env, ip, aj)) aj = null;   // ürünün kendi sunucusunda bu talepler gerçek uygulama kanıtı
                     return (r, hedef, kaynak, ps, aj);
                 })
                 .Where(x => x.hedef || x.kaynak).DistinctBy(x => G(x.r, "NUMBER")).ToList();
@@ -838,7 +854,9 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
               DEĞİLDİR. Bir SM talebinde sunucuya böyle bir ajanın kurulduğu ya da o ürüne erişim açıldığı yazıyorsa bu, sunucunun o
               uygulama olduğunu GÖSTERMEZ ("[AJAN / ARAÇ TALEBİ]" işaretli talepleri uygulama kanıtı sayma). Ajan adını yalnız boş
               portu kabul eden exe o ürüne aitse "Altyapı: <ürün>" olarak yaz; aksi halde diğer kanıtlara (exe yolu, sunucu adı,
-              benzer adlı sunucular, WEBSITE…) bak, yoksa null.
+              benzer adlı sunucular, WEBSITE…) bak, yoksa null. İSTİSNA: sunucunun KENDİSİ o ürünün sunucusuysa (aynı sunucuda ERT'de o
+              ürünün kayıtlı portları var, sunucu adı ya da segment adı ürünü / eski adını anıyor — ör. WEBSENSE segmenti = Forcepoint)
+              ürün bu sunucunun uygulamasıdır: o ürünün adını yaz (veritabanı portundaysa "veritabani": true → "<ürün> Veritabanı").
             - VERİTABANI SUNUCUSU: bilinen DB portu (1433, 1521, 1522, 5432…), portu kabul eden DB süreci (sqlservr.exe, oracle.exe,
               tnslsnr.exe…) ve sunucu adındaki sql / db / ora kısaltması (ör. zbkossql01) veritabanı sunucusu işaretidir
               ("VERİTABANI SUNUCUSU İPUÇLARI" satırı). Böyle bir portta "SQL Server" gibi teknoloji adı YAZMA: veritabanı hangi
@@ -930,7 +948,8 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
             // Ajan / araç adı önerildiyse: portun exe'si o ürüne aitse "Altyapı: X", değilse öneri yok sayılır (gerekçe saklanır)
             if (app != null && AjanOf(app) is { } ajan)
             {
-                if (PortExeHas(texts.GetValueOrDefault(ip), port, ajan)) app = "Altyapı: " + ajan;
+                if (AjanSunucusu(env, ip, ajan)) gerekce = $"{gerekce} [sunucu {ajan} ürününün kendi sunucusu (ERT / sunucu adı / segment)]";
+                else if (PortExeHas(texts.GetValueOrDefault(ip), port, ajan)) app = "Altyapı: " + ajan;
                 else { gerekce = $"Yok sayıldı: AI '{app}' önerdi ama {ajan} bir ajan / araç ürünü ve bu portu kabul eden exe ona ait değil. AI gerekçesi: {gerekce}"; app = null; guven = 0; }
             }
             if (app != null && !app.StartsWith("Altyapı", StringComparison.OrdinalIgnoreCase))

@@ -294,6 +294,10 @@ erişim talepleri) — DB → şema → tablo ve kim erişiyor bilgisi buradan b
   "iş uygulaması için talep" sayılmaz. ADAY UYGULAMALAR'dan çıkarılır. Prompt'ta kural + kanıtların SONUNDA hatırlatma (küçük model baştaki
   kuralı unutuyor). AI yine ajan adı önerirse: boş portu kabul eden exe (CB "- gelen port X" satırı) o ürüne aitse "Altyapı: X", değilse
   öneri null, güven 0, gerekçe "Yok sayıldı: …" (`PortExeHas`).
+  İSTİSNA (kullanıcı örneği: WEBSENSE segmentinde, ERT'de "Forcepoint Data Discovery" portları olan sunucuda 5432 için AI doğru olarak
+  Forcepoint dedi, filtre yok saydı): `AjanSunucusu` — aynı sunucunun ERT uygulamalarında, sunucu adında ya da segment adında ürün ya da
+  eski adı (`AjanTakma`: Forcepoint↔Websense, Trellix↔McAfee/FireEye, Carbon Black↔Bit9…) geçiyorsa ürün bu sunucunun uygulamasıdır:
+  SM talepleri ajan işaretlenmez, adaylardan çıkarılmaz, öneri yok sayılmaz (DB portunda "Forcepoint Data Discovery Veritabanı").
   HEDEF talebinde "A karşılığı … B'nin DB'lerine erişim" → bu sunucu B (kullanıcı örneği: "KKB Karşılığı / Ziraat Katılım prod segmentinin
   KÖS Db'lerine erişim talebi" + HEDEF → "KÖS"; AI null diyordu). Prompt kuralı: DB portu olsa da sahibi açıklamadaki sistem, null yazma.
   VERİTABANI SUNUCUSU (kullanıcı: "DB sunucusunda uygulamanın yanına 'X Veritabanı' yazsın"): `DbHints` kanıta "VERİTABANI SUNUCUSU
