@@ -294,6 +294,8 @@ erişim talepleri) — DB → şema → tablo ve kim erişiyor bilgisi buradan b
   "iş uygulaması için talep" sayılmaz. ADAY UYGULAMALAR'dan çıkarılır. Prompt'ta kural + kanıtların SONUNDA hatırlatma (küçük model baştaki
   kuralı unutuyor). AI yine ajan adı önerirse: boş portu kabul eden exe (CB "- gelen port X" satırı) o ürüne aitse "Altyapı: X", değilse
   öneri null, güven 0, gerekçe "Yok sayıldı: …" (`PortExeHas`).
+  HEDEF talebinde "A karşılığı … B'nin DB'lerine erişim" → bu sunucu B (kullanıcı örneği: "KKB Karşılığı / Ziraat Katılım prod segmentinin
+  KÖS Db'lerine erişim talebi" + HEDEF → "KÖS"; AI null diyordu). Prompt kuralı: DB portu olsa da sahibi açıklamadaki sistem, null yazma.
 - **VIP**: sorgulanan IP VIP ise üyeler + GW'ler aynı sorguya eklenir, üyeler "VIP ÜYESİ" (GW→üye trafiği varsa ✓).
   Gidilen IP VIP ise "VIP → n ÜYE"; gelen IP LB GW ise "LB GW"; sorgulanan sunucu havuz üyesiyse VIP kartı.
 - **Uygulama görünümü** (`/api/apps`, `/api/app`): `[kullanan uygulamalar] → [UYGULAMA: VIP'ler + segment grupları] → [bağımlı olunanlar]`,

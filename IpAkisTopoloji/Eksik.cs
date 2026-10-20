@@ -700,6 +700,11 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
               (bu porta bağlanan istemci uygulamalar, aynı sunucunun diğer portları, benzer adlı sunucular, SM talepleri).
               Gerekçede teknolojiyi belirt (ör. "1433 SQL Server; istemcileri KREDİ uygulaması"). Sahibi bulunamazsa
               uygulama null, gerekçede "SQL Server veritabanı, sahibi belirsiz" yaz.
+            - Bu sunucunun HEDEF olduğu bir talepte açıklama "<A> için / <A> karşılığı … <B>'nin DB'lerine / sunucularına / servisine
+              erişim" diyorsa erişilen sistem <B> BU SUNUCUDUR (A karşı taraftır, isteyen uygulamadır). Ör. "KKB Karşılığı / Ziraat
+              Katılım prod segmentinin KÖS Db'lerine erişim talebi" + bu sunucu HEDEF → uygulama "KÖS" (KÖS veritabanı; KKB Karşılığı
+              istemci). Port veritabanı portu olsa da sahibi açıklamada adı geçen sistemdir; bu durumda null YAZMA. Adaylarda o sistemi
+              içeren bir ad varsa onu seç, yoksa açıklamadaki kısa adı yaz ("yeni": true).
             - Kanıt yetersizse "uygulama": null ve güven düşük yaz. Uydurma.
             - "Envanter Kahini" satırları daha önce BAŞKA BİR AI'ın yaptığı tahminlerdir, doğrulanmış bilgi değildir. Girdi olarak
               kullan; ama öneri yalnız Kahin'e dayanıyorsa güven en fazla 60 olsun ve gerekçede "yalnız Kahin tahmini" yaz.
