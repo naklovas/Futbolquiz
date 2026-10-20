@@ -298,6 +298,10 @@ erişim talepleri) — DB → şema → tablo ve kim erişiyor bilgisi buradan b
   Forcepoint dedi, filtre yok saydı): `AjanSunucusu` — aynı sunucunun ERT uygulamalarında, sunucu adında ya da segment adında ürün ya da
   eski adı (`AjanTakma`: Forcepoint↔Websense, Trellix↔McAfee/FireEye, Carbon Black↔Bit9…) geçiyorsa ürün bu sunucunun uygulamasıdır:
   SM talepleri ajan işaretlenmez, adaylardan çıkarılmaz, öneri yok sayılmaz (DB portunda "Forcepoint Data Discovery Veritabanı").
+  Ayrıca BU SUNUCUYU anlatan SM açıklaması ürünün sunucusu olduğunu söylüyorsa (ürün adı + sunucu/server/yönetim/manager/konsol/veritabanı,
+  ajan/agent/kurulum YOK; `UrunSunucusuMetni`) — kullanıcı örneği: hedef açıklaması "Symantec Endpoint Protection ürünü sunucusu", AI
+  "bu port için kanıt yok" deyip null vermişti. Prompt: açıklama sunucunun ne olduğunu söylüyorsa SUNUCU DÜZEYİNDE kesin kanıt, portta ayrı
+  talep / exe olmasa da öneri o sistem (güven 70+), null yazma. Symantec takma adları: endpointprotection, sepm, sepmanager.
   HEDEF talebinde "A karşılığı … B'nin DB'lerine erişim" → bu sunucu B (kullanıcı örneği: "KKB Karşılığı / Ziraat Katılım prod segmentinin
   KÖS Db'lerine erişim talebi" + HEDEF → "KÖS"; AI null diyordu). Prompt kuralı: DB portu olsa da sahibi açıklamadaki sistem, null yazma.
   VERİTABANI SUNUCUSU (kullanıcı: "DB sunucusunda uygulamanın yanına 'X Veritabanı' yazsın"): `DbHints` kanıta "VERİTABANI SUNUCUSU
