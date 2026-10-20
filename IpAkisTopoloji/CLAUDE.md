@@ -296,6 +296,11 @@ erişim talepleri) — DB → şema → tablo ve kim erişiyor bilgisi buradan b
   öneri null, güven 0, gerekçe "Yok sayıldı: …" (`PortExeHas`).
   HEDEF talebinde "A karşılığı … B'nin DB'lerine erişim" → bu sunucu B (kullanıcı örneği: "KKB Karşılığı / Ziraat Katılım prod segmentinin
   KÖS Db'lerine erişim talebi" + HEDEF → "KÖS"; AI null diyordu). Prompt kuralı: DB portu olsa da sahibi açıklamadaki sistem, null yazma.
+  VERİTABANI SUNUCUSU (kullanıcı: "DB sunucusunda uygulamanın yanına 'X Veritabanı' yazsın"): `DbHints` kanıta "VERİTABANI SUNUCUSU
+  İPUÇLARI" satırı ekler — bilinen DB portları (`Eksik:VeritabaniPortlari`, varsayılan 1433/1434 SQL Server, 1521–1529 Oracle, 5432, 3306,
+  50000, 27017…; "5000 Sybase?" gibi soru işaretliler yalnız süreçle), sunucu adında sql/db/ora/orcl/exa/dwh (`DbAd`, ör. zbkossql01),
+  portu kabul eden DB süreci (sqlservr, oracle, tnslsnr, postgres, mysqld, db2sysc…). AI JSON'a `veritabani` alanı; kod: AI işaretlediyse,
+  port DB portu / DB süreci ise ya da ad "… DB/Veritabanı" ile bitiyorsa çekirdek ad katalogla eşlenir + " Veritabanı" (ör. "KÖS Veritabanı").
 - **VIP**: sorgulanan IP VIP ise üyeler + GW'ler aynı sorguya eklenir, üyeler "VIP ÜYESİ" (GW→üye trafiği varsa ✓).
   Gidilen IP VIP ise "VIP → n ÜYE"; gelen IP LB GW ise "LB GW"; sorgulanan sunucu havuz üyesiyse VIP kartı.
 - **Uygulama görünümü** (`/api/apps`, `/api/app`): `[kullanan uygulamalar] → [UYGULAMA: VIP'ler + segment grupları] → [bağımlı olunanlar]`,

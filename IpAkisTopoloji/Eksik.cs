@@ -261,6 +261,47 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
     static bool PortExeHas(string? evidence, string port, string ajan) => evidence != null && port.Length > 0 &&
         evidence.Split('\n').Any(l => (l.StartsWith($"- gelen port {port}:") || l.StartsWith($"- gelen port {port} (")) && Norm(l).Contains(Norm(ajan)));
 
+    // Veritabanı sunucusu ipuçları (kullanıcı: DB sunucusunda öneri "<uygulama> Veritabanı" olmalı): bilinen DB portları
+    // (Eksik:VeritabaniPortlari ile değişir), sunucu adında sql / db / ora kısaltmaları, portu kabul eden DB süreçleri.
+    static readonly Dictionary<string, string> DefaultDbPortlari = new()
+    {
+        ["1433"] = "SQL Server", ["1434"] = "SQL Server", ["1521"] = "Oracle", ["1522"] = "Oracle", ["1523"] = "Oracle", ["1524"] = "Oracle",
+        ["1525"] = "Oracle", ["1526"] = "Oracle", ["1527"] = "Oracle", ["1529"] = "Oracle", ["5432"] = "PostgreSQL", ["3306"] = "MySQL",
+        ["50000"] = "DB2", ["27017"] = "MongoDB", ["9042"] = "Cassandra", ["5000"] = "Sybase ASE?"
+    };
+    static readonly string[] DbSurecleri = ["sqlservr", "oracle", "tnslsnr", "postgres", "mysqld", "db2sysc", "mongod", "ocssd", "sqlbrowser"];
+    static readonly System.Text.RegularExpressions.Regex DbAd = new(@"(sql|db|ora(?=\d|db|cl|$)|orcl|exa|dwh|pgs)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+    Dictionary<string, string> DbPortlari() =>
+        cfg.GetSection("Eksik:VeritabaniPortlari").GetChildren().Where(c => c.Value is { Length: > 0 }).ToDictionary(c => c.Key, c => c.Value!) is { Count: > 0 } d
+            ? d : DefaultDbPortlari;
+    // Kanıttaki Carbon Black "- gelen port X" satırı
+    static string? PortLine(string? evidence, string port) => evidence == null || port.Length == 0 ? null :
+        evidence.Split('\n').FirstOrDefault(l => l.StartsWith($"- gelen port {port}:") || l.StartsWith($"- gelen port {port} ("));
+    static string? DbSurec(string? line) => line == null ? null : DbSurecleri.FirstOrDefault(p => line.Contains(p + ".exe", StringComparison.OrdinalIgnoreCase)
+        || System.Text.RegularExpressions.Regex.IsMatch(line, $@"[\\/]{p}\b", System.Text.RegularExpressions.RegexOptions.IgnoreCase));
+    // Bu port veritabanı portu mu: bilinen DB portu (Sybase 5000 gibi belirsizler yalnız süreçle) ya da portu kabul eden süreç DB süreci
+    bool DbPort(string? evidence, string port, out string? tek)
+    {
+        string? surec = DbSurec(PortLine(evidence, port));
+        tek = DbPortlari().GetValueOrDefault(port);
+        if (surec != null) { tek ??= surec; return true; }
+        return tek != null && !tek.EndsWith('?');
+    }
+    string DbHints(EnvanterSnapshot env, string ip, List<string> miss, string evidence)
+    {
+        var parts = new List<string>();
+        string? host = env.AppsOnIp(ip).Select(h => h.UnixName).OfType<string>().FirstOrDefault();
+        if (host != null && DbAd.Match(host) is { Success: true } m) parts.Add($"sunucu adı '{host}' içinde '{m.Value}' (isimlendirme standardında veritabanı sunucusu)");
+        var dbp = DbPortlari();
+        var ports = env.AppsOnIp(ip).Select(h => Key(h.Port)).Where(p => p.Length > 0).Distinct().ToList();
+        foreach (var p in ports.Where(p => DbPort(evidence, p, out _) || dbp.ContainsKey(p)))
+        {
+            DbPort(evidence, p, out var tek);
+            parts.Add($"port {p}{(tek != null ? $" ({tek.TrimEnd('?')}{(tek.EndsWith('?') ? "?" : "")})" : "")}{(miss.Contains(p) ? " — uygulama adı boş" : "")}{(DbSurec(PortLine(evidence, p)) is { } sr ? $", portu kabul eden süreç {sr}" : "")}");
+        }
+        return parts.Count == 0 ? "" : "VERİTABANI SUNUCUSU İPUÇLARI: " + string.Join("; ", parts) + "\n";
+    }
+
     async Task<Dictionary<string, string>> BuildAsync(List<string> ips, Dictionary<string, List<string>> ports, EnvanterSnapshot env,
         int hours, CancellationToken ct)
     {
@@ -290,6 +331,7 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
             if (smf.TryGetValue(ip, out var smfText)) sb.Append(smfText);
             if (cb.TryGetValue(ip, out var c)) sb.Append(c.Text(env, ip, miss));
             else sb.AppendLine($"Carbon Black (son {hours} saat): bu sunucuda ağ olayı yok (ajan yok ya da trafik yok).");
+            sb.Append(DbHints(env, ip, miss, sb.ToString()));
             string sofar = sb.ToString();
             var cands = Candidates(env, ip, sofar)
                 .Where(c => AjanOf(c) is not { } a || miss.Any(p => PortExeHas(sofar, p, a))).ToList();   // ajan adları aday değil
@@ -695,14 +737,16 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
               uygulama olduğunu GÖSTERMEZ ("[AJAN / ARAÇ TALEBİ]" işaretli talepleri uygulama kanıtı sayma). Ajan adını yalnız boş
               portu kabul eden exe o ürüne aitse "Altyapı: <ürün>" olarak yaz; aksi halde diğer kanıtlara (exe yolu, sunucu adı,
               benzer adlı sunucular, WEBSITE…) bak, yoksa null.
-            - Port bir veritabanı ya da ara katman portuysa (1433 SQL Server, 1521 Oracle, 5432, 1414 MQ… ya da exe sqlservr.exe,
-              oracle.exe, tnslsnr.exe) "SQL Server" gibi teknoloji adı YAZMA: veritabanı hangi uygulamaya aitse onu bul
-              (bu porta bağlanan istemci uygulamalar, aynı sunucunun diğer portları, benzer adlı sunucular, SM talepleri).
-              Gerekçede teknolojiyi belirt (ör. "1433 SQL Server; istemcileri KREDİ uygulaması"). Sahibi bulunamazsa
-              uygulama null, gerekçede "SQL Server veritabanı, sahibi belirsiz" yaz.
+            - VERİTABANI SUNUCUSU: bilinen DB portu (1433, 1521, 1522, 5432…), portu kabul eden DB süreci (sqlservr.exe, oracle.exe,
+              tnslsnr.exe…) ve sunucu adındaki sql / db / ora kısaltması (ör. zbkossql01) veritabanı sunucusu işaretidir
+              ("VERİTABANI SUNUCUSU İPUÇLARI" satırı). Böyle bir portta "SQL Server" gibi teknoloji adı YAZMA: veritabanı hangi
+              uygulamaya aitse onu bul (bu porta bağlanan istemci uygulamalar, aynı sunucunun diğer portları, benzer adlı sunucular,
+              SM talepleri, sunucu adındaki uygulama kısaltması) ve "uygulama" alanına yalnız UYGULAMA adını, "veritabani": true
+              yaz (kod "<uygulama> Veritabanı" yapar). Gerekçede teknolojiyi belirt (ör. "1433 SQL Server; istemcileri KREDİ").
+              Sahibi bulunamazsa uygulama null, gerekçede "SQL Server veritabanı, sahibi belirsiz" yaz.
             - Bu sunucunun HEDEF olduğu bir talepte açıklama "<A> için / <A> karşılığı … <B>'nin DB'lerine / sunucularına / servisine
               erişim" diyorsa erişilen sistem <B> BU SUNUCUDUR (A karşı taraftır, isteyen uygulamadır). Ör. "KKB Karşılığı / Ziraat
-              Katılım prod segmentinin KÖS Db'lerine erişim talebi" + bu sunucu HEDEF → uygulama "KÖS" (KÖS veritabanı; KKB Karşılığı
+              Katılım prod segmentinin KÖS Db'lerine erişim talebi" + bu sunucu HEDEF → uygulama "KÖS", veritabani true (KKB Karşılığı
               istemci). Port veritabanı portu olsa da sahibi açıklamada adı geçen sistemdir; bu durumda null YAZMA. Adaylarda o sistemi
               içeren bir ad varsa onu seç, yoksa açıklamadaki kısa adı yaz ("yeni": true).
             - Kanıt yetersizse "uygulama": null ve güven düşük yaz. Uydurma.
@@ -712,7 +756,7 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
               destekleniyorsa gerekçede destekleyen kanıtı da yaz.
 
             Yalnızca JSON dizi döndür, başka metin yazma. Her boş port için bir eleman:
-            [{"ip":"…","port":"…","uygulama":"… ya da null","yeni":false,"guven":0-100,"gerekce":"tek cümle; hangi kanıta dayandığın"}]
+            [{"ip":"…","port":"…","uygulama":"… ya da null","yeni":false,"veritabani":false,"guven":0-100,"gerekce":"tek cümle; hangi kanıta dayandığın"}]
             """);
         foreach (var ip in ips)
             sb.AppendLine().AppendLine($"=== Sunucu {ip} · boş portlar: {string.Join(", ", todo[ip].Select(p => p == "" ? "(port yok)" : p))}")
@@ -746,7 +790,15 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
                 if (PortExeHas(texts.GetValueOrDefault(ip), port, ajan)) app = "Altyapı: " + ajan;
                 else { gerekce = $"Yok sayıldı: AI '{app}' önerdi ama {ajan} bir ajan / araç ürünü ve bu portu kabul eden exe ona ait değil. AI gerekçesi: {gerekce}"; app = null; guven = 0; }
             }
-            if (app != null && !app.StartsWith("Altyapı", StringComparison.OrdinalIgnoreCase)) app = Snap(env, app, out yeni);
+            if (app != null && !app.StartsWith("Altyapı", StringComparison.OrdinalIgnoreCase))
+            {
+                // Veritabanı: AI işaretlediyse ya da port DB portu / DB süreci ise "<uygulama> Veritabanı" (kullanıcı isteği)
+                var dbRx = new System.Text.RegularExpressions.Regex(@"\s*[-–(]?\s*(veritaban[ıi]|database|db)\)?\s*$", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                bool db = e.TryGetProperty("veritabani", out var vt) && vt.ValueKind == JsonValueKind.True || DbPort(texts.GetValueOrDefault(ip), port, out _)
+                          || dbRx.IsMatch(app);
+                app = Snap(env, dbRx.Replace(app, "").Trim() is { Length: > 0 } core ? core : app, out yeni);
+                if (db) app += " Veritabanı";
+            }
             outp[(ip, port)] = new EksikOneri(Cut(app, 200), yeni, guven, gerekce, Ai, "AI", DateTime.Now);
         }
         return outp;
