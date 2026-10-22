@@ -36,6 +36,7 @@ builder.Services.AddHttpClient("ai", c => c.Timeout = TimeSpan.FromMinutes(build
 builder.Services.AddSingleton<EnvanterService>();
 builder.Services.AddSingleton<IslevService>();
 builder.Services.AddSingleton<EksikService>();
+builder.Services.AddSingleton<SegmentTaramaService>();
 builder.Services.AddMemoryCache();
 
 // Windows Authentication: IIS'te IIS'in Windows Auth'u, Kestrel'de Negotiate kullanılır.
@@ -743,6 +744,22 @@ app.MapPost("/api/eksik/karar", async (EksikKarar req, HttpContext ctx, IConfigu
 app.MapGet("/api/eksik/csv", async (bool? hepsi, HttpContext ctx, IConfiguration cfg, EksikService eksik, CancellationToken ct) =>
     !Yetki.Var(cfg, ctx, Yetki.Disari) ? Yetki.Red(ctx, "Dışa aktarma") : Results.File(Encoding.UTF8.GetBytes(await eksik.CsvAsync(hepsi ?? false, ct)), "text/csv; charset=utf-8",
         $"ert_uygulama_onerileri_{DateTime.Now:yyyyMMdd_HHmm}.csv"));
+
+// Segment tarama (Segment.cs, wwwroot/segment.html): segmentteki tüm IP'lerin Carbon Black gelen portları ve exe'leri (arka plan işi)
+app.MapGet("/api/segment/liste", async (SegmentTaramaService seg, CancellationToken ct) =>
+{
+    try { return Results.Ok(await seg.ListeAsync(ct)); }
+    catch (Exception ex) { return Results.Json(new { error = ex.Message }, statusCode: 502); }
+});
+app.MapPost("/api/segment/tarama", async (SegmentIstek req, HttpContext ctx, IConfiguration cfg, SegmentTaramaService seg, CancellationToken ct) =>
+{
+    if (!Yetki.Var(cfg, ctx, Yetki.Topoloji)) return Yetki.Red(ctx, "Segment tarama (topoloji)");
+    try { return Results.Ok(await seg.BaslatAsync(req, ctx.User?.Identity?.Name ?? "?", ct)); }
+    catch (InvalidOperationException ex) { return Results.BadRequest(new { error = ex.Message }); }
+});
+app.MapGet("/api/segment/tarama/{id}", (string id, SegmentTaramaService seg) =>
+    seg.Durum(id) is { } d ? Results.Ok(d) : Results.NotFound(new { error = "Tarama bulunamadı (süresi dolmuş olabilir)." }));
+app.MapPost("/api/segment/tarama/{id}/durdur", (string id, SegmentTaramaService seg) => { seg.Durdur(id); return Results.Ok(new { ok = true }); });
 
 // Versiyonlar (Versiyon.cs): işlev haritası + küme topolojisi birlikte; etiket başına son Islev:VersiyonSayisi (3).
 app.MapGet("/api/islev/versiyonlar", async (string etiket, IConfiguration cfg, CancellationToken ct) =>

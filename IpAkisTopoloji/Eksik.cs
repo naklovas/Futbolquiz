@@ -869,7 +869,7 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
         ("\\tibco", "TIBCO"), ("\\websphere", "IBM WebSphere"), ("\\weblogic", "Oracle WebLogic"), ("\\jboss", "JBoss"), ("\\tomcat", "Apache Tomcat"),
         ("\\elastic", "Elasticsearch"), ("\\kafka", "Kafka"), ("\\rabbitmq", "RabbitMQ"), ("\\ibm\\iib", "IBM Integration Bus"), ("\\ace\\", "IBM App Connect")
     ];
-    static string? BilinenUrun(string yol)
+    public static string? BilinenUrun(string yol)
     {
         string y = yol.Replace('/', '\\').ToLowerInvariant(), exe = y.Split('\\').Last();
         return BilinenUrunler.FirstOrDefault(b => b.Kalip.Contains('\\') ? y.Contains(b.Kalip) : exe.StartsWith(b.Kalip)).Urun;

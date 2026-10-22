@@ -200,6 +200,8 @@ sealed class EnvanterSnapshot
     readonly Dictionary<string, List<string>> _tagsByIp = new();
     // Envanterdeki (ERT) tüm sunucu IP'leri
     public IEnumerable<string> HostIps => _byIp.Keys;
+    // Tüm segment kayıtları (segment tarama sayfasının seçicisi)
+    public IEnumerable<SegmentInfo> Segments => _segByPrefix.Where(m => m != null).SelectMany(m => m!.Values);
     // ERT'deki uygulama adları (sistem portu kayıtları hariç)
     public IEnumerable<string> AppNames => _byApp.Keys;
     readonly Dictionary<string, List<string>> _ipsByTag = new(StringComparer.OrdinalIgnoreCase);
@@ -380,9 +382,9 @@ sealed class EnvanterSnapshot
         l.Add(h);
     }
 
-    static uint Mask(int prefix) => prefix == 0 ? 0u : uint.MaxValue << (32 - prefix);
+    public static uint Mask(int prefix) => prefix == 0 ? 0u : uint.MaxValue << (32 - prefix);
 
-    static bool TryParseCidr(string text, out uint net, out int prefix)
+    public static bool TryParseCidr(string text, out uint net, out int prefix)
     {
         net = 0;
         prefix = 32;
@@ -394,7 +396,7 @@ sealed class EnvanterSnapshot
         return true;
     }
 
-    static bool TryToUInt(string ip, out uint value)
+    public static bool TryToUInt(string ip, out uint value)
     {
         value = 0;
         if (ip.Split('.').Length != 4 || !IPAddress.TryParse(ip, out var a) || a.AddressFamily != AddressFamily.InterNetwork)

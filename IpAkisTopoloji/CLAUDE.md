@@ -38,6 +38,7 @@ topoloji çizer ve şirket içi AI'a etki analizi yaptırır. Canlıda IIS'te, W
 | `Versiyon.cs` | İşlev haritası + küme topolojisi versiyonları (etiket başına son 3) |
 | `F5Waf.cs` | F5 ASM / Bot Defense güvenlik logları (Splunk index=f5): erişimde engel kararı, IP görünümünde URI listesi |
 | `PortBilgisi.cs` | Port → işlev ve kesilirse duracak iş (AI prompt'u için) |
+| `Segment.cs` | Segment tarama: segmentteki tüm IP'lerin Carbon Black gelen portları + exe'leri, ERT karşılaştırması (`wwwroot/segment.html`) |
 | `Yetki.cs` | İşlem yetkileri (yazma, topoloji, dışa aktarma, toplu tahmin) — DokuPanel site kayıtları |
 | `AuthHelper.cs` | Kullanıcının verdiği DokuPanel yetki helper'ı (namespace `AppRel`), anahtar config'den |
 
@@ -359,6 +360,16 @@ erişim talepleri) — DB → şema → tablo ve kim erişiyor bilgisi buradan b
   çıkarılıp kanıtın en sonuna `KahinBas` bölümü olarak konur (kayıtlı KANIT'ta görünür). AskAsync 1. tur Kahin'siz; uygulaması bulunamayan
   portlar (Kahin verisi varsa) 2. turda Kahin'le yeniden sorulur: yalnız diğer kanıtlarla çelişmiyorsa, güven ≤ 50 (kodda da sınır),
   gerekçe "Kahin tahmini (son çare)". 2. tur hata verirse 1. tur sonucu kalır.
+- **Segment tarama** (`Segment.cs`, `wwwroot/segment.html` — ayrı sayfa, sekme çubuğunda "Segment tarama ↗"; kullanıcı: "verdiğim segmentteki IP
+  ve portlar full Carbon Black'ten gelsin, portlarda çalışan exe'ler, ayrı tab"): girdi segment adı (aynı adlı segmentlerin tüm CIDR'ları;
+  seçici `/api/segment/liste`, ERT sunucu sayısıyla) ya da CIDR. Arka plan işi (IIS zaman aşımı yüzünden): POST `/api/segment/tarama
+  {segment, saat}` (Yetki:Topoloji) → id; GET `/api/segment/tarama/{id}` (2 sn'de bir), `/durdur`. SPL: `local_ip="a.b.c.*"` desenleri (/24'e
+  bölünür; /16–/23'te 16'dan çok /24 varsa a.b.*) + `where cidrmatch(...)`, `stats count dc(remote_ip) values(remote_ip) max(_time) by local_ip yon
+  port yol` (gidende port boş). `Segment:MaxAdres`=65536, `MaxSaat`=168, `ParcaDesen`=16 desen/sorgu, `AyniAnda`=2, `SonucDakika`=60 (bellekte).
+  Satır: IP, sunucu (ERT UNIXNAME), port, exe + yol + ürün etiketi (`EksikService.BilinenUrun` ya da teknoloji: SQL Server, Oracle, IIS…),
+  bağlantı, istemci (uygulama adıyla), ERT durumu (kayıtlı / adı boş / ERT'de yok), son görülme. Filtreler: arama, ERT durumu, altyapı / dinamik /
+  genel süreç (varsayılan gizli), sıralama; "yalnız giden" programlar ve "ERT'de var ama CB verisi yok" sunucular katlanır bölümlerde; CSV
+  tarayıcıda (Yetki:Disari). Fake Splunk + sahte envanterle backend, mock'la arayüz test edildi.
 - **VIP**: sorgulanan IP VIP ise üyeler + GW'ler aynı sorguya eklenir, üyeler "VIP ÜYESİ" (GW→üye trafiği varsa ✓).
   Gidilen IP VIP ise "VIP → n ÜYE"; gelen IP LB GW ise "LB GW"; sorgulanan sunucu havuz üyesiyse VIP kartı.
 - **Uygulama görünümü** (`/api/apps`, `/api/app`): `[kullanan uygulamalar] → [UYGULAMA: VIP'ler + segment grupları] → [bağımlı olunanlar]`,
