@@ -24,28 +24,87 @@ record SegmentIs(string Id, string Segment, bool Calisiyor, string Asama, int To
 // AI ile iş uygulaması tahmini (kullanıcı: "sunucu sunucu AI'a gönderelim, exe'lerden çalışan iş uygulamalarını tahmin etsin, bir kolona"):
 // tarama sonucundaki exe'ler sunucu başına SurecAi'ye (IP kartındaki "Bu sunucuda hangi uygulama çalışıyor?" ile aynı prompt) gider;
 // aynı anda Segment:AiParalel (3) sunucu; sonuç tarama işiyle birlikte bellekte, kaydedilmez.
-record SegmentAiDurum(bool Calisiyor, int Toplam, int Biten, Dictionary<string, SurecAiSonuc> Sonuclar, Dictionary<string, string> Hatalar);
+record SegmentAiDurum(bool Calisiyor, int Toplam, int Biten, Dictionary<string, SurecAiSonuc> Sonuclar, Dictionary<string, string> Hatalar,
+    int Kayitli = 0, Dictionary<string, string>? Tarihler = null, string? Uyari = null);
 
 sealed class SegmentTaramaService(IConfiguration cfg, IHttpClientFactory factory, EnvanterService envanter, IslevService islev, EksikService eksik,
     ILogger<SegmentTaramaService> log)
 {
-    readonly ConcurrentDictionary<string, (ConcurrentDictionary<string, SurecAiSonuc> Sonuc, ConcurrentDictionary<string, string> Hata, int Toplam, int[] Biten, bool[] Calisiyor, CancellationTokenSource Cts)> _ai = new();
+    sealed class AiIs
+    {
+        public ConcurrentDictionary<string, SurecAiSonuc> Sonuc = new();
+        public ConcurrentDictionary<string, string> Hata = new(), Tarih = new();
+        public int Toplam, Biten, Kayitli; public volatile bool Calisiyor; public string? Uyari;
+        public CancellationTokenSource Cts = new();
+    }
+    readonly ConcurrentDictionary<string, AiIs> _ai = new();
 
     public SegmentAiDurum? AiDurum(string id) => _ai.TryGetValue(id, out var a)
-        ? new(a.Calisiyor[0], a.Toplam, a.Biten[0], new(a.Sonuc), new(a.Hata)) : null;
+        ? new(a.Calisiyor, a.Toplam, a.Biten, new(a.Sonuc), new(a.Hata), a.Kayitli, new(a.Tarih), a.Uyari) : null;
+
+    // ---- Kayıt (Segment:AiTablosu, sql/segment_ai.sql; tablo yoksa bellekte) ----
+    readonly ConcurrentDictionary<string, (SurecAiSonuc Sonuc, string Exeler, DateTime Tarih)> _aiBellek = new();
+    string AiTablo => cfg["Segment:AiTablosu"] is { Length: > 0 } t && System.Text.RegularExpressions.Regex.IsMatch(t, @"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*){0,2}$")
+        ? t : "dbo.DF_SEGMENT_AI_TAHMIN";
+    static readonly System.Text.Json.JsonSerializerOptions Js = new(System.Text.Json.JsonSerializerDefaults.Web);
+    async Task<(Dictionary<string, (SurecAiSonuc Sonuc, string Exeler, DateTime Tarih)> Kayit, string? Uyari)> AiOkuAsync(List<string> ips, CancellationToken ct)
+    {
+        var d = new Dictionary<string, (SurecAiSonuc, string, DateTime)>();
+        foreach (var ip in ips) if (_aiBellek.TryGetValue(ip, out var m)) d[ip] = m;
+        try
+        {
+            await using var conn = new Microsoft.Data.SqlClient.SqlConnection(cfg.GetConnectionString("Envanter"));
+            await conn.OpenAsync(ct);
+            foreach (var part in ips.Chunk(500))
+            {
+                await using var cmd = new Microsoft.Data.SqlClient.SqlCommand("", conn);
+                cmd.CommandText = $"SELECT IP, SONUC, EXELER, TARIH FROM {AiTablo} WHERE IP IN ({string.Join(",", part.Select((ip, i) => { cmd.Parameters.AddWithValue("@p" + i, ip); return "@p" + i; }))})";
+                await using var r = await cmd.ExecuteReaderAsync(ct);
+                while (await r.ReadAsync(ct))
+                    if (System.Text.Json.JsonSerializer.Deserialize<SurecAiSonuc>(r.GetString(1), Js) is { } sn)
+                        d[r.GetString(0)] = (sn, r.IsDBNull(2) ? "" : r.GetString(2), r.GetDateTime(3));
+            }
+            return (d, null);
+        }
+        catch (Microsoft.Data.SqlClient.SqlException ex) when (ex.Number == 208)
+        { return (d, $"AI tahmin tablosu ({AiTablo}) yok; tahminler yalnız bellekte tutuluyor (sql/segment_ai.sql)."); }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        { log.LogWarning(ex, "Segment AI tahminleri okunamadı"); return (d, "AI tahminleri okunamadı: " + ex.Message); }
+    }
+    async Task AiYazAsync(SurecAiSonuc sonuc, string exeler, string user)
+    {
+        _aiBellek[sonuc.Ip] = (sonuc, exeler, DateTime.Now);
+        try
+        {
+            await using var conn = new Microsoft.Data.SqlClient.SqlConnection(cfg.GetConnectionString("Envanter"));
+            await conn.OpenAsync();
+            await using var cmd = new Microsoft.Data.SqlClient.SqlCommand($"""
+                MERGE {AiTablo} AS t USING (SELECT @ip AS IP) AS s ON t.IP = s.IP
+                WHEN MATCHED THEN UPDATE SET SONUC = @s, EXELER = @e, TARIH = SYSDATETIME(), KAYDEDEN = @u
+                WHEN NOT MATCHED THEN INSERT (IP, SONUC, EXELER, TARIH, KAYDEDEN) VALUES (@ip, @s, @e, SYSDATETIME(), @u);
+                """, conn);
+            cmd.Parameters.AddWithValue("@ip", sonuc.Ip);
+            cmd.Parameters.Add("@s", System.Data.SqlDbType.NVarChar, -1).Value = System.Text.Json.JsonSerializer.Serialize(sonuc, Js);
+            cmd.Parameters.Add("@e", System.Data.SqlDbType.NVarChar, -1).Value = exeler;
+            cmd.Parameters.AddWithValue("@u", user);
+            await cmd.ExecuteNonQueryAsync();
+        }
+        catch (Exception ex) when (ex is not Microsoft.Data.SqlClient.SqlException { Number: 208 }) { log.LogWarning(ex, "Segment AI tahmini kaydedilemedi: {Ip}", sonuc.Ip); }
+        catch (Microsoft.Data.SqlClient.SqlException) { }
+    }
     public void AiDurdur(string id) { if (_ai.TryGetValue(id, out var a)) a.Cts.Cancel(); }
 
-    // ips boşsa sonuçtaki tüm sunucular (iş exe'si olanlar); yeniden = önceki sonuçları da yenile
-    public async Task<SegmentAiDurum> AiBaslatAsync(string id, List<string>? ips, bool yeniden, CancellationToken ct)
+    // Tarama bitince kendiliğinden çalışır (kullanıcı: "düğme olmasın, segmenti seçeyim, satır satır tahmin etsin, kendi kaydetsin; tekrar
+    // tekrar tahmin etmeyeyim"): kayıtlı tahmini olan ve iş exe'leri kayıttakilerin içinde kalan sunucular AI'a GİTMEZ (kayıt gösterilir);
+    // yeni sunucu ya da yeni iş exe'si görülen sunucu sorulur ve kaydedilir. yeniden = kayıtlı olanları da yeniden sor.
+    public async Task<SegmentAiDurum> AiBaslatAsync(string id, List<string>? ips, bool yeniden, string user, CancellationToken ct)
     {
         if (Durum(id)?.Sonuc is not { } r) throw new InvalidOperationException("Önce tarama bitmeli (ya da sonucun süresi dolmuş olabilir).");
-        if (_ai.TryGetValue(id, out var eski) && eski.Calisiyor[0]) throw new InvalidOperationException("AI tahmini zaten çalışıyor.");
+        if (_ai.TryGetValue(id, out var eski) && eski.Calisiyor) throw new InvalidOperationException("AI tahmini zaten çalışıyor.");
         var env = await envanter.GetAsync(false, ct);
-        var onceki = eski.Sonuc ?? new ConcurrentDictionary<string, SurecAiSonuc>();
         // sunucu başına exe'ler: gelen satırlar (port, bağlantı, istemci) + yalnız giden
-        var istek = r.Satirlar.Select(x => x.Ip).Concat(r.Giden.Select(g => g.Ip)).Distinct()
+        var tum = r.Satirlar.Select(x => x.Ip).Concat(r.Giden.Select(g => g.Ip)).Distinct()
             .Where(ip => ips is not { Count: > 0 } || ips.Contains(ip))
-            .Where(ip => yeniden || !onceki.ContainsKey(ip))
             .Select(ip => new SurecAiIstek(ip,
                 r.Satirlar.Where(x => x.Ip == ip).GroupBy(x => x.Yol, StringComparer.OrdinalIgnoreCase).Select(g => new SurecAiExe(g.First().Exe, g.Key, null,
                         g.Select(x => new ProcPort(x.Port, x.Baglanti, x.Istemci)).ToList(), 0, g.SelectMany(x => x.Istemciler).Distinct().Take(8).ToList(), null))
@@ -53,23 +112,38 @@ sealed class SegmentTaramaService(IConfiguration cfg, IHttpClientFactory factory
                     .ToList()))
             .Where(q => q.Surecler!.Any(e => !SurecAi.Genel(e)))   // yalnız genel süreçli sunucu AI'a gitmez
             .ToList();
-        var cts = new CancellationTokenSource();
-        var a = (Sonuc: onceki, Hata: new ConcurrentDictionary<string, string>(), Toplam: istek.Count, Biten: new[] { 0 }, Calisiyor: new[] { istek.Count > 0 }, Cts: cts);
+        static string Exeler(SurecAiIstek q) => string.Join("|", q.Surecler!.Where(e => !SurecAi.Genel(e)).Select(e => (e.Yol ?? e.Ad).ToLowerInvariant()).Distinct().OrderBy(x => x));
+        var (kayit, uyari) = await AiOkuAsync(tum.Select(q => q.Ip!).ToList(), ct);
+        var a = new AiIs { Uyari = uyari };
+        var istek = new List<SurecAiIstek>();
+        foreach (var q in tum)
+        {
+            if (!yeniden && kayit.TryGetValue(q.Ip!, out var k) && Exeler(q).Split('|').All(e => k.Exeler.Split('|').Contains(e)))
+            { a.Sonuc[q.Ip!] = k.Sonuc; a.Tarih[q.Ip!] = k.Tarih.ToString("yyyy-MM-dd HH:mm"); a.Kayitli++; }
+            else istek.Add(q);
+        }
+        a.Toplam = istek.Count; a.Calisiyor = istek.Count > 0;
+        if (eski != null) foreach (var (k2, v) in eski.Sonuc) a.Sonuc.TryAdd(k2, v);
         _ai[id] = a;
-        log.LogInformation("Segment tarama AI: {Id} {N} sunucu", id, istek.Count);
+        log.LogInformation("Segment tarama AI: {Id} {N} sunucu sorulacak, {K} kayıtlı", id, istek.Count, a.Kayitli);
         if (istek.Count > 0)
             _ = Task.Run(async () =>
             {
                 using var gate = new SemaphoreSlim(Math.Clamp(cfg.GetValue("Segment:AiParalel", 3), 1, 8));
                 await Task.WhenAll(istek.Select(async q =>
                 {
-                    try { await gate.WaitAsync(cts.Token); } catch (OperationCanceledException) { return; }
-                    try { a.Sonuc[q.Ip!] = await SurecAi.RunAsync(q, env, islev, eksik, cts.Token); a.Hata.TryRemove(q.Ip!, out _); }
+                    try { await gate.WaitAsync(a.Cts.Token); } catch (OperationCanceledException) { return; }
+                    try
+                    {
+                        var sonuc = await SurecAi.RunAsync(q, env, islev, eksik, a.Cts.Token);
+                        a.Sonuc[q.Ip!] = sonuc; a.Tarih[q.Ip!] = DateTime.Now.ToString("yyyy-MM-dd HH:mm"); a.Hata.TryRemove(q.Ip!, out _);
+                        await AiYazAsync(sonuc, Exeler(q), user);
+                    }
                     catch (OperationCanceledException) { }
                     catch (Exception ex) { a.Hata[q.Ip!] = ex.Message; }
-                    finally { Interlocked.Increment(ref a.Biten[0]); gate.Release(); }
+                    finally { Interlocked.Increment(ref a.Biten); gate.Release(); }
                 }));
-                a.Calisiyor[0] = false;
+                a.Calisiyor = false;
             });
         return AiDurum(id)!;
     }
@@ -141,6 +215,8 @@ sealed class SegmentTaramaService(IConfiguration cfg, IHttpClientFactory factory
             {
                 var sonuc = await TaraAsync(id, env, tur, ad, cidrs, ipler, sorgular, saat, cts.Token);
                 Set(id, i => i with { Calisiyor = false, Asama = "Bitti", Sonuc = sonuc });
+                try { await AiBaslatAsync(id, null, false, user, CancellationToken.None); }   // kendiliğinden AI tahmini (kayıtlılar sorulmaz)
+                catch (Exception ex) { log.LogWarning(ex, "Segment tarama AI başlatılamadı: {Segment}", ad); }
             }
             catch (OperationCanceledException) { Set(id, i => i with { Calisiyor = false, Asama = "Durduruldu" }); }
             catch (Exception ex)

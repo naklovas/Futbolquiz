@@ -182,19 +182,14 @@ async function poll(j) {
   $("#run").innerHTML = j.calisiyor ? `<div class="run"><div><span class="spinner"></span> <b>${esc(j.segment)}</b> · ${esc(j.asama)}</div><div class="bar"><i style="width:${pct}%"></i></div></div>`
     : j.hata ? `<div class="warn">Tarama başarısız: ${esc(j.hata)}</div>` : j.asama === "Durduruldu" ? `<div class="warn">Durduruldu.</div>` : "";
   if (j.calisiyor) { st.timer = setTimeout(() => poll(), 2000); return; }
-  if (j.sonuc) { st.data = j.sonuc; render(); }
+  if (j.sonuc) { st.data = j.sonuc; render(); setTimeout(aiPoll, 800); }   // AI tahmini sunucuda kendiliğinden başlar
 }
 
 // ---- AI ile iş uygulaması tahmini (sunucu sunucu, SurecAi) ----
-async function aiStart(ips, yeniden) {
-  try {
-    st.ai = await api(`api/segment/tarama/${st.job}/ai`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ips, yeniden: !!yeniden }) });
-    render(); aiPoll();
-  } catch (e) { alert(e.message); }
-}
-async function aiPoll() {
+async function aiPoll(deneme = 0) {
   clearTimeout(st.aiTimer);
-  try { st.ai = await api(`api/segment/tarama/${st.job}/ai`); } catch { return; }
+  try { st.ai = await api(`api/segment/tarama/${st.job}/ai`); }
+  catch { if (deneme < 5) st.aiTimer = setTimeout(() => aiPoll(deneme + 1), 1500); return; }   // iş henüz başlamadıysa
   render();
   if (st.ai.calisiyor) st.aiTimer = setTimeout(aiPoll, 2500);
 }
@@ -210,7 +205,8 @@ function aiCell(ip, exe) {
   if (a.hata) return `<span class="small" style="color:var(--err)" title="${esc(a.hata)}">AI hatası</span>`;
   if (!a.u) return `<span class="small muted" title="AI bu exe'yi iş uygulaması saymadı (genel / altyapı)">—</span>`;
   const u = a.u, c = u.guven >= 75 ? "var(--ok)" : u.guven >= 50 ? "var(--warn)" : "var(--err)";
-  return `<div class="sug" title="${esc(u.gerekce || "")}"><b>${esc(u.uygulama || "?")}</b><span class="conf"><i style="width:${u.guven}%;background:${c}"></i></span><span class="small muted">%${u.guven}</span>
+  const tarih = st.ai?.tarihler?.[ip];
+  return `<div class="sug" title="${esc((u.gerekce || "") + (tarih ? "\nTahmin tarihi: " + tarih : ""))}"><b>${esc(u.uygulama || "?")}</b><span class="conf"><i style="width:${u.guven}%;background:${c}"></i></span><span class="small muted">%${u.guven}</span>
     ${u.ertKarsiligi ? `<div class="small">ERT: ${esc(u.ertKarsiligi)}</div>` : ""}${u.rol ? `<div class="small muted">${esc(u.rol)}</div>` : ""}</div>`;
 }
 const aiText = (ip, exe) => { const a = aiOf(ip, exe); return a?.u ? `${a.u.uygulama || ""}${a.u.ertKarsiligi ? " (ERT: " + a.u.ertKarsiligi + ")" : ""} %${a.u.guven}` : ""; };
@@ -271,9 +267,8 @@ function render() {
       <label title="Carbon Black'te yerel portu 0 / boş gelen olaylar; kaldırırsanız bu satırlar gizlenir"><input type="checkbox" id="sifirF" ${st.sifir ? "checked" : ""}> Port 0 (${fmt(nSifir)})</label>
       <span class="sp"></span>
       <span class="small muted">${fmt(r.length)} satır</span>
-      ${st.yetki.topoloji ? (st.ai?.calisiyor
-        ? `<span class="small"><span class="spinner"></span> AI: ${st.ai.biten} / ${st.ai.toplam} sunucu</span> <button id="aiDur" type="button">Durdur</button>`
-        : `<button id="aiRun" type="button" title="Her sunucunun exe'leri (yol, port, istemci, giden) + ERT kayıtları AI'a gider; iş uygulamalarını adlandırır. Aynı anda 3 sunucu.">🤖 AI ile iş uygulamalarını tahmin et${st.ai ? " (yenile)" : ""}</button>`) : ""}
+      ${st.ai ? `<span class="small" title="Tarama bitince her sunucunun iş exe'leri AI'a gider ve sonuç kaydedilir; kayıtlı tahmini olan ve yeni exe'si olmayan sunucu yeniden sorulmaz">🤖 ${st.ai.calisiyor ? `<span class="spinner"></span> AI tahmini: ${st.ai.biten} / ${st.ai.toplam} sunucu` : `AI tahmini: ${st.ai.toplam} sunucu soruldu`}${st.ai.kayitli ? ` · ${st.ai.kayitli} sunucuda kayıtlı tahmin kullanıldı` : ""}</span>` : ""}
+      ${st.ai?.uyari ? `<span class="small" style="color:var(--warn)">${esc(st.ai.uyari)}</span>` : ""}
       ${st.ai && !st.ai.calisiyor && Object.keys(st.ai.hatalar || {}).length ? `<span class="small" style="color:var(--err)">${Object.keys(st.ai.hatalar).length} sunucuda AI hatası</span>` : ""}
       ${st.yetki.disari ? `<button id="csv" type="button">Excel'e aktar</button>` : ""}
     </div>
@@ -295,12 +290,6 @@ function render() {
   $("#genelF").addEventListener("change", e => { st.genel = e.target.checked; render(); });
   $("#sifirF").addEventListener("change", e => { st.sifir = e.target.checked; render(); });
   $("#csv")?.addEventListener("click", csv);
-  $("#aiRun")?.addEventListener("click", () => {
-    const n = new Set(d.satirlar.map(x => x.ip).concat(d.giden.map(x => x.ip))).size;
-    if (!st.ai && n > 50 && !confirm(`${n} sunucu AI'a gönderilecek (aynı anda 3). Uzun sürebilir; devam edilsin mi?`)) return;
-    aiStart(null, !!st.ai);
-  });
-  $("#aiDur")?.addEventListener("click", () => fetch(`api/segment/tarama/${st.job}/ai/durdur`, { method: "POST" }));
   document.querySelectorAll("#res details[data-k]").forEach(x => x.addEventListener("toggle", () => x.open ? st.open.add(x.dataset.k) : st.open.delete(x.dataset.k)));
   document.querySelectorAll("th[data-sort]").forEach(h => h.addEventListener("click", () => {
     if (st.sort === h.dataset.sort) st.desc = !st.desc; else { st.sort = h.dataset.sort; st.desc = ["baglanti", "istemci", "son"].includes(st.sort); }

@@ -763,7 +763,7 @@ app.MapPost("/api/segment/tarama/{id}/durdur", (string id, SegmentTaramaService 
 app.MapPost("/api/segment/tarama/{id}/ai", async (string id, SegmentAiIstek? req, HttpContext ctx, IConfiguration cfg, SegmentTaramaService seg, CancellationToken ct) =>
 {
     if (!Yetki.Var(cfg, ctx, Yetki.Topoloji)) return Yetki.Red(ctx, "Segment tarama (topoloji)");
-    try { return Results.Ok(await seg.AiBaslatAsync(id, req?.Ips, req?.Yeniden ?? false, ct)); }
+    try { return Results.Ok(await seg.AiBaslatAsync(id, req?.Ips, req?.Yeniden ?? false, ctx.User?.Identity?.Name ?? "?", ct)); }
     catch (InvalidOperationException ex) { return Results.BadRequest(new { error = ex.Message }); }
 });
 app.MapGet("/api/segment/tarama/{id}/ai", (string id, SegmentTaramaService seg) =>

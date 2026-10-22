@@ -383,6 +383,12 @@ erişim talepleri) — DB → şema → tablo ve kim erişiyor bilgisi buradan b
   gitmez; `Segment:AiParalel`=3; sonuç bellekte (`_ai`, tarama işiyle). Arayüz: "AI tahmini" kolonu (exe adıyla eşleşme: uygulama, güven
   çubuğu, ERT karşılığı, rol; AI iş uygulaması saymadıysa "—", hata "AI hatası"), IP'nin ilk satırında sunucu özeti, sıralama / arama / CSV
   (AI TAHMİNİ, AI ERT KARŞILIĞI, AI GÜVEN, AI SUNUCU ÖZETİ), "yalnız giden" tablosunda da kolon. Mock'la arayüz test edildi.
+  OTOMATİK + KAYITLI (kullanıcı: "düğme olmasın, segmenti seçeyim, satır satır tahmin etsin, kendi kaydetsin; tekrar tekrar tahmin etmeyeyim"):
+  düğme kaldırıldı; tarama bitince sunucuda `AiBaslatAsync` kendiliğinden çalışır, sayfa `…/ai`yi izler, kolon sunucu sunucu dolar. Kayıt
+  `Segment:AiTablosu` dbo.DF_SEGMENT_AI_TAHMIN (`sql/segment_ai.sql`: IP PK, SONUC JSON, EXELER (| ile iş exe yolları), TARIH, KAYDEDEN; yoksa
+  bellekte + uyarı). Kayıtlı tahmini olan ve şimdiki iş exe'leri kayıttakilerin içinde kalan sunucu AI'a GİTMEZ (kayıt gösterilir, tarih ipucunda);
+  yeni sunucu / yeni iş exe'si → sorulur ve MERGE ile yazılır. Durumda `Kayitli`, `Tarihler`, `Uyari`. POST `/ai {yeniden:true}` ucu duruyor
+  (arayüzde düğme yok). Sahte veriyle: kayıtlı sunucu yeniden sorulmadı, yeni exe'li sunucu soruldu.
 - **VIP**: sorgulanan IP VIP ise üyeler + GW'ler aynı sorguya eklenir, üyeler "VIP ÜYESİ" (GW→üye trafiği varsa ✓).
   Gidilen IP VIP ise "VIP → n ÜYE"; gelen IP LB GW ise "LB GW"; sorgulanan sunucu havuz üyesiyse VIP kartı.
 - **Uygulama görünümü** (`/api/apps`, `/api/app`): `[kullanan uygulamalar] → [UYGULAMA: VIP'ler + segment grupları] → [bağımlı olunanlar]`,
