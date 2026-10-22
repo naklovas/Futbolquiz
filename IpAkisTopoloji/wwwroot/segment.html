@@ -231,6 +231,13 @@ function rows() {
   return r;
 }
 
+// AI tahmini ilerleme çubuğu (tarama çubuğuyla aynı görünüm): beklerken ve çalışırken
+function aiBar() {
+  if (!st.ai) return `<div class="run" style="margin-top:10px"><div><span class="spinner"></span> 🤖 AI tahmini hazırlanıyor…${st.aiHata ? ` <span class="small muted">(${esc(st.aiHata)})</span>` : ""}</div><div class="bar"><i style="width:3%"></i></div></div>`;
+  if (!st.ai.calisiyor) return "";
+  const pct = st.ai.toplam ? Math.round(100 * st.ai.biten / st.ai.toplam) : 3;
+  return `<div class="run" style="margin-top:10px"><div><span class="spinner"></span> 🤖 AI iş uygulamalarını tahmin ediyor · <b>${st.ai.biten} / ${st.ai.toplam}</b> sunucu (%${pct})${st.ai.kayitli ? ` · ${st.ai.kayitli} sunucuda kayıtlı tahmin kullanıldı` : ""}${Object.keys(st.ai.hatalar || {}).length ? ` · <span style="color:var(--err)">${Object.keys(st.ai.hatalar).length} hata</span>` : ""}</div><div class="bar"><i style="width:${Math.max(pct, 3)}%"></i></div></div>`;
+}
 const sifir = x => !x.port || x.port === "0";
 function render() {
   const d = st.data, all = d.satirlar.filter(x => !x.altyapi && !x.dinamik && !x.genel);
@@ -258,6 +265,7 @@ function render() {
   $("#res").innerHTML = `
     <div class="sub" style="margin-top:8px">${d.tur === "etiket" ? "Etiket " : ""}${esc(d.segment)}${d.cidrler.length ? " · " + esc(d.cidrler.join(", ")) : ""} · Carbon Black ${new Date(d.baslangic).toLocaleString("tr-TR")} – ${new Date(d.bitis).toLocaleString("tr-TR")} · ${(d.ms / 1000).toFixed(1)} sn</div>
     ${d.mesajlar.length ? `<div class="warn" style="margin-top:8px">${d.mesajlar.map(esc).join("<br>")}</div>` : ""}
+    ${aiBar()}
     <div class="stats">
       <div class="stat"><b>${fmt(d.sunucular.length)}</b><span>IP</span></div>
       <div class="stat"><b>${fmt(cb)}</b><span>Carbon Black verisi olan</span></div>
