@@ -190,11 +190,12 @@ async function aiPoll(deneme = 0) {
   clearTimeout(st.aiTimer);
   try { st.ai = await api(`api/segment/tarama/${st.job}/ai`); }
   catch (e) {   // iş henüz kayıtlı değilse bir süre daha dene
+    st.aiHata = e.message; render();
     if (deneme < 40) st.aiTimer = setTimeout(() => aiPoll(deneme + 1), 2000);
     else { st.ai = { calisiyor: false, toplam: 0, biten: 0, sonuclar: {}, hatalar: {}, uyari: "AI tahmini durumu alınamadı: " + e.message }; render(); }
     return;
   }
-  render();
+  st.aiHata = null; render();
   if (st.ai.calisiyor) st.aiTimer = setTimeout(aiPoll, 2500);
 }
 // Satırın exe'si için AI tahmini (sonuç exe adıyla eşleşir)
@@ -208,7 +209,8 @@ function aiOf(ip, exe) {
 }
 function aiCell(ip, exe) {
   const a = aiOf(ip, exe);
-  if (!a) return st.ai?.calisiyor ? `<span class="small muted">…</span>` : "";
+  if (!a) return !st.ai || st.ai.calisiyor ? `<span class="small muted">…</span>`
+    : `<span class="small muted" title="Bu sunucu AI'a gönderilmedi (yalnız genel / ajan süreçleri) ya da sonuç gelmedi">sorulmadı</span>`;
   if (a.hata) return `<span class="small" style="color:var(--err)" title="${esc(a.hata)}">AI hatası</span>`;
   if (!a.u) return `<span class="small muted" title="AI bu exe'yi iş uygulaması saymadı (genel / altyapı)">—</span>`;
   const u = a.u, c = u.guven >= 75 ? "var(--ok)" : u.guven >= 50 ? "var(--warn)" : "var(--err)";
@@ -274,6 +276,7 @@ function render() {
       <label title="Carbon Black'te yerel portu 0 / boş gelen olaylar; kaldırırsanız bu satırlar gizlenir"><input type="checkbox" id="sifirF" ${st.sifir ? "checked" : ""}> Port 0 (${fmt(nSifir)})</label>
       <span class="sp"></span>
       <span class="small muted">${fmt(r.length)} satır</span>
+      ${!st.ai ? `<span class="small muted">🤖 AI tahmini bekleniyor…${st.aiHata ? ` (${esc(st.aiHata)})` : ""}</span>` : ""}
       ${st.ai ? `<span class="small" title="Tarama bitince her sunucunun iş exe'leri AI'a gider ve sonuç kaydedilir; kayıtlı tahmini olan ve yeni exe'si olmayan sunucu yeniden sorulmaz">🤖 ${st.ai.calisiyor ? `<span class="spinner"></span> AI tahmini: ${st.ai.biten} / ${st.ai.toplam} sunucu` : `AI tahmini: ${st.ai.toplam} sunucu soruldu`}${st.ai.kayitli ? ` · ${st.ai.kayitli} sunucuda kayıtlı tahmin kullanıldı` : ""}</span>` : ""}
       ${st.ai?.uyari ? `<span class="small" style="color:var(--warn)">${esc(st.ai.uyari)}</span>` : ""}
       ${st.ai && !st.ai.calisiyor && Object.keys(st.ai.hatalar || {}).length ? `<span class="small" style="color:var(--err)">${Object.keys(st.ai.hatalar).length} sunucuda AI hatası</span>` : ""}
