@@ -189,7 +189,11 @@ async function poll(j) {
 async function aiPoll(deneme = 0) {
   clearTimeout(st.aiTimer);
   try { st.ai = await api(`api/segment/tarama/${st.job}/ai`); }
-  catch { if (deneme < 5) st.aiTimer = setTimeout(() => aiPoll(deneme + 1), 1500); return; }   // iş henüz başlamadıysa
+  catch (e) {   // iş henüz kayıtlı değilse bir süre daha dene
+    if (deneme < 40) st.aiTimer = setTimeout(() => aiPoll(deneme + 1), 2000);
+    else { st.ai = { calisiyor: false, toplam: 0, biten: 0, sonuclar: {}, hatalar: {}, uyari: "AI tahmini durumu alınamadı: " + e.message }; render(); }
+    return;
+  }
   render();
   if (st.ai.calisiyor) st.aiTimer = setTimeout(aiPoll, 2500);
 }
@@ -197,7 +201,10 @@ async function aiPoll(deneme = 0) {
 function aiOf(ip, exe) {
   const s = st.ai?.sonuclar?.[ip];
   if (!s) return st.ai?.hatalar?.[ip] ? { hata: st.ai.hatalar[ip] } : null;
-  return { u: (s.uygulamalar || []).find(u => (u.exe || "").toLowerCase() === exe.toLowerCase()), ozet: s.ozet, var: true };
+  // AI exe'yi tam yol, büyük/küçük harf ya da ".exe"siz yazabilir: dosya adına indirgenip karşılaştırılır
+  const n = v => String(v || "").toLowerCase().split(/[\\/]/).pop().replace(/\.exe$/, "").trim();
+  const k = n(exe);
+  return { u: (s.uygulamalar || []).find(u => n(u.exe) === k || n(u.yol) === k), ozet: s.ozet, var: true };
 }
 function aiCell(ip, exe) {
   const a = aiOf(ip, exe);

@@ -389,6 +389,9 @@ erişim talepleri) — DB → şema → tablo ve kim erişiyor bilgisi buradan b
   bellekte + uyarı). Kayıtlı tahmini olan ve şimdiki iş exe'leri kayıttakilerin içinde kalan sunucu AI'a GİTMEZ (kayıt gösterilir, tarih ipucunda);
   yeni sunucu / yeni iş exe'si → sorulur ve MERGE ile yazılır. Durumda `Kayitli`, `Tarihler`, `Uyari`. POST `/ai {yeniden:true}` ucu duruyor
   (arayüzde düğme yok). Sahte veriyle: kayıtlı sunucu yeniden sorulmadı, yeni exe'li sunucu soruldu.
+  "AI tahmini full boş" (canlı) üzerine sağlamlaştırma: AI işi kayıtlar okunmadan önce `_ai`ye yazılır (GET 404 vermesin), başlatma hatası
+  `Uyari`ya düşer, iş programı yoksa açık uyarı; arayüz 404'te 80 sn bekler (eskiden 7,5 sn sonra vazgeçip kolonu boş bırakıyordu); exe eşleşmesi
+  dosya adına indirgenir (AI tam yol, büyük harf ya da ".exe"siz yazsa da eşleşir).
 - **VIP**: sorgulanan IP VIP ise üyeler + GW'ler aynı sorguya eklenir, üyeler "VIP ÜYESİ" (GW→üye trafiği varsa ✓).
   Gidilen IP VIP ise "VIP → n ÜYE"; gelen IP LB GW ise "LB GW"; sorgulanan sunucu havuz üyesiyse VIP kartı.
 - **Uygulama görünümü** (`/api/apps`, `/api/app`): `[kullanan uygulamalar] → [UYGULAMA: VIP'ler + segment grupları] → [bağımlı olunanlar]`,

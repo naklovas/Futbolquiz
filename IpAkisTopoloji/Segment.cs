@@ -101,6 +101,10 @@ sealed class SegmentTaramaService(IConfiguration cfg, IHttpClientFactory factory
     {
         if (Durum(id)?.Sonuc is not { } r) throw new InvalidOperationException("Önce tarama bitmeli (ya da sonucun süresi dolmuş olabilir).");
         if (_ai.TryGetValue(id, out var eski) && eski.Calisiyor) throw new InvalidOperationException("AI tahmini zaten çalışıyor.");
+        // iş hemen görünür olsun (arayüz "başlamadı" sanmasın); kayıtlar okununca doldurulur
+        var a = new AiIs { Calisiyor = true, Uyari = "Kayıtlı tahminler okunuyor…" };
+        if (eski != null) foreach (var (k2, v) in eski.Sonuc) a.Sonuc[k2] = v;
+        _ai[id] = a;
         var env = await envanter.GetAsync(false, ct);
         // sunucu başına exe'ler: gelen satırlar (port, bağlantı, istemci) + yalnız giden
         var tum = r.Satirlar.Select(x => x.Ip).Concat(r.Giden.Select(g => g.Ip)).Distinct()
@@ -114,7 +118,7 @@ sealed class SegmentTaramaService(IConfiguration cfg, IHttpClientFactory factory
             .ToList();
         static string Exeler(SurecAiIstek q) => string.Join("|", q.Surecler!.Where(e => !SurecAi.Genel(e)).Select(e => (e.Yol ?? e.Ad).ToLowerInvariant()).Distinct().OrderBy(x => x));
         var (kayit, uyari) = await AiOkuAsync(tum.Select(q => q.Ip!).ToList(), ct);
-        var a = new AiIs { Uyari = uyari };
+        a.Uyari = uyari ?? (tum.Count == 0 ? "AI'a gönderilecek iş programı yok (yalnız genel Windows / ajan süreçleri görüldü)." : null);
         var istek = new List<SurecAiIstek>();
         foreach (var q in tum)
         {
@@ -123,8 +127,6 @@ sealed class SegmentTaramaService(IConfiguration cfg, IHttpClientFactory factory
             else istek.Add(q);
         }
         a.Toplam = istek.Count; a.Calisiyor = istek.Count > 0;
-        if (eski != null) foreach (var (k2, v) in eski.Sonuc) a.Sonuc.TryAdd(k2, v);
-        _ai[id] = a;
         log.LogInformation("Segment tarama AI: {Id} {N} sunucu sorulacak, {K} kayıtlı", id, istek.Count, a.Kayitli);
         if (istek.Count > 0)
             _ = Task.Run(async () =>
@@ -216,7 +218,12 @@ sealed class SegmentTaramaService(IConfiguration cfg, IHttpClientFactory factory
                 var sonuc = await TaraAsync(id, env, tur, ad, cidrs, ipler, sorgular, saat, cts.Token);
                 Set(id, i => i with { Calisiyor = false, Asama = "Bitti", Sonuc = sonuc });
                 try { await AiBaslatAsync(id, null, false, user, CancellationToken.None); }   // kendiliğinden AI tahmini (kayıtlılar sorulmaz)
-                catch (Exception ex) { log.LogWarning(ex, "Segment tarama AI başlatılamadı: {Segment}", ad); }
+                catch (Exception ex)
+                {
+                    log.LogWarning(ex, "Segment tarama AI başlatılamadı: {Segment}", ad);
+                    if (_ai.TryGetValue(id, out var ai)) { ai.Calisiyor = false; ai.Uyari = "AI tahmini başlatılamadı: " + ex.Message; }
+                    else _ai[id] = new AiIs { Uyari = "AI tahmini başlatılamadı: " + ex.Message };
+                }
             }
             catch (OperationCanceledException) { Set(id, i => i with { Calisiyor = false, Asama = "Durduruldu" }); }
             catch (Exception ex)
