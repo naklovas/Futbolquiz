@@ -108,6 +108,7 @@
   <span class="sp"></span>
   <a href="eksik.html">ERT eksikleri ↗</a>
   <a href="./">← DeltaFlow</a>
+  <span id="surum" class="small muted"></span>
   <span id="me"></span>
 </header>
 <main>
@@ -191,6 +192,11 @@ async function aiPoll(deneme = 0) {
   try { st.ai = await api(`api/segment/tarama/${st.job}/ai`); }
   catch (e) {   // iş henüz kayıtlı değilse bir süre daha dene
     st.aiHata = e.message; render();
+    // uç hiç yoksa (JSON'suz 404) sunucudaki DLL bu sürümden eski: beklemeden söyle
+    if (/^HTTP 404/.test(e.message) && !st.surum?.segmentAi) {
+      st.ai = { calisiyor: false, toplam: 0, biten: 0, sonuclar: {}, hatalar: {}, uyari: `Sunucudaki DeltaFlow sürümü AI tahminini desteklemiyor (eski DLL${st.surum?.surum ? ", " + st.surum.surum : ""}). Segment.cs / Program.cs ile yeniden derleyip yayınlayın.` };
+      render(); return;
+    }
     if (deneme < 40) st.aiTimer = setTimeout(() => aiPoll(deneme + 1), 2000);
     else { st.ai = { calisiyor: false, toplam: 0, biten: 0, sonuclar: {}, hatalar: {}, uyari: "AI tahmini durumu alınamadı: " + e.message }; render(); }
     return;
@@ -344,6 +350,7 @@ if (p.get("etiket")) { st.tur = "etiket"; $("#tur").value = "etiket"; $("#seg").
 else if (p.get("segment")) $("#seg").value = p.get("segment");
 if (p.get("saat")) $("#saat").value = p.get("saat");
 loadSegs();
+fetch("api/surum").then(r => r.ok ? r.json() : null).then(v => { st.surum = v; $("#surum").textContent = v ? "sunucu sürümü " + v.surum : "eski sunucu sürümü (DLL güncel değil)"; }).catch(() => {});
 </script>
 </body>
 </html>
