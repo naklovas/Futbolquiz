@@ -131,7 +131,7 @@
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const fmt = n => Number(n || 0).toLocaleString("tr-TR");
-const st = { tur: "segment", tags: [], segs: [], job: null, data: null, timer: null, yetki: {}, q: "", alt: false, dyn: false, genel: false, durum: "", sort: "ip", desc: false };
+const st = { tur: "segment", tags: [], segs: [], job: null, data: null, timer: null, yetki: {}, q: "", alt: false, dyn: false, genel: false, sifir: false, durum: "", sort: "ip", desc: false };
 const ipNum = ip => ip.split(".").reduce((a, b) => a * 256 + +b, 0);
 
 async function api(url, opt) {
@@ -187,7 +187,9 @@ async function poll(j) {
 
 function rows() {
   const q = st.q.toLowerCase();
-  let r = st.data.satirlar.filter(x => (st.alt || !x.altyapi) && (st.dyn || !x.dinamik) && (st.genel || !x.genel) && (!st.durum || x.ertDurum === st.durum)
+  // Port 0 / boş (kullanıcı: "fazla 0 port geliyor"): Carbon Black'te yerel portu olmayan gelen olaylar (UDP / ICMP, reddedilen ya da yarım
+  // kalan bağlantı) — dinlenen port değildir, varsayılan gizli
+  let r = st.data.satirlar.filter(x => (st.sifir || !sifir(x)) && (st.alt || !x.altyapi) && (st.dyn || !x.dinamik) && (st.genel || !x.genel) && (!st.durum || x.ertDurum === st.durum)
     && (!q || [x.ip, x.sunucu, x.segment, x.port, x.exe, x.yol, x.urun, ...x.ertUygulama, ...x.istemciler].some(v => (v || "").toLowerCase().includes(q))));
   const key = { ip: x => ipNum(x.ip) * 1e5 + (+x.port || 0), port: x => +x.port || 0, exe: x => x.exe.toLowerCase(), baglanti: x => x.baglanti, istemci: x => x.istemci,
     ert: x => ({ yok: 0, bos: 1, kayitli: 2 }[x.ertDurum]), son: x => x.son || "" }[st.sort];
@@ -195,8 +197,10 @@ function rows() {
   return r;
 }
 
+const sifir = x => !x.port || x.port === "0";
 function render() {
-  const d = st.data, all = d.satirlar.filter(x => !x.altyapi && !x.dinamik && !x.genel);
+  const d = st.data, all = d.satirlar.filter(x => !x.altyapi && !x.dinamik && !x.genel && !sifir(x));
+  const nSifir = d.satirlar.filter(sifir).length;
   const cb = d.sunucular.filter(s => s.cbVar).length, ertIp = d.sunucular.filter(s => s.ertPort > 0).length;
   const r = rows();
   const th = (k, t) => `<th data-sort="${k}" class="${st.sort === k ? "on" : ""}">${t}<span class="arr">${st.sort === k ? (st.desc ? "▼" : "▲") : "↕"}</span></th>`;
@@ -207,7 +211,7 @@ function render() {
     return `<tr class="${first ? "grp" : "cont"}${x.altyapi || x.genel ? " alt" : ""}">
       <td class="ip ipc"><a href="./?ip=${encodeURIComponent(x.ip)}" target="_blank" rel="noopener" title="IP topolojisini aç">${esc(x.ip)}</a></td>
       <td class="hc">${esc(x.sunucu || "")}${d.tur === "etiket" && x.segment ? `<div class="small muted">${esc(x.segment)}</div>` : ""}</td>
-      <td class="mono"><b>${esc(x.port)}</b>${x.altyapi ? ' <span class="small muted">altyapı</span>' : ""}${x.dinamik ? ' <span class="small muted">dinamik</span>' : ""}</td>
+      <td class="mono"><b>${esc(x.port || "—")}</b>${sifir(x) ? ' <span class="small muted" title="Yerel port yok: UDP / ICMP ya da reddedilen bağlantı">port yok</span>' : ""}${x.altyapi ? ' <span class="small muted">altyapı</span>' : ""}${x.dinamik ? ' <span class="small muted">dinamik</span>' : ""}</td>
       <td title="${esc(x.yol)}"><b>${esc(x.exe)}</b>${x.urun ? `<span class="urun">${esc(x.urun)}</span>` : ""}<div class="small muted mono">${esc(x.yol.length > 70 ? "…" + x.yol.slice(-70) : x.yol)}</div></td>
       <td>${fmt(x.baglanti)}</td>
       <td>${x.istemci}<div class="small muted">${esc(x.istemciler.slice(0, 3).join(", "))}${x.istemci > 3 ? " …" : ""}</div></td>
@@ -234,6 +238,7 @@ function render() {
       <label><input type="checkbox" id="altF" ${st.alt ? "checked" : ""}> Altyapı portları</label>
       <label title="49152 ve üstü (otomatik / dinamik)"><input type="checkbox" id="dynF" ${st.dyn ? "checked" : ""}> Dinamik portlar</label>
       <label title="svchost, splunkd, Trend Micro, Carbon Black gibi genel süreçler"><input type="checkbox" id="genelF" ${st.genel ? "checked" : ""}> Genel süreçler</label>
+      <label title="Carbon Black'te yerel portu 0 / boş gelen olaylar (UDP, ICMP, reddedilen ya da yarım kalan bağlantılar) — dinlenen port değildir"><input type="checkbox" id="sifirF" ${st.sifir ? "checked" : ""}> Port 0 (${fmt(nSifir)})</label>
       <span class="sp"></span>
       <span class="small muted">${fmt(r.length)} satır</span>
       ${st.yetki.disari ? `<button id="csv" type="button">Excel'e aktar</button>` : ""}
@@ -254,6 +259,7 @@ function render() {
   $("#altF").addEventListener("change", e => { st.alt = e.target.checked; render(); });
   $("#dynF").addEventListener("change", e => { st.dyn = e.target.checked; render(); });
   $("#genelF").addEventListener("change", e => { st.genel = e.target.checked; render(); });
+  $("#sifirF").addEventListener("change", e => { st.sifir = e.target.checked; render(); });
   $("#csv")?.addEventListener("click", csv);
   document.querySelectorAll("th[data-sort]").forEach(h => h.addEventListener("click", () => {
     if (st.sort === h.dataset.sort) st.desc = !st.desc; else { st.sort = h.dataset.sort; st.desc = ["baglanti", "istemci", "son"].includes(st.sort); }

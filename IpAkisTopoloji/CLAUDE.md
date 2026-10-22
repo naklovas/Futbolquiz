@@ -374,6 +374,8 @@ erişim talepleri) — DB → şema → tablo ve kim erişiyor bilgisi buradan b
   `/api/etiketler`), istek `{etiket, saat}`; IP'ler `env.TagIps` (ana etiket alt etiketleri de kapsar), `Segment:EtiketMaxIp`=2000,
   `Segment:ParcaIp`=40 IP'lik sorgular `(TERM(ip) OR …) local_ip IN (…)`. Sonuçta `Tur`, satır / sunucuda `Segment` (etikette sunucu adının
   altında gösterilir, CSV'de SEGMENT kolonu); `?etiket=` derin bağlantı. Sayfa adı "Segment / etiket tarama".
+  PORT 0 (kullanıcı: "fazla 0 port geliyor"): yerel portu 0 / boş gelen olaylar (UDP / ICMP, reddedilen / yarım bağlantı) dinlenen port
+  değil → varsayılan gizli, "Port 0 (N)" kutucuğuyla açılır, özet sayılara girmez, satırda "port yok" notu.
 - **VIP**: sorgulanan IP VIP ise üyeler + GW'ler aynı sorguya eklenir, üyeler "VIP ÜYESİ" (GW→üye trafiği varsa ✓).
   Gidilen IP VIP ise "VIP → n ÜYE"; gelen IP LB GW ise "LB GW"; sorgulanan sunucu havuz üyesiyse VIP kartı.
 - **Uygulama görünümü** (`/api/apps`, `/api/app`): `[kullanan uygulamalar] → [UYGULAMA: VIP'ler + segment grupları] → [bağımlı olunanlar]`,
