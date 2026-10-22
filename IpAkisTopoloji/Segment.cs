@@ -10,12 +10,12 @@ using System.Text;
 // Ayarlar: Segment:MaxAdres (65536 = /16), Segment:MaxSaat (168), Segment:ParcaDesen (16 desen / sorgu), Segment:SonucDakika (60).
 // ---------------------------------------------------------------------------
 record SegmentOzet(string Ad, List<string> Cidrler, string? Kurum, int ErtSunucu);
-record SegmentIstek(string? Segment, int? Saat);
-record SegmentSatir(string Ip, string? Sunucu, string Port, string Exe, string Yol, string? Urun, bool Genel, bool Altyapi, bool Dinamik,
+record SegmentIstek(string? Segment, int? Saat, string? Etiket = null);
+record SegmentSatir(string Ip, string? Sunucu, string? Segment, string Port, string Exe, string Yol, string? Urun, bool Genel, bool Altyapi, bool Dinamik,
     long Baglanti, int Istemci, List<string> Istemciler, List<string> ErtUygulama, string ErtDurum, string? Son);
 record SegmentGiden(string Ip, string? Sunucu, string Exe, string Yol, string? Urun, bool Genel, long Baglanti, int Hedef, List<string> Hedefler);
-record SegmentSunucu(string Ip, string? Sunucu, List<string> ErtUygulamalar, int ErtPort, int CbPort, bool CbVar);
-record SegmentSonuc(string Segment, List<string> Cidrler, int Saat, DateTimeOffset Baslangic, DateTimeOffset Bitis, List<SegmentSunucu> Sunucular,
+record SegmentSunucu(string Ip, string? Sunucu, string? Segment, List<string> ErtUygulamalar, int ErtPort, int CbPort, bool CbVar);
+record SegmentSonuc(string Tur, string Segment, List<string> Cidrler, int Saat, DateTimeOffset Baslangic, DateTimeOffset Bitis, List<SegmentSunucu> Sunucular,
     List<SegmentSatir> Satirlar, List<SegmentGiden> Giden, List<string> Mesajlar, long Ms);
 record SegmentIs(string Id, string Segment, bool Calisiyor, string Asama, int Toplam, int Biten, string? Hata, string Kullanici,
     DateTimeOffset Basladi, SegmentSonuc? Sonuc);
@@ -50,22 +50,44 @@ sealed class SegmentTaramaService(IConfiguration cfg, IHttpClientFactory factory
         if (_isler.Values.Count(v => v.Is.Calisiyor) >= Math.Max(1, cfg.GetValue("Segment:AyniAnda", 2)))
             throw new InvalidOperationException("Şu an çalışan segment taramaları var; biri bitince yeniden deneyin.");
         var env = await envanter.GetAsync(false, ct);
-        var (ad, cidrs) = Coz(env, req.Segment);
-        long adres = cidrs.Sum(c => { EnvanterSnapshot.TryParseCidr(c, out _, out int p); return 1L << (32 - p); });
-        long max = cfg.GetValue("Segment:MaxAdres", 65536L);
-        if (adres > max) throw new InvalidOperationException($"Segment çok büyük ({adres:N0} adres; en çok {max:N0} — Segment:MaxAdres). Daha küçük bir CIDR girin.");
         int saat = Math.Clamp(req.Saat ?? 24, 1, cfg.GetValue("Segment:MaxSaat", 168));
+        string ad; List<string> cidrs = []; HashSet<string>? ipler = null;
+        List<(string Arama, string? Kosul, string Etiket)> sorgular;
+        if (!string.IsNullOrWhiteSpace(req.Etiket))
+        {
+            // Etiket (kullanıcı: "segment değil kayıtlı etiketler üzerinden de"): etiketli sunucular (ana etiket alt etiketleri de kapsar),
+            // TERM(ip) + local_ip IN (...) ile Segment:ParcaIp (40) IP'lik sorgular
+            ad = req.Etiket.Trim();
+            var list = env.TagIps(ad).Where(ip => LookupQuery.TryParseIpv4(ip, out _)).Distinct().ToList();
+            if (list.Count == 0) throw new InvalidOperationException($"Bu etikette sunucu yok: {ad}");
+            int maxIp = cfg.GetValue("Segment:EtiketMaxIp", 2000);
+            if (list.Count > maxIp) throw new InvalidOperationException($"Etikette {list.Count:N0} sunucu var; en çok {maxIp:N0} (Segment:EtiketMaxIp).");
+            ipler = list.ToHashSet();
+            sorgular = list.Chunk(Math.Clamp(cfg.GetValue("Segment:ParcaIp", 40), 1, 200)).Select(c => (
+                $"({string.Join(" OR ", c.Select(ip => $"TERM({ip})"))}) local_ip IN ({string.Join(",", c.Select(ip => $"\"{ip}\""))})",
+                (string?)null, $"{c[0]} … ({c.Length} IP)")).ToList();
+        }
+        else
+        {
+            (ad, cidrs) = Coz(env, req.Segment);
+            long adres = cidrs.Sum(c => { EnvanterSnapshot.TryParseCidr(c, out _, out int p); return 1L << (32 - p); });
+            long max = cfg.GetValue("Segment:MaxAdres", 65536L);
+            if (adres > max) throw new InvalidOperationException($"Segment çok büyük ({adres:N0} adres; en çok {max:N0} — Segment:MaxAdres). Daha küçük bir CIDR girin.");
+            sorgular = Desenler(cidrs).Chunk(Math.Clamp(cfg.GetValue("Segment:ParcaDesen", 16), 1, 256)).Select(g => (
+                $"({string.Join(" OR ", g.Select(x => $"local_ip=\"{x.Desen}\""))})",
+                (string?)string.Join(" OR ", g.SelectMany(x => x.Cidrler).Distinct().Select(c => $"cidrmatch(\"{c}\", local_ip)")),
+                string.Join(", ", g.Select(x => x.Desen)))).ToList();
+        }
         var id = Guid.NewGuid().ToString("N")[..12];
         var cts = new CancellationTokenSource();
-        var desen = Desenler(cidrs);
-        var parca = desen.Chunk(Math.Clamp(cfg.GetValue("Segment:ParcaDesen", 16), 1, 256)).ToList();
-        _isler[id] = (new SegmentIs(id, ad, true, "Carbon Black sorgulanıyor", parca.Count, 0, null, user, DateTimeOffset.Now, null), cts);
-        log.LogInformation("Segment tarama: {User} {Segment} ({Cidr}), {Saat} saat, {Parca} sorgu", user, ad, string.Join(",", cidrs), saat, parca.Count);
+        string tur = ipler != null ? "etiket" : "segment";
+        _isler[id] = (new SegmentIs(id, (ipler != null ? "Etiket " : "") + ad, true, "Carbon Black sorgulanıyor", sorgular.Count, 0, null, user, DateTimeOffset.Now, null), cts);
+        log.LogInformation("Segment tarama: {User} {Tur} {Ad} ({Cidr}), {Saat} saat, {Parca} sorgu", user, tur, ad, string.Join(",", cidrs), saat, sorgular.Count);
         _ = Task.Run(async () =>
         {
             try
             {
-                var sonuc = await TaraAsync(id, env, ad, cidrs, parca, saat, cts.Token);
+                var sonuc = await TaraAsync(id, env, tur, ad, cidrs, ipler, sorgular, saat, cts.Token);
                 Set(id, i => i with { Calisiyor = false, Asama = "Bitti", Sonuc = sonuc });
             }
             catch (OperationCanceledException) { Set(id, i => i with { Calisiyor = false, Asama = "Durduruldu" }); }
@@ -126,8 +148,8 @@ sealed class SegmentTaramaService(IConfiguration cfg, IHttpClientFactory factory
     static bool InCidrs(string ip, List<(uint Net, int P)> cs) =>
         EnvanterSnapshot.TryToUInt(ip, out uint a) && cs.Any(c => (a & EnvanterSnapshot.Mask(c.P)) == c.Net);
 
-    async Task<SegmentSonuc> TaraAsync(string id, EnvanterSnapshot env, string ad, List<string> cidrs,
-        List<(string Desen, List<string> Cidrler)[]> parca, int saat, CancellationToken ct)
+    async Task<SegmentSonuc> TaraAsync(string id, EnvanterSnapshot env, string tur, string ad, List<string> cidrs, HashSet<string>? ipler,
+        List<(string Arama, string? Kosul, string Etiket)> sorgular, int saat, CancellationToken ct)
     {
         var sw = System.Diagnostics.Stopwatch.StartNew();
         var s = cfg.GetSection("Splunk");
@@ -136,14 +158,13 @@ sealed class SegmentTaramaService(IConfiguration cfg, IHttpClientFactory factory
         var cs = cidrs.Select(c => { EnvanterSnapshot.TryParseCidr(c, out uint n, out int p); return (n, p); }).ToList();
         var mesaj = new List<string>();
         var rows = new List<Dictionary<string, string>>();
-        foreach (var grup in parca)
+        bool Icinde(string ip) => ipler?.Contains(ip) ?? InCidrs(ip, cs);
+        foreach (var (arama, kosul, etiket) in sorgular)
         {
             ct.ThrowIfCancellationRequested();
-            string desen = string.Join(" OR ", grup.Select(g => $"local_ip=\"{g.Desen}\""));
-            string kesin = string.Join(" OR ", grup.SelectMany(g => g.Cidrler).Distinct().Select(c => $"cidrmatch(\"{c}\", local_ip)"));
             string spl = $"""
-                search index={index} sourcetype="{sourcetype}" ({desen})
-                | where {kesin}
+                search index={index} sourcetype="{sourcetype}" {arama}
+                {(kosul != null ? "| where " + kosul : "")}
                 | eval yon=if(lower(direction)=="outbound", "out", "in"), yol=coalesce(process_path, process_name, "-"),
                        port=if(yon=="out", "", local_port)
                 | stats count dc(remote_ip) as peers values(remote_ip) as ornek max(_time) as son by local_ip yon port yol
@@ -151,13 +172,13 @@ sealed class SegmentTaramaService(IConfiguration cfg, IHttpClientFactory factory
                 """;
             try
             {
-                var res = await SplunkService.ExportAsync(spl, new LookupQuery(cidrs[0].Split('/')[0], bas, bit), cfg, factory.CreateClient("splunk"), ct, "Splunk");
+                var res = await SplunkService.ExportAsync(spl, new LookupQuery(ipler?.First() ?? cidrs[0].Split('/')[0], bas, bit), cfg, factory.CreateClient("splunk"), ct, "Splunk");
                 rows.AddRange(res.Rows);
                 mesaj.AddRange(res.Messages);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                mesaj.Add($"{string.Join(", ", grup.Select(g => g.Desen))}: {ex.Message}");
+                mesaj.Add($"{etiket}: {ex.Message}");
             }
             Set(id, i => i with { Biten = i.Biten + 1, Asama = $"Carbon Black sorgulanıyor ({i.Biten + 1} / {i.Toplam})" });
         }
@@ -176,7 +197,7 @@ sealed class SegmentTaramaService(IConfiguration cfg, IHttpClientFactory factory
         var satir = new List<SegmentSatir>(); var giden = new List<SegmentGiden>();
         foreach (var r in rows)
         {
-            if (V(r, "local_ip") is not { } ip || !InCidrs(ip, cs)) continue;
+            if (V(r, "local_ip") is not { } ip || !Icinde(ip)) continue;
             string yol = V(r, "yol") ?? "-", exe = Exe(yol);
             long n = long.TryParse(V(r, "count"), out var c) ? c : 1; int peers = int.TryParse(V(r, "peers"), out var pe) ? pe : 0;
             var ornek = Ornek(r, ip);
@@ -185,7 +206,7 @@ sealed class SegmentTaramaService(IConfiguration cfg, IHttpClientFactory factory
             var ert = env.AppsOnIp(ip).Where(h => h.Port == port).ToList();
             var ertAd = ert.Select(h => h.AppName).OfType<string>().Distinct().ToList();
             string durum = ert.Count == 0 ? "yok" : ertAd.Count == 0 ? "bos" : "kayitli";
-            satir.Add(new(ip, Host(ip), port, exe, yol, Urun(yol, exe), SurecAi.GenelExe(exe, yol), infra.Contains(port),
+            satir.Add(new(ip, Host(ip), env.FindSegment(ip)?.Label, port, exe, yol, Urun(yol, exe), SurecAi.GenelExe(exe, yol), infra.Contains(port),
                 int.TryParse(port, out int pn) && pn >= dyn, n, peers, ornek.Take(6).Select(Ad).ToList(), ertAd, durum, Zaman(V(r, "son"))));
         }
         // aynı IP + exe'de gelen satırı olan giden kayıtları "yalnız giden" listesinden çıkar; giden aynı exe birleştirilir
@@ -193,14 +214,14 @@ sealed class SegmentTaramaService(IConfiguration cfg, IHttpClientFactory factory
         giden = giden.Where(g => !gelenExe.Contains((g.Ip, g.Yol))).GroupBy(g => (g.Ip, g.Yol))
             .Select(g => g.First() with { Baglanti = g.Sum(x => x.Baglanti), Hedef = g.Max(x => x.Hedef) }).ToList();
 
-        var ipler = env.HostIps.Where(ip => InCidrs(ip, cs)).Concat(satir.Select(x => x.Ip)).Concat(giden.Select(x => x.Ip)).Distinct().ToList();
-        var sunucular = ipler.Select(ip => new SegmentSunucu(ip, Host(ip),
+        var tum = (ipler ?? env.HostIps.Where(ip => InCidrs(ip, cs))).Concat(satir.Select(x => x.Ip)).Concat(giden.Select(x => x.Ip)).Distinct().ToList();
+        var sunucular = tum.Select(ip => new SegmentSunucu(ip, Host(ip), env.FindSegment(ip)?.Label,
                 env.AppNamesOnIp(ip).Where(a => !env.IsSystemApp(a)).Take(6).ToList(),
                 env.AppsOnIp(ip).Select(h => h.Port).OfType<string>().Distinct().Count(),
                 satir.Where(x => x.Ip == ip).Select(x => x.Port).Distinct().Count(),
                 satir.Any(x => x.Ip == ip) || giden.Any(x => x.Ip == ip)))
             .OrderBy(x => EnvanterSnapshot.TryToUInt(x.Ip, out uint u) ? u : 0).ToList();
-        return new SegmentSonuc(ad, cidrs, saat, bas, bit, sunucular,
+        return new SegmentSonuc(tur, ad, cidrs, saat, bas, bit, sunucular,
             satir.OrderBy(x => EnvanterSnapshot.TryToUInt(x.Ip, out uint u) ? u : 0).ThenBy(x => int.TryParse(x.Port, out int p) ? p : 99999).ToList(),
             giden.OrderBy(x => EnvanterSnapshot.TryToUInt(x.Ip, out uint u) ? u : 0).ThenByDescending(x => x.Baglanti).ToList(),
             mesaj.Distinct().Take(20).ToList(), sw.ElapsedMilliseconds);

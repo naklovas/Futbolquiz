@@ -103,8 +103,8 @@
 <body>
 <header>
   <img src="deltaflow.svg" alt="">
-  <div><h1>Segment tarama · gelen portlar ve exe'ler</h1>
-    <div class="sub">Segmentteki bütün IP'lerin Carbon Black'te görülen gelen portları ve o portu kabul eden programlar · ERT ile karşılaştırma</div></div>
+  <div><h1>Segment / etiket tarama · gelen portlar ve exe'ler</h1>
+    <div class="sub">Segmentteki ya da etiketteki bütün IP'lerin Carbon Black'te görülen gelen portları ve o portu kabul eden programlar · ERT ile karşılaştırma</div></div>
   <span class="sp"></span>
   <a href="eksik.html">ERT eksikleri ↗</a>
   <a href="./">← DeltaFlow</a>
@@ -113,6 +113,7 @@
 <main>
   <section class="panel">
     <div class="segrow">
+      <select id="tur" title="Neye göre taransın"><option value="segment">Segment</option><option value="etiket">Etiket</option></select>
       <input id="seg" list="segList" placeholder="Segment adı ya da CIDR (ör. 10.1.2.0/24)" autocomplete="off">
       <datalist id="segList"></datalist>
       <label class="small muted">Carbon Black aralığı <select id="saat"><option value="1">1 saat</option><option value="6">6 saat</option>
@@ -130,7 +131,7 @@
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const fmt = n => Number(n || 0).toLocaleString("tr-TR");
-const st = { segs: [], job: null, data: null, timer: null, yetki: {}, q: "", alt: false, dyn: false, genel: false, durum: "", sort: "ip", desc: false };
+const st = { tur: "segment", tags: [], segs: [], job: null, data: null, timer: null, yetki: {}, q: "", alt: false, dyn: false, genel: false, durum: "", sort: "ip", desc: false };
 const ipNum = ip => ip.split(".").reduce((a, b) => a * 256 + +b, 0);
 
 async function api(url, opt) {
@@ -142,24 +143,33 @@ async function api(url, opt) {
 
 async function loadSegs() {
   try {
-    st.segs = await api("api/segment/liste");
-    $("#segList").innerHTML = st.segs.map(s => `<option value="${esc(s.ad)}">${esc(s.cidrler.join(", "))}${s.kurum ? " · " + esc(s.kurum) : ""} · ERT'de ${s.ertSunucu} sunucu</option>`).join("");
-    segInfo();
+    [st.segs, st.tags] = await Promise.all([api("api/segment/liste"), api("api/etiketler").then(b => b.etiketler || []).catch(() => [])]);
+    fillList();
   } catch (e) { $("#warn").innerHTML = `<div class="warn">Segment listesi alınamadı: ${esc(e.message)}</div>`; }
 }
+// Segment ya da etiket listesi (etiket: ana etiket seçilince alt etiketli sunucular da gelir)
+function fillList() {
+  $("#seg").placeholder = st.tur === "etiket" ? "Etiket (ör. VERIAMBARI ya da MOBILBANKACILIK/MOBIL APP)" : "Segment adı ya da CIDR (ör. 10.1.2.0/24)";
+  $("#segList").innerHTML = st.tur === "etiket"
+    ? st.tags.map(t => `<option value="${esc(t.ad)}">${t.sunucu} sunucu${t.aciklama ? " · " + esc(t.aciklama) : ""}</option>`).join("")
+    : st.segs.map(s => `<option value="${esc(s.ad)}">${esc(s.cidrler.join(", "))}${s.kurum ? " · " + esc(s.kurum) : ""} · ERT'de ${s.ertSunucu} sunucu</option>`).join("");
+  segInfo();
+}
 function segInfo() {
-  const v = $("#seg").value.trim(), s = st.segs.find(x => x.ad.toLowerCase() === v.toLowerCase());
+  const v = $("#seg").value.trim().toLowerCase();
+  if (st.tur === "etiket") { const t = st.tags.find(x => x.ad.toLowerCase() === v); $("#segInfo").textContent = t ? `${t.sunucu} sunucu` : ""; return; }
+  const s = st.segs.find(x => x.ad.toLowerCase() === v);
   $("#segInfo").textContent = s ? `${s.cidrler.join(", ")} · ERT'de ${s.ertSunucu} sunucu` : /\/\d+$/.test(v) ? "CIDR" : "";
 }
 
 async function start() {
   const seg = $("#seg").value.trim();
-  if (!seg) return alert("Segment adı ya da CIDR girin.");
+  if (!seg) return alert(st.tur === "etiket" ? "Etiket girin." : "Segment adı ya da CIDR girin.");
   $("#warn").innerHTML = ""; $("#res").innerHTML = "";
   try {
-    const j = await api("api/segment/tarama", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ segment: seg, saat: +$("#saat").value }) });
+    const j = await api("api/segment/tarama", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ [st.tur]: seg, saat: +$("#saat").value }) });
     st.job = j.id;
-    history.replaceState(null, "", "?" + new URLSearchParams({ segment: seg, saat: $("#saat").value }));
+    history.replaceState(null, "", "?" + new URLSearchParams({ [st.tur]: seg, saat: $("#saat").value }));
     poll(j);
   } catch (e) { $("#warn").innerHTML = `<div class="warn">${esc(e.message)}</div>`; }
 }
@@ -178,7 +188,7 @@ async function poll(j) {
 function rows() {
   const q = st.q.toLowerCase();
   let r = st.data.satirlar.filter(x => (st.alt || !x.altyapi) && (st.dyn || !x.dinamik) && (st.genel || !x.genel) && (!st.durum || x.ertDurum === st.durum)
-    && (!q || [x.ip, x.sunucu, x.port, x.exe, x.yol, x.urun, ...x.ertUygulama, ...x.istemciler].some(v => (v || "").toLowerCase().includes(q))));
+    && (!q || [x.ip, x.sunucu, x.segment, x.port, x.exe, x.yol, x.urun, ...x.ertUygulama, ...x.istemciler].some(v => (v || "").toLowerCase().includes(q))));
   const key = { ip: x => ipNum(x.ip) * 1e5 + (+x.port || 0), port: x => +x.port || 0, exe: x => x.exe.toLowerCase(), baglanti: x => x.baglanti, istemci: x => x.istemci,
     ert: x => ({ yok: 0, bos: 1, kayitli: 2 }[x.ertDurum]), son: x => x.son || "" }[st.sort];
   r.sort((a, b) => { const A = key(a), B = key(b); return (A < B ? -1 : A > B ? 1 : 0) * (st.desc ? -1 : 1); });
@@ -196,7 +206,7 @@ function render() {
     const ert = x.ertDurum === "kayitli" ? esc(x.ertUygulama.join(", ")) : x.ertDurum === "bos" ? `<span class="st bos">ERT'de adı boş</span>` : `<span class="st yok">ERT'de yok</span>`;
     return `<tr class="${first ? "grp" : "cont"}${x.altyapi || x.genel ? " alt" : ""}">
       <td class="ip ipc"><a href="./?ip=${encodeURIComponent(x.ip)}" target="_blank" rel="noopener" title="IP topolojisini aç">${esc(x.ip)}</a></td>
-      <td class="hc">${esc(x.sunucu || "")}</td>
+      <td class="hc">${esc(x.sunucu || "")}${d.tur === "etiket" && x.segment ? `<div class="small muted">${esc(x.segment)}</div>` : ""}</td>
       <td class="mono"><b>${esc(x.port)}</b>${x.altyapi ? ' <span class="small muted">altyapı</span>' : ""}${x.dinamik ? ' <span class="small muted">dinamik</span>' : ""}</td>
       <td title="${esc(x.yol)}"><b>${esc(x.exe)}</b>${x.urun ? `<span class="urun">${esc(x.urun)}</span>` : ""}<div class="small muted mono">${esc(x.yol.length > 70 ? "…" + x.yol.slice(-70) : x.yol)}</div></td>
       <td>${fmt(x.baglanti)}</td>
@@ -207,7 +217,7 @@ function render() {
   const yok = d.sunucular.filter(s => !s.cbVar && s.ertPort > 0);
   const giden = d.giden.filter(g => st.genel || !g.genel);
   $("#res").innerHTML = `
-    <div class="sub" style="margin-top:8px">${esc(d.segment)} · ${esc(d.cidrler.join(", "))} · Carbon Black ${new Date(d.baslangic).toLocaleString("tr-TR")} – ${new Date(d.bitis).toLocaleString("tr-TR")} · ${(d.ms / 1000).toFixed(1)} sn</div>
+    <div class="sub" style="margin-top:8px">${d.tur === "etiket" ? "Etiket " : ""}${esc(d.segment)}${d.cidrler.length ? " · " + esc(d.cidrler.join(", ")) : ""} · Carbon Black ${new Date(d.baslangic).toLocaleString("tr-TR")} – ${new Date(d.bitis).toLocaleString("tr-TR")} · ${(d.ms / 1000).toFixed(1)} sn</div>
     ${d.mesajlar.length ? `<div class="warn" style="margin-top:8px">${d.mesajlar.map(esc).join("<br>")}</div>` : ""}
     <div class="stats">
       <div class="stat"><b>${fmt(d.sunucular.length)}</b><span>IP</span></div>
@@ -254,8 +264,8 @@ function render() {
 function csv() {
   if (!st.yetki.disari) return alert("Dışa aktarma yetkiniz yok. Yetki DokuPanel'den verilir.");
   const C = v => `"${String(v ?? "").replace(/"/g, '""')}"`;
-  const lines = ["IP;SUNUCU;PORT;EXE;YOL;BİLİNEN ÜRÜN;BAĞLANTI;İSTEMCİ SAYISI;İSTEMCİLER;ERT DURUMU;ERT UYGULAMASI;SON GÖRÜLME"]
-    .concat(rows().map(x => [x.ip, x.sunucu, x.port, x.exe, x.yol, x.urun, x.baglanti, x.istemci, x.istemciler.join(", "),
+  const lines = ["IP;SUNUCU;SEGMENT;PORT;EXE;YOL;BİLİNEN ÜRÜN;BAĞLANTI;İSTEMCİ SAYISI;İSTEMCİLER;ERT DURUMU;ERT UYGULAMASI;SON GÖRÜLME"]
+    .concat(rows().map(x => [x.ip, x.sunucu, x.segment, x.port, x.exe, x.yol, x.urun, x.baglanti, x.istemci, x.istemciler.join(", "),
       { yok: "ERT'de yok", bos: "ERT'de adı boş", kayitli: "kayıtlı" }[x.ertDurum], x.ertUygulama.join(", "), x.son].map(C).join(";")));
   const a = document.createElement("a");
   a.href = URL.createObjectURL(new Blob(["\uFEFF" + lines.join("\r\n")], { type: "text/csv;charset=utf-8" }));
@@ -264,6 +274,7 @@ function csv() {
 }
 
 $("#tara").addEventListener("click", start);
+$("#tur").addEventListener("change", e => { st.tur = e.target.value; $("#seg").value = ""; fillList(); });
 $("#seg").addEventListener("keydown", e => { if (e.key === "Enter") start(); });
 $("#seg").addEventListener("input", segInfo);
 $("#dur").addEventListener("click", async () => { if (st.job) { await fetch(`api/segment/tarama/${st.job}/durdur`, { method: "POST" }); } });
@@ -274,7 +285,8 @@ fetch("api/me").then(r => r.ok ? r.json() : null).then(me => {
   if (st.data) render();
 }).catch(() => {});
 const p = new URLSearchParams(location.search);
-if (p.get("segment")) $("#seg").value = p.get("segment");
+if (p.get("etiket")) { st.tur = "etiket"; $("#tur").value = "etiket"; $("#seg").value = p.get("etiket"); }
+else if (p.get("segment")) $("#seg").value = p.get("segment");
 if (p.get("saat")) $("#saat").value = p.get("saat");
 loadSegs();
 </script>
