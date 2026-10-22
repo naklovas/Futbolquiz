@@ -230,9 +230,9 @@ function rows() {
   const q = st.q.toLowerCase();
   // Port 0 / boş: Carbon Black'te yerel portu olmayan gelen olaylar. Kullanıcı: aralarında çok iş uygulaması var, görünsün (kutucukla gizlenebilir)
   let r = st.data.satirlar.filter(x => (st.sifir || !sifir(x)) && (st.alt || !x.altyapi) && (st.dyn || !x.dinamik) && (st.genel || !x.genel) && (!st.durum || x.ertDurum === st.durum)
-    && (!q || [x.ip, x.sunucu, x.segment, x.port, x.exe, x.yol, x.urun, aiText(x.ip, x.exe), ...x.ertUygulama, ...x.istemciler].some(v => (v || "").toLowerCase().includes(q))));
+    && (!q || [x.ip, x.sunucu, x.segment, x.port, x.exe, x.yol, x.urun, aiText(x.ip, x.exe), nsText(x.ip, x.port), ...x.ertUygulama, ...x.istemciler].some(v => (v || "").toLowerCase().includes(q))));
   const key = { ip: x => ipNum(x.ip) * 1e5 + (+x.port || 0), port: x => +x.port || 0, exe: x => x.exe.toLowerCase(), baglanti: x => x.baglanti, istemci: x => x.istemci,
-    ert: x => ({ yok: 0, bos: 1, kayitli: 2 }[x.ertDurum]), son: x => x.son || "", ai: x => aiText(x.ip, x.exe).toLowerCase() || "\uffff" }[st.sort];
+    ert: x => ({ yok: 0, bos: 1, kayitli: 2 }[x.ertDurum]), son: x => x.son || "", ns: x => nsText(x.ip, x.port).toLowerCase() || "\uffff", ai: x => aiText(x.ip, x.exe).toLowerCase() || "\uffff" }[st.sort];
   r.sort((a, b) => { const A = key(a), B = key(b); return (A < B ? -1 : A > B ? 1 : 0) * (st.desc ? -1 : 1); });
   return r;
 }
@@ -245,6 +245,20 @@ function aiBar() {
   return `<div class="run" style="margin-top:10px"><div><span class="spinner"></span> 🤖 AI iş uygulamalarını tahmin ediyor · <b>${st.ai.biten} / ${st.ai.toplam}</b> sunucu (%${pct})${st.ai.kayitli ? ` · ${st.ai.kayitli} sunucuda kayıtlı tahmin kullanıldı` : ""}${Object.keys(st.ai.hatalar || {}).length ? ` · <span style="color:var(--err)">${Object.keys(st.ai.hatalar).length} hata</span>` : ""}</div><div class="bar"><i style="width:${Math.max(pct, 3)}%"></i></div></div>`;
 }
 const sifir = x => !x.port || x.port === "0";
+// Nessus / Tenable.sc (repository'deki son tarama): port başına web sunucusu, teknoloji, sertifika adı, dinleyen program
+const nsOf = (ip, port) => st.data?.nessus?.[ip]?.portlar?.find(p => p.port === String(port)) || null;
+const nsTek = p => p ? [...new Set([p.webSunucu, ...(p.teknoloji || [])].filter(Boolean))] : [];
+const nsText = (ip, port) => { const p = nsOf(ip, port); return p ? [nsTek(p).join(", "), p.sertifika.join(", "), p.dinleyen].filter(Boolean).join(" · ") : ""; };
+function nsCell(ip, port) {
+  const n = st.data.nessus?.[ip];
+  if (!n) return `<span class="small muted" title="Bu IP için Nessus repository'sinde (son tarama) kayıt yok">kayıt yok</span>`;
+  const p = nsOf(ip, port);
+  if (!p) return `<span class="small muted" title="Nessus bu IP'yi taramış ama bu port için bilgi yok${n.kimlikli === false ? " (kimlik bilgisiz tarama)" : ""}">—</span>`;
+  const tek = nsTek(p);
+  return `<div title="${esc(nsText(ip, port) + (p.servis ? "\nServis: " + p.servis : "") + (p.son ? "\nNessus son görülme: " + p.son : ""))}">${tek.map(t => `<span class="urun" style="margin:0 3px 2px 0">${esc(t)}</span>`).join("") || (p.servis ? `<span class="small">${esc(p.servis)}</span>` : `<span class="small muted">açık</span>`)}
+    ${p.sertifika.length ? `<div class="small mono">🔒 ${esc(p.sertifika.slice(0, 2).join(", "))}${p.sertifika.length > 2 ? " …" : ""}</div>` : ""}${p.dinleyen ? `<div class="small muted mono">${esc(p.dinleyen.split(/[\\/]/).pop())}</div>` : ""}</div>`;
+}
+const nsHost = ip => { const n = st.data.nessus?.[ip]; return n ? `<div class="small muted" title="Nessus son tarama ${esc(n.son || "")}${n.kimlikli ? " · kimlik bilgili" : n.kimlikli === false ? " · kimlik bilgisiz" : ""}${n.yazilim?.length ? "\nKurulu: " + esc(n.yazilim.slice(0, 25).join("; ")) : ""}">${esc(n.os || "Nessus")}${n.kimlikli === false ? " · dış tarama" : ""}</div>` : ""; };
 function render() {
   const d = st.data, all = d.satirlar.filter(x => !x.altyapi && !x.dinamik && !x.genel);
   const nSifir = d.satirlar.filter(sifir).length;
@@ -252,14 +266,17 @@ function render() {
   const r = rows();
   const th = (k, t) => `<th data-sort="${k}" class="${st.sort === k ? "on" : ""}">${t}<span class="arr">${st.sort === k ? (st.desc ? "▼" : "▲") : "↕"}</span></th>`;
   let last = null;
+  const ns = !!d.nessus;
+  const sadeceNs = ns ? Object.values(d.nessus).flatMap(n => n.portlar.filter(p => p.port !== "0" && !d.satirlar.some(x => x.ip === n.ip && x.port === p.port)).map(p => ({ n, p }))) : [];
   const body = r.map(x => {
     const first = x.ip !== last; last = x.ip;
     const ert = x.ertDurum === "kayitli" ? esc(x.ertUygulama.join(", ")) : x.ertDurum === "bos" ? `<span class="st bos">ERT'de adı boş</span>` : `<span class="st yok">ERT'de yok</span>`;
     return `<tr class="${first ? "grp" : "cont"}${x.altyapi || x.genel ? " alt" : ""}">
       <td class="ip ipc"><a href="./?ip=${encodeURIComponent(x.ip)}" target="_blank" rel="noopener" title="IP topolojisini aç">${esc(x.ip)}</a></td>
-      <td class="hc">${esc(x.sunucu || "")}${d.tur === "etiket" && x.segment ? `<div class="small muted">${esc(x.segment)}</div>` : ""}${first && st.ai?.sonuclar?.[x.ip]?.ozet ? `<div class="small" style="margin-top:4px;max-width:260px" title="${esc(st.ai.sonuclar[x.ip].ozet)}">🤖 ${esc(st.ai.sonuclar[x.ip].ozet.length > 110 ? st.ai.sonuclar[x.ip].ozet.slice(0, 110) + "…" : st.ai.sonuclar[x.ip].ozet)}</div>` : ""}</td>
+      <td class="hc">${esc(x.sunucu || "")}${d.tur === "etiket" && x.segment ? `<div class="small muted">${esc(x.segment)}</div>` : ""}${first && ns ? nsHost(x.ip) : ""}${first && st.ai?.sonuclar?.[x.ip]?.ozet ? `<div class="small" style="margin-top:4px;max-width:260px" title="${esc(st.ai.sonuclar[x.ip].ozet)}">🤖 ${esc(st.ai.sonuclar[x.ip].ozet.length > 110 ? st.ai.sonuclar[x.ip].ozet.slice(0, 110) + "…" : st.ai.sonuclar[x.ip].ozet)}</div>` : ""}</td>
       <td class="mono"><b>${esc(x.port || "—")}</b>${sifir(x) ? ' <span class="small muted" title="Carbon Black bu olayda yerel port vermedi">port yok</span>' : ""}${x.altyapi ? ' <span class="small muted">altyapı</span>' : ""}${x.dinamik ? ' <span class="small muted">dinamik</span>' : ""}</td>
       <td title="${esc(x.yol)}"><b>${esc(x.exe)}</b>${x.urun ? `<span class="urun">${esc(x.urun)}</span>` : ""}<div class="small muted mono">${esc(x.yol.length > 70 ? "…" + x.yol.slice(-70) : x.yol)}</div></td>
+      ${ns ? `<td>${nsCell(x.ip, x.port)}</td>` : ""}
       <td>${aiCell(x.ip, x.exe)}</td>
       <td>${fmt(x.baglanti)}</td>
       <td>${x.istemci}<div class="small muted">${esc(x.istemciler.slice(0, 3).join(", "))}${x.istemci > 3 ? " …" : ""}</div></td>
@@ -271,6 +288,7 @@ function render() {
   $("#res").innerHTML = `
     <div class="sub" style="margin-top:8px">${d.tur === "etiket" ? "Etiket " : ""}${esc(d.segment)}${d.cidrler.length ? " · " + esc(d.cidrler.join(", ")) : ""} · Carbon Black ${new Date(d.baslangic).toLocaleString("tr-TR")} – ${new Date(d.bitis).toLocaleString("tr-TR")} · ${(d.ms / 1000).toFixed(1)} sn</div>
     ${d.mesajlar.length ? `<div class="warn" style="margin-top:8px">${d.mesajlar.map(esc).join("<br>")}</div>` : ""}
+    ${d.nessusDurum ? `<div class="small ${ns ? "muted" : ""}" style="margin-top:6px${ns ? "" : ";color:var(--warn)"}">🛡 ${esc(d.nessusDurum)}${ns ? " · repository'deki son tarama sonuçları (yeni tarama yapılmaz)" : ""}</div>` : ""}
     ${aiBar()}
     <div class="stats">
       <div class="stat"><b>${fmt(d.sunucular.length)}</b><span>IP</span></div>
@@ -296,13 +314,19 @@ function render() {
       ${st.ai && !st.ai.calisiyor && Object.keys(st.ai.hatalar || {}).length ? `<span class="small" style="color:var(--err)">${Object.keys(st.ai.hatalar).length} sunucuda AI hatası</span>` : ""}
       ${st.yetki.disari ? `<button id="csv" type="button">Excel'e aktar</button>` : ""}
     </div>
-    <div class="grid"><table><thead><tr>${th("ip", "IP")}<th>Sunucu</th>${th("port", "Port")}${th("exe", "Program (exe)")}${th("ai", "AI tahmini")}${th("baglanti", "Bağlantı")}${th("istemci", "İstemci")}${th("ert", "ERT")}${th("son", "Son görülme")}</tr></thead>
-      <tbody>${body || `<tr><td colspan="9" class="empty">Filtreye uyan gelen port yok.</td></tr>`}</tbody></table></div>
+    <div class="grid"><table><thead><tr>${th("ip", "IP")}<th>Sunucu</th>${th("port", "Port")}${th("exe", "Program (exe)")}${ns ? th("ns", "Teknoloji (Nessus)") : ""}${th("ai", "AI tahmini")}${th("baglanti", "Bağlantı")}${th("istemci", "İstemci")}${th("ert", "ERT")}${th("son", "Son görülme")}</tr></thead>
+      <tbody>${body || `<tr><td colspan="${ns ? 10 : 9}" class="empty">Filtreye uyan gelen port yok.</td></tr>`}</tbody></table></div>
     <details data-k="giden" ${st.open.has("giden") ? "open" : ""} ${giden.length ? "" : "hidden"}><summary>Gelen bağlantısı görülmeyen programlar (yalnız giden) · ${fmt(giden.length)}</summary>
       <div class="grid" style="margin-top:8px;max-height:400px"><table><thead><tr><th>IP</th><th>Sunucu</th><th>Program</th><th>AI tahmini</th><th>Giden bağlantı</th><th>Gittiği yerler</th></tr></thead><tbody>
       ${giden.map(g => `<tr><td class="ip"><a href="./?ip=${encodeURIComponent(g.ip)}" target="_blank" rel="noopener">${esc(g.ip)}</a></td><td>${esc(g.sunucu || "")}</td>
         <td title="${esc(g.yol)}"><b>${esc(g.exe)}</b>${g.urun ? `<span class="urun">${esc(g.urun)}</span>` : ""}</td><td>${aiCell(g.ip, g.exe)}</td><td>${fmt(g.baglanti)}</td><td class="small">${esc(g.hedefler.join(", "))}</td></tr>`).join("")}
       </tbody></table></div></details>
+    <details data-k="nessus" ${st.open.has("nessus") ? "open" : ""} ${sadeceNs.length ? "" : "hidden"}><summary>Nessus'un açık gördüğü ama bu aralıkta Carbon Black'te gelen bağlantısı olmayan portlar · ${fmt(sadeceNs.length)}</summary>
+      <div class="grid" style="margin-top:8px;max-height:400px"><table><thead><tr><th>IP</th><th>Sunucu</th><th>Port</th><th>Servis</th><th>Teknoloji (Nessus)</th><th>ERT</th><th>Nessus son görülme</th></tr></thead><tbody>
+      ${sadeceNs.map(({ n, p }) => { const s = d.sunucular.find(x => x.ip === n.ip); return `<tr><td class="ip"><a href="./?ip=${encodeURIComponent(n.ip)}" target="_blank" rel="noopener">${esc(n.ip)}</a></td><td>${esc(s?.sunucu || n.dns || "")}${nsHost(n.ip)}</td>
+        <td class="mono"><b>${esc(p.port)}</b>/${esc(p.protokol)}</td><td class="small">${esc(p.servis || "")}</td><td>${nsCell(n.ip, p.port)}</td><td class="small">${esc(s?.ertUygulamalar?.join(", ") || "")}</td><td class="small muted">${esc(p.son || "")}</td></tr>`; }).join("")}
+      </tbody></table></div>
+      <div class="small muted" style="margin-top:6px">Port açık ama bu aralıkta bağlantı gelmemiş olabilir, Carbon Black ajanı olmayabilir ya da Nessus kaydı eski olabilir.</div></details>
     <details data-k="yok" ${st.open.has("yok") ? "open" : ""} ${yok.length ? "" : "hidden"}><summary>ERT'de kayıtlı ama bu aralıkta Carbon Black verisi olmayan sunucular · ${fmt(yok.length)}</summary>
       <div class="small" style="margin-top:8px">${yok.map(s => `<span class="chips"><span class="mono">${esc(s.ip)}</span></span> ${esc(s.sunucu || "")} <span class="muted">${esc(s.ertUygulamalar.join(", "))}</span>`).join("<br>")}</div>
       <div class="small muted" style="margin-top:6px">Carbon Black ajanı olmayabilir, sunucu kapalı olabilir ya da bu aralıkta ağ olayı olmamış olabilir.</div></details>`;
@@ -324,9 +348,10 @@ function render() {
 function csv() {
   if (!st.yetki.disari) return alert("Dışa aktarma yetkiniz yok. Yetki DokuPanel'den verilir.");
   const C = v => `"${String(v ?? "").replace(/"/g, '""')}"`;
-  const lines = ["IP;SUNUCU;SEGMENT;PORT;EXE;YOL;BİLİNEN ÜRÜN;AI TAHMİNİ;AI ERT KARŞILIĞI;AI GÜVEN;AI SUNUCU ÖZETİ;BAĞLANTI;İSTEMCİ SAYISI;İSTEMCİLER;ERT DURUMU;ERT UYGULAMASI;SON GÖRÜLME"]
+  const lines = ["IP;SUNUCU;SEGMENT;PORT;EXE;YOL;BİLİNEN ÜRÜN;AI TAHMİNİ;AI ERT KARŞILIĞI;AI GÜVEN;AI SUNUCU ÖZETİ;NESSUS TEKNOLOJİ;NESSUS SERTİFİKA ADI;NESSUS DİNLEYEN;NESSUS İŞLETİM SİSTEMİ;BAĞLANTI;İSTEMCİ SAYISI;İSTEMCİLER;ERT DURUMU;ERT UYGULAMASI;SON GÖRÜLME"]
     .concat(rows().map(x => { const a = aiOf(x.ip, x.exe); return [x.ip, x.sunucu, x.segment, x.port, x.exe, x.yol, x.urun,
-      a?.u?.uygulama, a?.u?.ertKarsiligi, a?.u ? a.u.guven : "", a?.ozet, x.baglanti, x.istemci, x.istemciler.join(", "),
+      a?.u?.uygulama, a?.u?.ertKarsiligi, a?.u ? a.u.guven : "", a?.ozet,
+      nsTek(nsOf(x.ip, x.port)).join(", "), nsOf(x.ip, x.port)?.sertifika.join(", "), nsOf(x.ip, x.port)?.dinleyen, st.data.nessus?.[x.ip]?.os, x.baglanti, x.istemci, x.istemciler.join(", "),
       { yok: "ERT'de yok", bos: "ERT'de adı boş", kayitli: "kayıtlı" }[x.ertDurum], x.ertUygulama.join(", "), x.son].map(C).join(";"); }));
   const a = document.createElement("a");
   a.href = URL.createObjectURL(new Blob(["\uFEFF" + lines.join("\r\n")], { type: "text/csv;charset=utf-8" }));

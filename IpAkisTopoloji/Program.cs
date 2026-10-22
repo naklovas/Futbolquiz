@@ -30,6 +30,10 @@ builder.Services.AddHttpClient("opinnate", c => c.Timeout = TimeSpan.FromMinutes
         return h;
     });
 
+// Nessus / Tenable.sc (Nessus.cs): iç sertifika — IgnoreSslErrors yalnız bu bağlantıyı etkiler
+builder.Services.AddHttpClient("nessus", c => c.Timeout = TimeSpan.FromMinutes(builder.Configuration.GetValue("Nessus:TimeoutMinutes", 2)))
+    .ConfigurePrimaryHttpMessageHandler(() => CreateHandler(builder.Configuration.GetValue("Nessus:IgnoreSslErrors", false)));
+
 builder.Services.AddHttpClient("ai", c => c.Timeout = TimeSpan.FromMinutes(builder.Configuration.GetValue("Ai:TimeoutMinutes", 3)))
     .ConfigurePrimaryHttpMessageHandler(() => CreateHandler(builder.Configuration.GetValue("Ai:IgnoreSslErrors", true)));
 
@@ -37,6 +41,7 @@ builder.Services.AddSingleton<EnvanterService>();
 builder.Services.AddSingleton<IslevService>();
 builder.Services.AddSingleton<EksikService>();
 builder.Services.AddSingleton<SegmentTaramaService>();
+builder.Services.AddSingleton<NessusService>();
 builder.Services.AddMemoryCache();
 
 // Windows Authentication: IIS'te IIS'in Windows Auth'u, Kestrel'de Negotiate kullanılır.
@@ -143,7 +148,7 @@ app.UseStaticFiles(new StaticFileOptions
 // Giriş yapan kullanıcı (başlıkta gösterilir)
 app.MapGet("/api/me", (HttpContext ctx, IConfiguration cfg) => new { name = ctx.User?.Identity?.Name, yetki = Yetki.Hepsi(cfg, ctx) });
 // Yayınlanan sürüm (DLL tarihi): kullanıcı dosyaları elle kopyalıyor, eski DLL'i ayırt etmek için sayfalarda gösterilir
-app.MapGet("/api/surum", () => new { surum = File.GetLastWriteTime(typeof(Yetki).Assembly.Location).ToString("yyyy-MM-dd HH:mm"), segmentAi = true });
+app.MapGet("/api/surum", () => new { surum = File.GetLastWriteTime(typeof(Yetki).Assembly.Location).ToString("yyyy-MM-dd HH:mm"), segmentAi = true, nessus = true });
 
 app.MapGet("/api/appliances", (IConfiguration cfg) =>
     cfg.GetSection("Servers").GetChildren()
@@ -770,6 +775,20 @@ app.MapPost("/api/segment/tarama/{id}/ai", async (string id, SegmentAiIstek? req
 });
 app.MapGet("/api/segment/tarama/{id}/ai", (string id, SegmentTaramaService seg) =>
     seg.AiDurum(id) is { } d ? Results.Ok(d) : Results.NotFound(new { error = "AI tahmini başlatılmadı." }));
+// Nessus kurulum testi: anahtarın gördüğü repository'ler; bir IP'nin ham kayıtları (tum=true: plugin filtresiz ilk sayfa) + çözümlenmiş özet
+app.MapGet("/api/nessus/repolar", async (HttpContext ctx, IConfiguration cfg, NessusService n, CancellationToken ct) =>
+{
+    if (!Yetki.Var(cfg, ctx, Yetki.Topoloji)) return Yetki.Red(ctx, "Nessus testi (topoloji)");
+    try { return Results.Ok(await n.RepolarAsync(ct)); }
+    catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested) { return Results.Json(new { error = ex.Message }, statusCode: 502); }
+});
+app.MapGet("/api/nessus/test", async (string ip, bool? tum, HttpContext ctx, IConfiguration cfg, NessusService n, CancellationToken ct) =>
+{
+    if (!Yetki.Var(cfg, ctx, Yetki.Topoloji)) return Yetki.Red(ctx, "Nessus testi (topoloji)");
+    if (!LookupQuery.TryParseIpv4(ip, out _)) return Results.BadRequest(new { error = "Geçerli bir IPv4 girin." });
+    try { return Results.Ok(await n.TestAsync(ip.Trim(), tum == true, ct)); }
+    catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested) { return Results.Json(new { error = ex.Message }, statusCode: 502); }
+});
 app.MapPost("/api/segment/tarama/{id}/ai/durdur", (string id, SegmentTaramaService seg) => { seg.AiDurdur(id); return Results.Ok(new { ok = true }); });
 
 // Versiyonlar (Versiyon.cs): işlev haritası + küme topolojisi birlikte; etiket başına son Islev:VersiyonSayisi (3).

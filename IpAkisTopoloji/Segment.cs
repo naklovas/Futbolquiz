@@ -17,7 +17,7 @@ record SegmentSatir(string Ip, string? Sunucu, string? Segment, string Port, str
 record SegmentGiden(string Ip, string? Sunucu, string Exe, string Yol, string? Urun, bool Genel, long Baglanti, int Hedef, List<string> Hedefler);
 record SegmentSunucu(string Ip, string? Sunucu, string? Segment, List<string> ErtUygulamalar, int ErtPort, int CbPort, bool CbVar);
 record SegmentSonuc(string Tur, string Segment, List<string> Cidrler, int Saat, DateTimeOffset Baslangic, DateTimeOffset Bitis, List<SegmentSunucu> Sunucular,
-    List<SegmentSatir> Satirlar, List<SegmentGiden> Giden, List<string> Mesajlar, long Ms);
+    List<SegmentSatir> Satirlar, List<SegmentGiden> Giden, List<string> Mesajlar, long Ms, Dictionary<string, NessusSunucu>? Nessus = null, string? NessusDurum = null);
 record SegmentIs(string Id, string Segment, bool Calisiyor, string Asama, int Toplam, int Biten, string? Hata, string Kullanici,
     DateTimeOffset Basladi, SegmentSonuc? Sonuc);
 
@@ -28,7 +28,7 @@ record SegmentAiDurum(bool Calisiyor, int Toplam, int Biten, Dictionary<string, 
     int Kayitli = 0, Dictionary<string, string>? Tarihler = null, string? Uyari = null);
 
 sealed class SegmentTaramaService(IConfiguration cfg, IHttpClientFactory factory, EnvanterService envanter, IslevService islev, EksikService eksik,
-    ILogger<SegmentTaramaService> log)
+    NessusService nessus, ILogger<SegmentTaramaService> log)
 {
     sealed class AiIs
     {
@@ -137,7 +137,8 @@ sealed class SegmentTaramaService(IConfiguration cfg, IHttpClientFactory factory
                     try { await gate.WaitAsync(a.Cts.Token); } catch (OperationCanceledException) { return; }
                     try
                     {
-                        var sonuc = await SurecAi.RunAsync(q, env, islev, eksik, a.Cts.Token);
+                        var sonuc = await SurecAi.RunAsync(q, env, islev, eksik, a.Cts.Token,
+                            r.Nessus?.TryGetValue(q.Ip!, out var ns) == true ? NessusService.Metin(ns) : null);
                         a.Sonuc[q.Ip!] = sonuc; a.Tarih[q.Ip!] = DateTime.Now.ToString("yyyy-MM-dd HH:mm"); a.Hata.TryRemove(q.Ip!, out _);
                         await AiYazAsync(sonuc, Exeler(q), user);
                     }
@@ -216,6 +217,7 @@ sealed class SegmentTaramaService(IConfiguration cfg, IHttpClientFactory factory
             try
             {
                 var sonuc = await TaraAsync(id, env, tur, ad, cidrs, ipler, sorgular, saat, cts.Token);
+                sonuc = await NessusEkleAsync(id, sonuc, cts.Token);
                 Set(id, i => i with { Calisiyor = false, Asama = "Bitti", Sonuc = sonuc });
                 try { await AiBaslatAsync(id, null, false, user, CancellationToken.None); }   // kendiliğinden AI tahmini (kayıtlılar sorulmaz)
                 catch (Exception ex)
@@ -233,6 +235,25 @@ sealed class SegmentTaramaService(IConfiguration cfg, IHttpClientFactory factory
             }
         });
         return _isler[id].Is;
+    }
+
+    // Nessus / Tenable.sc (Nessus.cs): taranan IP'lerin repository'deki son tarama bilgisi; hata taramayı bozmaz, NessusDurum'a yazılır
+    async Task<SegmentSonuc> NessusEkleAsync(string id, SegmentSonuc s, CancellationToken ct)
+    {
+        if (!nessus.Acik) return s;
+        var ips = s.Sunucular.Select(x => x.Ip).ToList();
+        Set(id, i => i with { Asama = $"Nessus (Tenable.sc) sorgulanıyor ({ips.Count} IP)" });
+        try
+        {
+            var n = await nessus.SunucularAsync(ips, (b, t) => Set(id, i => i with { Asama = $"Nessus (Tenable.sc) sorgulanıyor ({b + 1} / {t})" }), ct);
+            return s with { Nessus = n, NessusDurum = $"Nessus: {n.Count} / {ips.Count} IP'de tarama kaydı" };
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+        catch (Exception ex)
+        {
+            log.LogWarning(ex, "Segment tarama Nessus sorgusu başarısız");
+            return s with { NessusDurum = "Nessus sorgulanamadı: " + ex.Message };
+        }
     }
 
     void Set(string id, Func<SegmentIs, SegmentIs> f)

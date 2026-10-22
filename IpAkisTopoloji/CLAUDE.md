@@ -39,6 +39,7 @@ topoloji çizer ve şirket içi AI'a etki analizi yaptırır. Canlıda IIS'te, W
 | `F5Waf.cs` | F5 ASM / Bot Defense güvenlik logları (Splunk index=f5): erişimde engel kararı, IP görünümünde URI listesi |
 | `PortBilgisi.cs` | Port → işlev ve kesilirse duracak iş (AI prompt'u için) |
 | `Segment.cs` | Segment tarama: segmentteki tüm IP'lerin Carbon Black gelen portları + exe'leri, ERT karşılaştırması (`wwwroot/segment.html`) |
+| `Nessus.cs` | Nessus / Tenable.sc: repository'deki tarama sonuçlarından teknoloji, sertifika, OS, kurulu yazılım |
 | `Yetki.cs` | İşlem yetkileri (yazma, topoloji, dışa aktarma, toplu tahmin) — DokuPanel site kayıtları |
 | `AuthHelper.cs` | Kullanıcının verdiği DokuPanel yetki helper'ı (namespace `AppRel`), anahtar config'den |
 
@@ -392,6 +393,18 @@ erişim talepleri) — DB → şema → tablo ve kim erişiyor bilgisi buradan b
   "AI tahmini full boş" (canlı) üzerine sağlamlaştırma: AI işi kayıtlar okunmadan önce `_ai`ye yazılır (GET 404 vermesin), başlatma hatası
   `Uyari`ya düşer, iş programı yoksa açık uyarı; arayüz 404'te 80 sn bekler (eskiden 7,5 sn sonra vazgeçip kolonu boş bırakıyordu); exe eşleşmesi
   dosya adına indirgenir (AI tam yol, büyük harf ya da ".exe"siz yazsa da eşleşir).
+- **Nessus / Tenable.sc** (`Nessus.cs`, kullanıcı: "teknolojisi ASP mi PHP mi"; diğer projedeki guide): CANLI TARAMA YOK — repository'deki
+  birikmiş sonuçlar (`POST /rest/analysis`, sourceType cumulative, tool vulndetails, filtreler ip / pluginID / repository / lastSeen 0:MaxGun),
+  kimlik `x-apikey: accesskey=…; secretkey=…;` (anahtarlar yalnız appsettings.Production.json). Kullanıcının reposu **121** (`Nessus:Repolar`).
+  Bilgi plugin'leri (`Nessus:Pluginler`, boşsa varsayılan): 19506 kimlikli mi, 11936 OS, 45590 CPE, 10107 web sunucusu, 24260 HTTP başlıkları
+  (X-Powered-By, X-AspNet-Version, PHPSESSID / JSESSIONID / ASP.NET_SessionId çerezleri → teknoloji), 22964 servis, 10863 SSL sertifika CN + SAN,
+  34252 / 25221 portu dinleyen program, 20811 / 22869 kurulu yazılım (gürültü / Linux'ta yalnız teknoloji paketleri), 11219 / 10335 / 34220 /
+  14272 açık port. pluginText `<plugin_output>` çözülür → `NessusSunucu` (OS, kimlikli, portlar: servis, web sunucusu, teknoloji, sertifika,
+  dinleyen; yazılım; CPE). `ParcaIp`=100 IP / sorgu, `SayfaBoyutu`=2000, IP başına `CacheDakika`=60 önbellek, `IgnoreSslErrors` yalnız "nessus"
+  HttpClient'ı. Segment tarama Carbon Black'ten sonra Nessus'u sorar (`NessusEkleAsync`; hata taramayı bozmaz → `NessusDurum`), sonuçta
+  `Nessus` sözlüğü; arayüzde "Teknoloji (Nessus)" kolonu, sunucu altında OS, "Nessus'un açık gördüğü ama CB'de gelen bağlantısı olmayan
+  portlar" bölümü, CSV kolonları. AI tahminine `NessusService.Metin` kanıt olarak eklenir (`SurecAi.RunAsync(..., ekKanit)`). Kurulum testi:
+  `/api/nessus/repolar`, `/api/nessus/test?ip=&tum=true` (ham kayıt + plugin listesi + özet). Sahte Tenable sunucusuyla test edildi.
 - **VIP**: sorgulanan IP VIP ise üyeler + GW'ler aynı sorguya eklenir, üyeler "VIP ÜYESİ" (GW→üye trafiği varsa ✓).
   Gidilen IP VIP ise "VIP → n ÜYE"; gelen IP LB GW ise "LB GW"; sorgulanan sunucu havuz üyesiyse VIP kartı.
 - **Uygulama görünümü** (`/api/apps`, `/api/app`): `[kullanan uygulamalar] → [UYGULAMA: VIP'ler + segment grupları] → [bağımlı olunanlar]`,

@@ -112,7 +112,8 @@ static class SurecAi
     public static bool Genel(SurecAiExe e) =>
         GenelAd.Contains(e.Ad) || (e.Yol is { } y && GenelYol.Any(g => y.Contains(g, StringComparison.OrdinalIgnoreCase)) && !(e.Ad is "ntoskrnl.exe" or "System"));
 
-    public static async Task<SurecAiSonuc> RunAsync(SurecAiIstek req, EnvanterSnapshot env, IslevService islev, EksikService eksik, CancellationToken ct)
+    public static async Task<SurecAiSonuc> RunAsync(SurecAiIstek req, EnvanterSnapshot env, IslevService islev, EksikService eksik, CancellationToken ct,
+        string? ekKanit = null)
     {
         var sw = System.Diagnostics.Stopwatch.StartNew();
         string ip = req.Ip!;
@@ -155,6 +156,7 @@ static class SurecAi
                 + (e.GelenUygulamalar is { Count: > 0 } gu ? $" · bağlanan uygulamalar: {string.Join(", ", gu.Take(6))}" : "")
                 + (e.GidenUygulamalar is { Count: > 0 } gi ? $" · bağlandığı uygulamalar: {string.Join(", ", gi.Take(6))}" : ""));
         }
+        if (ekKanit != null) sb.AppendLine().AppendLine(ekKanit.Trim());   // Nessus (segment tarama)
         string answer = await islev.ChatAsync(sb.ToString(), ct);
         if (IslevService.ExtractJson(answer) is not { } root || root.ValueKind != System.Text.Json.JsonValueKind.Object)
             throw new InvalidOperationException("AI cevabı JSON değil: " + (answer.Length > 200 ? answer[..200] : answer));
