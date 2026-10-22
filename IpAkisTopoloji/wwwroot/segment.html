@@ -258,7 +258,25 @@ function nsCell(ip, port) {
   return `<div title="${esc(nsText(ip, port) + (p.servis ? "\nServis: " + p.servis : "") + (p.son ? "\nNessus son görülme: " + p.son : ""))}">${tek.map(t => `<span class="urun" style="margin:0 3px 2px 0">${esc(t)}</span>`).join("") || (p.servis ? `<span class="small">${esc(p.servis)}</span>` : `<span class="small muted">açık</span>`)}
     ${p.sertifika.length ? `<div class="small mono">🔒 ${esc(p.sertifika.slice(0, 2).join(", "))}${p.sertifika.length > 2 ? " …" : ""}</div>` : ""}${p.dinleyen ? `<div class="small muted mono">${esc(p.dinleyen.split(/[\\/]/).pop())}</div>` : ""}</div>`;
 }
-const nsHost = ip => { const n = st.data.nessus?.[ip]; return n ? `<div class="small muted" title="Nessus son tarama ${esc(n.son || "")}${n.kimlikli ? " · kimlik bilgili" : n.kimlikli === false ? " · kimlik bilgisiz" : ""}${n.yazilim?.length ? "\nKurulu: " + esc(n.yazilim.slice(0, 25).join("; ")) : ""}">${esc(n.os || "Nessus")}${n.kimlikli === false ? " · dış tarama" : ""}</div>` : ""; };
+const nsHost = ip => { const n = st.data.nessus?.[ip]; return n ? `<div class="small muted" title="Nessus son tarama ${esc(n.son || "")}${n.kimlikli ? " · kimlik bilgili" : n.kimlikli === false ? " · kimlik bilgisiz" : ""}">${esc(n.os || "Nessus")}${n.kimlikli === false ? " · dış tarama" : ""}
+  · <a href="#" data-ns="${esc(ip)}" title="Servisler, veritabanı instance'ları, süreçler, paylaşımlar, kurulu yazılımlar">🛡 Nessus ayrıntısı</a>${n.veritabani?.length ? `<div class="small" style="color:var(--in)">🗄 ${esc(n.veritabani.slice(0, 2).join("; "))}</div>` : ""}</div>` : ""; };
+// Sunucunun Nessus özeti (sağ panel)
+function nsDrawer(ip) {
+  const n = st.data.nessus?.[ip]; if (!n) return;
+  const L = (t, a) => a?.length ? `${t}\n${a.map(x => "  • " + x).join("\n")}\n\n` : "";
+  const txt = `${n.os || ""}${n.kimlikli ? " · kimlik bilgili tarama" : n.kimlikli === false ? " · kimlik bilgisiz (dış) tarama" : ""} · son tarama ${n.son || "?"}${n.repo ? " · repo " + n.repo : ""}\n${[n.dns, n.netbios].filter(Boolean).join(" · ")}\n\n`
+    + L("Portlar", n.portlar.map(p => `${p.port}/${p.protokol}: ${[p.servis, nsTek(p).join(", "), p.sertifika.length ? "🔒 " + p.sertifika.join(", ") : "", p.dinleyen].filter(Boolean).join(" · ") || "açık"}`))
+    + L("Veritabanı instance'ları", n.veritabani) + L("Nessus'un tespit ettiği ürünler", n.urunler)
+    + L("Windows servisleri (Windows'un kendi servisleri hariç)", (n.servisler || []).map(x => `${x.ad}${x.gorunen && x.gorunen !== x.ad ? " (" + x.gorunen + ")" : ""}${x.yol ? " → " + x.yol : ""}${x.hesap ? " [" + x.hesap + "]" : ""}`))
+    + L("Çalışan süreçler (tarama anı)", n.surecler) + L("SMB paylaşımları", n.paylasimlar) + L("Kurulu yazılımlar", n.yazilim) + L("CPE", n.cpe);
+  document.querySelector(".drawer")?.remove();
+  const d = document.createElement("div"); d.className = "drawer";
+  d.innerHTML = `<div class="dh"><div><h3>🛡 Nessus · ${esc(ip)}</h3><div class="sub">${esc(st.data.sunucular.find(x => x.ip === ip)?.sunucu || "")} · repository'deki son tarama sonuçları</div></div><button type="button">Kapat</button></div><pre>${esc(txt)}</pre>`;
+  d.querySelector("button").onclick = () => d.remove();
+  document.body.appendChild(d);
+}
+document.addEventListener("click", e => { const a = e.target.closest("[data-ns]"); if (a) { e.preventDefault(); nsDrawer(a.dataset.ns); } });
+document.addEventListener("keydown", e => { if (e.key === "Escape") document.querySelector(".drawer")?.remove(); });
 function render() {
   const d = st.data, all = d.satirlar.filter(x => !x.altyapi && !x.dinamik && !x.genel);
   const nSifir = d.satirlar.filter(sifir).length;

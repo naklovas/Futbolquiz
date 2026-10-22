@@ -405,6 +405,15 @@ erişim talepleri) — DB → şema → tablo ve kim erişiyor bilgisi buradan b
   `Nessus` sözlüğü; arayüzde "Teknoloji (Nessus)" kolonu, sunucu altında OS, "Nessus'un açık gördüğü ama CB'de gelen bağlantısı olmayan
   portlar" bölümü, CSV kolonları. AI tahminine `NessusService.Metin` kanıt olarak eklenir (`SurecAi.RunAsync(..., ekKanit)`). Kurulum testi:
   `/api/nessus/repolar`, `/api/nessus/test?ip=&tum=true` (ham kayıt + plugin listesi + özet). Sahte Tenable sunucusuyla test edildi.
+  UYGULAMAYI BULMAK İÇİN (kullanıcı: "1. madde komple"): 10144 / 10674 SQL Server instance (InstanceName / Version / tcp → port teknolojisi
+  "SQL Server instance X" + `Veritabani`), 10658 Oracle TNS (sürüm, SID / SERVICE_NAME), 44401 Windows servisleri (yalnız Active; \Windows\
+  ve `SurecAi.GenelExe` ayıklanır → `Servisler` ad / görünen ad / yol / hesap), 70329 çalışan süreçler (genel ayıklanır), 10395 SMB paylaşımları
+  ($'lılar hariç). Ürün tespiti: ayrı hafif `listvuln` sorgusu (severity=0 bilgi bulguları, `Nessus:UrunTespiti`=true) — "… Detection /
+  Installed / Version" plugin adlarından ürün adı (`UrunAdi`, genel / OS / .NET / ajanlar hariç), portluysa port teknolojisine. HTTP.sys:
+  Server `Microsoft-HTTPAPI` → "HTTP.sys (IIS değil)"; `Metin` ntoskrnl / HTTP.sys portları için "IIS sitesi (w3wp, WEBSITE)" ya da "IIS DEĞİL —
+  servislerden biri" + sertifika adı satırı. Nessus kanıtı artık ERT eksiklerinde de (`EksikService.BuildAsync`, DB ipuçlarından sonra,
+  `Eksik:NessusMaxKarakter`=2500) ve IP kartı `/api/surec/ai`'de. Segment sayfasında sunucu altında "🛡 Nessus ayrıntısı" sağ paneli
+  (portlar, DB instance, ürünler, servisler, süreçler, paylaşımlar, yazılım, CPE) ve 🗄 DB instance satırı.
 - **VIP**: sorgulanan IP VIP ise üyeler + GW'ler aynı sorguya eklenir, üyeler "VIP ÜYESİ" (GW→üye trafiği varsa ✓).
   Gidilen IP VIP ise "VIP → n ÜYE"; gelen IP LB GW ise "LB GW"; sorgulanan sunucu havuz üyesiyse VIP kartı.
 - **Uygulama görünümü** (`/api/apps`, `/api/app`): `[kullanan uygulamalar] → [UYGULAMA: VIP'ler + segment grupları] → [bağımlı olunanlar]`,

@@ -13,16 +13,22 @@ using System.Text.RegularExpressions;
 // IgnoreSslErrors. BaseUrl boşsa kapalı (segment tarama Nessus'suz çalışır).
 // ---------------------------------------------------------------------------
 record NessusPort(string Port, string Protokol, string? Servis, string? WebSunucu, List<string> Teknoloji, List<string> Sertifika, string? Dinleyen, string? Son);
+record NessusServis(string Ad, string? Gorunen, string? Yol, string? Hesap);
 record NessusSunucu(string Ip, string? Dns, string? Netbios, string? Os, bool? Kimlikli, string? Son, string? Repo,
-    List<NessusPort> Portlar, List<string> Yazilim, List<string> Cpe);
+    List<NessusPort> Portlar, List<string> Yazilim, List<string> Cpe,
+    List<string> Veritabani, List<NessusServis> Servisler, List<string> Surecler, List<string> Paylasimlar, List<string> Urunler);
 
 sealed class NessusService(IConfiguration cfg, IHttpClientFactory factory, ILogger<NessusService> log)
 {
     // 19506 tarama bilgisi (kimlikli mi), 11936 işletim sistemi, 45590 CPE, 10107 web sunucusu, 24260 HTTP başlıkları, 22964 servis,
     // 10863 SSL sertifikası, 34252 / 25221 portu dinleyen program (Windows / Linux), 20811 / 22869 kurulu yazılım,
-    // 11219 / 10335 / 34220 / 14272 açık port (SYN / TCP / netstat WMI / netstat SSH)
-    static readonly int[] DefaultPluginler = [19506, 11936, 45590, 10107, 24260, 22964, 10863, 34252, 25221, 20811, 22869, 11219, 10335, 34220, 14272];
+    // 11219 / 10335 / 34220 / 14272 açık port (SYN / TCP / netstat WMI / netstat SSH); uygulamayı bulmak için (kullanıcı: "1. madde komple"):
+    // 10144 / 10674 SQL Server instance, 10658 Oracle TNS listener, 44401 Windows servisleri, 70329 çalışan süreçler, 10395 SMB paylaşımları.
+    // Ürün tespiti (Tomcat, WebLogic, IBM MQ… "Detection" plugin'leri) ayrıca hafif listvuln sorgusuyla (Nessus:UrunTespiti)
+    static readonly int[] DefaultPluginler = [19506, 11936, 45590, 10107, 24260, 22964, 10863, 34252, 25221, 20811, 22869, 11219, 10335, 34220, 14272,
+        10144, 10674, 10658, 44401, 70329, 10395];
 
+    bool UrunTespiti => cfg.GetValue("Nessus:UrunTespiti", true);
     public bool Acik => !string.IsNullOrWhiteSpace(cfg["Nessus:BaseUrl"]);
     int[] Pluginler => cfg.GetSection("Nessus:Pluginler").Get<int[]>() is { Length: > 0 } p ? p : DefaultPluginler;
     string[] Repolar => cfg.GetSection("Nessus:Repolar").GetChildren().Select(c => c.Value?.Trim()).OfType<string>().Where(v => v != "").ToArray();
@@ -58,10 +64,11 @@ sealed class NessusService(IConfiguration cfg, IHttpClientFactory factory, ILogg
         return (await GonderAsync(Istek(HttpMethod.Get, "/rest/repository?fields=id,name,description,type"), ct))["response"];
     }
 
-    JsonObject Sorgu(IEnumerable<string> ips, int bas, int bit, bool tumPluginler)
+    JsonObject Sorgu(IEnumerable<string> ips, int bas, int bit, bool tumPluginler, string tool = "vulndetails")
     {
         var filtre = new JsonArray { new JsonObject { ["filterName"] = "ip", ["operator"] = "=", ["value"] = string.Join(",", ips) } };
-        if (!tumPluginler) filtre.Add(new JsonObject { ["filterName"] = "pluginID", ["operator"] = "=", ["value"] = string.Join(",", Pluginler) });
+        if (tool == "listvuln") filtre.Add(new JsonObject { ["filterName"] = "severity", ["operator"] = "=", ["value"] = "0" });   // yalnız bilgi bulguları
+        else if (!tumPluginler) filtre.Add(new JsonObject { ["filterName"] = "pluginID", ["operator"] = "=", ["value"] = string.Join(",", Pluginler) });
         if (Repolar.Length > 0)
             filtre.Add(new JsonObject { ["filterName"] = "repository", ["operator"] = "=", ["value"] = new JsonArray(Repolar.Select(r => (JsonNode)new JsonObject { ["id"] = r }).ToArray()) });
         int gun = cfg.GetValue("Nessus:MaxGun", 30);
@@ -69,17 +76,17 @@ sealed class NessusService(IConfiguration cfg, IHttpClientFactory factory, ILogg
         return new JsonObject
         {
             ["type"] = "vuln", ["sourceType"] = "cumulative",
-            ["query"] = new JsonObject { ["type"] = "vuln", ["tool"] = "vulndetails", ["startOffset"] = bas, ["endOffset"] = bit, ["filters"] = filtre }
+            ["query"] = new JsonObject { ["type"] = "vuln", ["tool"] = tool, ["startOffset"] = bas, ["endOffset"] = bit, ["filters"] = filtre }
         };
     }
 
-    async Task<List<JsonNode>> KayitlarAsync(IReadOnlyCollection<string> ips, bool tumPluginler, CancellationToken ct)
+    async Task<List<JsonNode>> KayitlarAsync(IReadOnlyCollection<string> ips, bool tumPluginler, CancellationToken ct, string tool = "vulndetails")
     {
         int sayfa = Math.Clamp(cfg.GetValue("Nessus:SayfaBoyutu", 2000), 100, 10000), maxSayfa = cfg.GetValue("Nessus:MaxSayfa", 20);
         var list = new List<JsonNode>();
         for (int i = 0, bas = 0; i < maxSayfa; i++, bas += sayfa)
         {
-            var r = (await GonderAsync(Istek(HttpMethod.Post, "/rest/analysis", Sorgu(ips, bas, bas + sayfa, tumPluginler)), ct))["response"];
+            var r = (await GonderAsync(Istek(HttpMethod.Post, "/rest/analysis", Sorgu(ips, bas, bas + sayfa, tumPluginler, tool)), ct))["response"];
             var res = r?["results"]?.AsArray().OfType<JsonNode>().ToList() ?? [];
             list.AddRange(res);
             if (!long.TryParse(r?["totalRecords"]?.ToString(), out long top) || bas + sayfa >= top || res.Count == 0) break;
@@ -92,11 +99,13 @@ sealed class NessusService(IConfiguration cfg, IHttpClientFactory factory, ILogg
     {
         if (!Acik) throw new InvalidOperationException("Nessus:BaseUrl tanımlı değil.");
         var raw = await KayitlarAsync([ip], tum, ct);
+        var bilgi = UrunTespiti ? await KayitlarAsync([ip], false, ct, "listvuln") : [];
         return new
         {
             kayit = raw.Count,
             pluginler = raw.GroupBy(x => S(x, "pluginID")).Select(g => new { id = g.Key, ad = S(g.First(), "pluginName"), adet = g.Count() }).OrderBy(x => x.id).ToList(),
-            ozet = Coz(ip, raw),
+            bilgiPluginleri = bilgi.GroupBy(x => S(x, "pluginID")).Select(g => new { id = g.Key, ad = S(g.First(), "pluginName"), adet = g.Count() }).OrderBy(x => x.ad).ToList(),
+            ozet = Coz(ip, raw, bilgi),
             ham = raw.Take(tum ? 100 : 300)
         };
     }
@@ -117,9 +126,10 @@ sealed class NessusService(IConfiguration cfg, IHttpClientFactory factory, ILogg
             ilerleme?.Invoke(i, parcalar.Count);
             var raw = await KayitlarAsync(parcalar[i], false, ct);
             var byIp = raw.GroupBy(x => S(x, "ip") ?? "").ToDictionary(g => g.Key, g => g.ToList());
+            var urun = (UrunTespiti ? await KayitlarAsync(parcalar[i], false, ct, "listvuln") : []).GroupBy(x => S(x, "ip") ?? "").ToDictionary(g => g.Key, g => g.ToList());
             foreach (var ip in parcalar[i])
             {
-                var s = byIp.TryGetValue(ip, out var rs) ? Coz(ip, rs) : null;
+                var s = byIp.TryGetValue(ip, out var rs) ? Coz(ip, rs, urun.GetValueOrDefault(ip) ?? []) : null;
                 _cache[ip] = (s, DateTime.Now);
                 if (s != null) sonuc[ip] = s;
             }
@@ -148,9 +158,10 @@ sealed class NessusService(IConfiguration cfg, IHttpClientFactory factory, ILogg
     static readonly Regex LinuxTeknoloji = new(@"^(httpd|nginx|php|tomcat|java|jdk|openjdk|jre|python3?\b|nodejs|postgres|mysql|mariadb|oracle|weblogic|jboss|wildfly|"
         + @"websphere|redis|mongo|kafka|elasticsearch|docker|containerd|kube|haproxy|sas|informatica|ibm|mq|rabbitmq|zookeeper|hadoop|spark|dotnet|aspnetcore|gunicorn|uwsgi)", RegexOptions.IgnoreCase);
 
-    static NessusSunucu? Coz(string ip, List<JsonNode> rs)
+    static NessusSunucu? Coz(string ip, List<JsonNode> rs, List<JsonNode> bilgi)
     {
-        if (rs.Count == 0) return null;
+        if (rs.Count == 0 && bilgi.Count == 0) return null;
+        var db = new List<string>(); var servis = new List<NessusServis>(); var surec = new List<string>(); var pay = new List<string>(); var urunler = new List<string>();
         var portlar = new Dictionary<(string, string), (string? Servis, string? Web, List<string> Tek, List<string> Cert, string? Dinleyen, string? Son)>();
         (string? Servis, string? Web, List<string> Tek, List<string> Cert, string? Dinleyen, string? Son) P(JsonNode r)
         {
@@ -213,19 +224,99 @@ sealed class NessusService(IConfiguration cfg, IHttpClientFactory factory, ILogg
                     foreach (var l in o.Split('\n').Select(l => l.Trim()))
                         if (LinuxTeknoloji.IsMatch(l)) yazilim.Add(l.Split(' ', '|')[0]);
                     break;
+                case "10144": case "10674":
+                    // SQL Server: blok başına InstanceName / Version / tcp (10674) ya da port başına instance (10144)
+                    foreach (var blok in Regex.Split(o, @"\n\s*\n"))
+                    {
+                        string? ins = Regex.Match(blok, @"Instance\s*Name\s*:\s*(\S+)", RegexOptions.IgnoreCase) is { Success: true } mi ? mi.Groups[1].Value : null;
+                        if (ins == null) continue;
+                        string? ver = Regex.Match(blok, @"Version\s*:\s*(\S+)", RegexOptions.IgnoreCase) is { Success: true } mv ? mv.Groups[1].Value : null;
+                        string? tcp = Regex.Match(blok, @"^\s*tcp\s*:\s*(\d+)", RegexOptions.IgnoreCase | RegexOptions.Multiline) is { Success: true } mt ? mt.Groups[1].Value
+                            : S(r, "port") is { } rp && rp != "0" ? rp : null;
+                        db.Add($"SQL Server instance {ins}{(ver != null ? " (sürüm " + ver + ")" : "")}{(tcp != null ? " · tcp " + tcp : "")}");
+                        if (tcp != null) portlar[(tcp, "tcp")] = YazP(portlar, tcp, "SQL Server instance " + ins);
+                    }
+                    break;
+                case "10658":
+                    string? tns = Regex.Match(o, @"(TNSLSNR[^\n]*?Version\s*[\d.]+)", RegexOptions.IgnoreCase) is { Success: true } mo ? mo.Groups[1].Value.Trim() : null;
+                    Yaz(r, v => (v.Servis ?? "Oracle TNS listener", v.Web, Ekle(v.Tek, ["Oracle" + (tns != null && Regex.Match(tns, @"Version\s*([\d.]+)") is { Success: true } tv ? " " + tv.Groups[1].Value : "")]), v.Cert, v.Dinleyen, v.Son));
+                    foreach (Match m in Regex.Matches(o, @"(?:SID|SERVICE_NAME|Service name)\s*[:=]\s*([A-Za-z0-9_$#.-]+)", RegexOptions.IgnoreCase))
+                        db.Add($"Oracle {m.Groups[1].Value} (port {S(r, "port")})");
+                    break;
+                case "44401":
+                    // Yalnız etkin servisler; Windows'un kendi servisleri ve genel ajanlar ayıklanır
+                    string aktif = Regex.Split(o, @"Inactive Services\s*:", RegexOptions.IgnoreCase)[0];
+                    foreach (var blok in Regex.Split(aktif, @"\n\s*\n"))
+                    {
+                        string? Al(string ad) => Regex.Match(blok, $@"{ad}\s*:\s*(.+)", RegexOptions.IgnoreCase) is { Success: true } m ? m.Groups[1].Value.Trim() : null;
+                        if (Al("Service name") is not { } sn) continue;
+                        string? yol = Al("Executable path") ?? Al("Path");
+                        string? exe = yol != null && Regex.Match(yol, @"([^\\/""]+\.exe)", RegexOptions.IgnoreCase) is { Success: true } me ? me.Groups[1].Value : null;
+                        if (yol != null && (Regex.IsMatch(yol, @"\\windows\\(system32|syswow64|servicing|winsxs|microsoft\.net)\\", RegexOptions.IgnoreCase)
+                            || exe != null && SurecAi.GenelExe(exe, yol))) continue;
+                        servis.Add(new NessusServis(sn, Al("Display name"), yol, Al("Log on as")));
+                    }
+                    break;
+                case "70329":
+                    foreach (Match m in Regex.Matches(o, @"([A-Za-z0-9_.$ -]+?\.exe)\s*\((\d+)\)", RegexOptions.IgnoreCase))
+                    {
+                        string e = m.Groups[1].Value.Trim().TrimStart('|', '-', ' ');
+                        if (!SurecAi.GenelExe(e, null) && !Regex.IsMatch(e, @"^(system|smss|csrss|wininit|winlogon|services|lsass|svchost|explorer|conhost|dwm|taskhostw?|spoolsv|dllhost|wmiprvse|msdtc|rdpclip|sihost|fontdrvhost|ctfmon|runtimebroker|searchindexer|searchui|lsaiso|wudfhost|smartscreen|vmtoolsd|vm3dservice|cmd|powershell)\.exe$", RegexOptions.IgnoreCase))
+                            surec.Add(e);
+                    }
+                    break;
+                case "10395":
+                    foreach (Match m in Regex.Matches(o, @"^\s*-\s*(.+?)\s*$", RegexOptions.Multiline))
+                        if (!m.Groups[1].Value.EndsWith('$') && !Regex.IsMatch(m.Groups[1].Value, @"^(print\$|netlogon|sysvol|users)$", RegexOptions.IgnoreCase)) pay.Add(m.Groups[1].Value);
+                    break;
                 default:   // port tarayıcıları: yalnız açık port bilgisi
                     if (S(r, "port") is { } pt && pt != "0") Yaz(r, v => v);
                     break;
             }
         }
+        // Ürün tespiti (listvuln, bilgi bulguları): "Apache Tomcat Detection" → "Apache Tomcat"; portluysa porta teknoloji, değilse sunucuya
+        foreach (var r in bilgi)
+        {
+            if (UrunAdi(S(r, "pluginName"), S(r, "pluginID")) is not { } ad) continue;
+            if (S(r, "port") is { } pt && pt != "0") portlar[(pt, (S(r, "protocol") ?? "tcp").ToLowerInvariant())] = YazP(portlar, pt, ad, (S(r, "protocol") ?? "tcp").ToLowerInvariant());
+            else urunler.Add(ad);
+        }
         var list = portlar.Where(kv => kv.Key.Item1 != "0" || kv.Value.Web != null || kv.Value.Cert.Count > 0)
             .Select(kv => new NessusPort(kv.Key.Item1, kv.Key.Item2, kv.Value.Servis, kv.Value.Web, Tekil(kv.Value.Tek),
                 kv.Value.Cert.Distinct(StringComparer.OrdinalIgnoreCase).Take(12).ToList(), kv.Value.Dinleyen, kv.Value.Son))
             .OrderBy(p => int.TryParse(p.Port, out int n) ? n : 99999).ToList();
-        var r0 = rs[0];
+        var r0 = rs.Count > 0 ? rs[0] : bilgi[0];
         return new NessusSunucu(ip, S(r0, "dnsName") is { Length: > 0 } d ? d : null, S(r0, "netbiosName") is { Length: > 0 } nb ? nb : null, os, kimlikli,
             rs.Select(r => Zaman(S(r, "lastSeen"))).Max(), S(r0, "repository"), list,
-            yazilim.Distinct(StringComparer.OrdinalIgnoreCase).Take(60).ToList(), cpe.Distinct(StringComparer.OrdinalIgnoreCase).Take(30).ToList());
+            yazilim.Distinct(StringComparer.OrdinalIgnoreCase).Take(60).ToList(), cpe.Distinct(StringComparer.OrdinalIgnoreCase).Take(30).ToList(),
+            db.Distinct(StringComparer.OrdinalIgnoreCase).ToList(), servis.DistinctBy(x => x.Ad.ToLowerInvariant()).Take(60).ToList(),
+            surec.Distinct(StringComparer.OrdinalIgnoreCase).Take(60).ToList(), pay.Distinct(StringComparer.OrdinalIgnoreCase).Take(30).ToList(),
+            urunler.Distinct(StringComparer.OrdinalIgnoreCase).Take(40).ToList());
+    }
+
+    static (string? Servis, string? Web, List<string> Tek, List<string> Cert, string? Dinleyen, string? Son) YazP(
+        Dictionary<(string, string), (string? Servis, string? Web, List<string> Tek, List<string> Cert, string? Dinleyen, string? Son)> portlar, string port, string tek, string proto = "tcp")
+    {
+        var v = portlar.TryGetValue((port, proto), out var x) ? x : (null, null, [], [], null, null);
+        v.Tek.Add(tek);
+        return v;
+    }
+
+    // Bilgi plugin adından ürün adı: yalnız ürün tespiti / kurulum plugin'leri; genel tarama / OS / ağ / zaten çözümlenenler hariç
+    static readonly Regex UrunPlugin = new(@"\b(Detection|Detected|Installed|Installation|Version)\b", RegexOptions.IgnoreCase);
+    static readonly Regex UrunGenel = new(@"^(Nessus|OS Identification|Operating System|Service Detection|HTTP Server Type|Common Platform|Device Type|Traceroute|ICMP|TCP/IP|"
+        + @"Ethernet|Host Fully|SSL|TLS|OpenSSL|DCE|SMB|Netstat|Patch Report|WMI|Authentication|Target Credential|Additional DNS|DNS Server|NTP|SNMP|Link-Local|Backported|HSTS|"
+        + @"HyperText|HTTP |Web Server|Windows |Microsoft Windows (SMB|Installed|Remote|Process|Server|Update|Startup|Display|Logged|Last|Product|Enumerate)|"
+        + @"Microsoft \.NET|\.NET|Microsoft Visual C|Microsoft Edge|Google Chrome|Mozilla|Adobe|VMware Tools|Trend Micro|Carbon Black|Splunk|Java Detection|"
+        + @"Unix|Linux|Software Enumeration|Kernel|Bash|Python|Perl|PowerShell|Curl|OpenSSH|SSH|Samba|IPMI|RPC|Remote Desktop|Terminal Services|"
+        + @"Antivirus|Firewall|BIOS|CPU|Intel|AMD|Dell|HP |Lenovo|Wake-on-LAN|Sudo|Systemd|Time|Timezone)", RegexOptions.IgnoreCase);
+    static readonly HashSet<string> Cozulen = ["10144", "10674", "10658", "10107", "11936", "45590", "20811", "22869", "22964", "19506"];
+    static string? UrunAdi(string? ad, string? id)
+    {
+        if (ad == null || (id != null && Cozulen.Contains(id)) || !UrunPlugin.IsMatch(ad) || UrunGenel.IsMatch(ad.Trim())) return null;
+        string u = Regex.Replace(ad, @"\s*\((Windows|Linux|Unix|macOS|credentialed check|remote check|uncredentialed check)\)", "", RegexOptions.IgnoreCase);
+        u = Regex.Replace(u, @"\s*(Remote\s+)?(Version\s+)?(Detection|Detected|Installed|Installation Detection|Installation|Version Disclosure|Version Check|Version)\b.*$", "", RegexOptions.IgnoreCase).Trim(' ', '-', ':');
+        return u.Length >= 3 ? u : null;
     }
 
     // "ASP.NET" + "ASP.NET 4.0.30319" → yalnız sürümlü olan
@@ -242,7 +333,7 @@ sealed class NessusService(IConfiguration cfg, IHttpClientFactory factory, ILogg
     {
         string s = srv.ToLowerInvariant();
         if (s.Contains("microsoft-iis")) yield return "IIS" + (Regex.Match(srv, @"IIS/([\d.]+)", RegexOptions.IgnoreCase) is { Success: true } m ? " " + m.Groups[1].Value : "");
-        if (s.Contains("microsoft-httpapi")) yield return "HTTP.sys";
+        if (s.Contains("microsoft-httpapi")) yield return "HTTP.sys (IIS değil)";
         if (s.Contains("kestrel")) yield return "ASP.NET Core (Kestrel)";
         if (s.Contains("apache-coyote") || s.Contains("tomcat")) yield return "Tomcat (Java)";
         else if (s.StartsWith("apache")) yield return "Apache";
@@ -281,7 +372,7 @@ sealed class NessusService(IConfiguration cfg, IHttpClientFactory factory, ILogg
     }
 
     // AI kanıtı (segment tarama AI tahmini, IP kartı)
-    public static string Metin(NessusSunucu n)
+    public static string Metin(NessusSunucu n, int max = 8000)
     {
         var sb = new StringBuilder();
         sb.AppendLine($"NESSUS (Tenable.sc, son tarama {n.Son}{(n.Kimlikli == true ? ", kimlik bilgili" : n.Kimlikli == false ? ", kimlik bilgisiz / dış tarama" : "")}):");
@@ -297,9 +388,25 @@ sealed class NessusService(IConfiguration cfg, IHttpClientFactory factory, ILogg
             if (p.Dinleyen != null) parca.Add("dinleyen program: " + p.Dinleyen);
             sb.AppendLine($"- port {p.Port}/{p.Protokol}: {(parca.Count > 0 ? string.Join(" · ", parca) : "açık")}");
         }
+        if (n.Veritabani.Count > 0) sb.AppendLine($"- Veritabanı instance'ları (instance adı çoğu zaman uygulama adıdır): {string.Join("; ", n.Veritabani)}");
+        if (n.Urunler.Count > 0) sb.AppendLine($"- Nessus'un tespit ettiği ürünler: {string.Join("; ", n.Urunler)}");
+        // HTTP.sys / ntoskrnl.exe portları: dinleyen gerçek program değil; asıl uygulama servis / süreç listesinden
+        var httpSys = n.Portlar.Where(p => p.Dinleyen?.Contains("ntoskrnl", StringComparison.OrdinalIgnoreCase) == true || p.Dinleyen is "System" or "4"
+            || p.WebSunucu?.Contains("Microsoft-HTTPAPI", StringComparison.OrdinalIgnoreCase) == true || p.WebSunucu?.Contains("Microsoft-IIS", StringComparison.OrdinalIgnoreCase) == true).ToList();
+        foreach (var p in httpSys)
+            sb.AppendLine($"- port {p.Port} HTTP.sys üzerinden (Carbon Black'te ntoskrnl.exe / System görünür): "
+                + (p.WebSunucu?.Contains("IIS", StringComparison.OrdinalIgnoreCase) == true ? "IIS sitesi (asıl süreç w3wp.exe; site adı ERT WEBSITE)" :
+                   p.WebSunucu?.Contains("HTTPAPI", StringComparison.OrdinalIgnoreCase) == true ? "IIS DEĞİL — kendi HTTP sunucusunu barındıran bir uygulama / Windows servisi; aşağıdaki servislerden biri" : "IIS ya da HTTP.sys kullanan uygulama")
+                + (p.Sertifika.Count > 0 ? $"; sertifika adı {p.Sertifika[0]}" : ""));
+        if (n.Servisler.Count > 0)
+            sb.AppendLine("- Windows servisleri (Windows'un kendi servisleri ayıklandı): " + string.Join("; ", n.Servisler.Take(30).Select(x =>
+                $"{x.Ad}{(x.Gorunen != null && x.Gorunen != x.Ad ? " (" + x.Gorunen + ")" : "")}{(x.Yol != null ? " → " + x.Yol : "")}{(x.Hesap != null ? " [" + x.Hesap + "]" : "")}")));
+        if (n.Surecler.Count > 0) sb.AppendLine($"- Çalışan süreçler (taramadaki anlık görüntü, genel olanlar ayıklandı): {string.Join(", ", n.Surecler.Take(40))}");
+        if (n.Paylasimlar.Count > 0) sb.AppendLine($"- SMB paylaşımları: {string.Join(", ", n.Paylasimlar)}");
         if (n.Yazilim.Count > 0) sb.AppendLine($"- Kurulu yazılımlar: {string.Join("; ", n.Yazilim.Take(40))}");
         if (n.Cpe.Count > 0) sb.AppendLine($"- CPE: {string.Join(", ", n.Cpe.Take(20))}");
-        sb.AppendLine("(SSL sertifika adı ve kurulu yazılım uygulama adı için güçlü ipucudur; teknoloji bilgisi uygulama adı DEĞİLDİR.)");
-        return sb.ToString();
+        sb.AppendLine("(SSL sertifika adı, veritabanı instance adı, servis adı / yolu ve kurulu yazılım uygulama adı için güçlü ipucudur; teknoloji bilgisi (IIS, ASP.NET, PHP…) uygulama adı DEĞİLDİR.)");
+        string t = sb.ToString();
+        return t.Length > max ? t[..max] + "\n…(Nessus bilgisi kesildi)\n" : t;
     }
 }

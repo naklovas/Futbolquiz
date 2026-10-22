@@ -21,7 +21,7 @@ record EksikCalistir(List<string>? Ips, bool Hepsi, bool Yeniden, int? Saat, boo
 record EksikKarar(string? Ip, string? Port, string? Karar, string? Uygulama);
 
 sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, EnvanterService envanter, IslevService islev,
-    ILogger<EksikService> log)
+    NessusService nessus, ILogger<EksikService> log)
 {
     public const string Onay = "Onaylandı", Red = "Reddedildi", Ai = "AI", Elle = "Elle";
     readonly object _gate = new();
@@ -506,6 +506,10 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
         var profiles = await islev.ProfilesAsync(ips, env, ct);
         var cb = await CarbonBlackAsync(ips, hours, ct);
         var smf = await SmFieldsAsync(ips, ports, env, ct);
+        // Nessus / Tenable.sc (Nessus.cs): DB instance, servis, sertifika, teknoloji; ulaşılamazsa kanıtsız devam
+        Dictionary<string, NessusSunucu> nes = [];
+        try { nes = await nessus.SunucularAsync(ips, null, ct); }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested) { log.LogWarning("ERT eksikleri Nessus sorgusu başarısız: {Hata}", ex.Message); }
         var outp = new Dictionary<string, string>();
         foreach (var ip in ips)
         {
@@ -532,6 +536,7 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
             if (cb.TryGetValue(ip, out var c)) sb.Append(c.Text(env, ip, miss));
             else sb.AppendLine($"Carbon Black (son {hours} saat): bu sunucuda ağ olayı yok (ajan yok ya da trafik yok).");
             sb.Append(DbHints(env, ip, miss, sb.ToString()));
+            if (nes.TryGetValue(ip, out var ns)) sb.Append(NessusService.Metin(ns, cfg.GetValue("Eksik:NessusMaxKarakter", 2500)));
             string profil = profiles.TryGetValue(ip, out var p) ? p.Metin.TrimEnd() : "";
             // Envanter Kahini (kullanıcı: "çok dikkate alıyor, en son baksın"): 1. turda AI'a gitmez, sonda ayrı bölüm (AskAsync 2. tur)
             profil = string.Join("\n", profil.Split('\n').Where(l => !l.StartsWith("Envanter Kahini: ")));

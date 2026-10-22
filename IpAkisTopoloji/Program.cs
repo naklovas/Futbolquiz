@@ -215,10 +215,14 @@ app.MapGet("/api/firewall", async (string? ip, string? start, string? end,
 
 // Sunucu içi akış: gelen bağlantıları hangi süreç karşılıyor, o süreç nereye gidiyor (Carbon Black).
 // "Bu sunucuda hangi uygulama çalışıyor?": arayüzdeki Carbon Black süreç listesi AI'a (Surec.cs SurecAi)
-app.MapPost("/api/surec/ai", async (SurecAiIstek req, EnvanterService envanter, IslevService islev, EksikService eksik, CancellationToken ct) =>
+app.MapPost("/api/surec/ai", async (SurecAiIstek req, EnvanterService envanter, IslevService islev, EksikService eksik, NessusService nessus, CancellationToken ct) =>
 {
     if (!LookupQuery.TryParseIpv4(req.Ip, out _)) return Results.BadRequest(new { error = "Geçersiz IP." });
-    try { return Results.Ok(await SurecAi.RunAsync(req, await envanter.GetAsync(false, ct), islev, eksik, ct)); }
+    // Nessus bilgisi (varsa) kanıta eklenir; ulaşılamazsa onsuz
+    string? ek = null;
+    try { if ((await nessus.SunucularAsync([req.Ip!], null, ct)).TryGetValue(req.Ip!, out var ns)) ek = NessusService.Metin(ns); }
+    catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested) { }
+    try { return Results.Ok(await SurecAi.RunAsync(req, await envanter.GetAsync(false, ct), islev, eksik, ct, ek)); }
     catch (Exception ex) when (ex is not OperationCanceledException) { return Results.Json(new { error = ex.Message }, statusCode: 502); }
 });
 
