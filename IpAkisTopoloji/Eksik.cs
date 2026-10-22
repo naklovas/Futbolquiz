@@ -372,7 +372,9 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
     // AI önerisinde geçerse sunucunun iş uygulaması sayılmaz; yalnız boş portu kabul eden exe o ürüne aitse "Altyapı: <ürün>" olabilir.
     static readonly string[] DefaultAjanlar = ["Dataskope", "Infraskope", "Carbon Black", "Splunk", "SiteScope", "Trend Micro", "Deep Security",
         "McAfee", "Trellix", "Symantec", "Tanium", "Qualys", "Tenable", "Nessus", "CyberArk", "SCCM", "Zabbix", "Dynatrace", "AppDynamics",
-        "AppInternals", "Commvault", "Veeam", "NetBackup", "Guardium", "Imperva", "Varonis", "Forcepoint", "Ansible", "Nagios", "PRTG", "SolarWinds"];
+        "AppInternals", "Commvault", "Veeam", "NetBackup", "Guardium", "Imperva", "Varonis", "Forcepoint", "Ansible", "Nagios", "PRTG", "SolarWinds",
+        // yetkili erişim yönetimi (PAM): sunuculara bağlanmak için kullanılır, bağlandığı sunucunun uygulaması değildir (kullanıcı: Kron)
+        "Kron", "Single Connect", "BeyondTrust", "Delinea", "Thycotic", "Wallix"];
     string[] Ajanlar() => cfg.GetSection("Eksik:AjanUygulamalari").GetChildren().Select(c => c.Value).OfType<string>().Where(v => v.Trim() != "") is var l && l.Any()
         ? l.ToArray() : DefaultAjanlar;
     // Ürünlerin eski / diğer adları (ör. Forcepoint'in eski adı Websense; segment adı WEBSENSE kalmış olabilir)
@@ -380,7 +382,7 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
     {
         ["forcepoint"] = ["websense"], ["trellix"] = ["mcafee", "fireeye"], ["carbonblack"] = ["bit9"],
         ["trendmicro"] = ["apexone", "officescan"], ["deepsecurity"] = ["trendmicro"],
-        ["symantec"] = ["endpointprotection", "sepm", "sepmanager"]
+        ["symantec"] = ["endpointprotection", "sepm", "sepmanager"], ["kron"] = ["singleconnect", "kronpam"], ["singleconnect"] = ["kron"]
     };
     static IEnumerable<string> AjanAdlari(string ajan) => new[] { Norm(ajan) }.Concat(AjanTakma.GetValueOrDefault(Norm(ajan)) ?? []).Where(x => x.Length >= 4);
     string? AjanOf(string? text)
@@ -426,7 +428,14 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
     static readonly System.Text.RegularExpressions.Regex SunucuKelime = new(@"sunucu|server|y[öo]netim|manager|konsol|console|veritaban|database|\bdb\b", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
     // "sunucu kurulumu" ürünün sunucusunun kurulduğunu söyler; başka "kurulum" (sunucuya X kurulumu) ajan kurulumudur
     static readonly System.Text.RegularExpressions.Regex AjanKelime = new(@"ajan|agent|client|istemci|(?<!sunucu\w*\s*)kurulum|install|y[üu]kle", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-    static bool UrunSunucusuMetni(string? t, string ajan) => t != null && AjanAdlari(ajan).Any(Norm(t).Contains)
+    // "A sunucularının B sunucularına erişmesi": A erişen taraftır (kullanıcı: "Kron Single-Connect Sunucularının Pinblock Sunucularına
+    // Erişmesi" → bu sunucu Pinblock, Kron değil). Erişim cümlesinde ilk "…larının / …sunun / …sisteminin" öncesi atılır.
+    static readonly System.Text.RegularExpressions.Regex ErisenKalip = new(@"\b\S*(sunucular[ıi]n[ıi]n|sunucusunun|sistemlerinin|sisteminin|cihazlar[ıi]n[ıi]n|kullan[ıi]c[ıi]lar[ıi]n[ıi]n)\b",
+        System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+    static string HedefKismi(string t) =>
+        System.Text.RegularExpressions.Regex.IsMatch(t, @"eri[şs]", System.Text.RegularExpressions.RegexOptions.IgnoreCase) && ErisenKalip.Match(t) is { Success: true } m
+            ? t[(m.Index + m.Length)..] : t;
+    static bool UrunSunucusuMetni(string? t, string ajan) => t != null && (t = HedefKismi(t)) != null && AjanAdlari(ajan).Any(Norm(t).Contains)
         && SunucuKelime.IsMatch(t) && !AjanKelime.IsMatch(t);
     // Boş portu kabul eden exe (kanıttaki Carbon Black "- gelen port X" satırı) bu ajana mı ait
     static bool PortExeHas(string? evidence, string port, string ajan) => evidence != null && port.Length > 0 &&
@@ -569,8 +578,10 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
         PrepCatalog(env);
         var say = new Dictionary<string, (int n, int p)>(StringComparer.OrdinalIgnoreCase);
         void Add(string ad, bool port) { var c = say.GetValueOrDefault(ad); say[ad] = (c.n + 1, c.p + (port ? 1 : 0)); }
-        foreach (var (text, port) in texts)
+        foreach (var (ham, port) in texts)
         {
+            // her açıklama parçası (" · " ile birleşik) ayrı ayrı: erişen taraf atılır
+            string text = string.Join(" · ", ham.Split(" · ").Select(HedefKismi));
             var tok = IslevService.Tokens(text);
             var found = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var (app, ct) in _catTok!)
@@ -580,7 +591,7 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
                 if (key.Count == 0) continue;
                 bool hit = key.Count >= 2 ? key.All(tok.Contains)
                     : app.Trim().Length >= 3 && System.Text.RegularExpressions.Regex.IsMatch(text, $@"(?<![\p{{L}}\d]){System.Text.RegularExpressions.Regex.Escape(app.Trim())}(?![\p{{L}}\d])", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-                if (hit) found.Add(app);
+                if (hit && (AjanOf(app) is not { } aj0 || UrunSunucusuMetni(text, aj0))) found.Add(app);   // ajan / PAM adı yalnız ürün sunucusu metninde
             }
             // aynı metinde hem "KÖS" hem "KÖS Raporlama" bulunduysa kısa olanı at
             foreach (var a in found.Where(a => !found.Any(b => b.Length > a.Length && Norm(b).Contains(Norm(a)))).ToList()) Add(a, port);
@@ -599,8 +610,9 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
         while (w.Count > 1 && UrunSonEk.Contains(w[^1].Trim('.', ','))) w.RemoveAt(w.Count - 1);
         return string.Join(' ', w);
     }
-    static string? SmAdayOf(string? evidence) => evidence?.Split('\n').FirstOrDefault(l => l.StartsWith(SmAdayBas)) is { } l
-        ? l[SmAdayBas.Length..].Split(" | ")[0].Split(" (")[0].Trim() is { Length: > 0 } a ? a : null : null;
+    // Kanıttaki SM aday satırını okur: (ad, boş portu anan talep var mı)
+    static List<(string Ad, bool Port)> SmAdaylariOku(string? evidence) => evidence?.Split('\n').FirstOrDefault(l => l.StartsWith(SmAdayBas)) is { } l
+        ? l[SmAdayBas.Length..].Split(" | ").Select(x => (Ad: x.Split(" (")[0].Trim(), Port: x.Contains("boş portu anan"))).Where(x => x.Ad.Length > 0).ToList() : [];
 
     // SM talepleri (kullanıcı tarifi): sunucu ZT_HEDEF / ZT_KAYNAK'ta (IP) ya da ZT_HEDEFHOSTNAME / ZT_KAYNAKHOSTNAME'de (UNIXNAME) aranır;
     // bulunan talebin DESCRIPTION, BRIEF_DESCRIPTION, ZT_KAYNAKACIKLAMA, ZT_HEDEFACIKLAMA alanları AI'a gider. Sunucunun talepte HEDEF mi
@@ -1100,6 +1112,9 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
               YAZMA. Uygulamayı programlardan bul: "SUNUCUDA ÇALIŞAN İŞ PROGRAMLARI" satırındaki exe'ler ve "= Ürün" etiketleri (ör.
               sas.exe = SAS) sunucunun ne çalıştırdığını doğrudan gösterir; boş portu kabul eden exe yoksa bile sunucudaki iş programı
               güçlü ipucudur.
+            - "A sunucularının B sunucularına erişmesi" gibi taleplerde A ERİŞEN (istemci) taraftır, bu sunucu (HEDEF) B'dir. Kron
+              Single-Connect (ve CyberArk, BeyondTrust gibi PAM araçları) yetkili erişim yönetimi için sunuculara bağlanır; bu
+              sunucunun uygulaması DEĞİLDİR (ör. "Kron Single-Connect Sunucularının Pinblock Sunucularına Erişmesi" → bu sunucu Pinblock).
             - Segment adı ve aynı segmentteki diğer sunucular ZAYIF ipucudur (bir segmentte birden çok ürünün sunucusu olabilir; ör.
               WEBSENSE segmentinde Symantec sunucusu). SM açıklaması, talebin kısa açıklaması, sanal sunucu notu ya da exe yolu başka bir
               ürünü / uygulamayı söylüyorsa onu seç; segmentten ürün adı TÜRETME.
@@ -1178,7 +1193,11 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
         // geçen bir sistem varsa o yazılır (DB portunda "… Veritabanı"), gerekçede belirtilir
         foreach (var (ip, ports) in todo)
         {
-            if (SmAdayOf(texts.GetValueOrDefault(ip)) is not { } sm) continue;
+            // Sunucuda birden çok sistem anılıyorsa (kullanıcı örneği: Ziraat POS, Bansoft, Pinblock, 3DSec aynı sunucuda) ilk adı her porta
+            // yazmak yanlış olur: yalnız boş portu anan talepten gelen ya da tek aday varsa uygulanır
+            var smList = SmAdaylariOku(texts.GetValueOrDefault(ip));
+            var smSec = smList.Count == 1 ? smList[0] : smList.FirstOrDefault(x => x.Port);
+            if (smSec.Ad is not { } sm) continue;
             foreach (var port in ports)
             {
                 var o = outp.GetValueOrDefault((ip, port));

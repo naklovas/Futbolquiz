@@ -331,6 +331,12 @@ erişim talepleri) — DB → şema → tablo ve kim erişiyor bilgisi buradan b
   Katalogda hiç karşılığı yoksa (kullanıcı: AI "SAS ALM" dedi → serbest kaldı) AYNI ÜRÜN AİLESİ (AI'ın anahtar kelimesi adında geçen kayıtlar)
   arasından da `Secim`. Ek puanlar doğrudan envanterden: aynı ad kökündeki sunucu (zkprodsasalm01 ↔ zkprodsasalm02, sondaki sayı atılır) +3,
   aynı önekle başlayan (son 3 harf atılmış kök, zkprodsas…) +1. Sahte envanterle: "SAS ALM" ve "SAS" → [ZK] SAS IFRS TFRS9.
+  ERİŞEN TARAF / PAM (kullanıcı: "Kron Single-Connect Sunucularının Pinblock Sunucularına Erişmesi" talebinden AI Kron önerdi; Kron yetki yönetimi
+  için sunuculara bağlanır): ajan listesine Kron, Single Connect, BeyondTrust, Delinea, Thycotic, Wallix (takma: singleconnect, kronpam).
+  `HedefKismi`: "eriş" geçen açıklamada ilk "…sunucularının / sunucusunun / sistemlerinin / cihazlarının / kullanıcılarının" öncesi (erişen
+  taraf) atılır — `SmAdaylari` ve `UrunSunucusuMetni` bunu kullanır; ajan / PAM adı aday olmaz (ürün sunucusu metni değilse). Prompt kuralı +
+  örnek. SM son kontrolü artık yalnız tek SM adayı varsa ya da aday boş portu anan talepten geliyorsa uygular (çok uygulamalı sunucu:
+  Ziraat POS / Bansoft / Pinblock / 3DSec aynı sunucuda → ilk ad her porta yazılmaz). Sahte veriyle: Kron elendi, Pinblock / Ziraat POS / Bansoft.
   HEDEF talebinde "A karşılığı … B'nin DB'lerine erişim" → bu sunucu B (kullanıcı örneği: "KKB Karşılığı / Ziraat Katılım prod segmentinin
   KÖS Db'lerine erişim talebi" + HEDEF → "KÖS"; AI null diyordu). Prompt kuralı: DB portu olsa da sahibi açıklamadaki sistem, null yazma.
   VERİTABANI SUNUCUSU (kullanıcı: "DB sunucusunda uygulamanın yanına 'X Veritabanı' yazsın"): `DbHints` kanıta "VERİTABANI SUNUCUSU
