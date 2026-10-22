@@ -131,7 +131,7 @@
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const fmt = n => Number(n || 0).toLocaleString("tr-TR");
-const st = { tur: "segment", tags: [], segs: [], job: null, data: null, timer: null, yetki: {}, q: "", alt: false, dyn: false, genel: false, sifir: true, durum: "", sort: "ip", desc: false };
+const st = { ai: null, aiTimer: null, open: new Set(), tur: "segment", tags: [], segs: [], job: null, data: null, timer: null, yetki: {}, q: "", alt: false, dyn: false, genel: false, sifir: true, durum: "", sort: "ip", desc: false };
 const ipNum = ip => ip.split(".").reduce((a, b) => a * 256 + +b, 0);
 
 async function api(url, opt) {
@@ -168,7 +168,7 @@ async function start() {
   $("#warn").innerHTML = ""; $("#res").innerHTML = "";
   try {
     const j = await api("api/segment/tarama", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ [st.tur]: seg, saat: +$("#saat").value }) });
-    st.job = j.id;
+    st.job = j.id; st.ai = null; clearTimeout(st.aiTimer);
     history.replaceState(null, "", "?" + new URLSearchParams({ [st.tur]: seg, saat: $("#saat").value }));
     poll(j);
   } catch (e) { $("#warn").innerHTML = `<div class="warn">${esc(e.message)}</div>`; }
@@ -185,13 +185,43 @@ async function poll(j) {
   if (j.sonuc) { st.data = j.sonuc; render(); }
 }
 
+// ---- AI ile iş uygulaması tahmini (sunucu sunucu, SurecAi) ----
+async function aiStart(ips, yeniden) {
+  try {
+    st.ai = await api(`api/segment/tarama/${st.job}/ai`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ips, yeniden: !!yeniden }) });
+    render(); aiPoll();
+  } catch (e) { alert(e.message); }
+}
+async function aiPoll() {
+  clearTimeout(st.aiTimer);
+  try { st.ai = await api(`api/segment/tarama/${st.job}/ai`); } catch { return; }
+  render();
+  if (st.ai.calisiyor) st.aiTimer = setTimeout(aiPoll, 2500);
+}
+// Satırın exe'si için AI tahmini (sonuç exe adıyla eşleşir)
+function aiOf(ip, exe) {
+  const s = st.ai?.sonuclar?.[ip];
+  if (!s) return st.ai?.hatalar?.[ip] ? { hata: st.ai.hatalar[ip] } : null;
+  return { u: (s.uygulamalar || []).find(u => (u.exe || "").toLowerCase() === exe.toLowerCase()), ozet: s.ozet, var: true };
+}
+function aiCell(ip, exe) {
+  const a = aiOf(ip, exe);
+  if (!a) return st.ai?.calisiyor ? `<span class="small muted">…</span>` : "";
+  if (a.hata) return `<span class="small" style="color:var(--err)" title="${esc(a.hata)}">AI hatası</span>`;
+  if (!a.u) return `<span class="small muted" title="AI bu exe'yi iş uygulaması saymadı (genel / altyapı)">—</span>`;
+  const u = a.u, c = u.guven >= 75 ? "var(--ok)" : u.guven >= 50 ? "var(--warn)" : "var(--err)";
+  return `<div class="sug" title="${esc(u.gerekce || "")}"><b>${esc(u.uygulama || "?")}</b><span class="conf"><i style="width:${u.guven}%;background:${c}"></i></span><span class="small muted">%${u.guven}</span>
+    ${u.ertKarsiligi ? `<div class="small">ERT: ${esc(u.ertKarsiligi)}</div>` : ""}${u.rol ? `<div class="small muted">${esc(u.rol)}</div>` : ""}</div>`;
+}
+const aiText = (ip, exe) => { const a = aiOf(ip, exe); return a?.u ? `${a.u.uygulama || ""}${a.u.ertKarsiligi ? " (ERT: " + a.u.ertKarsiligi + ")" : ""} %${a.u.guven}` : ""; };
+
 function rows() {
   const q = st.q.toLowerCase();
   // Port 0 / boş: Carbon Black'te yerel portu olmayan gelen olaylar. Kullanıcı: aralarında çok iş uygulaması var, görünsün (kutucukla gizlenebilir)
   let r = st.data.satirlar.filter(x => (st.sifir || !sifir(x)) && (st.alt || !x.altyapi) && (st.dyn || !x.dinamik) && (st.genel || !x.genel) && (!st.durum || x.ertDurum === st.durum)
-    && (!q || [x.ip, x.sunucu, x.segment, x.port, x.exe, x.yol, x.urun, ...x.ertUygulama, ...x.istemciler].some(v => (v || "").toLowerCase().includes(q))));
+    && (!q || [x.ip, x.sunucu, x.segment, x.port, x.exe, x.yol, x.urun, aiText(x.ip, x.exe), ...x.ertUygulama, ...x.istemciler].some(v => (v || "").toLowerCase().includes(q))));
   const key = { ip: x => ipNum(x.ip) * 1e5 + (+x.port || 0), port: x => +x.port || 0, exe: x => x.exe.toLowerCase(), baglanti: x => x.baglanti, istemci: x => x.istemci,
-    ert: x => ({ yok: 0, bos: 1, kayitli: 2 }[x.ertDurum]), son: x => x.son || "" }[st.sort];
+    ert: x => ({ yok: 0, bos: 1, kayitli: 2 }[x.ertDurum]), son: x => x.son || "", ai: x => aiText(x.ip, x.exe).toLowerCase() || "\uffff" }[st.sort];
   r.sort((a, b) => { const A = key(a), B = key(b); return (A < B ? -1 : A > B ? 1 : 0) * (st.desc ? -1 : 1); });
   return r;
 }
@@ -209,9 +239,10 @@ function render() {
     const ert = x.ertDurum === "kayitli" ? esc(x.ertUygulama.join(", ")) : x.ertDurum === "bos" ? `<span class="st bos">ERT'de adı boş</span>` : `<span class="st yok">ERT'de yok</span>`;
     return `<tr class="${first ? "grp" : "cont"}${x.altyapi || x.genel ? " alt" : ""}">
       <td class="ip ipc"><a href="./?ip=${encodeURIComponent(x.ip)}" target="_blank" rel="noopener" title="IP topolojisini aç">${esc(x.ip)}</a></td>
-      <td class="hc">${esc(x.sunucu || "")}${d.tur === "etiket" && x.segment ? `<div class="small muted">${esc(x.segment)}</div>` : ""}</td>
+      <td class="hc">${esc(x.sunucu || "")}${d.tur === "etiket" && x.segment ? `<div class="small muted">${esc(x.segment)}</div>` : ""}${first && st.ai?.sonuclar?.[x.ip]?.ozet ? `<div class="small" style="margin-top:4px;max-width:260px" title="${esc(st.ai.sonuclar[x.ip].ozet)}">🤖 ${esc(st.ai.sonuclar[x.ip].ozet.length > 110 ? st.ai.sonuclar[x.ip].ozet.slice(0, 110) + "…" : st.ai.sonuclar[x.ip].ozet)}</div>` : ""}</td>
       <td class="mono"><b>${esc(x.port || "—")}</b>${sifir(x) ? ' <span class="small muted" title="Carbon Black bu olayda yerel port vermedi">port yok</span>' : ""}${x.altyapi ? ' <span class="small muted">altyapı</span>' : ""}${x.dinamik ? ' <span class="small muted">dinamik</span>' : ""}</td>
       <td title="${esc(x.yol)}"><b>${esc(x.exe)}</b>${x.urun ? `<span class="urun">${esc(x.urun)}</span>` : ""}<div class="small muted mono">${esc(x.yol.length > 70 ? "…" + x.yol.slice(-70) : x.yol)}</div></td>
+      <td>${aiCell(x.ip, x.exe)}</td>
       <td>${fmt(x.baglanti)}</td>
       <td>${x.istemci}<div class="small muted">${esc(x.istemciler.slice(0, 3).join(", "))}${x.istemci > 3 ? " …" : ""}</div></td>
       <td>${ert}</td>
@@ -240,16 +271,20 @@ function render() {
       <label title="Carbon Black'te yerel portu 0 / boş gelen olaylar; kaldırırsanız bu satırlar gizlenir"><input type="checkbox" id="sifirF" ${st.sifir ? "checked" : ""}> Port 0 (${fmt(nSifir)})</label>
       <span class="sp"></span>
       <span class="small muted">${fmt(r.length)} satır</span>
+      ${st.yetki.topoloji ? (st.ai?.calisiyor
+        ? `<span class="small"><span class="spinner"></span> AI: ${st.ai.biten} / ${st.ai.toplam} sunucu</span> <button id="aiDur" type="button">Durdur</button>`
+        : `<button id="aiRun" type="button" title="Her sunucunun exe'leri (yol, port, istemci, giden) + ERT kayıtları AI'a gider; iş uygulamalarını adlandırır. Aynı anda 3 sunucu.">🤖 AI ile iş uygulamalarını tahmin et${st.ai ? " (yenile)" : ""}</button>`) : ""}
+      ${st.ai && !st.ai.calisiyor && Object.keys(st.ai.hatalar || {}).length ? `<span class="small" style="color:var(--err)">${Object.keys(st.ai.hatalar).length} sunucuda AI hatası</span>` : ""}
       ${st.yetki.disari ? `<button id="csv" type="button">Excel'e aktar</button>` : ""}
     </div>
-    <div class="grid"><table><thead><tr>${th("ip", "IP")}<th>Sunucu</th>${th("port", "Port")}${th("exe", "Program (exe)")}${th("baglanti", "Bağlantı")}${th("istemci", "İstemci")}${th("ert", "ERT")}${th("son", "Son görülme")}</tr></thead>
-      <tbody>${body || `<tr><td colspan="8" class="empty">Filtreye uyan gelen port yok.</td></tr>`}</tbody></table></div>
-    <details ${giden.length ? "" : "hidden"}><summary>Gelen bağlantısı görülmeyen programlar (yalnız giden) · ${fmt(giden.length)}</summary>
-      <div class="grid" style="margin-top:8px;max-height:400px"><table><thead><tr><th>IP</th><th>Sunucu</th><th>Program</th><th>Giden bağlantı</th><th>Gittiği yerler</th></tr></thead><tbody>
+    <div class="grid"><table><thead><tr>${th("ip", "IP")}<th>Sunucu</th>${th("port", "Port")}${th("exe", "Program (exe)")}${th("ai", "AI tahmini")}${th("baglanti", "Bağlantı")}${th("istemci", "İstemci")}${th("ert", "ERT")}${th("son", "Son görülme")}</tr></thead>
+      <tbody>${body || `<tr><td colspan="9" class="empty">Filtreye uyan gelen port yok.</td></tr>`}</tbody></table></div>
+    <details data-k="giden" ${st.open.has("giden") ? "open" : ""} ${giden.length ? "" : "hidden"}><summary>Gelen bağlantısı görülmeyen programlar (yalnız giden) · ${fmt(giden.length)}</summary>
+      <div class="grid" style="margin-top:8px;max-height:400px"><table><thead><tr><th>IP</th><th>Sunucu</th><th>Program</th><th>AI tahmini</th><th>Giden bağlantı</th><th>Gittiği yerler</th></tr></thead><tbody>
       ${giden.map(g => `<tr><td class="ip"><a href="./?ip=${encodeURIComponent(g.ip)}" target="_blank" rel="noopener">${esc(g.ip)}</a></td><td>${esc(g.sunucu || "")}</td>
-        <td title="${esc(g.yol)}"><b>${esc(g.exe)}</b>${g.urun ? `<span class="urun">${esc(g.urun)}</span>` : ""}</td><td>${fmt(g.baglanti)}</td><td class="small">${esc(g.hedefler.join(", "))}</td></tr>`).join("")}
+        <td title="${esc(g.yol)}"><b>${esc(g.exe)}</b>${g.urun ? `<span class="urun">${esc(g.urun)}</span>` : ""}</td><td>${aiCell(g.ip, g.exe)}</td><td>${fmt(g.baglanti)}</td><td class="small">${esc(g.hedefler.join(", "))}</td></tr>`).join("")}
       </tbody></table></div></details>
-    <details ${yok.length ? "" : "hidden"}><summary>ERT'de kayıtlı ama bu aralıkta Carbon Black verisi olmayan sunucular · ${fmt(yok.length)}</summary>
+    <details data-k="yok" ${st.open.has("yok") ? "open" : ""} ${yok.length ? "" : "hidden"}><summary>ERT'de kayıtlı ama bu aralıkta Carbon Black verisi olmayan sunucular · ${fmt(yok.length)}</summary>
       <div class="small" style="margin-top:8px">${yok.map(s => `<span class="chips"><span class="mono">${esc(s.ip)}</span></span> ${esc(s.sunucu || "")} <span class="muted">${esc(s.ertUygulamalar.join(", "))}</span>`).join("<br>")}</div>
       <div class="small muted" style="margin-top:6px">Carbon Black ajanı olmayabilir, sunucu kapalı olabilir ya da bu aralıkta ağ olayı olmamış olabilir.</div></details>`;
   $("#durumF").value = st.durum;
@@ -260,6 +295,13 @@ function render() {
   $("#genelF").addEventListener("change", e => { st.genel = e.target.checked; render(); });
   $("#sifirF").addEventListener("change", e => { st.sifir = e.target.checked; render(); });
   $("#csv")?.addEventListener("click", csv);
+  $("#aiRun")?.addEventListener("click", () => {
+    const n = new Set(d.satirlar.map(x => x.ip).concat(d.giden.map(x => x.ip))).size;
+    if (!st.ai && n > 50 && !confirm(`${n} sunucu AI'a gönderilecek (aynı anda 3). Uzun sürebilir; devam edilsin mi?`)) return;
+    aiStart(null, !!st.ai);
+  });
+  $("#aiDur")?.addEventListener("click", () => fetch(`api/segment/tarama/${st.job}/ai/durdur`, { method: "POST" }));
+  document.querySelectorAll("#res details[data-k]").forEach(x => x.addEventListener("toggle", () => x.open ? st.open.add(x.dataset.k) : st.open.delete(x.dataset.k)));
   document.querySelectorAll("th[data-sort]").forEach(h => h.addEventListener("click", () => {
     if (st.sort === h.dataset.sort) st.desc = !st.desc; else { st.sort = h.dataset.sort; st.desc = ["baglanti", "istemci", "son"].includes(st.sort); }
     render();
@@ -269,9 +311,10 @@ function render() {
 function csv() {
   if (!st.yetki.disari) return alert("Dışa aktarma yetkiniz yok. Yetki DokuPanel'den verilir.");
   const C = v => `"${String(v ?? "").replace(/"/g, '""')}"`;
-  const lines = ["IP;SUNUCU;SEGMENT;PORT;EXE;YOL;BİLİNEN ÜRÜN;BAĞLANTI;İSTEMCİ SAYISI;İSTEMCİLER;ERT DURUMU;ERT UYGULAMASI;SON GÖRÜLME"]
-    .concat(rows().map(x => [x.ip, x.sunucu, x.segment, x.port, x.exe, x.yol, x.urun, x.baglanti, x.istemci, x.istemciler.join(", "),
-      { yok: "ERT'de yok", bos: "ERT'de adı boş", kayitli: "kayıtlı" }[x.ertDurum], x.ertUygulama.join(", "), x.son].map(C).join(";")));
+  const lines = ["IP;SUNUCU;SEGMENT;PORT;EXE;YOL;BİLİNEN ÜRÜN;AI TAHMİNİ;AI ERT KARŞILIĞI;AI GÜVEN;AI SUNUCU ÖZETİ;BAĞLANTI;İSTEMCİ SAYISI;İSTEMCİLER;ERT DURUMU;ERT UYGULAMASI;SON GÖRÜLME"]
+    .concat(rows().map(x => { const a = aiOf(x.ip, x.exe); return [x.ip, x.sunucu, x.segment, x.port, x.exe, x.yol, x.urun,
+      a?.u?.uygulama, a?.u?.ertKarsiligi, a?.u ? a.u.guven : "", a?.ozet, x.baglanti, x.istemci, x.istemciler.join(", "),
+      { yok: "ERT'de yok", bos: "ERT'de adı boş", kayitli: "kayıtlı" }[x.ertDurum], x.ertUygulama.join(", "), x.son].map(C).join(";"); }));
   const a = document.createElement("a");
   a.href = URL.createObjectURL(new Blob(["\uFEFF" + lines.join("\r\n")], { type: "text/csv;charset=utf-8" }));
   a.download = `DeltaFlow_segment_${st.data.segment.replace(/[^\w.-]+/g, "_")}.csv`;

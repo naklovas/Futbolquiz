@@ -11,6 +11,7 @@ using System.Text;
 // ---------------------------------------------------------------------------
 record SegmentOzet(string Ad, List<string> Cidrler, string? Kurum, int ErtSunucu);
 record SegmentIstek(string? Segment, int? Saat, string? Etiket = null);
+record SegmentAiIstek(List<string>? Ips, bool Yeniden);
 record SegmentSatir(string Ip, string? Sunucu, string? Segment, string Port, string Exe, string Yol, string? Urun, bool Genel, bool Altyapi, bool Dinamik,
     long Baglanti, int Istemci, List<string> Istemciler, List<string> ErtUygulama, string ErtDurum, string? Son);
 record SegmentGiden(string Ip, string? Sunucu, string Exe, string Yol, string? Urun, bool Genel, long Baglanti, int Hedef, List<string> Hedefler);
@@ -20,8 +21,59 @@ record SegmentSonuc(string Tur, string Segment, List<string> Cidrler, int Saat, 
 record SegmentIs(string Id, string Segment, bool Calisiyor, string Asama, int Toplam, int Biten, string? Hata, string Kullanici,
     DateTimeOffset Basladi, SegmentSonuc? Sonuc);
 
-sealed class SegmentTaramaService(IConfiguration cfg, IHttpClientFactory factory, EnvanterService envanter, ILogger<SegmentTaramaService> log)
+// AI ile iş uygulaması tahmini (kullanıcı: "sunucu sunucu AI'a gönderelim, exe'lerden çalışan iş uygulamalarını tahmin etsin, bir kolona"):
+// tarama sonucundaki exe'ler sunucu başına SurecAi'ye (IP kartındaki "Bu sunucuda hangi uygulama çalışıyor?" ile aynı prompt) gider;
+// aynı anda Segment:AiParalel (3) sunucu; sonuç tarama işiyle birlikte bellekte, kaydedilmez.
+record SegmentAiDurum(bool Calisiyor, int Toplam, int Biten, Dictionary<string, SurecAiSonuc> Sonuclar, Dictionary<string, string> Hatalar);
+
+sealed class SegmentTaramaService(IConfiguration cfg, IHttpClientFactory factory, EnvanterService envanter, IslevService islev, EksikService eksik,
+    ILogger<SegmentTaramaService> log)
 {
+    readonly ConcurrentDictionary<string, (ConcurrentDictionary<string, SurecAiSonuc> Sonuc, ConcurrentDictionary<string, string> Hata, int Toplam, int[] Biten, bool[] Calisiyor, CancellationTokenSource Cts)> _ai = new();
+
+    public SegmentAiDurum? AiDurum(string id) => _ai.TryGetValue(id, out var a)
+        ? new(a.Calisiyor[0], a.Toplam, a.Biten[0], new(a.Sonuc), new(a.Hata)) : null;
+    public void AiDurdur(string id) { if (_ai.TryGetValue(id, out var a)) a.Cts.Cancel(); }
+
+    // ips boşsa sonuçtaki tüm sunucular (iş exe'si olanlar); yeniden = önceki sonuçları da yenile
+    public async Task<SegmentAiDurum> AiBaslatAsync(string id, List<string>? ips, bool yeniden, CancellationToken ct)
+    {
+        if (Durum(id)?.Sonuc is not { } r) throw new InvalidOperationException("Önce tarama bitmeli (ya da sonucun süresi dolmuş olabilir).");
+        if (_ai.TryGetValue(id, out var eski) && eski.Calisiyor[0]) throw new InvalidOperationException("AI tahmini zaten çalışıyor.");
+        var env = await envanter.GetAsync(false, ct);
+        var onceki = eski.Sonuc ?? new ConcurrentDictionary<string, SurecAiSonuc>();
+        // sunucu başına exe'ler: gelen satırlar (port, bağlantı, istemci) + yalnız giden
+        var istek = r.Satirlar.Select(x => x.Ip).Concat(r.Giden.Select(g => g.Ip)).Distinct()
+            .Where(ip => ips is not { Count: > 0 } || ips.Contains(ip))
+            .Where(ip => yeniden || !onceki.ContainsKey(ip))
+            .Select(ip => new SurecAiIstek(ip,
+                r.Satirlar.Where(x => x.Ip == ip).GroupBy(x => x.Yol, StringComparer.OrdinalIgnoreCase).Select(g => new SurecAiExe(g.First().Exe, g.Key, null,
+                        g.Select(x => new ProcPort(x.Port, x.Baglanti, x.Istemci)).ToList(), 0, g.SelectMany(x => x.Istemciler).Distinct().Take(8).ToList(), null))
+                    .Concat(r.Giden.Where(x => x.Ip == ip).Select(x => new SurecAiExe(x.Exe, x.Yol, null, null, x.Baglanti, null, x.Hedefler)))
+                    .ToList()))
+            .Where(q => q.Surecler!.Any(e => !SurecAi.Genel(e)))   // yalnız genel süreçli sunucu AI'a gitmez
+            .ToList();
+        var cts = new CancellationTokenSource();
+        var a = (Sonuc: onceki, Hata: new ConcurrentDictionary<string, string>(), Toplam: istek.Count, Biten: new[] { 0 }, Calisiyor: new[] { istek.Count > 0 }, Cts: cts);
+        _ai[id] = a;
+        log.LogInformation("Segment tarama AI: {Id} {N} sunucu", id, istek.Count);
+        if (istek.Count > 0)
+            _ = Task.Run(async () =>
+            {
+                using var gate = new SemaphoreSlim(Math.Clamp(cfg.GetValue("Segment:AiParalel", 3), 1, 8));
+                await Task.WhenAll(istek.Select(async q =>
+                {
+                    try { await gate.WaitAsync(cts.Token); } catch (OperationCanceledException) { return; }
+                    try { a.Sonuc[q.Ip!] = await SurecAi.RunAsync(q, env, islev, eksik, cts.Token); a.Hata.TryRemove(q.Ip!, out _); }
+                    catch (OperationCanceledException) { }
+                    catch (Exception ex) { a.Hata[q.Ip!] = ex.Message; }
+                    finally { Interlocked.Increment(ref a.Biten[0]); gate.Release(); }
+                }));
+                a.Calisiyor[0] = false;
+            });
+        return AiDurum(id)!;
+    }
+
     readonly ConcurrentDictionary<string, (SegmentIs Is, CancellationTokenSource Cts)> _isler = new();
 
     // Segment seçicisi: aynı adlı segmentler tek kayıt (proje kuralı), ERT'deki sunucu sayısıyla

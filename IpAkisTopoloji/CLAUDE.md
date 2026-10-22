@@ -376,6 +376,13 @@ erişim talepleri) — DB → şema → tablo ve kim erişiyor bilgisi buradan b
   altında gösterilir, CSV'de SEGMENT kolonu); `?etiket=` derin bağlantı. Sayfa adı "Segment / etiket tarama".
   PORT 0: önce varsayılan gizlendi; kullanıcı geri aldı ("port 0'lar kalsın, bir sürü iş uygulaması da var") → varsayılan GÖRÜNÜR, özet
   sayılara girer, "Port 0 (N)" kutucuğu (işaretli) ile gizlenebilir, satırda "port yok" notu.
+  AI İŞ UYGULAMASI TAHMİNİ (kullanıcı: "sunucu sunucu AI'a gönderelim, exe'lerden çalışan iş uygulamalarını tahmin etsin, bir kolona"):
+  "🤖 AI ile iş uygulamalarını tahmin et" (Yetki:Topoloji; 50+ sunucuda onay) → POST `/api/segment/tarama/{id}/ai {ips?, yeniden}`, GET `…/ai`
+  (2,5 sn), `…/ai/durdur`. Tarama sonucundaki exe'ler sunucu başına `SurecAiExe`'ye çevrilir (gelen: port / bağlantı / istemci, giden: hedefler)
+  ve IP kartındaki `SurecAi.RunAsync` (aynı prompt, genel süreçler ayıklanır, genel bilgiler dosyası) çağrılır; yalnız genel süreçli sunucu
+  gitmez; `Segment:AiParalel`=3; sonuç bellekte (`_ai`, tarama işiyle). Arayüz: "AI tahmini" kolonu (exe adıyla eşleşme: uygulama, güven
+  çubuğu, ERT karşılığı, rol; AI iş uygulaması saymadıysa "—", hata "AI hatası"), IP'nin ilk satırında sunucu özeti, sıralama / arama / CSV
+  (AI TAHMİNİ, AI ERT KARŞILIĞI, AI GÜVEN, AI SUNUCU ÖZETİ), "yalnız giden" tablosunda da kolon. Mock'la arayüz test edildi.
 - **VIP**: sorgulanan IP VIP ise üyeler + GW'ler aynı sorguya eklenir, üyeler "VIP ÜYESİ" (GW→üye trafiği varsa ✓).
   Gidilen IP VIP ise "VIP → n ÜYE"; gelen IP LB GW ise "LB GW"; sorgulanan sunucu havuz üyesiyse VIP kartı.
 - **Uygulama görünümü** (`/api/apps`, `/api/app`): `[kullanan uygulamalar] → [UYGULAMA: VIP'ler + segment grupları] → [bağımlı olunanlar]`,

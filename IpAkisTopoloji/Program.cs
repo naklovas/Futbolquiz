@@ -760,6 +760,15 @@ app.MapPost("/api/segment/tarama", async (SegmentIstek req, HttpContext ctx, ICo
 app.MapGet("/api/segment/tarama/{id}", (string id, SegmentTaramaService seg) =>
     seg.Durum(id) is { } d ? Results.Ok(d) : Results.NotFound(new { error = "Tarama bulunamadı (süresi dolmuş olabilir)." }));
 app.MapPost("/api/segment/tarama/{id}/durdur", (string id, SegmentTaramaService seg) => { seg.Durdur(id); return Results.Ok(new { ok = true }); });
+app.MapPost("/api/segment/tarama/{id}/ai", async (string id, SegmentAiIstek? req, HttpContext ctx, IConfiguration cfg, SegmentTaramaService seg, CancellationToken ct) =>
+{
+    if (!Yetki.Var(cfg, ctx, Yetki.Topoloji)) return Yetki.Red(ctx, "Segment tarama (topoloji)");
+    try { return Results.Ok(await seg.AiBaslatAsync(id, req?.Ips, req?.Yeniden ?? false, ct)); }
+    catch (InvalidOperationException ex) { return Results.BadRequest(new { error = ex.Message }); }
+});
+app.MapGet("/api/segment/tarama/{id}/ai", (string id, SegmentTaramaService seg) =>
+    seg.AiDurum(id) is { } d ? Results.Ok(d) : Results.NotFound(new { error = "AI tahmini başlatılmadı." }));
+app.MapPost("/api/segment/tarama/{id}/ai/durdur", (string id, SegmentTaramaService seg) => { seg.AiDurdur(id); return Results.Ok(new { ok = true }); });
 
 // Versiyonlar (Versiyon.cs): işlev haritası + küme topolojisi birlikte; etiket başına son Islev:VersiyonSayisi (3).
 app.MapGet("/api/islev/versiyonlar", async (string etiket, IConfiguration cfg, CancellationToken ct) =>
