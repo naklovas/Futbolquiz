@@ -221,8 +221,12 @@ function aiCell(ip, exe) {
   if (!a.u) return `<span class="small muted" title="AI bu exe'yi iş uygulaması saymadı (genel / altyapı)">—</span>`;
   const u = a.u, c = u.guven >= 75 ? "var(--ok)" : u.guven >= 50 ? "var(--warn)" : "var(--err)";
   const tarih = st.ai?.tarihler?.[ip];
-  return `<div class="sug" title="${esc((u.gerekce || "") + (tarih ? "\nTahmin tarihi: " + tarih : ""))}"><b>${esc(u.uygulama || "?")}</b><span class="conf"><i style="width:${u.guven}%;background:${c}"></i></span><span class="small muted">%${u.guven}</span>
-    ${u.ertKarsiligi ? `<div class="small">ERT: ${esc(u.ertKarsiligi)}</div>` : ""}${u.rol ? `<div class="small muted">${esc(u.rol)}</div>` : ""}</div>`;
+  // Katalog eşlemesi (SurecAi.Katalogla): ERT'deki adla eşlendiyse "ERT kataloğu", değilse "yeni (ERT'de yok)"; AI'ın kendi adı ipucunda
+  const kat = u.yeni ? `<span class="st new" title="ERT kataloğunda karşılığı bulunamadı; AI'ın serbest adı">yeni · ERT'de yok</span>`
+    : u.ertKarsiligi ? `<span class="st ok" title="ERT uygulama kataloğundaki ad">ERT kataloğu</span>` : "";
+  const ipucu = [u.gerekce, u.aiAdi && u.aiAdi !== u.uygulama ? "AI'ın önerdiği ad: " + u.aiAdi : "", u.katalogNot ? "Katalog: " + u.katalogNot : "", tarih ? "Tahmin tarihi: " + tarih : ""].filter(Boolean).join("\n");
+  return `<div class="sug" title="${esc(ipucu)}"><b>${esc(u.uygulama || "?")}</b><span class="conf"><i style="width:${u.guven}%;background:${c}"></i></span><span class="small muted">%${u.guven}</span>
+    <div>${kat}</div>${u.ertKarsiligi && u.ertKarsiligi !== u.uygulama ? `<div class="small">ERT: ${esc(u.ertKarsiligi)}</div>` : ""}${u.rol ? `<div class="small muted">${esc(u.rol)}</div>` : ""}</div>`;
 }
 const aiText = (ip, exe) => { const a = aiOf(ip, exe); return a?.u ? `${a.u.uygulama || ""}${a.u.ertKarsiligi ? " (ERT: " + a.u.ertKarsiligi + ")" : ""} %${a.u.guven}` : ""; };
 
@@ -366,9 +370,9 @@ function render() {
 function csv() {
   if (!st.yetki.disari) return alert("Dışa aktarma yetkiniz yok. Yetki DokuPanel'den verilir.");
   const C = v => `"${String(v ?? "").replace(/"/g, '""')}"`;
-  const lines = ["IP;SUNUCU;SEGMENT;PORT;EXE;YOL;BİLİNEN ÜRÜN;AI TAHMİNİ;AI ERT KARŞILIĞI;AI GÜVEN;AI SUNUCU ÖZETİ;NESSUS TEKNOLOJİ;NESSUS SERTİFİKA ADI;NESSUS DİNLEYEN;NESSUS İŞLETİM SİSTEMİ;BAĞLANTI;İSTEMCİ SAYISI;İSTEMCİLER;ERT DURUMU;ERT UYGULAMASI;SON GÖRÜLME"]
+  const lines = ["IP;SUNUCU;SEGMENT;PORT;EXE;YOL;BİLİNEN ÜRÜN;AI TAHMİNİ;AI ERT KARŞILIĞI;AI GÜVEN;AI ADI ERT'DE;AI SUNUCU ÖZETİ;NESSUS TEKNOLOJİ;NESSUS SERTİFİKA ADI;NESSUS DİNLEYEN;NESSUS İŞLETİM SİSTEMİ;BAĞLANTI;İSTEMCİ SAYISI;İSTEMCİLER;ERT DURUMU;ERT UYGULAMASI;SON GÖRÜLME"]
     .concat(rows().map(x => { const a = aiOf(x.ip, x.exe); return [x.ip, x.sunucu, x.segment, x.port, x.exe, x.yol, x.urun,
-      a?.u?.uygulama, a?.u?.ertKarsiligi, a?.u ? a.u.guven : "", a?.ozet,
+      a?.u?.uygulama, a?.u?.ertKarsiligi, a?.u ? a.u.guven : "", a?.u ? (a.u.yeni ? "hayır (yeni)" : "evet") : "", a?.ozet,
       nsTek(nsOf(x.ip, x.port)).join(", "), nsOf(x.ip, x.port)?.sertifika.join(", "), nsOf(x.ip, x.port)?.dinleyen, st.data.nessus?.[x.ip]?.os, x.baglanti, x.istemci, x.istemciler.join(", "),
       { yok: "ERT'de yok", bos: "ERT'de adı boş", kayitli: "kayıtlı" }[x.ertDurum], x.ertUygulama.join(", "), x.son].map(C).join(";"); }));
   const a = document.createElement("a");

@@ -123,7 +123,7 @@ sealed class SegmentTaramaService(IConfiguration cfg, IHttpClientFactory factory
         foreach (var q in tum)
         {
             if (!yeniden && kayit.TryGetValue(q.Ip!, out var k) && Exeler(q).Split('|').All(e => k.Exeler.Split('|').Contains(e)))
-            { a.Sonuc[q.Ip!] = k.Sonuc; a.Tarih[q.Ip!] = k.Tarih.ToString("yyyy-MM-dd HH:mm"); a.Kayitli++; }
+            { a.Sonuc[q.Ip!] = SurecAi.Katalogla(k.Sonuc, env, eksik); a.Tarih[q.Ip!] = k.Tarih.ToString("yyyy-MM-dd HH:mm"); a.Kayitli++; }   // eski kayıtlar da katalogla eşlenir
             else istek.Add(q);
         }
         a.Toplam = istek.Count; a.Calisiyor = istek.Count > 0;

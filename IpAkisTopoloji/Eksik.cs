@@ -227,6 +227,12 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
     // Birden çok eşit aday varsa ya da hiç yoksa AI'ın adı serbest kalır (yeni); not gerekçeye eklenir.
     static readonly HashSet<string> GenelKelime = ["siste", "uygul", "servi", "web", "api", "yonet", "modul", "proje", "veri", "verit", "app",
         "uygulama", "core", "test", "prod", "ortak", "genel", "islem", "batch", "zaman"];
+    // Segment tarama / IP kartı AI'ı (SurecAi) da aynı katalog eşlemesini ve aday listesini kullanır
+    public string Katalog(EnvanterSnapshot env, string name, out bool yeni, out string? not, string? ip = null, string? evidence = null) =>
+        CatalogMatch(env, name, out yeni, out not, ip, evidence);
+    public List<string> Adaylar(EnvanterSnapshot env, string ip, string evidence) =>
+        Candidates(env, ip, evidence).Where(c => AjanOf(c) is not { } a || AjanSunucusu(env, ip, a, evidence)).ToList();
+
     string CatalogMatch(EnvanterSnapshot env, string name, out bool yeni, out string? not, string? ip = null, string? evidence = null)
     {
         not = null;

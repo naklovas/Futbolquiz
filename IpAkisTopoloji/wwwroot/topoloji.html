@@ -668,7 +668,8 @@ function targetApps(t) {
         <td>${esc(a.varlikMuhafizi ?? "")}</td><td>${esc(a.sunucuIsletenBirim ?? "")}</td><td>${esc(a.uygulamaVarlikSahibi ?? "")}</td>
       </tr>`).join("")}</tbody></table></div>`
     : `<div class="unk">Bu IP için uygulama envanterinde kayıt yok.</div>`;
-  const rng = state.lastParams ? `${(state.lastParams.get("start") || "").replace("T", " ")} – ${(state.lastParams.get("end") || "").replace("T", " ")}` : "seçili aralık";
+  const pr = state.procRange || procRange();
+  const rng = `${pr.start.replace("T", " ")} – ${pr.end.slice(11)} (dünün mesai saati; topoloji aralığından bağımsız)`;
   const canAi = state.proc?.status === "ok" && state.proc.body.processes?.length;
   return ert + `<h2 style="margin-top:14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">Gelen portlar ve çalışan süreçler <span class="small muted" style="font-weight:400">Carbon Black · ${esc(rng)} · bu sunucuda ağ bağlantısı görülen tüm exe'ler</span>
     ${canAi ? `<button type="button" id="procAiBtn" class="mini" style="margin-left:auto" title="Genel Windows / altyapı exe'lerini ayıklayıp bu sunucuda gerçekte hangi iş uygulamalarının çalıştığını ve hangisinin hizmet verdiğini AI'a sorar"${state.procAi?.status === "loading" ? " disabled" : ""}>${state.procAi?.status === "loading" ? "AI inceliyor…" : "🤖 Bu sunucuda hangi uygulama çalışıyor?"}</button>` : ""}</h2>
@@ -1233,6 +1234,15 @@ const PROC_INFRA = new Set(["22", "53", "88", "123", "135", "137", "138", "139",
   "636", "3268", "3269", "3389", "5985", "5986", "10050", "10051"]);
 const PROC_MAX = { procs: 8, side: 14 };
 
+// Süreç listesi için sabit pencere (kullanıcı: "processler az geliyor, bir önceki günün 09:00–12:00 arasını getir"): mesai saati
+// yoğunluğunda çalışan tüm exe'ler görünsün; topolojinin seçili aralığından bağımsız
+const PROC_PENCERE = { gunOnce: 1, bas: "09:00", bit: "12:00" };
+function procRange() {
+  const d = new Date(); d.setDate(d.getDate() - PROC_PENCERE.gunOnce);
+  const g = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  return { start: `${g}T${PROC_PENCERE.bas}`, end: `${g}T${PROC_PENCERE.bit}` };
+}
+
 async function runProc(params) {
   procAbort?.abort();
   procAbort = new AbortController();
@@ -1240,7 +1250,8 @@ async function runProc(params) {
   renderProc();
   updateTargetApps();
   try {
-    const p = new URLSearchParams({ ip: params.get("ip"), start: params.get("start"), end: params.get("end") });
+    state.procRange = procRange();
+    const p = new URLSearchParams({ ip: params.get("ip"), ...state.procRange });
     const r = await fetch("api/surec?" + p, { signal: procAbort.signal });
     const body = await r.json().catch(() => ({ error: `HTTP ${r.status}: sunucu JSON yerine başka bir yanıt döndü (zaman aşımı, yetki ya da sunucu hata sayfası olabilir)` }));
     if (!r.ok) throw new Error(body.error || `HTTP ${r.status}`);

@@ -236,6 +236,8 @@ erişim talepleri) — DB → şema → tablo ve kim erişiyor bilgisi buradan b
   (kullanıcı: önce ERT tablosuna exe kolonu eklendi, eşleşme çok az çıktı → "bağımsız gelsin"): Port | exe | PID | gelen bağlantı |
   karşı IP | ERT'deki uygulama (varsa). Kaynak Carbon Black (`/api/surec`, IP sorgusundan sonra Splunk seçiliyse arka planda;
   `ProcNode.Portlar` = port başına tüm bağlantılar, Inbound'un 40 karşı IP sınırından bağımsız). Altyapı portları soluk "altyapı".
+  SÜREÇ PENCERESİ (kullanıcı: "processler az geliyor, bir önceki günün 09:00–12:00'ını getir"): /api/surec topolojinin aralığını DEĞİL
+  sabit `PROC_PENCERE` (topoloji.html; dün 09:00–12:00, `procRange()`) kullanır; başlıkta yazar. Sunucu içi akış çizimi de aynı veriyi kullanır.
   Bu sunucuda ağ olayı görülen TÜM exe'ler (kullanıcı: "Splunk'ta daha çok exe var, burada 1 satır" → yalnız gelen bağlantılı süreçler
   gösteriliyordu ve kendine / karşı IP'siz olaylar Surec.Build'de atılıyordu; artık süreç listesi tüm satırlardan, çizim filtreli):
   gelen bağlantısı olmayanlar "— yalnız giden" satırı (giden sayısıyla), yerel portu olmayan "?". Başlıkta kullanılan aralık yazılır.
@@ -393,6 +395,11 @@ erişim talepleri) — DB → şema → tablo ve kim erişiyor bilgisi buradan b
   "AI tahmini full boş" (canlı) üzerine sağlamlaştırma: AI işi kayıtlar okunmadan önce `_ai`ye yazılır (GET 404 vermesin), başlatma hatası
   `Uyari`ya düşer, iş programı yoksa açık uyarı; arayüz 404'te 80 sn bekler (eskiden 7,5 sn sonra vazgeçip kolonu boş bırakıyordu); exe eşleşmesi
   dosya adına indirgenir (AI tam yol, büyük harf ya da ".exe"siz yazsa da eşleşir).
+  KATALOGDAN SEÇİM (kullanıcı: "hep yeni uygulama öneriyor, envanterden seçsin"): `SurecAi.RunAsync` prompt'una ERT eksiklerinin aday listesi
+  (`EksikService.Adaylar` = Candidates, ajanlar hariç) "ERT KATALOĞUNDAN ADAY UYGULAMALAR" olarak girer, kural: önce listeden harfi harfine, yalnız
+  uymuyorsa yeni=true. Sonra `SurecAi.Katalogla`: her uygulama `EksikService.Katalog` (= CatalogMatch: birebir / kelime / Secim) ile ERT
+  APPNAME'e eşlenir → eşleşirse Uygulama = ErtKarsiligi = katalog adı, `AiAdi` AI'ın adı, `KatalogNot`; değilse `Yeni=true`. Kayıtlı (eski)
+  tahminlere de okurken uygulanır. Arayüzde "ERT kataloğu" / "yeni · ERT'de yok" rozeti, ipucunda AI'ın adı ve katalog notu, CSV "AI ADI ERT'DE".
 - **Nessus / Tenable.sc** (`Nessus.cs`, kullanıcı: "teknolojisi ASP mi PHP mi"; diğer projedeki guide): CANLI TARAMA YOK — repository'deki
   birikmiş sonuçlar (`POST /rest/analysis`, sourceType cumulative, tool vulndetails, filtreler ip / pluginID / repository / lastSeen 0:MaxGun),
   kimlik `x-apikey: accesskey=…; secretkey=…;` (anahtarlar yalnız appsettings.Production.json). Kullanıcının reposu **121** (`Nessus:Repolar`).

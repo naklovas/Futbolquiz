@@ -93,7 +93,8 @@ static class ProcessFlowBuilder
 // ---------------------------------------------------------------------------
 record SurecAiExe(string Ad, string? Yol, List<string>? Pidler, List<ProcPort>? Portlar, long Giden, List<string>? GelenUygulamalar, List<string>? GidenUygulamalar);
 record SurecAiIstek(string? Ip, List<SurecAiExe>? Surecler);
-record SurecAiUygulama(string Exe, string? Yol, string? Uygulama, string? Rol, string? ErtKarsiligi, int Guven, string? Gerekce);
+record SurecAiUygulama(string Exe, string? Yol, string? Uygulama, string? Rol, string? ErtKarsiligi, int Guven, string? Gerekce,
+    bool Yeni = false, string? KatalogNot = null, string? AiAdi = null);
 record SurecAiSonuc(string Ip, string? Ozet, List<SurecAiUygulama> Uygulamalar, List<string> Ayiklanan, long ElapsedMs);
 
 static class SurecAi
@@ -134,11 +135,14 @@ static class SurecAi
               "Paloma Toplu SMS"; odi4.exe → "Oracle Data Integrator ajanı").
             - rol: port dinleyip gelen bağlantı alıyorsa "hizmet veren (port X)", yalnız dışarı bağlanıyorsa "istemci / arka plan işi".
               ntoskrnl.exe / System bir portta görünüyorsa o port HTTP.sys üzerindendir; asıl uygulama yolu / adı ERT WEBSITE ile örtüşen exe'dir.
-            - ertKarsiligi: ERT'deki uygulama listesinden karşılığı varsa harfi harfine yaz, yoksa null.
+            - uygulama: ÖNCE aşağıdaki "ERT KATALOĞUNDAN ADAY UYGULAMALAR" listesinden (ya da sunucunun ERT kayıtlarından) uyan adı HARFİ HARFİNE
+              yaz ve yeni=false ver. Yalnız hiçbiri bu exe'ye uymuyorsa anlamlı bir ad üret ve yeni=true ver. Genel ürün adı (SAS, IIS,
+              SQL Server) yerine katalogdaki kurum içi adı tercih et (ör. "[ZK] SAS IFRS TFRS9").
+            - ertKarsiligi: katalogdan seçtiysen aynı ad; yoksa null.
             - Hâlâ genel / altyapı olduğunu düşündüğün exe'leri listeye KOYMA.
             - ozet: "Bu sunucu asıl olarak … uygulamasını çalıştırıyor; … portundan hizmet veriyor" gibi 1–2 cümle.
             Yalnızca JSON döndür:
-            {"ozet":"…","uygulamalar":[{"exe":"…","uygulama":"…","rol":"…","ertKarsiligi":null,"guven":0-100,"gerekce":"tek cümle"}]}
+            {"ozet":"…","uygulamalar":[{"exe":"…","uygulama":"…","yeni":false,"rol":"…","ertKarsiligi":null,"guven":0-100,"gerekce":"tek cümle"}]}
             """);
         var hosts = env.AppsOnIp(ip);
         sb.AppendLine().AppendLine($"### Sunucu {ip}" + (hosts.Select(h => h.UnixName).OfType<string>().FirstOrDefault() is { } hn ? $" ({hn})" : ""));
@@ -157,6 +161,11 @@ static class SurecAi
                 + (e.GidenUygulamalar is { Count: > 0 } gi ? $" · bağlandığı uygulamalar: {string.Join(", ", gi.Take(6))}" : ""));
         }
         if (ekKanit != null) sb.AppendLine().AppendLine(ekKanit.Trim());   // Nessus (segment tarama)
+        // Katalogdan seçsin (kullanıcı: "hep yeni uygulama öneriyor, envanterden seçsin"): ERT eksiklerindeki aday listesi
+        // (aynı sunucu, VIP / havuz komşuları, benzer adlı sunucular, segment + port, muhafız, kanıtla kelime örtüşen katalog adları)
+        string kanit = sb.ToString();
+        var aday = eksik.Adaylar(env, ip, kanit);
+        if (aday.Count > 0) sb.AppendLine().AppendLine("ERT KATALOĞUNDAN ADAY UYGULAMALAR (uyuyorsa birini harfi harfine seç): " + string.Join(" | ", aday));
         string answer = await islev.ChatAsync(sb.ToString(), ct);
         if (IslevService.ExtractJson(answer) is not { } root || root.ValueKind != System.Text.Json.JsonValueKind.Object)
             throw new InvalidOperationException("AI cevabı JSON değil: " + (answer.Length > 200 ? answer[..200] : answer));
@@ -172,6 +181,24 @@ static class SurecAi
                 list.Add(new SurecAiUygulama(exe, src?.Yol, IslevService.Str(x, "uygulama"), IslevService.Str(x, "rol"), ertK,
                     Math.Clamp(IslevService.Int(x, "guven"), 0, 100), IslevService.Str(x, "gerekce")));
             }
-        return new SurecAiSonuc(ip, IslevService.Str(root, "ozet"), list, genel, sw.ElapsedMilliseconds);
+        return Katalogla(new SurecAiSonuc(ip, IslevService.Str(root, "ozet"), list, genel, sw.ElapsedMilliseconds), env, eksik, kanit);
+    }
+
+    // AI'ın adı ERT APPNAME kataloğuyla eşlenir (EksikService.Katalog: birebir / kelime / benzer adlar arasından bağlamla seçim).
+    // Eşleşirse uygulama = katalog adı (AI'ın adı AiAdi'de), değilse yeni=true. Kayıtlı (eski) tahminlere de okurken uygulanır.
+    public static SurecAiSonuc Katalogla(SurecAiSonuc s, EnvanterSnapshot env, EksikService eksik, string? kanit = null)
+    {
+        var list = s.Uygulamalar.Select(u =>
+        {
+            if (u.AiAdi != null) return u;   // zaten eşlenmiş
+            string? ad = u.ErtKarsiligi ?? u.Uygulama;
+            if (string.IsNullOrWhiteSpace(ad)) return u with { Yeni = true };
+            string k = eksik.Katalog(env, ad, out bool yeni, out string? not, s.Ip, kanit);
+            if (yeni && u.ErtKarsiligi != null && u.Uygulama != null && u.Uygulama != u.ErtKarsiligi)
+                k = eksik.Katalog(env, u.Uygulama, out yeni, out not, s.Ip, kanit);
+            return yeni ? u with { Yeni = true, ErtKarsiligi = null, KatalogNot = not, AiAdi = u.Uygulama }
+                : u with { Uygulama = k, ErtKarsiligi = k, Yeni = false, KatalogNot = not, AiAdi = u.Uygulama };
+        }).ToList();
+        return s with { Uygulamalar = list };
     }
 }
