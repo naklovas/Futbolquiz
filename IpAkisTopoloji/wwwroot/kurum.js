@@ -38,8 +38,10 @@ async function tnLoad(tag) {
   tn.tag = tag;
   try {
     const r = await fetch("api/tenantlar?" + new URLSearchParams(tag ? { etiket: tag } : {}));
-    tn.list = r.ok ? await r.json() : [];
-  } catch { tn.list = []; }
+    const b = await r.json().catch(() => null);
+    tn.list = r.ok && Array.isArray(b) ? b : [];
+    tn.hata = r.ok && Array.isArray(b) ? null : (b?.error || `HTTP ${r.status}`);
+  } catch (e) { tn.list = []; tn.hata = e.message; }
   const names = new Set(tn.list.map(t => t.ad));
   [...tn.sel].forEach(t => { if (!names.has(t)) tn.sel.delete(t); });
   tnRender();
@@ -61,7 +63,10 @@ function tnRender() {
     const all = !tn.draft.size;
     $("#tnList").innerHTML = `<label class="all"><input type="checkbox" data-tn="*" ${all ? "checked" : ""}><span>Tümü</span><i>${fmt(tn.list.reduce((a, t) => a + t.sunucu, 0))}</i></label>` +
       tn.list.filter(t => !q || t.ad.toLocaleLowerCase("tr").includes(q)).map(t =>
-        `<label><input type="checkbox" data-tn="${esc(t.ad)}" ${tn.draft.has(t.ad) ? "checked" : ""}><span>${esc(t.ad)}</span><i>${fmt(t.sunucu)}</i></label>`).join("");
+        `<label><input type="checkbox" data-tn="${esc(t.ad)}" ${tn.draft.has(t.ad) ? "checked" : ""}><span>${esc(t.ad)}</span><i>${fmt(t.sunucu)}</i></label>`).join("")
+      // Liste etiketin sunucularının kurumlarıdır (segment Domain'i); boş / tek kurum / hata durumunu açıkça yaz
+      + (tn.hata ? `<div class="small" style="color:var(--err);padding:4px 6px">Kurum listesi alınamadı: ${esc(tn.hata)}</div>`
+        : tn.list.length <= 1 ? `<div class="small muted" style="padding:4px 6px">${tn.list.length ? `Bu etiketin tüm sunucuları tek kurumda (segment Domain'i: ${esc(tn.list[0].ad)}).` : "Bu etikette kurum bilgisi olan sunucu yok."} Liste yalnız ${esc(tn.tag || "etiket")} etiketli sunucuların kurumlarını gösterir.</div>` : "");
   };
   list();
   $("#tnQ").addEventListener("input", list);
