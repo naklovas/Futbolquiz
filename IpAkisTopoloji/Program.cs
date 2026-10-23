@@ -793,6 +793,21 @@ app.MapGet("/api/nessus/test", async (string ip, bool? tum, HttpContext ctx, ICo
     try { return Results.Ok(await n.TestAsync(ip.Trim(), tum == true, ct)); }
     catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested) { return Results.Json(new { error = ex.Message }, statusCode: 502); }
 });
+// Benzer sunucular (Benzer.cs): tarama sonucundan exe / port / trafik / Nessus parmak izi → aynı amaçlı gruplar, yakın amaçlılar, alakasızlar
+app.MapGet("/api/segment/tarama/{id}/benzer", async (string id, double? ayni, double? yakin, IConfiguration cfg, SegmentTaramaService seg,
+    EnvanterService envanter, CancellationToken ct) =>
+{
+    if (seg.Durum(id)?.Sonuc is not { } r) return Results.NotFound(new { error = "Tarama bulunamadı ya da bitmedi (süresi dolmuş olabilir)." });
+    try { return Results.Ok(SunucuBenzerlik.Hesapla(r, await envanter.GetAsync(false, ct), cfg, ayni, yakin)); }
+    catch (Exception ex) when (ex is not OperationCanceledException) { return Results.Json(new { error = ex.Message }, statusCode: 500); }
+});
+app.MapGet("/api/segment/tarama/{id}/benzer/karsilastir", async (string id, string a, string b, IConfiguration cfg, SegmentTaramaService seg,
+    EnvanterService envanter, CancellationToken ct) =>
+{
+    if (seg.Durum(id)?.Sonuc is not { } r) return Results.NotFound(new { error = "Tarama bulunamadı ya da bitmedi." });
+    try { return Results.Ok(SunucuBenzerlik.Karsilastir(r, await envanter.GetAsync(false, ct), cfg, a, b)); }
+    catch (InvalidOperationException ex) { return Results.BadRequest(new { error = ex.Message }); }
+});
 app.MapPost("/api/segment/tarama/{id}/ai/durdur", (string id, SegmentTaramaService seg) => { seg.AiDurdur(id); return Results.Ok(new { ok = true }); });
 
 // Versiyonlar (Versiyon.cs): işlev haritası + küme topolojisi birlikte; etiket başına son Islev:VersiyonSayisi (3).

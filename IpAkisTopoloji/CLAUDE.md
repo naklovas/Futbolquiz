@@ -39,6 +39,7 @@ topoloji çizer ve şirket içi AI'a etki analizi yaptırır. Canlıda IIS'te, W
 | `F5Waf.cs` | F5 ASM / Bot Defense güvenlik logları (Splunk index=f5): erişimde engel kararı, IP görünümünde URI listesi |
 | `PortBilgisi.cs` | Port → işlev ve kesilirse duracak iş (AI prompt'u için) |
 | `Segment.cs` | Segment tarama: segmentteki tüm IP'lerin Carbon Black gelen portları + exe'leri, ERT karşılaştırması (`wwwroot/segment.html`) |
+| `Benzer.cs` | Benzer sunucular: segment / etiket taramasında exe + port + trafik + Nessus parmak izi, aynı / yakın amaçlı / alakasız |
 | `Nessus.cs` | Nessus / Tenable.sc: repository'deki tarama sonuçlarından teknoloji, sertifika, OS, kurulu yazılım |
 | `Yetki.cs` | İşlem yetkileri (yazma, topoloji, dışa aktarma, toplu tahmin) — DokuPanel site kayıtları |
 | `AuthHelper.cs` | Kullanıcının verdiği DokuPanel yetki helper'ı (namespace `AppRel`), anahtar config'den |
@@ -400,6 +401,18 @@ erişim talepleri) — DB → şema → tablo ve kim erişiyor bilgisi buradan b
   uymuyorsa yeni=true. Sonra `SurecAi.Katalogla`: her uygulama `EksikService.Katalog` (= CatalogMatch: birebir / kelime / Secim) ile ERT
   APPNAME'e eşlenir → eşleşirse Uygulama = ErtKarsiligi = katalog adı, `AiAdi` AI'ın adı, `KatalogNot`; değilse `Yeni=true`. Kayıtlı (eski)
   tahminlere de okurken uygulanır. Arayüzde "ERT kataloğu" / "yeni · ERT'de yok" rozeti, ipucunda AI'ın adı ve katalog notu, CSV "AI ADI ERT'DE".
+- **Benzer sunucular** (`Benzer.cs`, segment sayfasında "Portlar ve exe'ler | 🧬 Benzer sunucular" sekmesi; kullanıcı: "exe ve trafik parmak izini
+  çıkarıp aynı amaçlı, yakın amaçlı, alakasızları anlayalım"): AI YOK. Parmak izi tarama sonucundan: exe (`exe:` ad, `klasör:` kökü; sürüm /
+  sayı `Sade` ile atılır, genel süreçler hariç), port (altyapı / dinamik / 0 hariç), gelen (istemcinin ERT uygulaması, yoksa segmenti; LB GW
+  hariç), giden (hedefin uygulaması / segmenti), nessus (servis, ürün, sertifika, DB instance). Benzerlik: bileşen başına IDF ağırlıklı Jaccard,
+  iki tarafta dolu bileşenlerin ağırlıklı ortalaması (`Segment:Benzer:*Agirlik` exe .45 port .15 gelen .15 giden .15 nessus .10), exe yoksa 0;
+  aday çiftler ters dizinle (sunucuların %60'ından çoğunda olan özellik aday üretmez). ≥ `Segment:Benzer:Ayni` (0,6) union-find → aynı amaçlı
+  grup (ortak özellikler ≥%60 üyede, ERT dağılımı, ERT tutarsız = kayıtlı üyelerin ortak uygulaması yok, öneri = ERT'siz üyeye kayıtlıların
+  yarısından fazlasındaki uygulama); `Yakin` (0,35)–Ayni → yakın amaçlı (grup çifti başına en yüksek, ERT'siz sunucuya eşin tek uygulaması
+  "yakın" öneri); altı → alakasız; iş exe'si yok → zayıf. ERT benzerlikte kullanılmaz. Uçlar `GET /api/segment/tarama/{id}/benzer?ayni=&yakin=`,
+  `…/benzer/karsilastir?a=&b=` (bileşen başına ortak / yalnız A / yalnız B). Arayüz: eşik seçicileri, istatistik, grup kartları, yakın tablo,
+  alakasız / zayıf katlanır listeler, 2 sunucu seçip karşılaştırma paneli, CSV. Sahte envanterle test edildi (ODEME 4'lü grup, KREDI'li üye
+  tutarsız, boş üyeye ODEME önerisi, SAS ikilisi yakın %56, foo alakasız, yalnız svchost zayıf).
 - **Nessus / Tenable.sc** (`Nessus.cs`, kullanıcı: "teknolojisi ASP mi PHP mi"; diğer projedeki guide): CANLI TARAMA YOK — repository'deki
   birikmiş sonuçlar (`POST /rest/analysis`, sourceType cumulative, tool vulndetails, filtreler ip / pluginID / repository / lastSeen 0:MaxGun),
   kimlik `x-apikey: accesskey=…; secretkey=…;` (anahtarlar yalnız appsettings.Production.json). Kullanıcının reposu **121** (`Nessus:Repolar`).

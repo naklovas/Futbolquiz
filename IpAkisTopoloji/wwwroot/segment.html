@@ -98,6 +98,9 @@
   details { margin-top: 14px; } summary { cursor: pointer; font-weight: 600; }
   .segrow { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
   #seg { min-width: 360px; }
+  .vt { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  .vt button { border: 0; border-radius: 0; padding: 6px 14px; }
+  .vt button.on { background: var(--in); color: #fff; font-weight: 600; }
 </style>
 </head>
 <body>
@@ -132,7 +135,7 @@
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const fmt = n => Number(n || 0).toLocaleString("tr-TR");
-const st = { ai: null, aiTimer: null, open: new Set(), tur: "segment", tags: [], segs: [], job: null, data: null, timer: null, yetki: {}, q: "", alt: false, dyn: false, genel: false, sifir: true, durum: "", sort: "ip", desc: false };
+const st = { view: "port", bz: null, bzAyni: 0.6, bzYakin: 0.35, bzSec: new Set(), ai: null, aiTimer: null, open: new Set(), tur: "segment", tags: [], segs: [], job: null, data: null, timer: null, yetki: {}, q: "", alt: false, dyn: false, genel: false, sifir: true, durum: "", sort: "ip", desc: false };
 const ipNum = ip => ip.split(".").reduce((a, b) => a * 256 + +b, 0);
 
 async function api(url, opt) {
@@ -169,7 +172,7 @@ async function start() {
   $("#warn").innerHTML = ""; $("#res").innerHTML = "";
   try {
     const j = await api("api/segment/tarama", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ [st.tur]: seg, saat: +$("#saat").value }) });
-    st.job = j.id; st.ai = null; clearTimeout(st.aiTimer);
+    st.job = j.id; st.ai = null; st.bz = null; clearTimeout(st.aiTimer);
     history.replaceState(null, "", "?" + new URLSearchParams({ [st.tur]: seg, saat: $("#saat").value }));
     poll(j);
   } catch (e) { $("#warn").innerHTML = `<div class="warn">${esc(e.message)}</div>`; }
@@ -282,6 +285,7 @@ function nsDrawer(ip) {
 document.addEventListener("click", e => { const a = e.target.closest("[data-ns]"); if (a) { e.preventDefault(); nsDrawer(a.dataset.ns); } });
 document.addEventListener("keydown", e => { if (e.key === "Escape") document.querySelector(".drawer")?.remove(); });
 function render() {
+  if (st.view === "benzer") return renderBenzer();
   const d = st.data, all = d.satirlar.filter(x => !x.altyapi && !x.dinamik && !x.genel);
   const nSifir = d.satirlar.filter(sifir).length;
   const cb = d.sunucular.filter(s => s.cbVar).length, ertIp = d.sunucular.filter(s => s.ertPort > 0).length;
@@ -307,7 +311,7 @@ function render() {
   }).join("");
   const yok = d.sunucular.filter(s => !s.cbVar && s.ertPort > 0);
   const giden = d.giden.filter(g => st.genel || !g.genel);
-  $("#res").innerHTML = `
+  $("#res").innerHTML = viewTabs() + `
     <div class="sub" style="margin-top:8px">${d.tur === "etiket" ? "Etiket " : ""}${esc(d.segment)}${d.cidrler.length ? " · " + esc(d.cidrler.join(", ")) : ""} · Carbon Black ${new Date(d.baslangic).toLocaleString("tr-TR")} – ${new Date(d.bitis).toLocaleString("tr-TR")} · ${(d.ms / 1000).toFixed(1)} sn</div>
     ${d.mesajlar.length ? `<div class="warn" style="margin-top:8px">${d.mesajlar.map(esc).join("<br>")}</div>` : ""}
     ${d.nessusDurum ? `<div class="small ${ns ? "muted" : ""}" style="margin-top:6px${ns ? "" : ";color:var(--warn)"}">🛡 ${esc(d.nessusDurum)}${ns ? " · repository'deki son tarama sonuçları (yeni tarama yapılmaz)" : ""}</div>` : ""}
@@ -352,6 +356,7 @@ function render() {
     <details data-k="yok" ${st.open.has("yok") ? "open" : ""} ${yok.length ? "" : "hidden"}><summary>ERT'de kayıtlı ama bu aralıkta Carbon Black verisi olmayan sunucular · ${fmt(yok.length)}</summary>
       <div class="small" style="margin-top:8px">${yok.map(s => `<span class="chips"><span class="mono">${esc(s.ip)}</span></span> ${esc(s.sunucu || "")} <span class="muted">${esc(s.ertUygulamalar.join(", "))}</span>`).join("<br>")}</div>
       <div class="small muted" style="margin-top:6px">Carbon Black ajanı olmayabilir, sunucu kapalı olabilir ya da bu aralıkta ağ olayı olmamış olabilir.</div></details>`;
+  bindTabs();
   $("#durumF").value = st.durum;
   $("#q").addEventListener("input", e => { st.q = e.target.value; render(); $("#q").focus(); $("#q").setSelectionRange(st.q.length, st.q.length); });
   $("#durumF").addEventListener("change", e => { st.durum = e.target.value; render(); });
@@ -365,6 +370,114 @@ function render() {
     if (st.sort === h.dataset.sort) st.desc = !st.desc; else { st.sort = h.dataset.sort; st.desc = ["baglanti", "istemci", "son"].includes(st.sort); }
     render();
   }));
+}
+
+// ---- Benzer sunucular (Benzer.cs): exe / port / trafik / Nessus parmak izi → aynı amaçlı, yakın amaçlı, alakasız ----
+const viewTabs = () => `<div class="tools" style="margin-top:10px"><div class="vt">
+  <button type="button" data-view="port" class="${st.view === "port" ? "on" : ""}">Portlar ve exe'ler</button>
+  <button type="button" data-view="benzer" class="${st.view === "benzer" ? "on" : ""}" title="Exe, port ve trafik parmak izine göre aynı amaca hizmet eden sunucular">🧬 Benzer sunucular</button></div></div>`;
+function bindTabs() {
+  document.querySelectorAll("[data-view]").forEach(b => b.addEventListener("click", () => { st.view = b.dataset.view; render(); if (st.view === "benzer" && !st.bz) loadBenzer(); }));
+}
+async function loadBenzer() {
+  st.bz = { loading: true }; render();
+  try { st.bz = await api(`api/segment/tarama/${st.job}/benzer?` + new URLSearchParams({ ayni: st.bzAyni, yakin: st.bzYakin })); }
+  catch (e) { st.bz = { error: e.message }; }
+  st.bzSec.clear(); render();
+}
+const pct = v => `%${Math.round((v || 0) * 100)}`;
+const BZ_AD = { exe: "İş programları", port: "Portlar", gelen: "Bağlananlar", giden: "Bağlandıkları", nessus: "Nessus" };
+function bzSrv(ip) {
+  const s = st.bz.sunucular[ip] || { ip, ertUygulamalar: [] };
+  return `<label class="small" style="display:inline-flex;gap:4px;align-items:center"><input type="checkbox" data-bzsec="${esc(ip)}" ${st.bzSec.has(ip) ? "checked" : ""} title="Karşılaştırmak için iki sunucu seçin">
+    <span class="mono"><b>${esc(ip)}</b></span></label> ${esc(s.sunucu || "")}`;
+}
+function renderBenzer() {
+  const b = st.bz;
+  let body;
+  if (!b || b.loading) body = `<div class="run"><div><span class="spinner"></span> Parmak izleri karşılaştırılıyor…</div></div>`;
+  else if (b.error) body = `<div class="warn">Benzerlik hesaplanamadı: ${esc(b.error)}</div>`;
+  else {
+    const S = b.sunucular, all = Object.values(S);
+    const n = k => all.filter(x => x.sinif === k).length;
+    const chips = (o) => Object.entries(o).filter(([, v]) => v.length).map(([k, v]) => `<div class="small"><span class="muted">${BZ_AD[k] || k}:</span> <span class="chips">${v.map(x => `<span>${esc(x)}</span>`).join("")}</span></div>`).join("");
+    const ert = ip => (S[ip]?.ertUygulamalar || []).length ? esc(S[ip].ertUygulamalar.join(", ")) : `<span class="st bos">ERT'de uygulama yok</span>`;
+    const oneri = ip => S[ip]?.oneri ? `<span class="st ${S[ip].oneriDuzey === "grup" ? "ok" : "new"}" title="${S[ip].oneriDuzey === "grup" ? "Grubun ERT'deki çoğunluk uygulaması" : "En benzer (yakın amaçlı) sunucunun ERT uygulaması — zayıf öneri"}">öneri: ${esc(S[ip].oneri)}</span>` : "";
+    const gruplar = b.gruplar.map(g => `<div class="panel" style="margin-top:10px;padding:12px 14px">
+      <div style="display:flex;gap:10px;align-items:baseline;flex-wrap:wrap"><b style="font-size:15px">Grup ${g.no} · ${esc(g.ad)}</b>
+        <span class="small muted">${g.uyeler.length} sunucu · ortalama benzerlik ${pct(g.puan)}</span>
+        ${g.tutarsiz ? `<span class="st red" title="Aynı parmak izine sahip sunucular ERT'de ortak uygulaması olmayan farklı uygulamalara kayıtlı">ERT tutarsız</span>` : ""}
+        ${g.oneriler.length ? `<span class="st ok">${g.oneriler.length} ERT önerisi</span>` : ""}
+        <span class="small muted" style="margin-left:auto">ERT: ${Object.entries(g.ertDagilim).map(([a, c]) => `${esc(a)} (${c})`).join(", ") || "—"}</span></div>
+      <div style="margin:6px 0">${chips(g.ortak)}</div>
+      <table><tbody>${g.uyeler.map(ip => `<tr><td>${bzSrv(ip)}</td><td>${ert(ip)} ${oneri(ip)}</td><td class="small muted">en benzer: ${esc(S[ip]?.enBenzer || "")} ${pct(S[ip]?.enPuan)}</td></tr>`).join("")}</tbody></table></div>`).join("");
+    const yakin = b.yakinlar.map(y => `<tr><td>${bzSrv(y.a)}${y.grupA ? ` <span class="small muted">(grup ${y.grupA})</span>` : ""}<div class="small">${ert(y.a)}</div></td>
+      <td>${bzSrv(y.b)}${y.grupB ? ` <span class="small muted">(grup ${y.grupB})</span>` : ""}<div class="small">${ert(y.b)}</div></td><td><b>${pct(y.puan)}</b></td>
+      <td class="small">${esc(y.ortak.join(", "))}</td><td>${oneri(y.a)} ${oneri(y.b)}</td></tr>`).join("");
+    const alak = b.alakasiz.map(ip => `<tr><td>${bzSrv(ip)}</td><td>${ert(ip)}</td><td class="small">${esc((S[ip].iz.exe || []).filter(x => x.startsWith("exe")).join(", "))}</td><td class="small muted">${S[ip].enBenzer ? `en yakın ${esc(S[ip].enBenzer)} ${pct(S[ip].enPuan)}` : "ortak özelliği olan sunucu yok"}</td></tr>`).join("");
+    body = `<div class="sub" style="margin:8px 0">Her sunucunun parmak izi: iş programları (sürüm / sondaki sayı atılmış), dinlenen portlar, bağlanan ve bağlandığı uygulamalar, Nessus servis / sertifika.
+      Nadir ortak özellik çok, herkeste olan (w3wp, sqlservr) az sayar. ERT benzerlikte kullanılmaz; sonradan doğrulama ve öneri için gösterilir.</div>
+      <div class="tools"><label>Aynı amaçlı ≥ <select id="bzAyni">${[0.5, 0.6, 0.7, 0.8, 0.9].map(v => `<option ${v === b.ayni ? "selected" : ""}>${v}</option>`).join("")}</select></label>
+        <label>Yakın amaçlı ≥ <select id="bzYakin">${[0.2, 0.25, 0.35, 0.45].map(v => `<option ${v === b.yakin ? "selected" : ""}>${v}</option>`).join("")}</select></label>
+        <span class="sp"></span><button type="button" id="bzKars" ${st.bzSec.size === 2 ? "" : "disabled"}>Seçili 2 sunucuyu karşılaştır (${st.bzSec.size}/2)</button>
+        ${st.yetki.disari ? `<button type="button" id="bzCsv">Excel'e aktar</button>` : ""}</div>
+      <div class="stats">
+        <div class="stat"><b>${b.gruplar.length}</b><span>Aynı amaçlı grup</span></div>
+        <div class="stat"><b>${n("ayni")}</b><span>Gruptaki sunucu</span></div>
+        <div class="stat"><b>${n("yakin")}</b><span>Yakın amaçlı (grupsuz)</span></div>
+        <div class="stat"><b>${n("alakasiz")}</b><span>Alakasız / tekil</span></div>
+        <div class="stat"><b>${n("zayif")}</b><span>Parmak izi zayıf</span></div>
+        <div class="stat"><b>${b.gruplar.filter(g => g.tutarsiz).length}</b><span>ERT tutarsız grup</span></div>
+        <div class="stat"><b>${all.filter(x => x.oneri).length}</b><span>ERT önerisi</span></div>
+      </div>
+      <h3 style="margin:14px 0 0">Aynı amaçlı gruplar</h3>${gruplar || `<div class="empty">Eşiğin üstünde benzeyen sunucu grubu yok.</div>`}
+      <details open><summary>Yakın amaçlı sunucular · ${b.yakinlar.length} eşleşme</summary>
+        <div class="grid" style="margin-top:8px;max-height:460px"><table><thead><tr><th>Sunucu</th><th>Benzediği</th><th>Benzerlik</th><th>Ortak özellikler</th><th>Öneri</th></tr></thead>
+        <tbody>${yakin || `<tr><td colspan="5" class="empty">Yakın amaçlı eşleşme yok.</td></tr>`}</tbody></table></div></details>
+      <details data-k="bzAlak" ${st.open.has("bzAlak") ? "open" : ""}><summary>Alakasız / tekil sunucular · ${b.alakasiz.length}</summary>
+        <div class="grid" style="margin-top:8px;max-height:400px"><table><thead><tr><th>Sunucu</th><th>ERT</th><th>İş programları</th><th></th></tr></thead><tbody>${alak}</tbody></table></div></details>
+      <details data-k="bzZayif" ${st.open.has("bzZayif") ? "open" : ""} ${b.zayif.length ? "" : "hidden"}><summary>Parmak izi zayıf (yalnız genel / ajan süreçleri görüldü) · ${b.zayif.length}</summary>
+        <div class="small" style="margin-top:8px">${b.zayif.map(ip => `<span class="chips"><span class="mono">${esc(ip)}</span></span> ${esc(S[ip]?.sunucu || "")} <span class="muted">${esc((S[ip]?.ertUygulamalar || []).join(", "))}</span>`).join("<br>")}</div></details>`;
+  }
+  $("#res").innerHTML = viewTabs() + body;
+  bindTabs();
+  $("#bzAyni")?.addEventListener("change", e => { st.bzAyni = +e.target.value; if (st.bzYakin > st.bzAyni) st.bzYakin = 0.35; loadBenzer(); });
+  $("#bzYakin")?.addEventListener("change", e => { st.bzYakin = +e.target.value; loadBenzer(); });
+  document.querySelectorAll("[data-bzsec]").forEach(c => c.addEventListener("change", () => {
+    const ip = c.dataset.bzsec;
+    if (c.checked) { if (st.bzSec.size >= 2) st.bzSec.delete([...st.bzSec][0]); st.bzSec.add(ip); } else st.bzSec.delete(ip);
+    render();
+  }));
+  $("#bzKars")?.addEventListener("click", bzKarsilastir);
+  $("#bzCsv")?.addEventListener("click", bzCsv);
+  document.querySelectorAll("#res details[data-k]").forEach(x => x.addEventListener("toggle", () => x.open ? st.open.add(x.dataset.k) : st.open.delete(x.dataset.k)));
+}
+async function bzKarsilastir() {
+  const [a, b] = [...st.bzSec];
+  let k;
+  try { k = await api(`api/segment/tarama/${st.job}/benzer/karsilastir?` + new URLSearchParams({ a, b })); } catch (e) { return alert(e.message); }
+  const L = (t, arr) => arr.length ? `<div class="small"><span class="muted">${t}:</span> ${arr.map(esc).join(", ")}</div>` : "";
+  document.querySelector(".drawer")?.remove();
+  const d = document.createElement("div"); d.className = "drawer";
+  d.innerHTML = `<div class="dh"><div><h3>🧬 ${esc(a)} ↔ ${esc(b)}</h3><div class="sub">${esc(st.bz.sunucular[a]?.sunucu || "")} ↔ ${esc(st.bz.sunucular[b]?.sunucu || "")} · toplam benzerlik <b>${pct(k.puan)}</b></div></div><button type="button">Kapat</button></div>
+    <div style="padding:14px 18px;overflow:auto">${k.bilesenler.map(c => `<div style="margin-bottom:12px"><b>${esc(c.ad)}</b> <span class="small muted">ağırlık ${pct(c.agirlik)} · ${c.puan == null ? "karşılaştırılmadı (bir tarafta yok)" : "benzerlik " + pct(c.puan)}</span>
+      ${L("Ortak", c.ortak)}${L("Yalnız " + a, c.sadeceA)}${L("Yalnız " + b, c.sadeceB)}</div>`).join("")}</div>`;
+  d.querySelector("button").onclick = () => d.remove();
+  document.body.appendChild(d);
+}
+function bzCsv() {
+  if (!st.yetki.disari) return alert("Dışa aktarma yetkiniz yok. Yetki DokuPanel'den verilir.");
+  const C = v => `"${String(v ?? "").replace(/"/g, '""')}"`, S = st.bz.sunucular;
+  const sinif = { ayni: "aynı amaçlı", yakin: "yakın amaçlı", alakasiz: "alakasız", zayif: "parmak izi zayıf" };
+  const lines = ["IP;SUNUCU;SEGMENT;SINIF;GRUP;GRUP ADI;EN BENZER;BENZERLİK;ERT UYGULAMALARI;ÖNERİ;ÖNERİ DÜZEYİ;İŞ PROGRAMLARI;GELEN;GİDEN"].concat(Object.values(S).map(x => {
+    const g = st.bz.gruplar.find(g => g.no === x.grup);
+    return [x.ip, x.sunucu, x.segment, sinif[x.sinif], x.grup, g?.ad, x.enBenzer, x.enPuan ? Math.round(x.enPuan * 100) + "%" : "", x.ertUygulamalar.join(", "), x.oneri, x.oneriDuzey,
+      (x.iz.exe || []).join(", "), (x.iz.gelen || []).join(", "), (x.iz.giden || []).join(", ")].map(C).join(";");
+  }));
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob(["\uFEFF" + lines.join("\r\n")], { type: "text/csv;charset=utf-8" }));
+  a.download = `DeltaFlow_benzer_${st.data.segment.replace(/[^\w.-]+/g, "_")}.csv`;
+  a.click();
 }
 
 function csv() {
