@@ -10,7 +10,8 @@ using System.Text;
 // Ayarlar: Segment:MaxAdres (65536 = /16), Segment:MaxSaat (168), Segment:ParcaDesen (16 desen / sorgu), Segment:SonucDakika (60).
 // ---------------------------------------------------------------------------
 record SegmentOzet(string Ad, List<string> Cidrler, string? Kurum, int ErtSunucu);
-record SegmentIstek(string? Segment, int? Saat, string? Etiket = null);
+record SegmentIstek(string? Segment, int? Saat, string? Etiket = null, string? Mod = null);   // Mod: boş = kayıtlıysa aç, "yeniden" = baştan tara, "ekle" = yalnız yeni sunucular
+record SegmentKayit(string Tur, string Ad, DateTime Tarih, int Saat, int Sunucu, int Satir, string? Kaydeden);
 record SegmentAiIstek(List<string>? Ips, bool Yeniden);
 record SegmentSatir(string Ip, string? Sunucu, string? Segment, string Port, string Exe, string Yol, string? Urun, bool Genel, bool Altyapi, bool Dinamik,
     long Baglanti, int Istemci, List<string> Istemciler, List<string> ErtUygulama, string ErtDurum, string? Son);
@@ -19,7 +20,7 @@ record SegmentSunucu(string Ip, string? Sunucu, string? Segment, List<string> Er
 record SegmentSonuc(string Tur, string Segment, List<string> Cidrler, int Saat, DateTimeOffset Baslangic, DateTimeOffset Bitis, List<SegmentSunucu> Sunucular,
     List<SegmentSatir> Satirlar, List<SegmentGiden> Giden, List<string> Mesajlar, long Ms, Dictionary<string, NessusSunucu>? Nessus = null, string? NessusDurum = null);
 record SegmentIs(string Id, string Segment, bool Calisiyor, string Asama, int Toplam, int Biten, string? Hata, string Kullanici,
-    DateTimeOffset Basladi, SegmentSonuc? Sonuc);
+    DateTimeOffset Basladi, SegmentSonuc? Sonuc, SegmentKayit? Kayit = null, string? Not = null);
 
 // AI ile iş uygulaması tahmini (kullanıcı: "sunucu sunucu AI'a gönderelim, exe'lerden çalışan iş uygulamalarını tahmin etsin, bir kolona"):
 // tarama sonucundaki exe'ler sunucu başına SurecAi'ye (IP kartındaki "Bu sunucuda hangi uygulama çalışıyor?" ile aynı prompt) gider;
@@ -192,9 +193,7 @@ sealed class SegmentTaramaService(IConfiguration cfg, IHttpClientFactory factory
             int maxIp = cfg.GetValue("Segment:EtiketMaxIp", 2000);
             if (list.Count > maxIp) throw new InvalidOperationException($"Etikette {list.Count:N0} sunucu var; en çok {maxIp:N0} (Segment:EtiketMaxIp).");
             ipler = list.ToHashSet();
-            sorgular = list.Chunk(Math.Clamp(cfg.GetValue("Segment:ParcaIp", 40), 1, 200)).Select(c => (
-                $"({string.Join(" OR ", c.Select(ip => $"TERM({ip})"))}) local_ip IN ({string.Join(",", c.Select(ip => $"\"{ip}\""))})",
-                (string?)null, $"{c[0]} … ({c.Length} IP)")).ToList();
+            sorgular = IpSorgulari(list);
         }
         else
         {
@@ -209,8 +208,37 @@ sealed class SegmentTaramaService(IConfiguration cfg, IHttpClientFactory factory
         }
         var id = Guid.NewGuid().ToString("N")[..12];
         var cts = new CancellationTokenSource();
-        string tur = ipler != null ? "etiket" : "segment";
-        _isler[id] = (new SegmentIs(id, (ipler != null ? "Etiket " : "") + ad, true, "Carbon Black sorgulanıyor", sorgular.Count, 0, null, user, DateTimeOffset.Now, null), cts);
+        string tur = ipler != null ? "etiket" : "segment", gorunen = (ipler != null ? "Etiket " : "") + ad;
+        // Kayıtlı tarama (kullanıcı: "her seferinde tekrar sorgulamayayım, kaydetsin; istersem yeniden çek, ya da yeni sunucuları ekle")
+        string mod = (req.Mod ?? "").Trim().ToLowerInvariant();
+        var kayit = mod == "yeniden" ? null : await KayitOkuAsync(tur, ad, ct);
+        if (kayit != null && mod != "ekle")
+        {
+            _isler[id] = (new SegmentIs(id, gorunen, false, "Kayıttan açıldı", 0, 0, null, user, DateTimeOffset.Now, kayit.Value.Sonuc, kayit.Value.Bilgi), cts);
+            log.LogInformation("Segment tarama kayıttan: {User} {Tur} {Ad} ({Tarih})", user, tur, ad, kayit.Value.Bilgi.Tarih);
+            _ = Task.Run(async () => { try { await AiBaslatAsync(id, null, false, user, CancellationToken.None); } catch (Exception ex) { _ai[id] = new AiIs { Uyari = "AI tahmini başlatılamadı: " + ex.Message }; } });
+            return _isler[id].Is;
+        }
+        SegmentSonuc? eski = null;
+        if (kayit != null)   // mod == "ekle": kayıtta olmayan ya da geçen sefer Carbon Black verisi gelmeyen sunucular
+        {
+            eski = kayit.Value.Sonuc;
+            var bilinen = eski.Sunucular.Where(x => x.CbVar).Select(x => x.Ip).ToHashSet();
+            var hepsi = ipler ?? env.HostIps.Where(ip => InCidrs(ip, cidrs.Select(c => { EnvanterSnapshot.TryParseCidr(c, out uint n, out int pp); return (n, pp); }).ToList())).ToHashSet();
+            var yeni = hepsi.Where(ip => !bilinen.Contains(ip) && LookupQuery.TryParseIpv4(ip, out _)).ToList();
+            if (yeni.Count == 0)
+            {
+                _isler[id] = (new SegmentIs(id, gorunen, false, "Kayıttan açıldı", 0, 0, null, user, DateTimeOffset.Now, eski, kayit.Value.Bilgi,
+                    "Eklenecek yeni sunucu yok: ERT'deki tüm sunucular kayıtlı taramada var (Carbon Black verisi gelmeyenler dahil yeniden denenecek sunucu yok)."), cts);
+                _ = Task.Run(async () => { try { await AiBaslatAsync(id, null, false, user, CancellationToken.None); } catch { } });
+                return _isler[id].Is;
+            }
+            ipler = yeni.ToHashSet();
+            sorgular = IpSorgulari(yeni);
+            saat = eski.Saat;   // birleşen sonuç aynı aralık uzunluğunda kalsın
+        }
+        _isler[id] = (new SegmentIs(id, gorunen, true, eski != null ? $"Yeni sunucular Carbon Black'te sorgulanıyor ({ipler!.Count} IP)" : "Carbon Black sorgulanıyor",
+            sorgular.Count, 0, null, user, DateTimeOffset.Now, null), cts);
         log.LogInformation("Segment tarama: {User} {Tur} {Ad} ({Cidr}), {Saat} saat, {Parca} sorgu", user, tur, ad, string.Join(",", cidrs), saat, sorgular.Count);
         _ = Task.Run(async () =>
         {
@@ -218,7 +246,15 @@ sealed class SegmentTaramaService(IConfiguration cfg, IHttpClientFactory factory
             {
                 var sonuc = await TaraAsync(id, env, tur, ad, cidrs, ipler, sorgular, saat, cts.Token);
                 sonuc = await NessusEkleAsync(id, sonuc, cts.Token);
-                Set(id, i => i with { Calisiyor = false, Asama = "Bitti", Sonuc = sonuc });
+                string? not = null;
+                if (eski != null)
+                {
+                    int bulunan = sonuc.Sunucular.Count(x => x.CbVar);
+                    not = $"{ipler!.Count} yeni / verisiz sunucu tarandı, {bulunan} tanesinde Carbon Black verisi bulundu ve kayda eklendi.";
+                    sonuc = Birlestir(eski, sonuc, ipler!);
+                }
+                var bilgi = await KayitYazAsync(tur, ad, sonuc, user);
+                Set(id, i => i with { Calisiyor = false, Asama = "Bitti", Sonuc = sonuc, Kayit = bilgi, Not = not });
                 try { await AiBaslatAsync(id, null, false, user, CancellationToken.None); }   // kendiliğinden AI tahmini (kayıtlılar sorulmaz)
                 catch (Exception ex)
                 {
@@ -254,6 +290,112 @@ sealed class SegmentTaramaService(IConfiguration cfg, IHttpClientFactory factory
             log.LogWarning(ex, "Segment tarama Nessus sorgusu başarısız");
             return s with { NessusDurum = "Nessus sorgulanamadı: " + ex.Message };
         }
+    }
+
+    List<(string Arama, string? Kosul, string Etiket)> IpSorgulari(IEnumerable<string> list) =>
+        list.Chunk(Math.Clamp(cfg.GetValue("Segment:ParcaIp", 40), 1, 200)).Select(c => (
+            $"({string.Join(" OR ", c.Select(ip => $"TERM({ip})"))}) local_ip IN ({string.Join(",", c.Select(ip => $"\"{ip}\""))})",
+            (string?)null, $"{c[0]} … ({c.Length} IP)")).ToList();
+
+    // "Yeni sunucuları ekle": kayıtlı sonuçtan yeni taranan IP'lerin eski satırları çıkar, yenileri girer (Nessus da birleşir)
+    static SegmentSonuc Birlestir(SegmentSonuc eski, SegmentSonuc yeni, HashSet<string> ips)
+    {
+        static uint U(string ip) => EnvanterSnapshot.TryToUInt(ip, out uint u) ? u : 0;
+        var nes = new Dictionary<string, NessusSunucu>(eski.Nessus ?? []);
+        foreach (var (k, v) in yeni.Nessus ?? []) nes[k] = v;
+        return eski with
+        {
+            Sunucular = eski.Sunucular.Where(x => !ips.Contains(x.Ip)).Concat(yeni.Sunucular).OrderBy(x => U(x.Ip)).ToList(),
+            Satirlar = eski.Satirlar.Where(x => !ips.Contains(x.Ip)).Concat(yeni.Satirlar).OrderBy(x => U(x.Ip)).ThenBy(x => int.TryParse(x.Port, out int p) ? p : 99999).ToList(),
+            Giden = eski.Giden.Where(x => !ips.Contains(x.Ip)).Concat(yeni.Giden).OrderBy(x => U(x.Ip)).ToList(),
+            Mesajlar = eski.Mesajlar.Concat(yeni.Mesajlar).Distinct().Take(20).ToList(),
+            Nessus = nes.Count > 0 ? nes : null, NessusDurum = yeni.NessusDurum ?? eski.NessusDurum,
+            Bitis = yeni.Bitis, Ms = eski.Ms + yeni.Ms
+        };
+    }
+
+    // ---- Kayıtlı taramalar (Segment:TaramaTablosu, sql/segment_tarama.sql; tür + ad başına son tarama, gzip'li JSON; tablo yoksa bellekte) ----
+    readonly ConcurrentDictionary<string, (SegmentSonuc Sonuc, SegmentKayit Bilgi)> _kayitBellek = new(StringComparer.OrdinalIgnoreCase);
+    string TaramaTablo => cfg["Segment:TaramaTablosu"] is { Length: > 0 } t && System.Text.RegularExpressions.Regex.IsMatch(t, @"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*){0,2}$")
+        ? t : "dbo.DF_SEGMENT_TARAMA";
+    public string? KayitUyari { get; private set; }
+    static byte[] Sikistir(SegmentSonuc s)
+    {
+        using var ms = new MemoryStream();
+        using (var gz = new System.IO.Compression.GZipStream(ms, System.IO.Compression.CompressionLevel.Optimal)) System.Text.Json.JsonSerializer.Serialize(gz, s, Js);
+        return ms.ToArray();
+    }
+    static SegmentSonuc? Ac(byte[] b)
+    {
+        using var gz = new System.IO.Compression.GZipStream(new MemoryStream(b), System.IO.Compression.CompressionMode.Decompress);
+        return System.Text.Json.JsonSerializer.Deserialize<SegmentSonuc>(gz, Js);
+    }
+
+    async Task<(SegmentSonuc Sonuc, SegmentKayit Bilgi)?> KayitOkuAsync(string tur, string ad, CancellationToken ct)
+    {
+        try
+        {
+            await using var conn = new Microsoft.Data.SqlClient.SqlConnection(cfg.GetConnectionString("Envanter"));
+            await conn.OpenAsync(ct);
+            await using var cmd = new Microsoft.Data.SqlClient.SqlCommand($"SELECT SONUC, TARIH, SAAT, SUNUCU, SATIR, KAYDEDEN FROM {TaramaTablo} WHERE TUR = @t AND AD = @a", conn);
+            cmd.Parameters.AddWithValue("@t", tur); cmd.Parameters.AddWithValue("@a", ad);
+            await using var r = await cmd.ExecuteReaderAsync(ct);
+            if (await r.ReadAsync(ct) && Ac((byte[])r[0]) is { } s)
+                return (s, new SegmentKayit(tur, ad, r.GetDateTime(1), r.GetInt32(2), r.GetInt32(3), r.GetInt32(4), r.IsDBNull(5) ? null : r.GetString(5)));
+            return _kayitBellek.TryGetValue(tur + "|" + ad, out var m) ? m : null;
+        }
+        catch (Microsoft.Data.SqlClient.SqlException ex) when (ex.Number == 208)
+        {
+            KayitUyari = $"Tarama kayıt tablosu ({TaramaTablo}) yok; taramalar yalnız bellekte tutuluyor (sql/segment_tarama.sql).";
+            return _kayitBellek.TryGetValue(tur + "|" + ad, out var m) ? m : null;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            log.LogWarning(ex, "Kayıtlı segment taraması okunamadı: {Tur} {Ad}", tur, ad);
+            return _kayitBellek.TryGetValue(tur + "|" + ad, out var m) ? m : null;
+        }
+    }
+
+    async Task<SegmentKayit> KayitYazAsync(string tur, string ad, SegmentSonuc s, string user)
+    {
+        var bilgi = new SegmentKayit(tur, ad, DateTime.Now, s.Saat, s.Sunucular.Count, s.Satirlar.Count, user);
+        _kayitBellek[tur + "|" + ad] = (s, bilgi);
+        try
+        {
+            await using var conn = new Microsoft.Data.SqlClient.SqlConnection(cfg.GetConnectionString("Envanter"));
+            await conn.OpenAsync();
+            await using var cmd = new Microsoft.Data.SqlClient.SqlCommand($"""
+                MERGE {TaramaTablo} AS t USING (SELECT @t AS TUR, @a AS AD) AS s ON t.TUR = s.TUR AND t.AD = s.AD
+                WHEN MATCHED THEN UPDATE SET SONUC = @s, SAAT = @h, SUNUCU = @n, SATIR = @r, TARIH = SYSDATETIME(), KAYDEDEN = @u
+                WHEN NOT MATCHED THEN INSERT (TUR, AD, SONUC, SAAT, SUNUCU, SATIR, TARIH, KAYDEDEN) VALUES (@t, @a, @s, @h, @n, @r, SYSDATETIME(), @u);
+                """, conn);
+            cmd.Parameters.AddWithValue("@t", tur); cmd.Parameters.AddWithValue("@a", ad);
+            cmd.Parameters.Add("@s", System.Data.SqlDbType.VarBinary, -1).Value = Sikistir(s);
+            cmd.Parameters.AddWithValue("@h", s.Saat); cmd.Parameters.AddWithValue("@n", s.Sunucular.Count); cmd.Parameters.AddWithValue("@r", s.Satirlar.Count);
+            cmd.Parameters.AddWithValue("@u", user);
+            await cmd.ExecuteNonQueryAsync();
+        }
+        catch (Microsoft.Data.SqlClient.SqlException ex) when (ex.Number == 208) { KayitUyari = $"Tarama kayıt tablosu ({TaramaTablo}) yok; taramalar yalnız bellekte (sql/segment_tarama.sql)."; }
+        catch (Exception ex) { log.LogWarning(ex, "Segment taraması kaydedilemedi: {Tur} {Ad}", tur, ad); }
+        return bilgi;
+    }
+
+    // Sayfadaki seçici için kayıtlı taramaların listesi (sonuç gövdesi okunmaz)
+    public async Task<List<SegmentKayit>> KayitlarAsync(CancellationToken ct)
+    {
+        var list = _kayitBellek.Values.Select(v => v.Bilgi).ToDictionary(k => k.Tur + "|" + k.Ad, StringComparer.OrdinalIgnoreCase);
+        try
+        {
+            await using var conn = new Microsoft.Data.SqlClient.SqlConnection(cfg.GetConnectionString("Envanter"));
+            await conn.OpenAsync(ct);
+            await using var cmd = new Microsoft.Data.SqlClient.SqlCommand($"SELECT TUR, AD, TARIH, SAAT, SUNUCU, SATIR, KAYDEDEN FROM {TaramaTablo}", conn);
+            await using var r = await cmd.ExecuteReaderAsync(ct);
+            while (await r.ReadAsync(ct))
+                list[r.GetString(0) + "|" + r.GetString(1)] = new SegmentKayit(r.GetString(0), r.GetString(1), r.GetDateTime(2), r.GetInt32(3), r.GetInt32(4), r.GetInt32(5), r.IsDBNull(6) ? null : r.GetString(6));
+        }
+        catch (Microsoft.Data.SqlClient.SqlException ex) when (ex.Number == 208) { KayitUyari = $"Tarama kayıt tablosu ({TaramaTablo}) yok; taramalar yalnız bellekte (sql/segment_tarama.sql)."; }
+        catch (Exception ex) when (ex is not OperationCanceledException) { log.LogWarning(ex, "Kayıtlı segment taramaları listelenemedi"); }
+        return list.Values.OrderByDescending(k => k.Tarih).ToList();
     }
 
     void Set(string id, Func<SegmentIs, SegmentIs> f)

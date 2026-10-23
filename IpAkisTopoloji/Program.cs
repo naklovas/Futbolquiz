@@ -768,6 +768,9 @@ app.MapPost("/api/segment/tarama", async (SegmentIstek req, HttpContext ctx, ICo
     try { return Results.Ok(await seg.BaslatAsync(req, ctx.User?.Identity?.Name ?? "?", ct)); }
     catch (InvalidOperationException ex) { return Results.BadRequest(new { error = ex.Message }); }
 });
+// Kayıtlı taramalar (tür + ad başına son tarama; sayfada "kayıtlı" bilgisi için)
+app.MapGet("/api/segment/kayitlar", async (SegmentTaramaService seg, CancellationToken ct) =>
+    Results.Ok(new { kayitlar = await seg.KayitlarAsync(ct), uyari = seg.KayitUyari }));
 app.MapGet("/api/segment/tarama/{id}", (string id, SegmentTaramaService seg) =>
     seg.Durum(id) is { } d ? Results.Ok(d) : Results.NotFound(new { error = "Tarama bulunamadı (süresi dolmuş olabilir)." }));
 app.MapPost("/api/segment/tarama/{id}/durdur", (string id, SegmentTaramaService seg) => { seg.Durdur(id); return Results.Ok(new { ok = true }); });

@@ -148,6 +148,7 @@ async function api(url, opt) {
 async function loadSegs() {
   try {
     [st.segs, st.tags] = await Promise.all([api("api/segment/liste"), api("api/etiketler").then(b => b.etiketler || []).catch(() => [])]);
+    await loadKayit();
     fillList();
   } catch (e) { $("#warn").innerHTML = `<div class="warn">Segment listesi alınamadı: ${esc(e.message)}</div>`; }
 }
@@ -159,19 +160,30 @@ function fillList() {
     : st.segs.map(s => `<option value="${esc(s.ad)}">${esc(s.cidrler.join(", "))}${s.kurum ? " · " + esc(s.kurum) : ""} · ERT'de ${s.ertSunucu} sunucu</option>`).join("");
   segInfo();
 }
+// Kayıtlı taramalar (tür + ad başına son tarama): seçilen segment / etiketin kaydı varsa "Tara" kayıttan açar
+async function loadKayit() {
+  try { const b = await api("api/segment/kayitlar"); st.kayitlar = b.kayitlar || []; st.kayitUyari = b.uyari; } catch { st.kayitlar = []; }
+}
+const kayitOf = (tur, ad) => (st.kayitlar || []).find(k => k.tur === tur && k.ad.toLowerCase() === String(ad || "").trim().toLowerCase());
+const tarihTr = t => t ? new Date(t).toLocaleString("tr-TR", { dateStyle: "short", timeStyle: "short" }) : "";
 function segInfo() {
   const v = $("#seg").value.trim().toLowerCase();
-  if (st.tur === "etiket") { const t = st.tags.find(x => x.ad.toLowerCase() === v); $("#segInfo").textContent = t ? `${t.sunucu} sunucu` : ""; return; }
+  const k = kayitOf(st.tur, v);
+  const kt = k ? ` · 📁 kayıtlı tarama ${tarihTr(k.tarih)} (${k.saat} saat, ${k.sunucu} sunucu) — Tara kayıttan açar` : "";
+  $("#tara").textContent = k ? "Aç (kayıtlı)" : "Tara";
+  if (st.tur === "etiket") { const t = st.tags.find(x => x.ad.toLowerCase() === v); $("#segInfo").textContent = (t ? `${t.sunucu} sunucu` : "") + kt; return; }
   const s = st.segs.find(x => x.ad.toLowerCase() === v);
-  $("#segInfo").textContent = s ? `${s.cidrler.join(", ")} · ERT'de ${s.ertSunucu} sunucu` : /\/\d+$/.test(v) ? "CIDR" : "";
+  $("#segInfo").textContent = (s ? `${s.cidrler.join(", ")} · ERT'de ${s.ertSunucu} sunucu` : /\/\d+$/.test(v) ? "CIDR" : "") + kt;
 }
 
-async function start() {
-  const seg = $("#seg").value.trim();
+async function start(mod) {
+  if (typeof mod !== "string") mod = "";
+  const seg = mod && st.jobInfo ? st.jobInfo.adGirdi : $("#seg").value.trim();
   if (!seg) return alert(st.tur === "etiket" ? "Etiket girin." : "Segment adı ya da CIDR girin.");
   $("#warn").innerHTML = ""; $("#res").innerHTML = "";
   try {
-    const j = await api("api/segment/tarama", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ [st.tur]: seg, saat: +$("#saat").value }) });
+    const j = await api("api/segment/tarama", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ [st.tur]: seg, saat: +$("#saat").value, mod }) });
+    j.adGirdi = seg; st.jobInfo = j;
     st.job = j.id; st.ai = null; st.bz = null; clearTimeout(st.aiTimer);
     history.replaceState(null, "", "?" + new URLSearchParams({ [st.tur]: seg, saat: $("#saat").value }));
     poll(j);
@@ -186,7 +198,8 @@ async function poll(j) {
   $("#run").innerHTML = j.calisiyor ? `<div class="run"><div><span class="spinner"></span> <b>${esc(j.segment)}</b> · ${esc(j.asama)}</div><div class="bar"><i style="width:${pct}%"></i></div></div>`
     : j.hata ? `<div class="warn">Tarama başarısız: ${esc(j.hata)}</div>` : j.asama === "Durduruldu" ? `<div class="warn">Durduruldu.</div>` : "";
   if (j.calisiyor) { st.timer = setTimeout(() => poll(), 2000); return; }
-  if (j.sonuc) { st.data = j.sonuc; render(); setTimeout(aiPoll, 800); }   // AI tahmini sunucuda kendiliğinden başlar
+  if (st.jobInfo && j.id === st.jobInfo.id) st.jobInfo = { ...j, adGirdi: st.jobInfo.adGirdi };
+  if (j.sonuc) { st.data = j.sonuc; if (j.kayit) loadKayit().then(segInfo); render(); setTimeout(aiPoll, 800); }   // AI tahmini sunucuda kendiliğinden başlar
 }
 
 // ---- AI ile iş uygulaması tahmini (sunucu sunucu, SurecAi) ----
@@ -373,10 +386,24 @@ function render() {
 }
 
 // ---- Benzer sunucular (Benzer.cs): exe / port / trafik / Nessus parmak izi → aynı amaçlı, yakın amaçlı, alakasız ----
-const viewTabs = () => `<div class="tools" style="margin-top:10px"><div class="vt">
+// Kayıt bandı: kayıttan mı açıldı / yeni mi kaydedildi; "Yeniden çek" (baştan tarama) ve "Yeni sunucuları ekle" (yalnız kayıtta olmayan
+// ya da geçen sefer Carbon Black verisi gelmeyen sunucular)
+function kayitBand() {
+  const j = st.jobInfo, k = j?.kayit;
+  if (!k) return st.kayitUyari ? `<div class="small" style="color:var(--warn);margin-top:8px">${esc(st.kayitUyari)}</div>` : "";
+  const acildi = j.asama === "Kayıttan açıldı";
+  return `<div class="run" style="margin-top:10px;grid-template-columns:1fr auto;align-items:center">
+    <div>${acildi ? "📁 <b>Kayıtlı tarama</b> açıldı" : "💾 Tarama <b>kaydedildi</b>"} · ${tarihTr(k.tarih)}${k.kaydeden ? " · " + esc(k.kaydeden) : ""} · Carbon Black ${k.saat} saat · ${fmt(k.sunucu)} sunucu, ${fmt(k.satir)} satır
+      ${j.not ? `<div class="small" style="margin-top:3px">${esc(j.not)}</div>` : ""}${acildi ? `<div class="small muted">Carbon Black yeniden sorgulanmadı. Güncel veri için yeniden çekin ya da yalnız yeni sunucuları ekleyin.</div>` : ""}</div>
+    <div style="display:flex;gap:6px">${st.yetki.topoloji ? `<button type="button" id="kEkle" title="Kayıtta olmayan ya da geçen sefer Carbon Black verisi gelmeyen sunucuları tarar, kayda ekler">➕ Yeni sunucuları ekle</button>
+      <button type="button" id="kYeni" title="Tüm segmenti / etiketi Carbon Black'ten baştan sorgular ve kaydın üzerine yazar">🔄 Yeniden çek</button>` : ""}</div></div>`;
+}
+const viewTabs = () => kayitBand() + `<div class="tools" style="margin-top:10px"><div class="vt">
   <button type="button" data-view="port" class="${st.view === "port" ? "on" : ""}">Portlar ve exe'ler</button>
   <button type="button" data-view="benzer" class="${st.view === "benzer" ? "on" : ""}" title="Exe, port ve trafik parmak izine göre aynı amaca hizmet eden sunucular">🧬 Benzer sunucular</button></div></div>`;
 function bindTabs() {
+  $("#kEkle")?.addEventListener("click", () => start("ekle"));
+  $("#kYeni")?.addEventListener("click", () => { if (confirm("Tüm sunucular Carbon Black'ten yeniden sorgulanacak ve kayıtlı taramanın üzerine yazılacak. Devam?")) start("yeniden"); });
   document.querySelectorAll("[data-view]").forEach(b => b.addEventListener("click", () => { st.view = b.dataset.view; render(); if (st.view === "benzer" && !st.bz) loadBenzer(); }));
 }
 async function loadBenzer() {

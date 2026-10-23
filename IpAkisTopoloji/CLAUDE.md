@@ -396,6 +396,15 @@ erişim talepleri) — DB → şema → tablo ve kim erişiyor bilgisi buradan b
   "AI tahmini full boş" (canlı) üzerine sağlamlaştırma: AI işi kayıtlar okunmadan önce `_ai`ye yazılır (GET 404 vermesin), başlatma hatası
   `Uyari`ya düşer, iş programı yoksa açık uyarı; arayüz 404'te 80 sn bekler (eskiden 7,5 sn sonra vazgeçip kolonu boş bırakıyordu); exe eşleşmesi
   dosya adına indirgenir (AI tam yol, büyük harf ya da ".exe"siz yazsa da eşleşir).
+  KAYITLI TARAMA (kullanıcı: "her seferinde tekrar sorgulamayayım, kaydetsin; istersem yeniden çek, ya da yeni sunucuları ekle"): tarama bitince
+  sonuç `Segment:TaramaTablosu` dbo.DF_SEGMENT_TARAMA'ya (`sql/segment_tarama.sql`; PK TUR + AD, SONUC VARBINARY gzip JSON, SAAT, SUNUCU, SATIR,
+  TARIH, KAYDEDEN; tablo yoksa bellekte + `KayitUyari`) MERGE. POST `/api/segment/tarama {…, mod}`: mod boş + kayıt var → Carbon Black sorgulanmaz,
+  iş "Kayıttan açıldı" olarak hemen biter (AI tahmini yine kendiliğinden, kayıtlı tahminleri kullanır); `mod:"yeniden"` → baştan tarar, üzerine yazar;
+  `mod:"ekle"` → kayıtta olmayan ya da CbVar=false olan sunucular (segmentte ERT IP'leri CIDR içinde, etikette TagIps) `IpSorgulari` (TERM) ile taranır,
+  `Birlestir` o IP'lerin eski satırlarını yenileriyle değiştirir (Nessus da), aralık kayıttaki saat; eklenecek yoksa kayıt açılır + not. `SegmentIs.Kayit`
+  (tarih, kaydeden, saat, sunucu, satır) ve `Not`. `GET /api/segment/kayitlar` (gövdesiz liste). Arayüz: seçili segment / etiketin kaydı varsa düğme
+  "Aç (kayıtlı)" ve bilgi satırında tarih; sonuçta kayıt bandı ("📁 Kayıtlı tarama açıldı" / "💾 kaydedildi") + "➕ Yeni sunucuları ekle" ve
+  "🔄 Yeniden çek" (onaylı; Yetki:Topoloji). gzip / birleştirme sahte veriyle, bant ve istekler mock'la test edildi.
   KATALOGDAN SEÇİM (kullanıcı: "hep yeni uygulama öneriyor, envanterden seçsin"): `SurecAi.RunAsync` prompt'una ERT eksiklerinin aday listesi
   (`EksikService.Adaylar` = Candidates, ajanlar hariç) "ERT KATALOĞUNDAN ADAY UYGULAMALAR" olarak girer, kural: önce listeden harfi harfine, yalnız
   uymuyorsa yeni=true. Sonra `SurecAi.Katalogla`: her uygulama `EksikService.Katalog` (= CatalogMatch: birebir / kelime / Secim) ile ERT
