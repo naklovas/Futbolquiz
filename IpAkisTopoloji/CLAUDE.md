@@ -459,6 +459,11 @@ erişim talepleri) — DB → şema → tablo ve kim erişiyor bilgisi buradan b
   kendi şeridinden; uçlar kenar boyunca dağıtılır; kalınlık log(bağlantı). Oka tıkla → sağ panel (`agPanel`): kaynak sunucu, hedef sunucu
   (uygulama), port, bağlantı; kutuya tıkla → sunucular, uygulamalar, bağlananlar / bağlandıkları (satıra tıklayınca o bağ). "Altyapı portları",
   "Genel süreçler" kutucukları; bağsız exe'ler katlanır listede; eski kayıtta "🔄 Yeniden çek". topoloji.html `?exeag=1` çizimi duruyor (sayfada bağlantı yok).
+  KURUM + EXE BİLGİSİ (kullanıcı: "buraya da domain seçme ekleyelim, sağ panelde exe bilgisi de verelim"): `KtEleman.Kurum` (segment Domain,
+  ExeAgi doldurur). Araç çubuğunda "Kurum: Tümü ▾" çoklu seçim (`st.agKurum`, boş / hepsi = tümü; kurum başına sunucu sayısı): yalnız seçili
+  kurumların `x:` karoları kalır, dış hedef / istemciler bağı kaldıkça (`agHazirla` yeniden, sorgu yok). Sağ panelde `agExeBilgi`: exe adı +
+  bilinen ürün + yollar, sunucu başına exe yolu, dinlediği portlar (ya da "yalnız giden"), ERT uygulaması ya da AI önerisi (durumuyla), Nessus
+  teknolojisi, bağlantı, son görülme (tarama satırları + `st.on`); bağ panelinde kaynak ve hedef exe'nin bilgisi + satırlarda exe yolları.
 - **Nessus / Tenable.sc** (`Nessus.cs`, kullanıcı: "teknolojisi ASP mi PHP mi"; diğer projedeki guide): CANLI TARAMA YOK — repository'deki
   birikmiş sonuçlar (`POST /rest/analysis`, sourceType cumulative, tool vulndetails, filtreler ip / pluginID / repository / lastSeen 0:MaxGun),
   kimlik `x-apikey: accesskey=…; secretkey=…;` (anahtarlar yalnız appsettings.Production.json). Kullanıcının reposu **121** (`Nessus:Repolar`).

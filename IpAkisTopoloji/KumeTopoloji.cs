@@ -7,7 +7,8 @@
 record KtUye(string Ip, string? Hostname, string? Rol, int? Guven, bool Elle, string? Port, long Gelen, long Giden);
 record KtDis(string Ad, long Hits, List<string> Portlar);
 record KtEleman(string Id, string Tur, string Ip, string? Port, string Ad, string? Alt, string? Segment, List<KtUye> Uyeler,
-    long Gelen, long Giden, List<KtDis> DisGelen, List<KtDis> DisGiden, string? Uygulama = null, string? AltEtiket = null);
+    long Gelen, long Giden, List<KtDis> DisGelen, List<KtDis> DisGiden, string? Uygulama = null, string? AltEtiket = null,
+    string? Kurum = null);   // Kurum: segment Domain (exe ağı kurum seçimi)
 record KtKume(string Ad, string? Aciklama, int Sunucu, List<KtEleman> Elemanlar, string? Tenant = null);
 record KtBag(string From, string To, List<string> Portlar, long Hits, long Engel, bool Altyapi);
 record KtAkis(string Src, string Dst, string Port, long Hits, long Engel);

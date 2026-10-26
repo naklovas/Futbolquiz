@@ -104,7 +104,7 @@ static class ExeAgi
                         [new KtUye(e.Value.Ip, Host(e.Value.Ip), e.Value.Tur == "dis" ? e.Value.Alt : e.Value.Alt, null, false, e.Value.Portlar.Count > 0 ? string.Join(",", e.Value.Portlar) : null,
                             gelen.GetValueOrDefault(e.Key), giden.GetValueOrDefault(e.Key))],
                         gelen.GetValueOrDefault(e.Key), giden.GetValueOrDefault(e.Key), [], [],
-                        dis ? e.Value.Alt : Ert(e.Value.Ip, e.Value.Portlar.FirstOrDefault())))
+                        dis ? e.Value.Alt : Ert(e.Value.Ip, e.Value.Portlar.FirstOrDefault()), Kurum: env.FindSegment(e.Value.Ip)?.Domain))
                     .OrderBy(e => EnvanterSnapshot.TryToUInt(e.Ip, out uint u) ? u : 0).ToList();
                 string ad = kumeAd.GetValueOrDefault(kv.Key, kv.Key);
                 return (Dis: dis, Kume: new KtKume(ad, kv.Value.Aciklama, els.Select(e => e.Ip).Distinct().Count(), els));
