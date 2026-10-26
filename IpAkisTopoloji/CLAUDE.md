@@ -464,6 +464,10 @@ erişim talepleri) — DB → şema → tablo ve kim erişiyor bilgisi buradan b
   kurumların `x:` karoları kalır, dış hedef / istemciler bağı kaldıkça (`agHazirla` yeniden, sorgu yok). Sağ panelde `agExeBilgi`: exe adı +
   bilinen ürün + yollar, sunucu başına exe yolu, dinlediği portlar (ya da "yalnız giden"), ERT uygulaması ya da AI önerisi (durumuyla), Nessus
   teknolojisi, bağlantı, son görülme (tarama satırları + `st.on`); bağ panelinde kaynak ve hedef exe'nin bilgisi + satırlarda exe yolları.
+  KUTU GİZLEME (kullanıcı: "bazı exe'leri çıkartabileyim: SiteScope, dış istemci ya da herhangi bir kutu"): kutunun üstüne gelince sağ üstte ×,
+  ayrıca kutu panelinde "🙈 Bu kutuyu gizle" → kutu bağlarıyla çizimden çıkar (`agGizle`, `agYerlesim` gizli uçlu bağları ve bağsız listeyi atar).
+  Gizlenenler localStorage `df.agGizli` (kutu adı küçük harf; "__ist" = Dış istemciler) → başka segment / etiket taramasında da gizli. Çizimin
+  altında "🙈 Gizlenen kutular" şeridi (tıkla → geri göster, "+N başka taramalardan", "Tümünü göster").
 - **Nessus / Tenable.sc** (`Nessus.cs`, kullanıcı: "teknolojisi ASP mi PHP mi"; diğer projedeki guide): CANLI TARAMA YOK — repository'deki
   birikmiş sonuçlar (`POST /rest/analysis`, sourceType cumulative, tool vulndetails, filtreler ip / pluginID / repository / lastSeen 0:MaxGun),
   kimlik `x-apikey: accesskey=…; secretkey=…;` (anahtarlar yalnız appsettings.Production.json). Kullanıcının reposu **121** (`Nessus:Repolar`).

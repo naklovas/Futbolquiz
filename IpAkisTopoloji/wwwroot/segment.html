@@ -113,6 +113,8 @@
   #agSvg .agkutu { cursor: pointer; }
   #agSvg .agkutu rect:first-child { fill: var(--panel); stroke-width: 1.5; }
   #agSvg .agkutu.on rect:first-child, #agSvg .agkutu:hover rect:first-child { stroke-width: 3; }
+  #agSvg .aggizle { opacity: 0; cursor: pointer; } #agSvg .agkutu:hover .aggizle { opacity: 1; }
+  #agSvg .aggizle circle { fill: var(--bg); stroke: var(--line); } #agSvg .aggizle text { font-size: 13px; fill: var(--err); font-weight: 700; }
   #agSvg .agad { font-size: 13.5px; font-weight: 700; fill: var(--text); }
   #agSvg .agalt { font-size: 11.5px; fill: var(--muted); }
 </style>
@@ -504,8 +506,19 @@ function agHazirla(k) {
   return { nodes: [...node.values()].filter(n => n.tur === "exe" || bagli.has(n.key)), edges: [...edge.values()], sec: null, kurumlar: agKurumlar(k) };
 }
 // Yerleşim: istemciler 0. sütun; exe'ler gelen bağlarına göre en uzun yol derinliği (döngüde sınırlı); dış hedefler en sağ; bağsızlar listede
+// Gizlenen kutular (kullanıcı: "bazı exe'leri çıkartabileyim: SiteScope, dış istemci ya da herhangi bir kutu"): tarayıcıda hatırlanır
+// (localStorage df.agGizli, kutu adı küçük harf) — başka segmentte de aynı adlı kutu gizli açılır
+st.agGizli = new Set((() => { try { return JSON.parse(localStorage.getItem("df.agGizli") || "[]"); } catch { return []; } })());
+const agGizliMi = key => st.agGizli.has(String(key).toLowerCase());
+function agGizle(key, gizle) {
+  const k = String(key).toLowerCase();
+  gizle ? st.agGizli.add(k) : st.agGizli.delete(k);
+  try { localStorage.setItem("df.agGizli", JSON.stringify([...st.agGizli])); } catch { /* tarayıcı izin vermezse yalnız bu oturum */ }
+  if (st.ag) st.ag.sec = null;
+  document.querySelector(".drawer")?.remove(); render();
+}
 function agYerlesim(g, infra) {
-  const E = g.edges.filter(e => infra || !e.altyapi), bagli = new Set(E.flatMap(e => [e.f, e.t]));
+  const E = g.edges.filter(e => (infra || !e.altyapi) && !agGizliMi(e.f) && !agGizliMi(e.t)), bagli = new Set(E.flatMap(e => [e.f, e.t]));
   const nodes = g.nodes.filter(n => bagli.has(n.key)), d = {};
   nodes.forEach(n => d[n.key] = n.tur === "ist" ? 0 : 1);
   for (let i = 0; i < nodes.length; i++) {
@@ -526,7 +539,7 @@ function agYerlesim(g, infra) {
     col.forEach((n, i) => pos[n.key] = { x: 20 + ci * (W + GX), y: 20 + i * (H + GY), w: W, h: H });
   });
   const Hh = Math.max(...Object.values(pos).map(p => p.y + p.h), 100) + 20, Ww = 20 + C.length * (W + GX) - GX + 20;
-  return { E, pos, W: Ww, H: Hh, bagsiz: g.nodes.filter(n => !bagli.has(n.key) && n.tur === "exe") };
+  return { E, pos, W: Ww, H: Hh, bagsiz: g.nodes.filter(n => !bagli.has(n.key) && n.tur === "exe" && !agGizliMi(n.key)) };
 }
 function renderAg() {
   const g = st.ag;
@@ -564,7 +577,8 @@ function renderAg() {
       return `<g class="agkutu${on ? " on" : ""}" data-agkutu="${esc(key)}"><rect x="${p.x}" y="${p.y}" width="${p.w}" height="${p.h}" rx="9" style="stroke:${renk[n.tur]}"/>
         <rect x="${p.x}" y="${p.y}" width="5" height="${p.h}" rx="2" style="fill:${renk[n.tur]}"/>
         <text x="${p.x + 14}" y="${p.y + 22}" class="agad">${esc(n.ad.length > 28 ? n.ad.slice(0, 27) + "…" : n.ad)}</text>
-        <text x="${p.x + 14}" y="${p.y + 40}" class="agalt">${esc(alt.length > 36 ? alt.slice(0, 35) + "…" : alt)}</text><title>${esc(n.ad + (n.aciklama ? "\n" + n.aciklama : ""))}</title></g>`;
+        <text x="${p.x + 14}" y="${p.y + 40}" class="agalt">${esc(alt.length > 36 ? alt.slice(0, 35) + "…" : alt)}</text><title>${esc(n.ad + (n.aciklama ? "\n" + n.aciklama : ""))}</title>
+        <g class="aggizle" data-aggizle="${esc(key)}"><circle cx="${p.x + p.w - 13}" cy="${p.y + 13}" r="9"/><text x="${p.x + p.w - 13}" y="${p.y + 17}" text-anchor="middle">×</text><title>Bu kutuyu gizle (bağlarıyla birlikte)</title></g></g>`;
     }).join("");
     const nExe = g.nodes.filter(n => n.tur === "exe").length;
     body = `<div class="tools"><span class="small muted">Kutu = exe (aynı exe'yi çalıştıran sunucular tek kutu) · turuncu = taramada olmayan hedef · gri = dış istemciler · ok kalınlığı = bağlantı · oka ya da kutuya tıklayın</span><span class="sp"></span>
@@ -578,6 +592,7 @@ function renderAg() {
       ${L.E.length ? `<div class="grid" style="max-height:calc(100vh - 300px);background:var(--bg)"><svg id="agSvg" width="${L.W}" height="${svgH}" viewBox="0 0 ${L.W} ${svgH}">
         <defs><marker id="agm" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="9" markerHeight="9" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--muted)"/></marker></defs>
         ${okl}${kutular}</svg></div>` : `<div class="empty">Çizilecek exe → exe bağı yok${st.agInfra ? "" : " (altyapı portları gizli)"}.</div>`}
+      ${agGizliSerit(g)}
       ${L.bagsiz.length ? `<details style="margin-top:10px"><summary>Bağı görülmeyen exe'ler · ${L.bagsiz.length}</summary><div class="chips small" style="margin-top:6px">${L.bagsiz.map(n => `<span title="${esc(n.aciklama || "")}">${esc(n.ad)} (${n.sunucu.size})</span>`).join("")}</div></details>` : ""}`;
   }
   $("#res").innerHTML = viewTabs() + body;
@@ -593,7 +608,20 @@ function renderAg() {
   }));
   if (st.agKurumAcik) { const d = document.querySelector(".kurumSec"); if (d) d.open = true; st.agKurumAcik = false; }
   document.querySelectorAll("[data-agbag]").forEach(p => p.addEventListener("click", () => { g.sec = { tur: "bag", i: +p.dataset.agbag }; render(); agPanel(); }));
-  document.querySelectorAll("[data-agkutu]").forEach(p => p.addEventListener("click", () => { g.sec = { tur: "kutu", key: p.dataset.agkutu }; render(); agPanel(); }));
+  document.querySelectorAll("[data-agkutu]").forEach(p => p.addEventListener("click", ev => {
+    if (ev.target.closest("[data-aggizle]")) return;   // × gizle
+    g.sec = { tur: "kutu", key: p.dataset.agkutu }; render(); agPanel();
+  }));
+  document.querySelectorAll("[data-aggizle]").forEach(x => x.addEventListener("click", ev => { ev.stopPropagation(); agGizle(x.dataset.aggizle, true); }));
+  document.querySelectorAll("[data-aggoster]").forEach(x => x.addEventListener("click", () => x.dataset.aggoster === "*" ? (st.agGizli.clear(), agGizle("", false)) : agGizle(x.dataset.aggoster, false)));
+}
+// Gizlenen kutular şeridi: bu çizimdeki gizliler (tıklayınca geri gelir) + başka taramalardan hatırlananların sayısı
+function agGizliSerit(g) {
+  if (!st.agGizli.size) return "";
+  const burada = g.nodes.filter(n => agGizliMi(n.key)), diger = st.agGizli.size - burada.length;
+  return `<div class="small" style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;align-items:center"><span class="muted">🙈 Gizlenen kutular:</span>
+    ${burada.map(n => `<button type="button" class="mini" data-aggoster="${esc(n.key)}" title="Geri göster">${esc(n.ad)} ✕</button>`).join("") || `<span class="muted">bu çizimde yok</span>`}
+    ${diger > 0 ? `<span class="muted">(+${diger} başka taramalardan)</span>` : ""}<button type="button" class="mini" data-aggoster="*">Tümünü göster</button></div>`;
 }
 // Exe bilgisi (sağ panel): exe'nin çalıştığı her sunucu için yol, dinlediği portlar, bilinen ürün, ERT uygulaması / AI önerisi, Nessus
 // teknolojisi, bağlantı ve son görülme — tarama satırlarından (st.data), öneriler st.on'dan
@@ -643,12 +671,14 @@ function agPanel() {
       <div style="padding:12px 18px;overflow:auto;display:grid;gap:14px">
         ${n.tur === "exe" ? agExeBilgi(n.key) : `<div><b>${n.tur === "ist" ? "İstemciler" : "Hedefler"}</b> (${n.sunucu.size})<div class="chips small" style="margin-top:4px">${(n.el || []).map(e => `<span class="mono" title="${esc(e.uygulama || "")}">${esc(e.ad)}</span>`).join("")}</div>
           ${n.uyg.size ? `<div class="small muted" style="margin-top:4px">Uygulama / segment: ${esc([...n.uyg].join(", "))}</div>` : ""}</div>`}
+        <div><button type="button" class="mini" id="agPGizle" title="Kutuyu bağlarıyla birlikte çizimden çıkarır; şeritten geri getirilir">🙈 Bu kutuyu gizle</button></div>
         <div><b>Bu kutuya bağlananlar</b>${tb(ins, "in")}</div><div><b>Bu kutunun bağlandıkları</b>${tb(outs, "out")}</div>
         <div class="small muted">Satıra tıklayınca o bağın sunucu sunucu dökümü açılır.</div></div>`;
   }
   document.querySelector(".drawer")?.remove();
   const d = document.createElement("div"); d.className = "drawer"; d.innerHTML = html;
   d.querySelector("button").onclick = () => { d.remove(); g.sec = null; render(); };
+  d.querySelector("#agPGizle")?.addEventListener("click", () => agGizle(g.sec.key, true));
   d.querySelectorAll("[data-agk]").forEach(r => r.addEventListener("click", () => { g.sec = { tur: "bag", i: +r.dataset.agk }; render(); agPanel(); }));
   document.body.appendChild(d);
 }
