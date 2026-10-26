@@ -540,10 +540,12 @@ function bzCsv() {
   if (!st.yetki.disari) return alert("Dışa aktarma yetkiniz yok. Yetki DokuPanel'den verilir.");
   const C = v => `"${String(v ?? "").replace(/"/g, '""')}"`, S = st.bz.sunucular;
   const sinif = { ayni: "aynı amaçlı", yakin: "yakın amaçlı", alakasiz: "alakasız", zayif: "parmak izi zayıf" };
-  const lines = ["IP;SUNUCU;SEGMENT;SINIF;GRUP;GRUP ADI;EN BENZER;BENZERLİK;ERT UYGULAMALARI;ÖNERİ;ÖNERİ DÜZEYİ;İŞ PROGRAMLARI;GELEN;GİDEN"].concat(Object.values(S).map(x => {
+  const lines = ["IP;SUNUCU;SEGMENT;SINIF;GRUP;GRUP ADI;EN BENZER;BENZERLİK;ERT UYGULAMALARI;ÖNERİ;ÖNERİ DÜZEYİ;İŞ PROGRAMLARI;GELEN;GİDEN;EXE YOLLARI"].concat(Object.values(S).map(x => {
     const g = st.bz.gruplar.find(g => g.no === x.grup);
+    // sunucudaki iş exe'lerinin tam yolları (gelen + yalnız giden; genel süreçler hariç)
+    const yollar = [...new Set(st.data.satirlar.filter(r => r.ip === x.ip && !r.genel).map(r => r.yol).concat(st.data.giden.filter(r => r.ip === x.ip && !r.genel).map(r => r.yol)))];
     return [x.ip, x.sunucu, x.segment, sinif[x.sinif], x.grup, g?.ad, x.enBenzer, x.enPuan ? Math.round(x.enPuan * 100) + "%" : "", x.ertUygulamalar.join(", "), x.oneri, x.oneriDuzey,
-      (x.iz.exe || []).join(", "), (x.iz.gelen || []).join(", "), (x.iz.giden || []).join(", ")].map(C).join(";");
+      (x.iz.exe || []).join(", "), (x.iz.gelen || []).join(", "), (x.iz.giden || []).join(", "), yollar.join(" | ")].map(C).join(";");
   }));
   const a = document.createElement("a");
   a.href = URL.createObjectURL(new Blob(["\uFEFF" + lines.join("\r\n")], { type: "text/csv;charset=utf-8" }));
@@ -554,11 +556,14 @@ function bzCsv() {
 function csv() {
   if (!st.yetki.disari) return alert("Dışa aktarma yetkiniz yok. Yetki DokuPanel'den verilir.");
   const C = v => `"${String(v ?? "").replace(/"/g, '""')}"`;
-  const lines = ["IP;SUNUCU;SEGMENT;PORT;EXE;YOL;BİLİNEN ÜRÜN;AI ÖNERİSİ;AI GÜVEN;AI DURUM;AI ADI ERT'DE;AI GEREKÇE;NESSUS TEKNOLOJİ;NESSUS SERTİFİKA ADI;NESSUS DİNLEYEN;NESSUS İŞLETİM SİSTEMİ;BAĞLANTI;İSTEMCİ SAYISI;İSTEMCİLER;ERT DURUMU;ERT UYGULAMASI;SON GÖRÜLME"]
-    .concat(rows().map(x => { const o = oneriOf(x); return [x.ip, x.sunucu, x.segment, x.port, x.exe, x.yol, x.urun,
+  const lines = ["IP;SUNUCU;SEGMENT;YÖN;PORT;EXE;YOL;BİLİNEN ÜRÜN;AI ÖNERİSİ;AI GÜVEN;AI DURUM;AI ADI ERT'DE;AI GEREKÇE;NESSUS TEKNOLOJİ;NESSUS SERTİFİKA ADI;NESSUS DİNLEYEN;NESSUS İŞLETİM SİSTEMİ;BAĞLANTI;İSTEMCİ SAYISI;İSTEMCİLER;ERT DURUMU;ERT UYGULAMASI;SON GÖRÜLME"]
+    .concat(rows().map(x => { const o = oneriOf(x); return [x.ip, x.sunucu, x.segment, "gelen", x.port, x.exe, x.yol, x.urun,
       o?.uygulama, o ? o.guven : "", o?.durum, o ? (o.yeni ? "hayır (yeni)" : "evet") : "", o?.gerekce,
       nsTek(nsOf(x.ip, x.port)).join(", "), nsOf(x.ip, x.port)?.sertifika.join(", "), nsOf(x.ip, x.port)?.dinleyen, st.data.nessus?.[x.ip]?.os, x.baglanti, x.istemci, x.istemciler.join(", "),
-      { yok: "ERT'de yok", bos: "ERT'de adı boş", kayitli: "kayıtlı" }[x.ertDurum], x.ertUygulama.join(", "), x.son].map(C).join(";"); }));
+      { yok: "ERT'de yok", bos: "ERT'de adı boş", kayitli: "kayıtlı" }[x.ertDurum], x.ertUygulama.join(", "), x.son].map(C).join(";"); }))
+    // gelen bağlantısı olmayan programlar (yalnız giden): port yok, istemci yerine gittiği yerler (ekrandaki "Genel süreçler" süzgeciyle)
+    .concat(st.data.giden.filter(g => st.genel || !g.genel).map(g => [g.ip, g.sunucu, st.data.sunucular.find(s => s.ip === g.ip)?.segment, "yalnız giden", "", g.exe, g.yol, g.urun,
+      "", "", "", "", "", "", "", "", st.data.nessus?.[g.ip]?.os, g.baglanti, g.hedef, g.hedefler.join(", "), "", "", ""].map(C).join(";")));
   const a = document.createElement("a");
   a.href = URL.createObjectURL(new Blob(["\uFEFF" + lines.join("\r\n")], { type: "text/csv;charset=utf-8" }));
   a.download = `DeltaFlow_segment_${st.data.segment.replace(/[^\w.-]+/g, "_")}.csv`;
