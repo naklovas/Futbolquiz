@@ -102,6 +102,16 @@
   .vt { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
   .vt button { border: 0; border-radius: 0; padding: 6px 14px; }
   .vt button.on { background: var(--in); color: #fff; font-weight: 600; }
+  #agSvg .agok { fill: none; stroke: color-mix(in srgb, var(--muted) 55%, transparent); }
+  #agSvg .agok.geri { stroke-dasharray: 5 4; }
+  #agSvg .agok.on { stroke: var(--in); }
+  #agSvg .aghit { fill: none; stroke: transparent; stroke-width: 14; cursor: pointer; }
+  #agSvg .aghit:hover + .agok, #agSvg .aghit:hover { stroke: color-mix(in srgb, var(--in) 25%, transparent); }
+  #agSvg .agkutu { cursor: pointer; }
+  #agSvg .agkutu rect:first-child { fill: var(--panel); stroke-width: 1.5; }
+  #agSvg .agkutu.on rect:first-child, #agSvg .agkutu:hover rect:first-child { stroke-width: 3; }
+  #agSvg .agad { font-size: 13.5px; font-weight: 700; fill: var(--text); }
+  #agSvg .agalt { font-size: 11.5px; fill: var(--muted); }
 </style>
 </head>
 <body>
@@ -185,7 +195,7 @@ async function start(mod) {
   try {
     const j = await api("api/segment/tarama", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ [st.tur]: seg, saat: +$("#saat").value, mod }) });
     j.adGirdi = seg; st.jobInfo = j;
-    st.job = j.id; st.on = {}; st.ed = null; st.edMsg = null; st.bz = null; clearTimeout(st.aiTimer);
+    st.job = j.id; st.ag = null; st.on = {}; st.ed = null; st.edMsg = null; st.bz = null; clearTimeout(st.aiTimer);
     history.replaceState(null, "", "?" + new URLSearchParams({ [st.tur]: seg, saat: $("#saat").value }));
     poll(j);
   } catch (e) { $("#warn").innerHTML = `<div class="warn">${esc(e.message)}</div>`; }
@@ -339,6 +349,7 @@ document.addEventListener("click", e => { const a = e.target.closest("[data-ns]"
 document.addEventListener("keydown", e => { if (e.key === "Escape") document.querySelector(".drawer")?.remove(); });
 function render() {
   if (st.view === "benzer") return renderBenzer();
+  if (st.view === "exeag") return renderAg();
   const d = st.data, all = d.satirlar.filter(x => !x.altyapi && !x.dinamik && !x.genel);
   const nSifir = d.satirlar.filter(sifir).length;
   const cb = d.sunucular.filter(s => s.cbVar).length, ertIp = d.sunucular.filter(s => s.ertPort > 0).length;
@@ -445,20 +456,154 @@ function kayitBand() {
 const viewTabs = () => kayitBand() + `<div class="tools" style="margin-top:10px"><div class="vt">
   <button type="button" data-view="port" class="${st.view === "port" ? "on" : ""}">Portlar ve exe'ler</button>
   <button type="button" data-view="benzer" class="${st.view === "benzer" ? "on" : ""}" title="Exe, port ve trafik parmak izine göre aynı amaca hizmet eden sunucular">🧬 Benzer sunucular</button>
-  <button type="button" id="exeAg" title="Exe → exe ilişki ağı, küme topolojisi çiziminde yeni sekmede (kutu = exe, karo = sunucu, ok = trafik)">🕸 Exe ilişki ağı ↗</button></div></div>`;
+  <button type="button" data-view="exeag" class="${st.view === "exeag" ? "on" : ""}" title="Her exe tek kutu, oklar exe → exe trafik; oka ya da kutuya tıklayınca sağda bağlantılar">🕸 Exe ilişki ağı</button></div></div>`;
 function bindTabs() {
-  // Exe ağı: yeni veriyle (giden bağlantının hedef portu + IP'leri) taranmış kayıt gerekir; eski kayıtta yeniden çekmeyi önerir
-  $("#exeAg")?.addEventListener("click", () => {
-    if (!st.data?.baglar) {
-      if (confirm("Bu tarama exe ilişki ağı verisi içermiyor (bu özellikten önce kaydedilmiş). Carbon Black yeniden çekilsin mi? Bittikten sonra düğmeye tekrar basın.")) start("yeniden");
-      return;
-    }
-    window.open("./?" + new URLSearchParams(st.jobInfo?.kayit ? { exeag: "1", tur: st.jobInfo.kayit.tur, ad: st.jobInfo.kayit.ad } : { exeag: "1", id: st.job }), "_blank", "noopener");
-  });
   $("#kEkle")?.addEventListener("click", () => start("ekle"));
   $("#kYeni")?.addEventListener("click", () => { if (confirm("Tüm sunucular Carbon Black'ten yeniden sorgulanacak ve kayıtlı taramanın üzerine yazılacak. Devam?")) start("yeniden"); });
-  document.querySelectorAll("[data-view]").forEach(b => b.addEventListener("click", () => { st.view = b.dataset.view; render(); if (st.view === "benzer" && !st.bz) loadBenzer(); }));
+  document.querySelectorAll("[data-view]").forEach(b => b.addEventListener("click", () => { st.view = b.dataset.view; render(); if (st.view === "benzer" && !st.bz) loadBenzer(); if (st.view === "exeag" && !st.ag) loadAg(); }));
 }
+// ---- Exe ilişki ağı (kullanıcı: "çok karmaşık; her exe tek kutu, dış istemci tek, bağlantıya tıklayınca sağda panel"): /api/segment/exeag
+// (ExeAgi.cs) verisi kutu = exe olarak toplanır; tüm dış istemciler tek kutu; sütunlar soldan sağa akış sırası (istemciler → exe'ler → dış hedefler)
+async function loadAg() {
+  if (!st.data?.baglar) { st.ag = { eski: true }; render(); return; }
+  st.ag = { loading: true }; render();
+  try {
+    const q = st.jobInfo?.kayit ? { tur: st.jobInfo.kayit.tur, ad: st.jobInfo.kayit.ad } : { id: st.job };
+    st.ag = agHazirla(await api("api/segment/exeag?" + new URLSearchParams({ ...q, ...(st.agGenel ? { genel: "true" } : {}) })));
+  } catch (e) { st.ag = { error: e.message }; }
+  render();
+}
+function agHazirla(k) {
+  const node = new Map(), elNode = {}, el = {};
+  const N = (key, ad, tur, aciklama) => node.get(key) || node.set(key, { key, ad, tur, aciklama, sunucu: new Set(), uyg: new Set(), gelen: 0, giden: 0 }).get(key);
+  for (const ku of k.kumeler) for (const e of ku.elemanlar) {
+    const ist = e.id.startsWith("c:"), dis = e.id.startsWith("d:");
+    const n = ist ? N("__ist", "Dış istemciler", "ist", "Taranan exe'lere bağlanan, istemci exe'si bilinmeyen sunucular") : N(ku.ad, ku.ad, dis ? "dis" : "exe", ku.aciklama);
+    n.sunucu.add(e.ip); if (e.uygulama) n.uyg.add(e.uygulama);
+    elNode[e.id] = n.key; el[e.id] = e;
+  }
+  const edge = new Map();
+  for (const b of k.baglar) {
+    const f = elNode[b.from], t = elNode[b.to];
+    if (!f || !t || f === t) continue;
+    const x = edge.get(f + "\u0000" + t) || edge.set(f + "\u0000" + t, { f, t, hits: 0, portlar: new Set(), altyapi: true, satir: [] }).get(f + "\u0000" + t);
+    x.hits += b.hits; b.portlar.forEach(p => x.portlar.add(p)); x.altyapi &&= b.altyapi;
+    x.satir.push({ from: el[b.from], to: el[b.to], portlar: b.portlar, hits: b.hits });
+    node.get(f).giden += b.hits; node.get(t).gelen += b.hits;
+  }
+  return { nodes: [...node.values()], edges: [...edge.values()], sec: null };
+}
+// Yerleşim: istemciler 0. sütun; exe'ler gelen bağlarına göre en uzun yol derinliği (döngüde sınırlı); dış hedefler en sağ; bağsızlar listede
+function agYerlesim(g, infra) {
+  const E = g.edges.filter(e => infra || !e.altyapi), bagli = new Set(E.flatMap(e => [e.f, e.t]));
+  const nodes = g.nodes.filter(n => bagli.has(n.key)), d = {};
+  nodes.forEach(n => d[n.key] = n.tur === "ist" ? 0 : 1);
+  for (let i = 0; i < nodes.length; i++) {
+    let deg = false;
+    for (const e of E) if (g.nodes.find(n => n.key === e.t)?.tur === "exe" && d[e.t] < d[e.f] + 1 && d[e.f] + 1 <= 8) { d[e.t] = d[e.f] + 1; deg = true; }
+    if (!deg) break;
+  }
+  const maxExe = Math.max(1, ...nodes.filter(n => n.tur === "exe").map(n => d[n.key]));
+  nodes.filter(n => n.tur === "dis").forEach(n => d[n.key] = maxExe + 1);
+  const cols = [];
+  nodes.forEach(n => (cols[d[n.key]] ||= []).push(n));
+  const C = cols.filter(Boolean), W = 230, H = 54, GX = 110, GY = 18, pos = {};
+  C.forEach((col, ci) => {
+    // aynı sütunda: önceki sütundaki bağlı kutuların ortalama sırasına göre (çizgiler az kesişsin)
+    if (ci > 0) col.forEach(n => { const ins = E.filter(e => e.t === n.key && pos[e.f]); n._b = ins.length ? ins.reduce((a, e) => a + pos[e.f].y, 0) / ins.length : 1e9; });
+    else col.sort((a, b) => b.giden - a.giden);
+    if (ci > 0) col.sort((a, b) => a._b - b._b || b.gelen - a.gelen);
+    col.forEach((n, i) => pos[n.key] = { x: 20 + ci * (W + GX), y: 20 + i * (H + GY), w: W, h: H });
+  });
+  const Hh = Math.max(...Object.values(pos).map(p => p.y + p.h), 100) + 20, Ww = 20 + C.length * (W + GX) - GX + 20;
+  return { E, pos, W: Ww, H: Hh, bagsiz: g.nodes.filter(n => !bagli.has(n.key) && n.tur === "exe") };
+}
+function renderAg() {
+  const g = st.ag;
+  let body;
+  if (!g || g.loading) body = `<div class="run"><div><span class="spinner"></span> Exe ilişki ağı hazırlanıyor…</div></div>`;
+  else if (g.eski) body = `<div class="warn">Bu tarama exe ilişki ağı verisi içermiyor (bu özellikten önce kaydedilmiş). ${st.yetki.topoloji ? `<button type="button" id="agYeni">🔄 Yeniden çek</button>` : ""}</div>`;
+  else if (g.error) body = `<div class="warn">Exe ağı hazırlanamadı: ${esc(g.error)}</div>`;
+  else {
+    const L = agYerlesim(g, st.agInfra), maxH = Math.max(1, ...L.E.map(e => e.hits));
+    const renk = { exe: "var(--in)", dis: "var(--warn)", ist: "var(--muted)" };
+    // Uç noktaları: bir kutudan çıkan / giren oklar kenar boyunca karşı ucun yüksekliğine göre dağıtılır.
+    // Komşu sütuna giden ok S eğrisi; sütun atlayan ya da geri giden ok kutuların altındaki kendi şeridinden (üst üste binmesin).
+    const colOf = k => Math.round((L.pos[k].x - 20) / 340), cy = k => L.pos[k].y + L.pos[k].h / 2;
+    const cikis = {}, giris = {};
+    L.E.forEach((e, i) => { (cikis[e.f] ||= []).push(i); (giris[e.t] ||= []).push(i); });
+    const uc = {};
+    for (const [k, list] of Object.entries(cikis)) list.sort((a, b) => cy(L.E[a].t) - cy(L.E[b].t)).forEach((i, n) => (uc[i] ||= {}).y1 = L.pos[k].y + L.pos[k].h * (n + 1) / (list.length + 1));
+    for (const [k, list] of Object.entries(giris)) list.sort((a, b) => cy(L.E[a].f) - cy(L.E[b].f)).forEach((i, n) => (uc[i] ||= {}).y2 = L.pos[k].y + L.pos[k].h * (n + 1) / (list.length + 1));
+    const altY = Math.max(...Object.values(L.pos).map(p => p.y + p.h)) + 22;
+    let serit = 0;
+    const yol = pts => pts.reduce((a, [x, y], n) => a + (n ? ` L${x},${y}` : `M${x},${y}`), "");
+    const okl = L.E.map((e, i) => {
+      const a = L.pos[e.f], b = L.pos[e.t], x1 = a.x + a.w, y1 = uc[i].y1, x2 = b.x, y2 = uc[i].y2;
+      const span = colOf(e.t) - colOf(e.f), w = 1.2 + 4 * Math.log(1 + e.hits) / Math.log(1 + maxH);
+      let dpath;
+      if (span === 1) dpath = `M${x1},${y1} C${(x1 + x2) / 2},${y1} ${(x1 + x2) / 2},${y2} ${x2},${y2}`;
+      else { const ly = altY + (serit++) * 12, o = 18 + (i % 5) * 6; dpath = yol([[x1, y1], [x1 + o, y1], [x1 + o, ly], [x2 - o, ly], [x2 - o, y2], [x2, y2]]); }
+      const on = g.sec?.tur === "bag" && g.sec.i === i, ilgili = g.sec?.tur === "kutu" && (e.f === g.sec.key || e.t === g.sec.key);
+      return `<path d="${dpath}" class="agok${on || ilgili ? " on" : ""}${span < 1 ? " geri" : ""}" stroke-width="${w.toFixed(1)}" marker-end="url(#agm)"/><path d="${dpath}" class="aghit" data-agbag="${i}"><title>${esc(g.nodes.find(n => n.key === e.f).ad)} → ${esc(g.nodes.find(n => n.key === e.t).ad)} · port ${esc([...e.portlar].join(", "))} · ${fmt(e.hits)} bağlantı</title></path>`;
+    }).join("");
+    const svgH = Math.max(L.H, altY + serit * 12 + 16);
+    const kutular = Object.entries(L.pos).map(([key, p]) => {
+      const n = g.nodes.find(x => x.key === key), on = g.sec?.tur === "kutu" && g.sec.key === key;
+      const alt = n.tur === "ist" ? `${n.sunucu.size} istemci` : `${n.sunucu.size} sunucu${n.uyg.size ? " · " + [...n.uyg].slice(0, 2).join(", ") : ""}`;
+      return `<g class="agkutu${on ? " on" : ""}" data-agkutu="${esc(key)}"><rect x="${p.x}" y="${p.y}" width="${p.w}" height="${p.h}" rx="9" style="stroke:${renk[n.tur]}"/>
+        <rect x="${p.x}" y="${p.y}" width="5" height="${p.h}" rx="2" style="fill:${renk[n.tur]}"/>
+        <text x="${p.x + 14}" y="${p.y + 22}" class="agad">${esc(n.ad.length > 28 ? n.ad.slice(0, 27) + "…" : n.ad)}</text>
+        <text x="${p.x + 14}" y="${p.y + 40}" class="agalt">${esc(alt.length > 36 ? alt.slice(0, 35) + "…" : alt)}</text><title>${esc(n.ad + (n.aciklama ? "\n" + n.aciklama : ""))}</title></g>`;
+    }).join("");
+    const nExe = g.nodes.filter(n => n.tur === "exe").length;
+    body = `<div class="tools"><span class="small muted">Kutu = exe (aynı exe'yi çalıştıran sunucular tek kutu) · turuncu = taramada olmayan hedef · gri = dış istemciler · ok kalınlığı = bağlantı · oka ya da kutuya tıklayın</span><span class="sp"></span>
+        <label><input type="checkbox" id="agInfra" ${st.agInfra ? "checked" : ""}> Altyapı portları</label>
+        <label title="svchost, splunkd gibi genel / ajan süreçleri de"><input type="checkbox" id="agGenel" ${st.agGenel ? "checked" : ""}> Genel süreçler</label></div>
+      <div class="stats"><div class="stat"><b>${fmt(nExe)}</b><span>Exe</span></div><div class="stat"><b>${fmt(L.E.length)}</b><span>Bağ</span></div>
+        <div class="stat"><b>${fmt(g.nodes.filter(n => n.tur === "dis").length)}</b><span>Dış hedef</span></div><div class="stat"><b>${fmt(g.nodes.find(n => n.tur === "ist")?.sunucu.size || 0)}</b><span>Dış istemci</span></div></div>
+      ${L.E.length ? `<div class="grid" style="max-height:calc(100vh - 300px);background:var(--bg)"><svg id="agSvg" width="${L.W}" height="${svgH}" viewBox="0 0 ${L.W} ${svgH}">
+        <defs><marker id="agm" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="9" markerHeight="9" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--muted)"/></marker></defs>
+        ${okl}${kutular}</svg></div>` : `<div class="empty">Çizilecek exe → exe bağı yok${st.agInfra ? "" : " (altyapı portları gizli)"}.</div>`}
+      ${L.bagsiz.length ? `<details style="margin-top:10px"><summary>Bağı görülmeyen exe'ler · ${L.bagsiz.length}</summary><div class="chips small" style="margin-top:6px">${L.bagsiz.map(n => `<span title="${esc(n.aciklama || "")}">${esc(n.ad)} (${n.sunucu.size})</span>`).join("")}</div></details>` : ""}`;
+  }
+  $("#res").innerHTML = viewTabs() + body;
+  bindTabs();
+  $("#agYeni")?.addEventListener("click", () => { if (confirm("Tüm sunucular Carbon Black'ten yeniden sorgulanacak ve kaydın üzerine yazılacak. Devam?")) start("yeniden"); });
+  $("#agInfra")?.addEventListener("change", e => { st.agInfra = e.target.checked; g.sec = null; render(); });
+  $("#agGenel")?.addEventListener("change", e => { st.agGenel = e.target.checked; loadAg(); });
+  document.querySelectorAll("[data-agbag]").forEach(p => p.addEventListener("click", () => { g.sec = { tur: "bag", i: +p.dataset.agbag }; render(); agPanel(); }));
+  document.querySelectorAll("[data-agkutu]").forEach(p => p.addEventListener("click", () => { g.sec = { tur: "kutu", key: p.dataset.agkutu }; render(); agPanel(); }));
+}
+// Sağ panel: seçili bağın sunucu sunucu dökümü ya da kutunun sunucuları ve bağları
+function agPanel() {
+  const g = st.ag, L = agYerlesim(g, st.agInfra), ad = key => g.nodes.find(n => n.key === key)?.ad || key;
+  const srv = e => `${esc(e.ad)}${e.ad !== e.ip ? ` <span class="small muted mono">${esc(e.ip)}</span>` : ""}`;
+  let html;
+  if (g.sec?.tur === "bag") {
+    const e = L.E[g.sec.i];
+    html = `<div class="dh"><div><h3>${esc(ad(e.f))} → ${esc(ad(e.t))}</h3><div class="sub">port ${esc([...e.portlar].join(", "))} · ${fmt(e.hits)} bağlantı · ${e.satir.length} sunucu çifti</div></div><button type="button">Kapat</button></div>
+      <div style="padding:12px 18px;overflow:auto"><table><thead><tr><th>Kaynak sunucu</th><th>Hedef sunucu</th><th>Port</th><th class="num">Bağlantı</th></tr></thead><tbody>
+      ${e.satir.sort((a, b) => b.hits - a.hits).map(r => `<tr><td>${srv(r.from)}</td><td>${srv(r.to)}${r.to.uygulama ? `<div class="small muted">${esc(r.to.uygulama)}</div>` : ""}</td><td class="mono">${esc(r.portlar.join(", "))}</td><td>${fmt(r.hits)}</td></tr>`).join("")}
+      </tbody></table></div>`;
+  } else {
+    const n = g.nodes.find(x => x.key === g.sec.key), ins = L.E.filter(e => e.t === n.key), outs = L.E.filter(e => e.f === n.key);
+    const tb = (rows, side) => rows.length ? `<table><thead><tr><th>${side === "in" ? "Bağlanan" : "Bağlandığı"}</th><th>Port</th><th class="num">Bağlantı</th></tr></thead><tbody>
+      ${rows.sort((a, b) => b.hits - a.hits).map(e => `<tr class="cl" data-agk="${L.E.indexOf(e)}" style="cursor:pointer"><td><b>${esc(ad(side === "in" ? e.f : e.t))}</b></td><td class="mono">${esc([...e.portlar].join(", "))}</td><td>${fmt(e.hits)}</td></tr>`).join("")}</tbody></table>` : `<div class="small muted">Yok.</div>`;
+    html = `<div class="dh"><div><h3>${esc(n.ad)}</h3><div class="sub">${esc(n.aciklama || "")}</div></div><button type="button">Kapat</button></div>
+      <div style="padding:12px 18px;overflow:auto;display:grid;gap:14px">
+        <div><b>${n.tur === "ist" ? "İstemciler" : "Sunucular"}</b> (${n.sunucu.size})<div class="chips small" style="margin-top:4px">${[...n.sunucu].map(ip => `<span class="mono">${esc(ip)}</span>`).join("")}</div>
+          ${n.uyg.size ? `<div class="small muted" style="margin-top:4px">Uygulama: ${esc([...n.uyg].join(", "))}</div>` : ""}</div>
+        <div><b>Bu kutuya bağlananlar</b>${tb(ins, "in")}</div><div><b>Bu kutunun bağlandıkları</b>${tb(outs, "out")}</div>
+        <div class="small muted">Satıra tıklayınca o bağın sunucu sunucu dökümü açılır.</div></div>`;
+  }
+  document.querySelector(".drawer")?.remove();
+  const d = document.createElement("div"); d.className = "drawer"; d.innerHTML = html;
+  d.querySelector("button").onclick = () => { d.remove(); g.sec = null; render(); };
+  d.querySelectorAll("[data-agk]").forEach(r => r.addEventListener("click", () => { g.sec = { tur: "bag", i: +r.dataset.agk }; render(); agPanel(); }));
+  document.body.appendChild(d);
+}
+
 async function loadBenzer() {
   st.bz = { loading: true }; render();
   try { st.bz = await api(`api/segment/tarama/${st.job}/benzer?` + new URLSearchParams({ ayni: st.bzAyni, yakin: st.bzYakin })); }

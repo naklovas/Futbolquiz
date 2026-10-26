@@ -451,6 +451,14 @@ erişim talepleri) — DB → şema → tablo ve kim erişiyor bilgisi buradan b
   düğmeler exe kipine göre (versiyon, yeniden sorgula yok; "← Segment / etiket tarama", "Genel süreçler"), karoya tıkla → `ktExeOpen` (exe yolu,
   ERT, bağlananlar / bağlandıkları, karşı karoya geçiş, IP topolojisi). Segment sayfasında sekmelerin yanında "🕸 Exe ilişki ağı ↗" (kayıt yoksa
   "Exe ağı için yeniden çekin"). `ktRun` / `ktShowSaved` `kt.exe`'yi sıfırlar. Sahte veriyle backend ve Playwright'la çizim test edildi.
+  SADE GÖRÜNÜM (kullanıcı: "çok karmaşık olmuş; her exe tek kutu, dış istemci tek gözüksün, bağlantıya tıklayınca sağda panel açılsın, orada
+  bağlantılar yazsın"): segment sayfasında üçüncü sekme "🕸 Exe ilişki ağı" (`st.view="exeag"`, `loadAg` → aynı `/api/segment/exeag`, `agHazirla`):
+  KtSonuc kutu başına TEK düğüm (karo yok), tüm `c:` istemcileri tek "Dış istemciler" düğümü, `d:` hedefleri "Dış · <uygulama>" (turuncu); bağlar
+  düğüm çiftine toplanır (satırlar sunucu sunucu saklanır). Yerleşim `agYerlesim`: istemciler 0. sütun, exe'ler en uzun yol derinliği (≤8),
+  dış hedefler en sağ, sütun içi sıra önceki sütundaki bağlıların ortalaması; komşu sütun S eğrisi, sütun atlayan / geri ok kutuların altındaki
+  kendi şeridinden; uçlar kenar boyunca dağıtılır; kalınlık log(bağlantı). Oka tıkla → sağ panel (`agPanel`): kaynak sunucu, hedef sunucu
+  (uygulama), port, bağlantı; kutuya tıkla → sunucular, uygulamalar, bağlananlar / bağlandıkları (satıra tıklayınca o bağ). "Altyapı portları",
+  "Genel süreçler" kutucukları; bağsız exe'ler katlanır listede; eski kayıtta "🔄 Yeniden çek". topoloji.html `?exeag=1` çizimi duruyor (sayfada bağlantı yok).
 - **Nessus / Tenable.sc** (`Nessus.cs`, kullanıcı: "teknolojisi ASP mi PHP mi"; diğer projedeki guide): CANLI TARAMA YOK — repository'deki
   birikmiş sonuçlar (`POST /rest/analysis`, sourceType cumulative, tool vulndetails, filtreler ip / pluginID / repository / lastSeen 0:MaxGun),
   kimlik `x-apikey: accesskey=…; secretkey=…;` (anahtarlar yalnız appsettings.Production.json). Kullanıcının reposu **121** (`Nessus:Repolar`).
