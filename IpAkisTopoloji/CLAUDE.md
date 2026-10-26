@@ -40,6 +40,7 @@ topoloji çizer ve şirket içi AI'a etki analizi yaptırır. Canlıda IIS'te, W
 | `PortBilgisi.cs` | Port → işlev ve kesilirse duracak iş (AI prompt'u için) |
 | `Segment.cs` | Segment tarama: segmentteki tüm IP'lerin Carbon Black gelen portları + exe'leri, ERT karşılaştırması (`wwwroot/segment.html`) |
 | `Benzer.cs` | Benzer sunucular: segment / etiket taramasında exe + port + trafik + Nessus parmak izi, aynı / yakın amaçlı / alakasız |
+| `ExeAgi.cs` | Exe ilişki ağı: segment / etiket taramasının exe → exe bağları, küme topolojisi çiziminde (topoloji.html `?exeag=1`) |
 | `Nessus.cs` | Nessus / Tenable.sc: repository'deki tarama sonuçlarından teknoloji, sertifika, OS, kurulu yazılım |
 | `Yetki.cs` | İşlem yetkileri (yazma, topoloji, dışa aktarma, toplu tahmin) — DokuPanel site kayıtları |
 | `AuthHelper.cs` | Kullanıcının verdiği DokuPanel yetki helper'ı (namespace `AppRel`), anahtar config'den |
@@ -437,6 +438,19 @@ erişim talepleri) — DB → şema → tablo ve kim erişiyor bilgisi buradan b
   `…/benzer/karsilastir?a=&b=` (bileşen başına ortak / yalnız A / yalnız B). Arayüz: eşik seçicileri, istatistik, grup kartları, yakın tablo,
   alakasız / zayıf katlanır listeler, 2 sunucu seçip karşılaştırma paneli, CSV. Sahte envanterle test edildi (ODEME 4'lü grup, KREDI'li üye
   tutarsız, boş üyeye ODEME önerisi, SAS ikilisi yakın %56, foo alakasız, yalnız svchost zayıf).
+- **Exe ilişki ağı** (`ExeAgi.cs`, kullanıcı: "exelerin ilişki ağını çıkaralım; topolojide etiketlileri çizdiğimiz gibi, aynı yapı"): segment
+  taraması SPL'i artık gidende `port=remote_port` ve karşı IP'leri ilk 50 (`ornek`) tutar; TaraAsync her satırdan ham bağ üretir
+  (`SegmentSonuc.Baglar`, `SegmentBag(Kaynak, KaynakYol, Hedef, Port, HedefYol, Baglanti)`: giden = exe → hedef IP:port, gelen = istemci IP → exe:port;
+  bağlantı sayısı örnek IP'lere eşit bölünür; `Segment:ExeAgMaxBag`=60000; Birlestir yeni IP'lerin bağlarını değiştirir). `GET /api/segment/exeag?tur=&ad=`
+  (kayıtlı tarama) ya da `?id=` (bellekteki iş), `&genel=true` → `ExeAgi.Build` KtSonuc: kutu = exe (aynı exe'yi çalıştıran sunucular; ntoskrnl →
+  "HTTP.sys (ntoskrnl.exe)"), eleman `x:ip|exe` (Alt = exe yolu, Uygulama = ERT), bağ X@A → Y@B (B taranmış ve P'yi kabul eden exe biliniyorsa), aksi
+  halde hedef `d:ip:port` "Dış · <ERT uygulaması / segment>" (taranmış ama exe yoksa "Exe görülmedi · …"); taranmayan istemciden gelen `c:ip`
+  "Dış istemci · …" (taranmış ama giden olayı yoksa "İstemci, exe görülmedi · …"); genel / ajan süreçleri hariç (`genel` ile dahil); bağsız iş
+  exe'leri de karo (trafiksiz). Eski kayıtta Baglar yok → 409 "Yeniden çek". Arayüz: topoloji.html `?exeag=1&tur=&ad=` → `ktExeRun` (kumetopo.js,
+  `kt.exe`): aynı çizim (kutu / eleman bağları, kutu içi grup ERT uygulaması, Kutular Exe | Segment, sütun, yakınlaştırma), başlık / istatistik /
+  düğmeler exe kipine göre (versiyon, yeniden sorgula yok; "← Segment / etiket tarama", "Genel süreçler"), karoya tıkla → `ktExeOpen` (exe yolu,
+  ERT, bağlananlar / bağlandıkları, karşı karoya geçiş, IP topolojisi). Segment sayfasında sekmelerin yanında "🕸 Exe ilişki ağı ↗" (kayıt yoksa
+  "Exe ağı için yeniden çekin"). `ktRun` / `ktShowSaved` `kt.exe`'yi sıfırlar. Sahte veriyle backend ve Playwright'la çizim test edildi.
 - **Nessus / Tenable.sc** (`Nessus.cs`, kullanıcı: "teknolojisi ASP mi PHP mi"; diğer projedeki guide): CANLI TARAMA YOK — repository'deki
   birikmiş sonuçlar (`POST /rest/analysis`, sourceType cumulative, tool vulndetails, filtreler ip / pluginID / repository / lastSeen 0:MaxGun),
   kimlik `x-apikey: accesskey=…; secretkey=…;` (anahtarlar yalnız appsettings.Production.json). Kullanıcının reposu **121** (`Nessus:Repolar`).

@@ -79,6 +79,7 @@ const kt = { by: ktBy, src: null, tag: "", data: null, raw: null, liveMap: null,
 
 async function ktRun(tag) {
   setUiMode("topo");
+  kt.exe = null;   // etiket topolojisi (exe ağı kipinden çık)
   kt.tag = tag; kt.stack = []; kt.saved = null; kt.liveMap = null;
   ivSetVer(tag, null);   // canlı çizim
   ivStopPoll();
@@ -146,6 +147,23 @@ function ktFitScale() {
   w.style.height = ktWrapH() + "px";
   return Math.max(0.2, Math.min(1, (w.clientWidth - 4) / kt.pos.W, (w.clientHeight - 4) / kt.pos.H));
 }
+// Exe ilişki ağı (ExeAgi.cs; segment / etiket taramasından, ?exeag=1&tur=&ad= ya da &id=): aynı çizim, kutu = exe,
+// karo = exe'nin bir sunucudaki örneği, ok = exe → exe trafik (Carbon Black, kayıtlı tarama; yeniden sorgu yok)
+async function ktExeRun(q) {
+  setUiMode("topo");
+  kt.exe = q; kt.stack = []; kt.saved = null; kt.tag = q.ad || q.id;
+  $("#main").innerHTML = `<div class="panel empty"><span class="spinner"></span> Exe ilişki ağı hazırlanıyor (kayıtlı tarama)…</div>`;
+  try {
+    const r = await fetch("api/segment/exeag?" + new URLSearchParams(Object.fromEntries(Object.entries({ id: q.id, tur: q.tur, ad: q.ad, genel: q.genel ? "true" : "" }).filter(([, v]) => v))));
+    const b = await r.json().catch(() => ({ error: `HTTP ${r.status}` }));
+    if (!r.ok) throw new Error(b.error || `HTTP ${r.status}`);
+    kt.meta = {};
+    kt.data = ktPrepare(b);
+    if (kt.alt === "islev" && kt.by !== "segment") kt.alt = "uygulama";
+    ktShell();
+  } catch (e) { $("#main").innerHTML = `<div class="panel empty" style="color:var(--err)">${esc(e.message)}</div>`; }
+}
+
 function ktShell() {
   const d = kt.data;
   const pill = (n, s) => s ? `<span class="pill ${s.ok ? "ok" : s.error === "Sorgulanmadı" ? "skip" : "err"}" title="${esc(s.error || (s.messages || []).join(" · "))}">${n}${s.ok ? ` · ${fmt(s.rows)} satır` : ""}</span>` : "";
@@ -154,40 +172,45 @@ function ktShell() {
   const hasAlt = d.kumeler.some(k => k.elemanlar.some(e => e.altEtiket));
   if (kt.alt === "alt" && !hasAlt) kt.alt = "uygulama";
   if (kt.alt === "islev" && kt.by !== "segment") kt.alt = "uygulama";
-  const kutu = kt.by === "segment" ? "Segment" : "Küme";
+  const kutu = kt.by === "segment" ? "Segment" : kt.exe ? "Exe" : "Küme";
+  const X = !!kt.exe, segUrl = X ? "segment.html?" + new URLSearchParams(kt.exe.tur === "etiket" ? { etiket: kt.exe.ad } : { segment: kt.exe.ad || "" }) : "";
   $("#main").innerHTML = `
   <section class="panel">
     <div class="eg-head">
-      <div><h2>Küme topolojisi · ${esc(d.etiket)}</h2>
-        <div class="eg-sub">${kt.saved ? `<b>Kayıtlı versiyon</b> (${esc(verWhen(kt.saved.tarih))} · ${esc(String(kt.saved.kaydeden || "").split("\\").pop())}) · ` : ""}${esc((kt.meta.start || "").replace("T", " "))} – ${esc((kt.meta.end || "").replace("T", " "))} · kutular ${kt.by === "segment" ? "segmentler" : "işlev kümeleri"}, içlerinde VIP'ler ve VIP'e bağlı olmayan sunucular · oklar aralarındaki trafik</div></div>
+      <div><h2>${X ? "Exe ilişki ağı" : "Küme topolojisi"} · ${esc(d.etiket)}</h2>
+        <div class="eg-sub">${X ? `kutular ${kt.by === "segment" ? "segmentler" : "exe'ler (aynı exe'yi çalıştıran sunucular bir kutuda)"}, karolar exe'nin çalıştığı sunucular · oklar exe → exe trafik (Carbon Black, kayıtlı tarama) · "Dış" kutuları taramada olmayan hedef / istemciler` : `${kt.saved ? `<b>Kayıtlı versiyon</b> (${esc(verWhen(kt.saved.tarih))} · ${esc(String(kt.saved.kaydeden || "").split("\\").pop())}) · ` : ""}${esc((kt.meta.start || "").replace("T", " "))} – ${esc((kt.meta.end || "").replace("T", " "))} · kutular ${kt.by === "segment" ? "segmentler" : "işlev kümeleri"}, içlerinde VIP'ler ve VIP'e bağlı olmayan sunucular · oklar aralarındaki trafik`}</div></div>
       <div class="eg-stats">
         <div class="eg-stat"><b>${d.kumeler.length}</b><span>${kutu}</span></div>
-        <div class="eg-stat"><b>${nVip}</b><span>VIP</span></div>
-        <div class="eg-stat"><b>${nSrv}</b><span>Tekil sunucu</span></div>
+        ${X ? `<div class="eg-stat"><b>${nSrv}</b><span>Exe × sunucu</span></div><div class="eg-stat"><b>${d.sorgulanan}</b><span>Taranan sunucu</span></div>`
+          : `<div class="eg-stat"><b>${nVip}</b><span>VIP</span></div>
+        <div class="eg-stat"><b>${nSrv}</b><span>Tekil sunucu</span></div>`}
         <div class="eg-stat"><b>${fmt(d.baglar.length)}</b><span>Bağ</span></div>
       </div>
     </div>
     <div class="kt-bar">
-      <button id="ktBack">← İşlev haritası</button>
-      <span id="ktVer" style="display:flex;gap:8px;align-items:center"></span>
-      <label title="Kutular işlev kümelerine mi segmentlere mi göre çizilsin (trafik yeniden sorgulanmaz)">Kutular <select id="ktBy"><option value="islev"${kt.by !== "segment" ? " selected" : ""}>İşlev</option><option value="segment"${kt.by === "segment" ? " selected" : ""}>Segment</option></select></label>
+      ${X ? `<a href="${esc(segUrl)}" style="padding:6px 10px">← Segment / etiket tarama</a>
+        <label title="svchost, splunkd, Carbon Black gibi genel / ajan süreçleri de çizilsin"><input type="checkbox" id="ktGenel" ${kt.exe.genel ? "checked" : ""}> Genel süreçler</label>`
+        : `<button id="ktBack">← İşlev haritası</button>
+      <span id="ktVer" style="display:flex;gap:8px;align-items:center"></span>`}
+      <label title="Kutular ${X ? "exe'lere" : "işlev kümelerine"} mi segmentlere mi göre çizilsin (trafik yeniden sorgulanmaz)">Kutular <select id="ktBy"><option value="islev"${kt.by !== "segment" ? " selected" : ""}>${X ? "Exe" : "İşlev"}</option><option value="segment"${kt.by === "segment" ? " selected" : ""}>Segment</option></select></label>
       <div class="seg"><button data-ktm="kume" class="${kt.mode === "kume" ? "on" : ""}" title="Kutular arası toplam trafik; elemanın üstüne gelince kendi bağları çizilir">${kutu} bağları</button><button data-ktm="eleman" class="${kt.mode === "eleman" ? "on" : ""}" title="Bütün VIP / sunucu bağları kanallardan">Tüm eleman bağları</button></div>
-      <label>Kutu içi grup <select id="ktAlt">${[["uygulama", "Uygulama (ERT)"], ...(kt.by === "segment" ? [["islev", "İşlev"]] : []), ...(hasAlt ? [["alt", "Alt etiket"]] : []), ["yok", "Yok"]].map(([v, t]) => `<option value="${v}"${kt.alt === v ? " selected" : ""}>${t}</option>`).join("")}</select></label>
+      <label>Kutu içi grup <select id="ktAlt">${[["uygulama", "Uygulama (ERT)"], ...(kt.by === "segment" ? [["islev", X ? "Exe" : "İşlev"]] : []), ...(hasAlt ? [["alt", "Alt etiket"]] : []), ["yok", "Yok"]].map(([v, t]) => `<option value="${v}"${kt.alt === v ? " selected" : ""}>${t}</option>`).join("")}</select></label>
       <label>Kutu içi <select id="ktPer">${[2, 3, 4, 5, 6].map(v => `<option${v === kt.per ? " selected" : ""}>${v}</option>`).join("")}</select></label>
       <label>Sütun <select id="ktCols">${[["0", "Otomatik"], ["2", "2"], ["3", "3"], ["4", "4"], ["5", "5"]].map(([v, t]) => `<option value="${v}"${+v === kt.cols ? " selected" : ""}>${t}</option>`).join("")}</select></label>
       <label><input type="checkbox" id="ktInfra" ${kt.infra ? "checked" : ""}> Altyapı portları (DNS, AD, RDP…)</label>
       <span class="sp"></span>
       <button id="ktZo" title="Uzaklaştır">−</button><button id="ktFit">Sığdır</button><button id="ktZi" title="Yakınlaştır">+</button>
-      <button id="ktAgain" title="Trafiği seçili tarih aralığı için yeniden sorgular (canlı)">Yeniden sorgula</button>
+      ${X ? "" : `<button id="ktAgain" title="Trafiği seçili tarih aralığı için yeniden sorgular (canlı)">Yeniden sorgula</button>`}
     </div>
-    <div class="kt-src">${pill("Carbon Black", d.splunk)}${pill("AppResponse", d.appResponse)}${pill("Firewall", d.firewall)}
+    <div class="kt-src">${pill("Carbon Black", d.splunk)}${X ? "" : pill("AppResponse", d.appResponse) + pill("Firewall", d.firewall)}
       <span>${d.sorgulanan} IP sorgulandı${d.sorgulanan < d.toplam ? ` (etikette ${d.toplam} sunucu; üst sınır Islev:TopolojiMaxIp)` : ""} · ${(d.elapsedMs / 1000).toFixed(1)} sn</span></div>
     <div class="kt-wrap" id="ktWrap"></div>
-    <div class="legend" style="margin-top:8px"><span>◯ VIP</span><span>▭ sunucu</span><span>— trafik (kalınlık = hacim)</span><span style="color:var(--err)">- - engellenen</span><span>Elemanın üstüne gelin: kendi bağları · tıklayın: ayrıntı</span><span>Ctrl + tekerlek: yakınlaştır · boş yerde sürükle: kaydır</span><span>Küme adının üstüne gelin: kümenin bağları</span></div>
+    <div class="legend" style="margin-top:8px">${X ? `<span>▭ exe'nin çalıştığı sunucu (karo) · Dış kutuları: taramada olmayan hedef / istemci</span>` : `<span>◯ VIP</span>`}<span>▭ sunucu</span><span>— trafik (kalınlık = hacim)</span><span style="color:var(--err)">- - engellenen</span><span>Elemanın üstüne gelin: kendi bağları · tıklayın: ayrıntı</span><span>Ctrl + tekerlek: yakınlaştır · boş yerde sürükle: kaydır</span><span>Küme adının üstüne gelin: kümenin bağları</span></div>
   </section>`;
-  $("#ktBack").addEventListener("click", () => runIslev(kt.tag));
-  ktBarVer();
-  $("#ktAgain").addEventListener("click", () => ktRun(kt.tag));
+  $("#ktBack")?.addEventListener("click", () => runIslev(kt.tag));
+  if (!X) ktBarVer();
+  $("#ktAgain")?.addEventListener("click", () => ktRun(kt.tag));
+  $("#ktGenel")?.addEventListener("change", e => ktExeRun({ ...kt.exe, genel: e.target.checked }));
   document.querySelectorAll("[data-ktm]").forEach(b => b.addEventListener("click", () => { kt.mode = b.dataset.ktm; ktShell(); }));
   $("#ktBy").addEventListener("change", e => {
     kt.by = e.target.value; try { localStorage.setItem("df.ktBy", kt.by); } catch { }
@@ -234,6 +257,7 @@ function ktView() {
 
 // Kayıtlı versiyonun topolojisi: trafik yeniden sorgulanmaz
 async function ktShowSaved(tag) {
+  kt.exe = null;
   setUiMode("topo");
   ivStopPoll();
   kt.tag = tag; kt.stack = [];
@@ -528,7 +552,7 @@ function ktDraw() {
     return `<g class="box" data-box="${esc(b.k.ad)}" style="--h:${h}"><rect class="bg" x="${b.x}" y="${b.y}" width="${b.w}" height="${b.h}" rx="10"/>
       <path d="M${b.x} ${b.y + 10} a10 10 0 0 1 10 -10 h${b.w - 20} a10 10 0 0 1 10 10 v22 h${-b.w} z" style="fill:hsl(${h} 60% 50% / .15)"/>
       <text class="bt" x="${b.x + 10}" y="${b.y + 15}">${esc(ktCut(b.k.kume || b.k.ad, 38))}</text>
-      <text class="bs" x="${b.x + 10}" y="${b.y + 27}">${b.k.sunucu} sunucu · ${nVip} VIP${b.idle.length ? ` · ${b.idle.length} trafiksiz` : ""}</text>
+      <text class="bs" x="${b.x + 10}" y="${b.y + 27}">${b.k.sunucu} sunucu${kt.exe ? "" : ` · ${nVip} VIP`}${b.idle.length ? ` · ${b.idle.length} trafiksiz` : ""}</text>
       ${b.hdrs.map(hd => `<g class="ah"><text x="${b.x + KT.PAD + 2}" y="${hd.y + 11}">${esc(ktCut(hd.t, Math.floor((b.w - 70) / 6.5)))}<tspan dx="5">${hd.n}</tspan></text>
         <line x1="${b.x + KT.PAD + Math.min(b.w - 60, 12 + Math.min(hd.t.length, Math.floor((b.w - 70) / 6.5)) * 6.5 + 20)}" y1="${hd.y + 8}" x2="${b.x + b.w - KT.PAD}" y2="${hd.y + 8}"/></g>`).join("")}
       ${b.tiles.map(t => t.idle
@@ -655,6 +679,7 @@ function ktHead(title, sub, back) {
 function ktOpen(id) {
   const p = ktFind(id);
   if (!p) return;
+  if (kt.exe) return ktExeOpen(id);
   if (p.e.tur !== "vip") return ktServer(p.e.uyeler[0].ip);
   kt.stack.push(() => ktOpen(id));
   const e = p.e, h = tagHue(p.k);
@@ -675,6 +700,26 @@ function ktOpen(id) {
     </div>`);
   bg.querySelectorAll("[data-srv]").forEach(r => r.addEventListener("click", () => ktServer(r.dataset.srv)));
   bg.querySelectorAll("[data-open]").forEach(r => r.addEventListener("click", () => ktOpen(r.dataset.open)));
+}
+
+// Exe ağı: karonun ayrıntısı — exe yolu, sunucu, ERT uygulaması, gelen / giden exe bağları (tıklanınca karşı karo)
+function ktExeOpen(id) {
+  const p = ktFind(id); if (!p) return;
+  kt.stack.push(() => ktExeOpen(id));
+  const e = p.e, dis = id.startsWith("d:") || id.startsWith("c:");
+  const ins = kt.data.baglar.filter(b => b.to === id).sort((a, b) => b.hits - a.hits), outs = kt.data.baglar.filter(b => b.from === id).sort((a, b) => b.hits - a.hits);
+  const nm = o => { const x = ktFind(o); return x ? `<b>${esc(x.k)}</b> <span class="eg-sub">${esc(x.e.ad)}${x.e.ip && x.e.ad !== x.e.ip ? " · " + esc(x.e.ip) : ""}</span>` : esc(o); };
+  const tb = (rows, side) => rows.length ? `<table><thead><tr><th>${side === "in" ? "Bağlanan" : "Bağlandığı"}</th><th>Port</th><th class="num">Bağlantı</th></tr></thead><tbody>
+    ${rows.map(b => { const o = side === "in" ? b.from : b.to; return `<tr class="cl" data-open="${esc(o)}"><td>${nm(o)}</td><td>${esc(b.portlar.join(", "))}</td><td class="num">${fmt(b.hits)}</td></tr>`; }).join("")}</tbody></table>`
+    : `<div class="eg-sub">Yok.</div>`;
+  const bg = ktModal(`${ktHead(`${dis ? "↗" : "▭"} ${esc(p.k)}`, `${dis ? "" : `<b>${esc(e.ad)}</b> · `}<span class="ip">${esc(e.ip)}</span>${e.port ? " · port " + esc(e.port) : ""} · ${esc(e.segment || "")}`, kt.stack.length > 1)}
+    <div class="mb">
+      <dl class="kv">${!dis && e.alt ? `<dt>Exe yolu</dt><dd class="mono">${esc(e.alt)}</dd>` : ""}${e.uygulama ? `<dt>${dis ? "Uygulama / segment" : "Uygulama (ERT)"}</dt><dd>${esc(e.uygulama)}</dd>` : ""}
+        <dt>Trafik</dt><dd>${fmt(e.gelen)} gelen · ${fmt(e.giden)} giden</dd></dl>
+      <div class="two"><div><h4>Bu exe'ye bağlananlar</h4>${tb(ins, "in")}</div><div><h4>Bu exe'nin bağlandıkları</h4>${tb(outs, "out")}</div></div>
+      <div style="display:flex;gap:8px"><a href="?ip=${encodeURIComponent(e.ip)}" target="_blank" rel="noopener" style="padding:6px 12px;border-radius:6px;text-decoration:none;background:var(--in);color:#fff">IP topolojisini aç ↗</a></div>
+    </div>`);
+  bg.querySelectorAll("[data-open]").forEach(r => r.addEventListener("click", () => ktExeOpen(r.dataset.open)));
 }
 
 function ktServer(ip) {

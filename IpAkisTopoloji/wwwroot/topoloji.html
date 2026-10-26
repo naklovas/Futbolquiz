@@ -384,6 +384,7 @@ function initForm() {
   }
   if (p.get("etiket") != null) return "etiket";
   if (p.get("topo")) { topoWanted = p.get("topo"); return "topo"; }
+  if (p.get("exeag")) return "exeag";   // exe ilişki ağı (segment / etiket taramasından, kumetopo.js ktExeRun)
   return p.get("app") ? "app" : p.get("ip") ? "ip" : null;
 }
 
@@ -2124,7 +2125,8 @@ fetch("api/me").then(r => r.ok ? r.json() : null).then(me => {
   document.body.classList.toggle("no-topoloji", !yetki.topoloji);
 }).catch(() => {});
 function yetkiYok(ne) { alert(`${ne} yetkiniz yok. Yetki DokuPanel'den verilir.`); }
-loadAppliances().then(() => { const m = initForm(); if (m) uiMode = m; /* adres çubuğundaki aralık o sekmenin aralığıdır */ if (m === "app") runApp(); else if (m === "topo") runTopo(); else if (m === "erisim") runAccess(); else if (m === "etiket") runEtiket(); else if (m === "ip") run(); });
+loadAppliances().then(() => { const m = initForm(); if (m) uiMode = m; /* adres çubuğundaki aralık o sekmenin aralığıdır */ if (m === "app") runApp(); else if (m === "topo") runTopo(); else if (m === "erisim") runAccess(); else if (m === "etiket") runEtiket(); else if (m === "ip") run();
+  else if (m === "exeag") { const q = new URLSearchParams(location.search); uiMode = "topo"; ktExeRun({ tur: q.get("tur"), ad: q.get("ad"), id: q.get("id"), genel: q.get("genel") === "1" }); } });
 </script>
 <script src="uygulama.js"></script>
 <script src="erisim.js"></script>

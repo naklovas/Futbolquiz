@@ -16,9 +16,12 @@ record SegmentAiIstek(List<string>? Ips, bool Yeniden);
 record SegmentSatir(string Ip, string? Sunucu, string? Segment, string Port, string Exe, string Yol, string? Urun, bool Genel, bool Altyapi, bool Dinamik,
     long Baglanti, int Istemci, List<string> Istemciler, List<string> ErtUygulama, string ErtDurum, string? Son);
 record SegmentGiden(string Ip, string? Sunucu, string Exe, string Yol, string? Urun, bool Genel, long Baglanti, int Hedef, List<string> Hedefler);
+// Exe ilişki ağı için ham bağ (ExeAgi.cs): giden olay (Kaynak exe → Hedef IP:Port) ya da gelen olay (Kaynak istemci IP → Hedef exe:Port)
+record SegmentBag(string Kaynak, string? KaynakYol, string Hedef, string Port, string? HedefYol, long Baglanti);
 record SegmentSunucu(string Ip, string? Sunucu, string? Segment, List<string> ErtUygulamalar, int ErtPort, int CbPort, bool CbVar);
 record SegmentSonuc(string Tur, string Segment, List<string> Cidrler, int Saat, DateTimeOffset Baslangic, DateTimeOffset Bitis, List<SegmentSunucu> Sunucular,
-    List<SegmentSatir> Satirlar, List<SegmentGiden> Giden, List<string> Mesajlar, long Ms, Dictionary<string, NessusSunucu>? Nessus = null, string? NessusDurum = null);
+    List<SegmentSatir> Satirlar, List<SegmentGiden> Giden, List<string> Mesajlar, long Ms, Dictionary<string, NessusSunucu>? Nessus = null, string? NessusDurum = null,
+    List<SegmentBag>? Baglar = null);
 record SegmentIs(string Id, string Segment, bool Calisiyor, string Asama, int Toplam, int Biten, string? Hata, string Kullanici,
     DateTimeOffset Basladi, SegmentSonuc? Sonuc, SegmentKayit? Kayit = null, string? Not = null);
 
@@ -170,6 +173,11 @@ sealed class SegmentTaramaService(IConfiguration cfg, IHttpClientFactory factory
         return _liste;
     }
 
+    // Exe ağı / dış sayfalar: tarama işi (bellekte) ya da kayıtlı tarama (tür + ad)
+    public async Task<SegmentSonuc?> SonucAsync(string? id, string? tur, string? ad, CancellationToken ct) =>
+        id is { Length: > 0 } && Durum(id)?.Sonuc is { } s ? s
+        : tur is { Length: > 0 } && ad is { Length: > 0 } && await KayitOkuAsync(tur, ad.Trim(), ct) is { } k ? k.Sonuc : null;
+
     public SegmentIs? Durum(string id) => _isler.TryGetValue(id, out var x) ? x.Is : null;
     public void Durdur(string id) { if (_isler.TryGetValue(id, out var x)) x.Cts.Cancel(); }
 
@@ -302,6 +310,8 @@ sealed class SegmentTaramaService(IConfiguration cfg, IHttpClientFactory factory
             Giden = eski.Giden.Where(x => !ips.Contains(x.Ip)).Concat(yeni.Giden).OrderBy(x => U(x.Ip)).ToList(),
             Mesajlar = eski.Mesajlar.Concat(yeni.Mesajlar).Distinct().Take(20).ToList(),
             Nessus = nes.Count > 0 ? nes : null, NessusDurum = yeni.NessusDurum ?? eski.NessusDurum,
+            Baglar = eski.Baglar == null ? yeni.Baglar : eski.Baglar.Where(b => !(b.KaynakYol != null && ips.Contains(b.Kaynak)) && !(b.HedefYol != null && ips.Contains(b.Hedef)))
+                .Concat(yeni.Baglar ?? []).ToList(),
             Bitis = yeni.Bitis, Ms = eski.Ms + yeni.Ms
         };
     }
@@ -456,9 +466,9 @@ sealed class SegmentTaramaService(IConfiguration cfg, IHttpClientFactory factory
                 search index={index} sourcetype="{sourcetype}" {arama}
                 {(kosul != null ? "| where " + kosul : "")}
                 | eval yon=if(lower(direction)=="outbound", "out", "in"), yol=coalesce(process_path, process_name, "-"),
-                       port=if(yon=="out", "", local_port)
+                       port=if(yon=="out", remote_port, local_port)
                 | stats count dc(remote_ip) as peers values(remote_ip) as ornek max(_time) as son by local_ip yon port yol
-                | eval ornek=mvjoin(mvindex(ornek, 0, 9), " ")
+                | eval ornek=mvjoin(mvindex(ornek, 0, 49), " ")
                 """;
             try
             {
@@ -484,13 +494,21 @@ sealed class SegmentTaramaService(IConfiguration cfg, IHttpClientFactory factory
         List<string> Ornek(Dictionary<string, string> r, string ip) => (V(r, "ornek") ?? "").Split(new[] { ' ', '|' }, StringSplitOptions.RemoveEmptyEntries)
             .Where(x => x != ip && x != "127.0.0.1").ToList();
 
-        var satir = new List<SegmentSatir>(); var giden = new List<SegmentGiden>();
+        var satir = new List<SegmentSatir>(); var giden = new List<SegmentGiden>(); var bag = new List<SegmentBag>();
+        int maxBag = cfg.GetValue("Segment:ExeAgMaxBag", 60000);
         foreach (var r in rows)
         {
             if (V(r, "local_ip") is not { } ip || !Icinde(ip)) continue;
             string yol = V(r, "yol") ?? "-", exe = Exe(yol);
             long n = long.TryParse(V(r, "count"), out var c) ? c : 1; int peers = int.TryParse(V(r, "peers"), out var pe) ? pe : 0;
             var ornek = Ornek(r, ip);
+            // exe ağı: bağlantı sayısı örnek karşı IP'lere eşit bölünür (Splunk satırı exe + port başına; karşı IP'ler ilk 50)
+            if (bag.Count < maxBag && ornek.Count > 0 && V(r, "port") is { } bp && bp != "0")
+            {
+                long pay = Math.Max(1, n / ornek.Count);
+                foreach (var o in ornek)
+                    bag.Add(V(r, "yon") == "out" ? new SegmentBag(ip, yol, o, bp, null, pay) : new SegmentBag(o, null, ip, bp, yol, pay));
+            }
             if (V(r, "yon") == "out") { giden.Add(new(ip, Host(ip), exe, yol, Urun(yol, exe), SurecAi.GenelExe(exe, yol), n, peers, ornek.Take(5).Select(Ad).ToList())); continue; }
             string port = V(r, "port") ?? "";
             var ert = env.AppsOnIp(ip).Where(h => h.Port == port).ToList();
@@ -514,6 +532,6 @@ sealed class SegmentTaramaService(IConfiguration cfg, IHttpClientFactory factory
         return new SegmentSonuc(tur, ad, cidrs, saat, bas, bit, sunucular,
             satir.OrderBy(x => EnvanterSnapshot.TryToUInt(x.Ip, out uint u) ? u : 0).ThenBy(x => int.TryParse(x.Port, out int p) ? p : 99999).ToList(),
             giden.OrderBy(x => EnvanterSnapshot.TryToUInt(x.Ip, out uint u) ? u : 0).ThenByDescending(x => x.Baglanti).ToList(),
-            mesaj.Distinct().Take(20).ToList(), sw.ElapsedMilliseconds);
+            mesaj.Distinct().Take(20).ToList(), sw.ElapsedMilliseconds, Baglar: bag);
     }
 }

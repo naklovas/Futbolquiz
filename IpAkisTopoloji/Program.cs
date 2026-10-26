@@ -803,6 +803,15 @@ app.MapGet("/api/nessus/test", async (string ip, bool? tum, HttpContext ctx, ICo
     try { return Results.Ok(await n.TestAsync(ip.Trim(), tum == true, ct)); }
     catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested) { return Results.Json(new { error = ex.Message }, statusCode: 502); }
 });
+// Exe ilişki ağı (ExeAgi.cs): tarama işi (id) ya da kayıtlı tarama (tur + ad) → küme topolojisi verisi (topoloji.html ?exeag=1)
+app.MapGet("/api/segment/exeag", async (string? id, string? tur, string? ad, bool? genel, IConfiguration cfg, SegmentTaramaService seg,
+    EnvanterService envanter, CancellationToken ct) =>
+{
+    if (await seg.SonucAsync(id, tur, ad, ct) is not { } r) return Results.NotFound(new { error = "Tarama bulunamadı (kayıtlı tarama yok ya da süresi dolmuş)." });
+    if (r.Baglar == null) return Results.Json(new { error = "Bu tarama exe ağı verisi içermiyor (eski kayıt). Segment / etiket tarama sayfasında 🔄 Yeniden çek ile yenileyin." }, statusCode: 409);
+    try { return Results.Ok(ExeAgi.Build(r, await envanter.GetAsync(false, ct), AppTopology.InfraPorts(cfg), genel ?? false)); }
+    catch (Exception ex) when (ex is not OperationCanceledException) { return Results.Json(new { error = ex.Message }, statusCode: 500); }
+});
 // Benzer sunucular (Benzer.cs): tarama sonucundan exe / port / trafik / Nessus parmak izi → aynı amaçlı gruplar, yakın amaçlılar, alakasızlar
 app.MapGet("/api/segment/tarama/{id}/benzer", async (string id, double? ayni, double? yakin, IConfiguration cfg, SegmentTaramaService seg,
     EnvanterService envanter, CancellationToken ct) =>
