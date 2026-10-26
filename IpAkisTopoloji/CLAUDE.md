@@ -396,6 +396,17 @@ erişim talepleri) — DB → şema → tablo ve kim erişiyor bilgisi buradan b
   "AI tahmini full boş" (canlı) üzerine sağlamlaştırma: AI işi kayıtlar okunmadan önce `_ai`ye yazılır (GET 404 vermesin), başlatma hatası
   `Uyari`ya düşer, iş programı yoksa açık uyarı; arayüz 404'te 80 sn bekler (eskiden 7,5 sn sonra vazgeçip kolonu boş bırakıyordu); exe eşleşmesi
   dosya adına indirgenir (AI tam yol, büyük harf ya da ".exe"siz yazsa da eşleşir).
+  AI ÖNERİSİ = ERT EKSİKLERİ MOTORU (kullanıcı: "buradaki AI tahmini eksik.cs'deki olmalı, aynı yapı: silme, tekrar AI'a sorma"; aşağıdaki
+  SurecAi tabanlı otomatik tahmin ARTIK ÇAĞRILMIYOR, uçları / DF_SEGMENT_AI_TAHMIN duruyor): kolon (IP, port) başına `EksikService` önerisi, aynı
+  kayıt (DF_ERT_UYGULAMA_ONERI), aynı kanıt (SM, CB, Nessus, Kahin, katalog), durum AI / Onaylandı / Reddedildi / Elle. Sorulan satırlar: iş süreci
+  (genel / altyapı / dinamik değil), port ≠ 0, ERT'de adı boş ya da hiç kaydı yok (`aiGerek`); kayıtlı olan (ERT adı var) "ERT'de kayıtlı", port 0 /
+  yalnız giden "port yok". Tarama açılınca `POST /api/eksik/oneriler {ips}` ile kayıtlı öneriler okunur, önerisi OLMAYAN portlar kendiliğinden
+  `POST /api/eksik/calistir {portlar: {ip: [port]}, yeniden:false, saat}` (EksikCalistir.Portlar → RunAsync Missing yerine verilen portlar; onaylı /
+  elle hiç, AI önerisi yalnız yeniden'de sorulur; ortak `RunTodoAsync`; BuildAsync ERT'de satırı olmayan portu "ERT'de bu port için kayıt YOK" diye
+  yazar) ile sorulur; yazma yetkisi gerekir, toplu yetkisi yoksa en çok 50 sunucu; başka eksik işi çalışıyorsa (409) bitince yeniden denenir.
+  `/api/eksik/durum` 3 sn'de bir izlenir (ilerleme çubuğu: port), öneriler her turda yenilenir. Satırda ✓ onay / ✗ ret / ✎ elle / ⟲ sil
+  (`/api/eksik/karar`), ↻ tekrar sor (o port, yeniden:true), "kanıtlar" (`/api/eksik/kanit`, sağ panel). CSV: AI ÖNERİSİ, GÜVEN, DURUM, ADI ERT'DE,
+  GEREKÇE. Mock'la test edildi (yalnız önerisiz port soruldu, onay ve tekrar sor istekleri doğru).
   KAYITLI TARAMA (kullanıcı: "her seferinde tekrar sorgulamayayım, kaydetsin; istersem yeniden çek, ya da yeni sunucuları ekle"): tarama bitince
   sonuç `Segment:TaramaTablosu` dbo.DF_SEGMENT_TARAMA'ya (`sql/segment_tarama.sql`; PK TUR + AD, SONUC VARBINARY gzip JSON, SAAT, SUNUCU, SATIR,
   TARIH, KAYDEDEN; tablo yoksa bellekte + `KayitUyari`) MERGE. POST `/api/segment/tarama {…, mod}`: mod boş + kayıt var → Carbon Black sorgulanmaz,

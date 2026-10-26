@@ -17,7 +17,8 @@ record EksikSatir(string Ip, string Port, string? Hostname, string? Segment, str
 record EksikListe(List<EksikSatir> Satirlar, int Toplam, int TumSatir, int TumIp, int Onerili, int Onayli, IslevDurum Durum,
     bool Yazabilir, string? Uyari, bool TopluYetki = false, string? Bilgi = null, string? Surum = null);
 // Max: bu çalıştırmada en çok kaç sunucu (boş = Eksik:MaxIp; 0 = sınırsız)
-record EksikCalistir(List<string>? Ips, bool Hepsi, bool Yeniden, int? Saat, bool Test = false, int? Max = null);
+record EksikCalistir(List<string>? Ips, bool Hepsi, bool Yeniden, int? Saat, bool Test = false, int? Max = null,
+    Dictionary<string, List<string>>? Portlar = null);   // Portlar: IP → port (segment tarama; ERT'de adı boş ya da hiç kaydı olmayan portlar)
 record EksikKarar(string? Ip, string? Port, string? Karar, string? Uygulama);
 
 sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, EnvanterService envanter, IslevService islev,
@@ -56,6 +57,14 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
         if (words.Count == 0) words = ["test"];
         string? d = env.FindSegment(ip)?.Domain;
         return d != null && words.Any(w => d.Contains(w, StringComparison.OrdinalIgnoreCase));
+    }
+
+    // Segment tarama: IP'lerin port başına önerileri (AI / Onaylandı / Reddedildi / Elle)
+    public async Task<Dictionary<string, Dictionary<string, EksikOneri>>> OnerilerAsync(IEnumerable<string> ips, CancellationToken ct)
+    {
+        var set = ips.ToHashSet();
+        return (await LoadAsync(false, ct)).Where(kv => set.Contains(kv.Key.Item1) && kv.Value.Durum != "")
+            .GroupBy(kv => kv.Key.Item1).ToDictionary(g => g.Key, g => g.ToDictionary(kv => kv.Key.Item2, kv => kv.Value));
     }
 
     // IP sorgulama kartı: bu IP'nin port başına önerisi (ERT tablosundaki "AI önerisi" kolonu)
@@ -536,6 +545,9 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
                     h.VarlikMuhafizi is { } vm ? "muhafız=" + vm : null, h.SunucuIsletenBirim is { } sb2 ? "işleten=" + sb2 : null
                 }.OfType<string>().DefaultIfEmpty("başka bilgi yok")));
             }
+            // segment taramasından gelen, ERT'de hiç satırı olmayan portlar (Carbon Black'te gelen bağlantı görüldü)
+            foreach (var yp in miss.Where(m => !env.AppsOnIp(ip).Any(h => Key(h.Port) == m)))
+                sb.AppendLine($"- port {(yp == "" ? "(yok)" : yp)}{(PortBilgisi.Find(yp, cfg) is { } pinfo ? $" (bilinen kullanım: {pinfo.Name})" : "")}: ERT'de bu port için kayıt YOK (Carbon Black'te gelen bağlantı görüldü)");
             // Sıra önemli (kullanıcı: SM açıklamaları önemsenmiyordu): metin Eksik:MaxKarakter'de kesilir ve uzun profil (ERT, MSY, ÇSY,
             // Kahin…) başta olunca SM / CB kesiliyordu. Güçlü kanıtlar önce, komşular ve profil sonda.
             if (smf.TryGetValue(ip, out var smfText)) sb.Append(smfText);
@@ -985,6 +997,19 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
         var infra = AppTopology.InfraPorts(cfg);
         var have = await LoadAsync(true, ct);
         var wanted = req.Ips is { Count: > 0 } ? req.Ips.ToHashSet() : null;
+        if (req.Portlar is { Count: > 0 })
+        {
+            // Segment tarama (kullanıcı: "buradaki AI tahmini eksik.cs'deki olmalı, aynı yapı"): verilen IP → portlar; onaylanan / elle girilen
+            // hiç, kayıtlı AI önerisi yalnız yeniden istenirse sorulur (tekrar tekrar sorma)
+            var pt = req.Portlar.Where(kv => LookupQuery.TryParseIpv4(kv.Key, out _))
+                .ToDictionary(kv => kv.Key, kv => kv.Value.Select(Key).Distinct()
+                    .Where(p => !have.TryGetValue((kv.Key, p), out var o) || (o.Durum is not (Onay or Elle) && req.Yeniden)).ToList())
+                .Where(kv => kv.Value.Count > 0).ToDictionary(kv => kv.Key, kv => kv.Value);
+            if (pt.Count == 0) throw new InvalidOperationException("Sorulacak port yok (hepsinin önerisi var ya da onaylanmış).");
+            Set(d => d with { Asama = "Kanıtlar toplanıyor", Toplam = pt.Values.Sum(v => v.Count), Etiket = $"segment taraması: {pt.Count} sunucu" });
+            await RunTodoAsync(pt, env, Hours(req.Saat), ct);
+            return;
+        }
         // Hedef: istenen IP'ler ya da önerisi olmayanlar; altyapı portları ve onaylanmış / elle girilmiş olanlar atlanır
         var cands = Missing(env, Dyn).Where(m => !infra.Contains(m.Port))
             .Where(m => wanted == null || wanted.Contains(m.Ip))
@@ -999,6 +1024,11 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
         // Etiket alanı özet için: bu çalıştırmada kaç sunucu / bekleyen toplam
         Set(d => d with { Asama = "Kanıtlar toplanıyor", Toplam = total,
             Etiket = todo.Count < allIps ? $"bu çalıştırmada {todo.Count} / {allIps} sunucu ({allPorts - total} port sonraki çalıştırmalara kaldı)" : $"{allIps} sunucu" });
+        await RunTodoAsync(todo, env, hours, ct);
+    }
+
+    async Task RunTodoAsync(Dictionary<string, List<string>> todo, EnvanterSnapshot env, int hours, CancellationToken ct)
+    {
         // Sunucu sunucu (kullanıcı: 20'lik toplu kanıt toplama SM tablosuyla çok uzadı): her sunucunun kanıtı toplanır, hemen AI'a
         // sorulur ve kaydedilir; aynı anda Eksik:Paralel (varsayılan 3) sunucu. İlk öneriler hemen gelir.
         int paralel = Math.Clamp(cfg.GetValue("Eksik:Paralel", 3), 1, 8);

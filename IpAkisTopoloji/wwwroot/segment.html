@@ -81,6 +81,7 @@
   .st.new { color: var(--warn); border-color: var(--warn); }
   .acts { white-space: nowrap; }
   .acts button { padding: 2px 8px; font-size: 12px; }
+  button.mini { padding: 1px 7px; font-size: 12px; }
   .foot { display: flex; justify-content: space-between; align-items: center; margin-top: 10px; color: var(--muted); font-size: 12.5px; gap: 10px; flex-wrap: wrap; }
   .empty { padding: 40px; text-align: center; color: var(--muted); }
   .spinner { display: inline-block; width: 12px; height: 12px; border: 2px solid var(--line); border-top-color: var(--in); border-radius: 50%; animation: sp 0.8s linear infinite; vertical-align: -2px; }
@@ -184,7 +185,7 @@ async function start(mod) {
   try {
     const j = await api("api/segment/tarama", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ [st.tur]: seg, saat: +$("#saat").value, mod }) });
     j.adGirdi = seg; st.jobInfo = j;
-    st.job = j.id; st.ai = null; st.bz = null; clearTimeout(st.aiTimer);
+    st.job = j.id; st.on = {}; st.ed = null; st.edMsg = null; st.bz = null; clearTimeout(st.aiTimer);
     history.replaceState(null, "", "?" + new URLSearchParams({ [st.tur]: seg, saat: $("#saat").value }));
     poll(j);
   } catch (e) { $("#warn").innerHTML = `<div class="warn">${esc(e.message)}</div>`; }
@@ -199,70 +200,103 @@ async function poll(j) {
     : j.hata ? `<div class="warn">Tarama başarısız: ${esc(j.hata)}</div>` : j.asama === "Durduruldu" ? `<div class="warn">Durduruldu.</div>` : "";
   if (j.calisiyor) { st.timer = setTimeout(() => poll(), 2000); return; }
   if (st.jobInfo && j.id === st.jobInfo.id) st.jobInfo = { ...j, adGirdi: st.jobInfo.adGirdi };
-  if (j.sonuc) { st.data = j.sonuc; if (j.kayit) loadKayit().then(segInfo); render(); setTimeout(aiPoll, 800); }   // AI tahmini sunucuda kendiliğinden başlar
+  if (j.sonuc) { st.data = j.sonuc; if (j.kayit) loadKayit().then(segInfo); render(); loadOneri().then(() => { render(); aiBaslat(); }); }   // önerisi olmayan portlar kendiliğinden sorulur
 }
 
-// ---- AI ile iş uygulaması tahmini (sunucu sunucu, SurecAi) ----
-async function aiPoll(deneme = 0) {
+// ---- AI önerisi: ERT eksikleriyle AYNI motor ve kayıt (Eksik.cs; kullanıcı: "buradaki AI tahmini eksik.cs'deki olmalı, aynı yapı: silme,
+// tekrar AI'a sorma") — (IP, port) başına öneri, durum AI / Onaylandı / Reddedildi / Elle; onaylanan / elle girilene AI dokunmaz.
+// Sorulan: iş süreci (genel / altyapı / dinamik değil), gerçek portu olan ve ERT'de adı boş ya da hiç kaydı olmayan satırlar.
+const aiGerek = x => !x.genel && !x.altyapi && !x.dinamik && !sifir(x) && x.ertDurum !== "kayitli";
+const oneriOf = x => st.on?.[x.ip]?.[x.port] || null;
+function aiHedef(sadeceYeni) {
+  const h = {};
+  for (const x of st.data.satirlar.filter(aiGerek)) if (!sadeceYeni || !oneriOf(x)) (h[x.ip] ||= []).includes(x.port) || h[x.ip].push(x.port);
+  return h;
+}
+async function loadOneri() {
+  try { st.on = await api("api/eksik/oneriler", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ips: st.data.sunucular.map(s => s.ip) }) }); }
+  catch (e) { st.edMsg = "AI önerileri okunamadı: " + e.message; }
+}
+// Önerisi olmayan portlar kendiliğinden sorulur (kayıtlı olanlar sorulmaz); yeniden=true + portlar: satırdaki "↻ tekrar sor"
+async function aiBaslat(yeniden = false, portlar = null) {
   clearTimeout(st.aiTimer);
-  try { st.ai = await api(`api/segment/tarama/${st.job}/ai`); }
-  catch (e) {   // iş henüz kayıtlı değilse bir süre daha dene
-    st.aiHata = e.message; render();
-    // uç hiç yoksa (JSON'suz 404) sunucudaki DLL bu sürümden eski: beklemeden söyle
-    if (/^HTTP 404/.test(e.message) && !st.surum?.segmentAi) {
-      st.ai = { calisiyor: false, toplam: 0, biten: 0, sonuclar: {}, hatalar: {}, uyari: `Sunucudaki DeltaFlow sürümü AI tahminini desteklemiyor (eski DLL${st.surum?.surum ? ", " + st.surum.surum : ""}). Segment.cs / Program.cs ile yeniden derleyip yayınlayın.` };
-      render(); return;
-    }
-    if (deneme < 40) st.aiTimer = setTimeout(() => aiPoll(deneme + 1), 2000);
-    else { st.ai = { calisiyor: false, toplam: 0, biten: 0, sonuclar: {}, hatalar: {}, uyari: "AI tahmini durumu alınamadı: " + e.message }; render(); }
-    return;
+  if (!st.yetki.yazma) { st.edMsg = "AI önerisi istemek için yazma yetkisi gerekir (DokuPanel); kayıtlı öneriler gösteriliyor."; render(); return; }
+  let h = portlar || aiHedef(true), ips = Object.keys(h);
+  if (!ips.length) { st.edMsg = null; render(); return; }
+  let kalan = 0;
+  if (!st.yetki.toplu && ips.length > 50) { kalan = ips.length - 50; h = Object.fromEntries(ips.slice(0, 50).map(ip => [ip, h[ip]])); }
+  try {
+    st.ed = await api("api/eksik/calistir", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ portlar: h, yeniden, saat: st.data.saat }) });
+    st.edMsg = kalan ? `Bu çalıştırmada 50 sunucu soruluyor; ${kalan} sunucu sonraki açılışta (50'den çok sunucu için toplu yetki gerekir).` : null;
+    st.edBekle = false;
+  } catch (e) {
+    if (/zaten çalışıyor/.test(e.message)) { st.edMsg = "Başka bir ERT eksikleri AI işi çalışıyor; bitince bu segmentin portları kendiliğinden sorulacak."; st.edBekle = true; }
+    else { st.edMsg = "AI önerisi başlatılamadı: " + e.message; render(); return; }
   }
-  st.aiHata = null; render();
-  if (st.ai.calisiyor) st.aiTimer = setTimeout(aiPoll, 2500);
+  render(); aiWatch();
 }
-// Satırın exe'si için AI tahmini (sonuç exe adıyla eşleşir)
-function aiOf(ip, exe) {
-  const s = st.ai?.sonuclar?.[ip];
-  if (!s) return st.ai?.hatalar?.[ip] ? { hata: st.ai.hatalar[ip] } : null;
-  // AI exe'yi tam yol, büyük/küçük harf ya da ".exe"siz yazabilir: dosya adına indirgenip karşılaştırılır
-  const n = v => String(v || "").toLowerCase().split(/[\\/]/).pop().replace(/\.exe$/, "").trim();
-  const k = n(exe);
-  return { u: (s.uygulamalar || []).find(u => n(u.exe) === k || n(u.yol) === k), ozet: s.ozet, var: true };
+async function aiWatch() {
+  clearTimeout(st.aiTimer);
+  try { st.ed = await api("api/eksik/durum"); } catch { st.aiTimer = setTimeout(aiWatch, 5000); return; }
+  await loadOneri(); render();
+  if (st.ed.calisiyor) { st.aiTimer = setTimeout(aiWatch, 3000); return; }
+  if (st.edBekle) { st.edBekle = false; aiBaslat(); }
 }
-function aiCell(ip, exe) {
-  const a = aiOf(ip, exe);
-  if (!a) return !st.ai || st.ai.calisiyor ? `<span class="small muted">…</span>`
-    : `<span class="small muted" title="Bu sunucu AI'a gönderilmedi (yalnız genel / ajan süreçleri) ya da sonuç gelmedi">sorulmadı</span>`;
-  if (a.hata) return `<span class="small" style="color:var(--err)" title="${esc(a.hata)}">AI hatası</span>`;
-  if (!a.u) return `<span class="small muted" title="AI bu exe'yi iş uygulaması saymadı (genel / altyapı)">—</span>`;
-  const u = a.u, c = u.guven >= 75 ? "var(--ok)" : u.guven >= 50 ? "var(--warn)" : "var(--err)";
-  const tarih = st.ai?.tarihler?.[ip];
-  // Katalog eşlemesi (SurecAi.Katalogla): ERT'deki adla eşlendiyse "ERT kataloğu", değilse "yeni (ERT'de yok)"; AI'ın kendi adı ipucunda
-  const kat = u.yeni ? `<span class="st new" title="ERT kataloğunda karşılığı bulunamadı; AI'ın serbest adı">yeni · ERT'de yok</span>`
-    : u.ertKarsiligi ? `<span class="st ok" title="ERT uygulama kataloğundaki ad">ERT kataloğu</span>` : "";
-  const ipucu = [u.gerekce, u.aiAdi && u.aiAdi !== u.uygulama ? "AI'ın önerdiği ad: " + u.aiAdi : "", u.katalogNot ? "Katalog: " + u.katalogNot : "", tarih ? "Tahmin tarihi: " + tarih : ""].filter(Boolean).join("\n");
-  return `<div class="sug" title="${esc(ipucu)}"><b>${esc(u.uygulama || "?")}</b><span class="conf"><i style="width:${u.guven}%;background:${c}"></i></span><span class="small muted">%${u.guven}</span>
-    <div>${kat}</div>${u.ertKarsiligi && u.ertKarsiligi !== u.uygulama ? `<div class="small">ERT: ${esc(u.ertKarsiligi)}</div>` : ""}${u.rol ? `<div class="small muted">${esc(u.rol)}</div>` : ""}</div>`;
+const aiText = x => { const o = oneriOf(x); return o ? `${o.uygulama || "öneri yok"} %${o.guven} ${o.durum}` : ""; };
+function aiCell(x) {
+  if (!aiGerek(x)) return x.ertDurum === "kayitli" && !x.genel ? `<span class="small muted" title="ERT'de bu port için uygulama adı var">ERT'de kayıtlı</span>`
+    : sifir(x) && !x.genel ? `<span class="small muted" title="ERT eksikleri port bazında çalışır; bu olayda yerel port yok">port yok</span>` : `<span class="small muted">—</span>`;
+  const o = oneriOf(x), w = st.yetki.yazma, d = `data-ip="${esc(x.ip)}" data-port="${esc(x.port)}"`;
+  const tekrar = w ? `<button class="mini" data-ak="tekrar" ${d} title="Bu portu AI'a yeniden sor (kanıtlar yeniden toplanır)">↻</button>` : "";
+  if (!o) return st.ed?.calisiyor ? `<span class="small muted">…</span>` : `<span class="small muted">sorulmadı</span> ${tekrar}`;
+  const g = o.guven || 0, c = g >= 75 ? "var(--ok)" : g >= 50 ? "var(--warn)" : "var(--err)";
+  const stc = o.durum === "Onaylandı" || o.durum === "Elle" ? "ok" : o.durum === "Reddedildi" ? "red" : "ai";
+  const gr = o.gerekce || "";
+  return `<div class="sug"><div>${o.uygulama ? `<b>${esc(o.uygulama)}</b>` : `<span class="muted">öneri yok</span>`}${o.uygulama && o.durum !== "Elle" ? `<span class="conf"><i style="width:${g}%;background:${c}"></i></span><span class="small muted">%${g}</span>` : ""}
+      <span class="st ${stc}">${esc(o.durum)}</span>${o.yeni ? ` <span class="st new" title="ERT'deki uygulama listesinde yok">yeni ad</span>` : ""}</div>
+    ${gr ? `<div class="why" title="${esc(gr)}">${esc(gr.length > 140 ? gr.slice(0, 140) + "…" : gr)}</div>` : ""}${o.durum !== "AI" && o.kaynak ? `<div class="why">${esc(o.kaynak)}</div>` : ""}
+    ${w ? `<div class="acts" style="margin-top:3px">${o.uygulama && o.durum === "AI" ? `<button class="mini" data-ak="onay" ${d} title="Öneriyi onayla">✓</button> ` : ""}${o.durum !== "Reddedildi" ? `<button class="mini" data-ak="red" ${d} title="Reddet">✗</button> ` : ""}<button class="mini" data-ak="elle" ${d} data-cur="${esc(o.uygulama || "")}" title="Uygulama adını elle yaz">✎</button> <button class="mini" data-ak="sil" ${d} title="Öneriyi ve kararı sil">⟲</button> ${o.durum === "Onaylandı" || o.durum === "Elle" ? "" : tekrar} <a href="#" class="small" data-kanit="${esc(x.ip)}">kanıtlar</a></div>` : ""}</div>`;
 }
-const aiText = (ip, exe) => { const a = aiOf(ip, exe); return a?.u ? `${a.u.uygulama || ""}${a.u.ertKarsiligi ? " (ERT: " + a.u.ertKarsiligi + ")" : ""} %${a.u.guven}` : ""; };
+// Satırdaki işlemler: onay / ret / elle / sil (ERT eksikleriyle aynı /api/eksik/karar) ve tekrar sor
+document.addEventListener("click", async e => {
+  const b = e.target.closest("[data-ak]"), kn = e.target.closest("[data-kanit]");
+  if (kn) { e.preventDefault(); return kanitAc(kn.dataset.kanit); }
+  if (!b) return;
+  const { ak, ip, port, cur } = b.dataset;
+  if (ak === "tekrar") return aiBaslat(true, { [ip]: [port] });
+  let uygulama = null;
+  if (ak === "elle") { uygulama = prompt(`${ip}:${port} için uygulama adı (ERT'deki adla aynı yazılırsa eşleşir):`, cur || ""); if (!uygulama?.trim()) return; }
+  if (ak === "sil" && !confirm(`${ip}:${port} önerisi ve kararı silinsin mi?`)) return;
+  try { await api("api/eksik/karar", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ip, port, karar: ak, uygulama }) }); await loadOneri(); render(); }
+  catch (er) { alert(er.message); }
+});
+async function kanitAc(ip) {
+  document.querySelector(".drawer")?.remove();
+  const d = document.createElement("div"); d.className = "drawer";
+  d.innerHTML = `<div class="dh"><div><h3>AI'a giden kanıtlar · ${esc(ip)}</h3><div class="sub">ERT eksikleriyle aynı kanıt metni (son AI çalıştırmasında kaydedilen)</div></div><button type="button">Kapat</button></div><pre>yükleniyor…</pre>`;
+  d.querySelector("button").onclick = () => d.remove();
+  document.body.appendChild(d);
+  try { d.querySelector("pre").textContent = (await api("api/eksik/kanit?ip=" + encodeURIComponent(ip))).metin || "(kanıt yok)"; }
+  catch (er) { d.querySelector("pre").textContent = er.message; }
+}
 
 function rows() {
   const q = st.q.toLowerCase();
   // Port 0 / boş: Carbon Black'te yerel portu olmayan gelen olaylar. Kullanıcı: aralarında çok iş uygulaması var, görünsün (kutucukla gizlenebilir)
   let r = st.data.satirlar.filter(x => (st.sifir || !sifir(x)) && (st.alt || !x.altyapi) && (st.dyn || !x.dinamik) && (st.genel || !x.genel) && (!st.durum || x.ertDurum === st.durum)
-    && (!q || [x.ip, x.sunucu, x.segment, x.port, x.exe, x.yol, x.urun, aiText(x.ip, x.exe), nsText(x.ip, x.port), ...x.ertUygulama, ...x.istemciler].some(v => (v || "").toLowerCase().includes(q))));
+    && (!q || [x.ip, x.sunucu, x.segment, x.port, x.exe, x.yol, x.urun, aiText(x), nsText(x.ip, x.port), ...x.ertUygulama, ...x.istemciler].some(v => (v || "").toLowerCase().includes(q))));
   const key = { ip: x => ipNum(x.ip) * 1e5 + (+x.port || 0), port: x => +x.port || 0, exe: x => x.exe.toLowerCase(), baglanti: x => x.baglanti, istemci: x => x.istemci,
-    ert: x => ({ yok: 0, bos: 1, kayitli: 2 }[x.ertDurum]), son: x => x.son || "", ns: x => nsText(x.ip, x.port).toLowerCase() || "\uffff", ai: x => aiText(x.ip, x.exe).toLowerCase() || "\uffff" }[st.sort];
+    ert: x => ({ yok: 0, bos: 1, kayitli: 2 }[x.ertDurum]), son: x => x.son || "", ns: x => nsText(x.ip, x.port).toLowerCase() || "\uffff", ai: x => aiText(x).toLowerCase() || "\uffff" }[st.sort];
   r.sort((a, b) => { const A = key(a), B = key(b); return (A < B ? -1 : A > B ? 1 : 0) * (st.desc ? -1 : 1); });
   return r;
 }
 
-// AI tahmini ilerleme çubuğu (tarama çubuğuyla aynı görünüm): beklerken ve çalışırken
+// AI önerisi ilerleme çubuğu (ERT eksikleri işi; /api/eksik/durum: Biten / Toplam port)
 function aiBar() {
-  if (!st.ai) return `<div class="run" style="margin-top:10px"><div><span class="spinner"></span> 🤖 AI tahmini hazırlanıyor…${st.aiHata ? ` <span class="small muted">(${esc(st.aiHata)})</span>` : ""}</div><div class="bar"><i style="width:3%"></i></div></div>`;
-  if (!st.ai.calisiyor) return "";
-  const pct = st.ai.toplam ? Math.round(100 * st.ai.biten / st.ai.toplam) : 3;
-  return `<div class="run" style="margin-top:10px"><div><span class="spinner"></span> 🤖 AI iş uygulamalarını tahmin ediyor · <b>${st.ai.biten} / ${st.ai.toplam}</b> sunucu (%${pct})${st.ai.kayitli ? ` · ${st.ai.kayitli} sunucuda kayıtlı tahmin kullanıldı` : ""}${Object.keys(st.ai.hatalar || {}).length ? ` · <span style="color:var(--err)">${Object.keys(st.ai.hatalar).length} hata</span>` : ""}</div><div class="bar"><i style="width:${Math.max(pct, 3)}%"></i></div></div>`;
+  const d = st.ed;
+  if (!d?.calisiyor) return d && !d.calisiyor && d.hatalar?.length ? `<div class="small" style="color:var(--err);margin-top:6px" title="${esc(d.hatalar.join("\n"))}">${d.hatalar.length} sunucuda AI hatası</div>` : "";
+  const pct = d.toplam ? Math.round(100 * d.biten / d.toplam) : 3;
+  return `<div class="run" style="margin-top:10px"><div><span class="spinner"></span> 🤖 AI önerisi (ERT eksikleri motoru) · ${esc(d.asama || "")} · <b>${d.biten} / ${d.toplam}</b> port (%${pct})${d.etiket ? ` · ${esc(d.etiket)}` : ""}${d.baslatan ? ` · ${esc(d.baslatan)}` : ""}</div><div class="bar"><i style="width:${Math.max(pct, 3)}%"></i></div></div>`;
 }
 const sifir = x => !x.port || x.port === "0";
 // Nessus / Tenable.sc (repository'deki son tarama): port başına web sunucusu, teknoloji, sertifika adı, dinleyen program
@@ -312,11 +346,11 @@ function render() {
     const ert = x.ertDurum === "kayitli" ? esc(x.ertUygulama.join(", ")) : x.ertDurum === "bos" ? `<span class="st bos">ERT'de adı boş</span>` : `<span class="st yok">ERT'de yok</span>`;
     return `<tr class="${first ? "grp" : "cont"}${x.altyapi || x.genel ? " alt" : ""}">
       <td class="ip ipc"><a href="./?ip=${encodeURIComponent(x.ip)}" target="_blank" rel="noopener" title="IP topolojisini aç">${esc(x.ip)}</a></td>
-      <td class="hc">${esc(x.sunucu || "")}${d.tur === "etiket" && x.segment ? `<div class="small muted">${esc(x.segment)}</div>` : ""}${first && ns ? nsHost(x.ip) : ""}${first && st.ai?.sonuclar?.[x.ip]?.ozet ? `<div class="small" style="margin-top:4px;max-width:260px" title="${esc(st.ai.sonuclar[x.ip].ozet)}">🤖 ${esc(st.ai.sonuclar[x.ip].ozet.length > 110 ? st.ai.sonuclar[x.ip].ozet.slice(0, 110) + "…" : st.ai.sonuclar[x.ip].ozet)}</div>` : ""}</td>
+      <td class="hc">${esc(x.sunucu || "")}${d.tur === "etiket" && x.segment ? `<div class="small muted">${esc(x.segment)}</div>` : ""}${first && ns ? nsHost(x.ip) : ""}</td>
       <td class="mono"><b>${esc(x.port || "—")}</b>${sifir(x) ? ' <span class="small muted" title="Carbon Black bu olayda yerel port vermedi">port yok</span>' : ""}${x.altyapi ? ' <span class="small muted">altyapı</span>' : ""}${x.dinamik ? ' <span class="small muted">dinamik</span>' : ""}</td>
       <td title="${esc(x.yol)}"><b>${esc(x.exe)}</b>${x.urun ? `<span class="urun">${esc(x.urun)}</span>` : ""}<div class="small muted mono">${esc(x.yol.length > 70 ? "…" + x.yol.slice(-70) : x.yol)}</div></td>
       ${ns ? `<td>${nsCell(x.ip, x.port)}</td>` : ""}
-      <td>${aiCell(x.ip, x.exe)}</td>
+      <td>${aiCell(x)}</td>
       <td>${fmt(x.baglanti)}</td>
       <td>${x.istemci}<div class="small muted">${esc(x.istemciler.slice(0, 3).join(", "))}${x.istemci > 3 ? " …" : ""}</div></td>
       <td>${ert}</td>
@@ -347,18 +381,17 @@ function render() {
       <label title="Carbon Black'te yerel portu 0 / boş gelen olaylar; kaldırırsanız bu satırlar gizlenir"><input type="checkbox" id="sifirF" ${st.sifir ? "checked" : ""}> Port 0 (${fmt(nSifir)})</label>
       <span class="sp"></span>
       <span class="small muted">${fmt(r.length)} satır</span>
-      ${!st.ai ? `<span class="small muted">🤖 AI tahmini bekleniyor…${st.aiHata ? ` (${esc(st.aiHata)})` : ""}</span>` : ""}
-      ${st.ai ? `<span class="small" title="Tarama bitince her sunucunun iş exe'leri AI'a gider ve sonuç kaydedilir; kayıtlı tahmini olan ve yeni exe'si olmayan sunucu yeniden sorulmaz">🤖 ${st.ai.calisiyor ? `<span class="spinner"></span> AI tahmini: ${st.ai.biten} / ${st.ai.toplam} sunucu` : `AI tahmini: ${st.ai.toplam} sunucu soruldu`}${st.ai.kayitli ? ` · ${st.ai.kayitli} sunucuda kayıtlı tahmin kullanıldı` : ""}</span>` : ""}
-      ${st.ai?.uyari ? `<span class="small" style="color:var(--warn)">${esc(st.ai.uyari)}</span>` : ""}
-      ${st.ai && !st.ai.calisiyor && Object.keys(st.ai.hatalar || {}).length ? `<span class="small" style="color:var(--err)">${Object.keys(st.ai.hatalar).length} sunucuda AI hatası</span>` : ""}
+      ${(() => { const hd = st.data.satirlar.filter(aiGerek), on = hd.filter(oneriOf), ok = on.filter(x => ["Onaylandı", "Elle"].includes(oneriOf(x).durum));
+        return `<span class="small" title="ERT eksikleriyle aynı AI ve kayıt: önerisi olan port yeniden sorulmaz; satırdaki ↻ ile tekrar sorulur, ✓ ✗ ✎ ⟲ ile karar verilir">🤖 AI önerisi: ${fmt(on.length)} / ${fmt(hd.length)} port${ok.length ? ` · ${fmt(ok.length)} onaylı / elle` : ""}</span>`; })()}
+      ${st.edMsg ? `<span class="small" style="color:var(--warn)">${esc(st.edMsg)}</span>` : ""}
       ${st.yetki.disari ? `<button id="csv" type="button">Excel'e aktar</button>` : ""}
     </div>
-    <div class="grid"><table><thead><tr>${th("ip", "IP")}<th>Sunucu</th>${th("port", "Port")}${th("exe", "Program (exe)")}${ns ? th("ns", "Teknoloji (Nessus)") : ""}${th("ai", "AI tahmini")}${th("baglanti", "Bağlantı")}${th("istemci", "İstemci")}${th("ert", "ERT")}${th("son", "Son görülme")}</tr></thead>
+    <div class="grid"><table><thead><tr>${th("ip", "IP")}<th>Sunucu</th>${th("port", "Port")}${th("exe", "Program (exe)")}${ns ? th("ns", "Teknoloji (Nessus)") : ""}${th("ai", "AI önerisi")}${th("baglanti", "Bağlantı")}${th("istemci", "İstemci")}${th("ert", "ERT")}${th("son", "Son görülme")}</tr></thead>
       <tbody>${body || `<tr><td colspan="${ns ? 10 : 9}" class="empty">Filtreye uyan gelen port yok.</td></tr>`}</tbody></table></div>
     <details data-k="giden" ${st.open.has("giden") ? "open" : ""} ${giden.length ? "" : "hidden"}><summary>Gelen bağlantısı görülmeyen programlar (yalnız giden) · ${fmt(giden.length)}</summary>
       <div class="grid" style="margin-top:8px;max-height:400px"><table><thead><tr><th>IP</th><th>Sunucu</th><th>Program</th><th>AI tahmini</th><th>Giden bağlantı</th><th>Gittiği yerler</th></tr></thead><tbody>
       ${giden.map(g => `<tr><td class="ip"><a href="./?ip=${encodeURIComponent(g.ip)}" target="_blank" rel="noopener">${esc(g.ip)}</a></td><td>${esc(g.sunucu || "")}</td>
-        <td title="${esc(g.yol)}"><b>${esc(g.exe)}</b>${g.urun ? `<span class="urun">${esc(g.urun)}</span>` : ""}</td><td>${aiCell(g.ip, g.exe)}</td><td>${fmt(g.baglanti)}</td><td class="small">${esc(g.hedefler.join(", "))}</td></tr>`).join("")}
+        <td title="${esc(g.yol)}"><b>${esc(g.exe)}</b>${g.urun ? `<span class="urun">${esc(g.urun)}</span>` : ""}</td><td><span class="small muted" title="Gelen portu yok; ERT eksikleri port bazında çalışır">port yok</span></td><td>${fmt(g.baglanti)}</td><td class="small">${esc(g.hedefler.join(", "))}</td></tr>`).join("")}
       </tbody></table></div></details>
     <details data-k="nessus" ${st.open.has("nessus") ? "open" : ""} ${sadeceNs.length ? "" : "hidden"}><summary>Nessus'un açık gördüğü ama bu aralıkta Carbon Black'te gelen bağlantısı olmayan portlar · ${fmt(sadeceNs.length)}</summary>
       <div class="grid" style="margin-top:8px;max-height:400px"><table><thead><tr><th>IP</th><th>Sunucu</th><th>Port</th><th>Servis</th><th>Teknoloji (Nessus)</th><th>ERT</th><th>Nessus son görülme</th></tr></thead><tbody>
@@ -510,9 +543,9 @@ function bzCsv() {
 function csv() {
   if (!st.yetki.disari) return alert("Dışa aktarma yetkiniz yok. Yetki DokuPanel'den verilir.");
   const C = v => `"${String(v ?? "").replace(/"/g, '""')}"`;
-  const lines = ["IP;SUNUCU;SEGMENT;PORT;EXE;YOL;BİLİNEN ÜRÜN;AI TAHMİNİ;AI ERT KARŞILIĞI;AI GÜVEN;AI ADI ERT'DE;AI SUNUCU ÖZETİ;NESSUS TEKNOLOJİ;NESSUS SERTİFİKA ADI;NESSUS DİNLEYEN;NESSUS İŞLETİM SİSTEMİ;BAĞLANTI;İSTEMCİ SAYISI;İSTEMCİLER;ERT DURUMU;ERT UYGULAMASI;SON GÖRÜLME"]
-    .concat(rows().map(x => { const a = aiOf(x.ip, x.exe); return [x.ip, x.sunucu, x.segment, x.port, x.exe, x.yol, x.urun,
-      a?.u?.uygulama, a?.u?.ertKarsiligi, a?.u ? a.u.guven : "", a?.u ? (a.u.yeni ? "hayır (yeni)" : "evet") : "", a?.ozet,
+  const lines = ["IP;SUNUCU;SEGMENT;PORT;EXE;YOL;BİLİNEN ÜRÜN;AI ÖNERİSİ;AI GÜVEN;AI DURUM;AI ADI ERT'DE;AI GEREKÇE;NESSUS TEKNOLOJİ;NESSUS SERTİFİKA ADI;NESSUS DİNLEYEN;NESSUS İŞLETİM SİSTEMİ;BAĞLANTI;İSTEMCİ SAYISI;İSTEMCİLER;ERT DURUMU;ERT UYGULAMASI;SON GÖRÜLME"]
+    .concat(rows().map(x => { const o = oneriOf(x); return [x.ip, x.sunucu, x.segment, x.port, x.exe, x.yol, x.urun,
+      o?.uygulama, o ? o.guven : "", o?.durum, o ? (o.yeni ? "hayır (yeni)" : "evet") : "", o?.gerekce,
       nsTek(nsOf(x.ip, x.port)).join(", "), nsOf(x.ip, x.port)?.sertifika.join(", "), nsOf(x.ip, x.port)?.dinleyen, st.data.nessus?.[x.ip]?.os, x.baglanti, x.istemci, x.istemciler.join(", "),
       { yok: "ERT'de yok", bos: "ERT'de adı boş", kayitli: "kayıtlı" }[x.ertDurum], x.ertUygulama.join(", "), x.son].map(C).join(";"); }));
   const a = document.createElement("a");

@@ -216,7 +216,6 @@ sealed class SegmentTaramaService(IConfiguration cfg, IHttpClientFactory factory
         {
             _isler[id] = (new SegmentIs(id, gorunen, false, "Kayıttan açıldı", 0, 0, null, user, DateTimeOffset.Now, kayit.Value.Sonuc, kayit.Value.Bilgi), cts);
             log.LogInformation("Segment tarama kayıttan: {User} {Tur} {Ad} ({Tarih})", user, tur, ad, kayit.Value.Bilgi.Tarih);
-            _ = Task.Run(async () => { try { await AiBaslatAsync(id, null, false, user, CancellationToken.None); } catch (Exception ex) { _ai[id] = new AiIs { Uyari = "AI tahmini başlatılamadı: " + ex.Message }; } });
             return _isler[id].Is;
         }
         SegmentSonuc? eski = null;
@@ -230,7 +229,6 @@ sealed class SegmentTaramaService(IConfiguration cfg, IHttpClientFactory factory
             {
                 _isler[id] = (new SegmentIs(id, gorunen, false, "Kayıttan açıldı", 0, 0, null, user, DateTimeOffset.Now, eski, kayit.Value.Bilgi,
                     "Eklenecek yeni sunucu yok: ERT'deki tüm sunucular kayıtlı taramada var (Carbon Black verisi gelmeyenler dahil yeniden denenecek sunucu yok)."), cts);
-                _ = Task.Run(async () => { try { await AiBaslatAsync(id, null, false, user, CancellationToken.None); } catch { } });
                 return _isler[id].Is;
             }
             ipler = yeni.ToHashSet();
@@ -255,13 +253,7 @@ sealed class SegmentTaramaService(IConfiguration cfg, IHttpClientFactory factory
                 }
                 var bilgi = await KayitYazAsync(tur, ad, sonuc, user);
                 Set(id, i => i with { Calisiyor = false, Asama = "Bitti", Sonuc = sonuc, Kayit = bilgi, Not = not });
-                try { await AiBaslatAsync(id, null, false, user, CancellationToken.None); }   // kendiliğinden AI tahmini (kayıtlılar sorulmaz)
-                catch (Exception ex)
-                {
-                    log.LogWarning(ex, "Segment tarama AI başlatılamadı: {Segment}", ad);
-                    if (_ai.TryGetValue(id, out var ai)) { ai.Calisiyor = false; ai.Uyari = "AI tahmini başlatılamadı: " + ex.Message; }
-                    else _ai[id] = new AiIs { Uyari = "AI tahmini başlatılamadı: " + ex.Message };
-                }
+                // AI tahmini artık ERT eksikleri motoruyla (sayfa /api/eksik/calistir {portlar} çağırır; aynı kayıt, onay / ret / elle / sil)
             }
             catch (OperationCanceledException) { Set(id, i => i with { Calisiyor = false, Asama = "Durduruldu" }); }
             catch (Exception ex)

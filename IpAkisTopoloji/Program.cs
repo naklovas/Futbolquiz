@@ -730,6 +730,7 @@ app.MapPost("/api/eksik/calistir", (EksikCalistir req, HttpContext ctx, IConfigu
 {
     string user = ctx.User?.Identity?.Name ?? "?";
     if (!EtiketService.CanWrite(cfg, ctx)) return Results.Json(new { error = $"Yetkiniz yok ({user})." }, statusCode: 403);
+    if (req.Portlar is { Count: > 0 }) req = req with { Ips = req.Portlar.Keys.ToList() };   // segment tarama: verilen IP → portlar
     // Tüm boşları tahmin ettirme (IP listesi olmadan) yalnız toplu yetkisi olanlar (Yetki:Toplu); seçili / tek sunucu yenilemesi yazma yetkisi olan herkese
     bool toplu = Yetki.Var(cfg, ctx, Yetki.Toplu);
     if (req.Ips is not { Count: > 0 } && !toplu)
@@ -737,6 +738,12 @@ app.MapPost("/api/eksik/calistir", (EksikCalistir req, HttpContext ctx, IConfigu
     if (req.Ips is { Count: > 50 } && !toplu)
         return Results.Json(new { error = "Bir seferde en çok 50 sunucu seçebilirsiniz." }, statusCode: 403);
     return eksik.Start(req, user) ? Results.Ok(eksik.Durum) : Results.Json(new { error = "Bir öneri işi zaten çalışıyor.", durum = eksik.Durum }, statusCode: 409);
+});
+// Segment tarama: taranan IP'lerin port başına önerileri (ERT eksikleriyle aynı kayıt)
+app.MapPost("/api/eksik/oneriler", async (SegmentAiIstek req, EksikService eksik, CancellationToken ct) =>
+{
+    try { return Results.Ok(await eksik.OnerilerAsync(req.Ips ?? [], ct)); }
+    catch (Exception ex) { return Results.Json(new { error = ex.Message }, statusCode: 502); }
 });
 app.MapPost("/api/eksik/durdur", (HttpContext ctx, IConfiguration cfg, EksikService eksik) =>
 {
