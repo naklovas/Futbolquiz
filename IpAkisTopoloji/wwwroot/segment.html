@@ -200,7 +200,9 @@ async function poll(j) {
     : j.hata ? `<div class="warn">Tarama başarısız: ${esc(j.hata)}</div>` : j.asama === "Durduruldu" ? `<div class="warn">Durduruldu.</div>` : "";
   if (j.calisiyor) { st.timer = setTimeout(() => poll(), 2000); return; }
   if (st.jobInfo && j.id === st.jobInfo.id) st.jobInfo = { ...j, adGirdi: st.jobInfo.adGirdi };
-  if (j.sonuc) { st.data = j.sonuc; if (j.kayit) loadKayit().then(segInfo); render(); loadOneri().then(() => { render(); aiBaslat(); }); }   // önerisi olmayan portlar kendiliğinden sorulur
+  // Yeni taramada önerisi olmayan portlar kendiliğinden sorulur; kayıttan açılınca (kullanıcı: "Aç kayıtlı'ya basınca doğrudan AI devreye girdi")
+  // yalnız kayıtlı öneriler gösterilir, sormak için araç çubuğundaki düğme ya da satırdaki ↻
+  if (j.sonuc) { st.data = j.sonuc; if (j.kayit) loadKayit().then(segInfo); render(); loadOneri().then(() => { render(); if (j.asama !== "Kayıttan açıldı") aiBaslat(); else aiWatch(true); }); }
 }
 
 // ---- AI önerisi: ERT eksikleriyle AYNI motor ve kayıt (Eksik.cs; kullanıcı: "buradaki AI tahmini eksik.cs'deki olmalı, aynı yapı: silme,
@@ -220,6 +222,9 @@ async function loadOneri() {
 // Önerisi olmayan portlar kendiliğinden sorulur (kayıtlı olanlar sorulmaz); yeniden=true + portlar: satırdaki "↻ tekrar sor"
 async function aiBaslat(yeniden = false, portlar = null) {
   clearTimeout(st.aiTimer);
+  await st.surumP;
+  // Eski DLL'de /api/eksik/calistir "portlar"ı tanımaz ve TÜM ERT eksiklerini çalıştırırdı: göndermeden uyar
+  if (!st.surum?.eksikPortlar) { st.edMsg = `Sunucudaki DeltaFlow sürümü (${st.surum.surum || "?"}) bu sayfadan eski; AI önerisi için Eksik.cs, Segment.cs ve Program.cs ile yeniden derleyip yayınlayın.`; render(); return; }
   if (!st.yetki.yazma) { st.edMsg = "AI önerisi istemek için yazma yetkisi gerekir (DokuPanel); kayıtlı öneriler gösteriliyor."; render(); return; }
   let h = portlar || aiHedef(true), ips = Object.keys(h);
   if (!ips.length) { st.edMsg = null; render(); return; }
@@ -235,9 +240,10 @@ async function aiBaslat(yeniden = false, portlar = null) {
   }
   render(); aiWatch();
 }
-async function aiWatch() {
+async function aiWatch(tekSefer = false) {
   clearTimeout(st.aiTimer);
-  try { st.ed = await api("api/eksik/durum"); } catch { st.aiTimer = setTimeout(aiWatch, 5000); return; }
+  try { st.ed = await api("api/eksik/durum"); } catch { if (!tekSefer) st.aiTimer = setTimeout(aiWatch, 5000); return; }
+  if (tekSefer && !st.ed.calisiyor) { render(); return; }
   await loadOneri(); render();
   if (st.ed.calisiyor) { st.aiTimer = setTimeout(aiWatch, 3000); return; }
   if (st.edBekle) { st.edBekle = false; aiBaslat(); }
@@ -246,16 +252,16 @@ const aiText = x => { const o = oneriOf(x); return o ? `${o.uygulama || "öneri 
 function aiCell(x) {
   if (!aiGerek(x)) return x.ertDurum === "kayitli" && !x.genel ? `<span class="small muted" title="ERT'de bu port için uygulama adı var">ERT'de kayıtlı</span>`
     : sifir(x) && !x.genel ? `<span class="small muted" title="ERT eksikleri port bazında çalışır; bu olayda yerel port yok">port yok</span>` : `<span class="small muted">—</span>`;
-  const o = oneriOf(x), w = st.yetki.yazma, d = `data-ip="${esc(x.ip)}" data-port="${esc(x.port)}"`;
-  const tekrar = w ? `<button class="mini" data-ak="tekrar" ${d} title="Bu portu AI'a yeniden sor (kanıtlar yeniden toplanır)">↻</button>` : "";
-  if (!o) return st.ed?.calisiyor ? `<span class="small muted">…</span>` : `<span class="small muted">sorulmadı</span> ${tekrar}`;
+  const o = oneriOf(x), w = st.yetki.yazma, d = `data-ip="${esc(x.ip)}" data-port="${esc(x.port)}"${w ? "" : ` disabled title="Yazma yetkisi gerekir (DokuPanel)"`}`;
+  const tekrar = `<button class="mini" data-ak="tekrar" ${d} title="Bu portu AI'a ${o ? "yeniden " : ""}sor (kanıtlar yeniden toplanır)">↻${o ? "" : " AI'a sor"}</button>`;
+  if (!o) return `<span class="small muted">${st.ed?.calisiyor ? "sırada / soruluyor…" : "önerisi yok"}</span> ${tekrar} <button class="mini" data-ak="elle" ${d} title="Uygulama adını elle yaz">✎</button>`;
   const g = o.guven || 0, c = g >= 75 ? "var(--ok)" : g >= 50 ? "var(--warn)" : "var(--err)";
   const stc = o.durum === "Onaylandı" || o.durum === "Elle" ? "ok" : o.durum === "Reddedildi" ? "red" : "ai";
   const gr = o.gerekce || "";
   return `<div class="sug"><div>${o.uygulama ? `<b>${esc(o.uygulama)}</b>` : `<span class="muted">öneri yok</span>`}${o.uygulama && o.durum !== "Elle" ? `<span class="conf"><i style="width:${g}%;background:${c}"></i></span><span class="small muted">%${g}</span>` : ""}
       <span class="st ${stc}">${esc(o.durum)}</span>${o.yeni ? ` <span class="st new" title="ERT'deki uygulama listesinde yok">yeni ad</span>` : ""}</div>
     ${gr ? `<div class="why" title="${esc(gr)}">${esc(gr.length > 140 ? gr.slice(0, 140) + "…" : gr)}</div>` : ""}${o.durum !== "AI" && o.kaynak ? `<div class="why">${esc(o.kaynak)}</div>` : ""}
-    ${w ? `<div class="acts" style="margin-top:3px">${o.uygulama && o.durum === "AI" ? `<button class="mini" data-ak="onay" ${d} title="Öneriyi onayla">✓</button> ` : ""}${o.durum !== "Reddedildi" ? `<button class="mini" data-ak="red" ${d} title="Reddet">✗</button> ` : ""}<button class="mini" data-ak="elle" ${d} data-cur="${esc(o.uygulama || "")}" title="Uygulama adını elle yaz">✎</button> <button class="mini" data-ak="sil" ${d} title="Öneriyi ve kararı sil">⟲</button> ${o.durum === "Onaylandı" || o.durum === "Elle" ? "" : tekrar} <a href="#" class="small" data-kanit="${esc(x.ip)}">kanıtlar</a></div>` : ""}</div>`;
+    <div class="acts" style="margin-top:3px">${o.uygulama && o.durum === "AI" ? `<button class="mini" data-ak="onay" ${d} title="Öneriyi onayla">✓ onay</button> ` : ""}${o.durum !== "Reddedildi" ? `<button class="mini" data-ak="red" ${d} title="Reddet">✗ ret</button> ` : ""}<button class="mini" data-ak="elle" ${d} data-cur="${esc(o.uygulama || "")}" title="Uygulama adını elle yaz">✎ elle</button> <button class="mini" data-ak="sil" ${d} title="Öneriyi ve kararı sil (sonra yeniden sorulabilir)">🗑 sil</button> ${o.durum === "Onaylandı" || o.durum === "Elle" ? "" : tekrar} <a href="#" class="small" data-kanit="${esc(x.ip)}">kanıtlar</a></div></div>`;
 }
 // Satırdaki işlemler: onay / ret / elle / sil (ERT eksikleriyle aynı /api/eksik/karar) ve tekrar sor
 document.addEventListener("click", async e => {
@@ -384,6 +390,9 @@ function render() {
       ${(() => { const hd = st.data.satirlar.filter(aiGerek), on = hd.filter(oneriOf), ok = on.filter(x => ["Onaylandı", "Elle"].includes(oneriOf(x).durum));
         return `<span class="small" title="ERT eksikleriyle aynı AI ve kayıt: önerisi olan port yeniden sorulmaz; satırdaki ↻ ile tekrar sorulur, ✓ ✗ ✎ ⟲ ile karar verilir">🤖 AI önerisi: ${fmt(on.length)} / ${fmt(hd.length)} port${ok.length ? ` · ${fmt(ok.length)} onaylı / elle` : ""}</span>`; })()}
       ${st.edMsg ? `<span class="small" style="color:var(--warn)">${esc(st.edMsg)}</span>` : ""}
+      ${(() => { const n = Object.values(aiHedef(true)).reduce((a, v) => a + v.length, 0);
+        return st.ed?.calisiyor ? `<button type="button" id="aiDur" ${st.yetki.yazma ? "" : "disabled"}>AI'ı durdur</button>`
+          : n ? `<button type="button" id="aiSor" ${st.yetki.yazma ? "" : `disabled title="Yazma yetkisi gerekir (DokuPanel)"`}>🤖 Önerisi olmayan ${fmt(n)} portu AI'a sor</button>` : ""; })()}
       ${st.yetki.disari ? `<button id="csv" type="button">Excel'e aktar</button>` : ""}
     </div>
     <div class="grid"><table><thead><tr>${th("ip", "IP")}<th>Sunucu</th>${th("port", "Port")}${th("exe", "Program (exe)")}${ns ? th("ns", "Teknoloji (Nessus)") : ""}${th("ai", "AI önerisi")}${th("baglanti", "Bağlantı")}${th("istemci", "İstemci")}${th("ert", "ERT")}${th("son", "Son görülme")}</tr></thead>
@@ -411,6 +420,8 @@ function render() {
   $("#genelF").addEventListener("change", e => { st.genel = e.target.checked; render(); });
   $("#sifirF").addEventListener("change", e => { st.sifir = e.target.checked; render(); });
   $("#csv")?.addEventListener("click", csv);
+  $("#aiSor")?.addEventListener("click", () => aiBaslat());
+  $("#aiDur")?.addEventListener("click", async () => { try { st.ed = await api("api/eksik/durdur", { method: "POST" }); } catch (e) { alert(e.message); } render(); });
   document.querySelectorAll("#res details[data-k]").forEach(x => x.addEventListener("toggle", () => x.open ? st.open.add(x.dataset.k) : st.open.delete(x.dataset.k)));
   document.querySelectorAll("th[data-sort]").forEach(h => h.addEventListener("click", () => {
     if (st.sort === h.dataset.sort) st.desc = !st.desc; else { st.sort = h.dataset.sort; st.desc = ["baglanti", "istemci", "son"].includes(st.sort); }
@@ -570,7 +581,7 @@ if (p.get("etiket")) { st.tur = "etiket"; $("#tur").value = "etiket"; $("#seg").
 else if (p.get("segment")) $("#seg").value = p.get("segment");
 if (p.get("saat")) $("#saat").value = p.get("saat");
 loadSegs();
-fetch("api/surum").then(r => r.ok ? r.json() : null).then(v => { st.surum = v; $("#surum").textContent = v ? "sunucu sürümü " + v.surum : "eski sunucu sürümü (DLL güncel değil)"; }).catch(() => {});
+st.surumP = fetch("api/surum").then(r => r.ok ? r.json() : null).then(v => { st.surum = v; $("#surum").textContent = v ? "sunucu sürümü " + v.surum : "eski sunucu sürümü (DLL güncel değil)"; }).catch(() => {});
 </script>
 </body>
 </html>

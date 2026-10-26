@@ -407,6 +407,10 @@ erişim talepleri) — DB → şema → tablo ve kim erişiyor bilgisi buradan b
   `/api/eksik/durum` 3 sn'de bir izlenir (ilerleme çubuğu: port), öneriler her turda yenilenir. Satırda ✓ onay / ✗ ret / ✎ elle / ⟲ sil
   (`/api/eksik/karar`), ↻ tekrar sor (o port, yeniden:true), "kanıtlar" (`/api/eksik/kanit`, sağ panel). CSV: AI ÖNERİSİ, GÜVEN, DURUM, ADI ERT'DE,
   GEREKÇE. Mock'la test edildi (yalnız önerisiz port soruldu, onay ve tekrar sor istekleri doğru).
+  Kullanıcı: "Aç kayıtlı'ya basınca doğrudan AI devreye girdi, satırda tekrar sor / sil yok" → kayıttan açılınca AI KENDİLİĞİNDEN SORULMAZ (yalnız
+  yeni tarama / ekle sonrası); araç çubuğunda "🤖 Önerisi olmayan N portu AI'a sor" ve çalışırken "AI'ı durdur" (`/api/eksik/durdur`). Satır
+  düğmeleri her zaman görünür (yetkisizse pasif + ipucu): önerisizde "↻ AI'a sor" + ✎; öneride "✓ onay ✗ ret ✎ elle 🗑 sil ↻". `/api/surum`
+  `eksikPortlar=true`; yoksa (eski DLL "portlar"ı tanımayıp TÜM eksikleri çalıştırırdı) sayfa AI'ı göndermez, "DLL eski" uyarısı verir.
   KAYITLI TARAMA (kullanıcı: "her seferinde tekrar sorgulamayayım, kaydetsin; istersem yeniden çek, ya da yeni sunucuları ekle"): tarama bitince
   sonuç `Segment:TaramaTablosu` dbo.DF_SEGMENT_TARAMA'ya (`sql/segment_tarama.sql`; PK TUR + AD, SONUC VARBINARY gzip JSON, SAAT, SUNUCU, SATIR,
   TARIH, KAYDEDEN; tablo yoksa bellekte + `KayitUyari`) MERGE. POST `/api/segment/tarama {…, mod}`: mod boş + kayıt var → Carbon Black sorgulanmaz,

@@ -148,7 +148,7 @@ app.UseStaticFiles(new StaticFileOptions
 // Giriş yapan kullanıcı (başlıkta gösterilir)
 app.MapGet("/api/me", (HttpContext ctx, IConfiguration cfg) => new { name = ctx.User?.Identity?.Name, yetki = Yetki.Hepsi(cfg, ctx) });
 // Yayınlanan sürüm (DLL tarihi): kullanıcı dosyaları elle kopyalıyor, eski DLL'i ayırt etmek için sayfalarda gösterilir
-app.MapGet("/api/surum", () => new { surum = File.GetLastWriteTime(typeof(Yetki).Assembly.Location).ToString("yyyy-MM-dd HH:mm"), segmentAi = true, nessus = true });
+app.MapGet("/api/surum", () => new { surum = File.GetLastWriteTime(typeof(Yetki).Assembly.Location).ToString("yyyy-MM-dd HH:mm"), segmentAi = true, nessus = true, eksikPortlar = true });
 
 app.MapGet("/api/appliances", (IConfiguration cfg) =>
     cfg.GetSection("Servers").GetChildren()
