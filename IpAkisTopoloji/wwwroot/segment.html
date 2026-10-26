@@ -444,10 +444,17 @@ function kayitBand() {
 }
 const viewTabs = () => kayitBand() + `<div class="tools" style="margin-top:10px"><div class="vt">
   <button type="button" data-view="port" class="${st.view === "port" ? "on" : ""}">Portlar ve exe'ler</button>
-  <button type="button" data-view="benzer" class="${st.view === "benzer" ? "on" : ""}" title="Exe, port ve trafik parmak izine göre aynı amaca hizmet eden sunucular">🧬 Benzer sunucular</button></div>
-  ${st.data?.baglar ? `<a href="./?${new URLSearchParams(st.jobInfo?.kayit ? { exeag: "1", tur: st.jobInfo.kayit.tur, ad: st.jobInfo.kayit.ad } : { exeag: "1", id: st.job })}" target="_blank" rel="noopener" style="margin-left:8px" title="Exe → exe ilişki ağı, küme topolojisi çiziminde (kutu = exe, karo = sunucu)">🕸 Exe ilişki ağı ↗</a>`
-    : st.data ? `<span class="small muted" style="margin-left:8px" title="Bu kayıt exe ağı verisi içermiyor; 🔄 Yeniden çek ile yenileyin">🕸 Exe ağı için yeniden çekin</span>` : ""}</div>`;
+  <button type="button" data-view="benzer" class="${st.view === "benzer" ? "on" : ""}" title="Exe, port ve trafik parmak izine göre aynı amaca hizmet eden sunucular">🧬 Benzer sunucular</button>
+  <button type="button" id="exeAg" title="Exe → exe ilişki ağı, küme topolojisi çiziminde yeni sekmede (kutu = exe, karo = sunucu, ok = trafik)">🕸 Exe ilişki ağı ↗</button></div></div>`;
 function bindTabs() {
+  // Exe ağı: yeni veriyle (giden bağlantının hedef portu + IP'leri) taranmış kayıt gerekir; eski kayıtta yeniden çekmeyi önerir
+  $("#exeAg")?.addEventListener("click", () => {
+    if (!st.data?.baglar) {
+      if (confirm("Bu tarama exe ilişki ağı verisi içermiyor (bu özellikten önce kaydedilmiş). Carbon Black yeniden çekilsin mi? Bittikten sonra düğmeye tekrar basın.")) start("yeniden");
+      return;
+    }
+    window.open("./?" + new URLSearchParams(st.jobInfo?.kayit ? { exeag: "1", tur: st.jobInfo.kayit.tur, ad: st.jobInfo.kayit.ad } : { exeag: "1", id: st.job }), "_blank", "noopener");
+  });
   $("#kEkle")?.addEventListener("click", () => start("ekle"));
   $("#kYeni")?.addEventListener("click", () => { if (confirm("Tüm sunucular Carbon Black'ten yeniden sorgulanacak ve kayıtlı taramanın üzerine yazılacak. Devam?")) start("yeniden"); });
   document.querySelectorAll("[data-view]").forEach(b => b.addEventListener("click", () => { st.view = b.dataset.view; render(); if (st.view === "benzer" && !st.bz) loadBenzer(); }));
