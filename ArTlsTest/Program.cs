@@ -8,6 +8,7 @@
 //        Kolon verilmezse "kaynaklar" ile bulunan SSL/TLS kolonları tek tek denenir; geçersiz olan atlanır.
 //   dotnet run -- kolonlar <kaynak> [regex]
 //        Kaynağın tüm kolonları (ör: kolonlar tls_handshakes ip|port).
+//   --yon gelen | giden | ikisi (varsayılan) : IP sunucu olarak mı, istemci olarak mı
 //   --port 443,8443 : yalnız bu portlar (büyük veride rapor hızlanır)
 //   --bas / --bit "2026-11-01 09:00" : sabit aralık · --bekle <sn> : rapor bekleme (600)
 //   --anahtar istemciIp,sunucuIp,sunucuPort  : tls / ham için kaynağın IP-port kolon adları (varsayılan cli_tcp.ip,srv_tcp.ip,srv_tcp.port)
@@ -64,6 +65,8 @@ long? Zaman(string? v)
 long? sabitBas = Zaman(Opsiyon("--bas")), sabitBit = Zaman(Opsiyon("--bit"));
 int BekleSn = int.TryParse(Opsiyon("--bekle"), out int bk) ? bk : 600;
 // --port 443  ya da  --port 443,8443 : yalnız bu sunucu portları (veri azalır, rapor hızlanır)
+string yon = (Opsiyon("--yon") ?? "ikisi").ToLowerInvariant();
+if (yon is not ("gelen" or "giden" or "ikisi")) { Console.WriteLine("--yon gelen | giden | ikisi"); return 1; }
 var portSec = Opsiyon("--port")?.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries).ToList();
 if (portSec?.Any(x => !int.TryParse(x, out _)) == true) { Console.WriteLine("--port sayı olmalı (ör: --port 443,8443)"); return 1; }
 string PortF(string kolon) => portSec is { Count: > 0 } ? " and (" + string.Join(" or ", portSec.Select(x => $"{kolon} == {x}")) + ")" : "";
@@ -140,7 +143,10 @@ switch (args[0].ToLowerInvariant())
                 }
                 else Console.WriteLine($"'{kaynak}' SSL/TLS kolonları: {string.Join(", ", aday)}");
             }
-            string filtre = $"{anahtar[1]} == {ip}" + PortF(anahtar[2]);
+            // --yon gelen (IP sunucu) | giden (IP istemci) | ikisi (varsayılan)
+            string gelenF = $"{anahtar[1]} == {ip}" + PortF(anahtar[2]), gidenF = $"{anahtar[0]} == {ip}" + PortF(anahtar[2]);
+            string filtre = yon switch { "gelen" => gelenF, "giden" => gidenF, _ => $"({gelenF}) or ({gidenF})" };
+            Console.WriteLine($"  yön: {yon} · filtre: {filtre}");
             if (portSec != null) Console.WriteLine($"  port süzgeci: {string.Join(", ", portSec)}");
             // önce anahtar kolonların kendisi (bu kaynakta yoksa her TLS kolonu boşuna ✗ olur)
             try { await RaporAsync(kaynak, anahtar, filtre, Simdi(5)); Console.WriteLine($"  ✓ anahtar kolonlar: {string.Join(", ", anahtar)}"); }
@@ -194,13 +200,23 @@ switch (args[0].ToLowerInvariant())
             long Sayi(List<JsonNode?> r) => metrikVar && r.Count > mi + 1 && double.TryParse(Deger(r[mi]), System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out double d) ? (long)d : 1;
             Console.WriteLine($"\n{ip} · {(sabitBas != null ? "sabit aralık" : $"son {dk} dk")} · {satirlar.Count} satır (kaynak {kaynak})");
             // port × TLS değerleri → bağlantı sayısı, istemci sayısı
-            var ozet = satirlar.Where(r => r.Count >= 3 + gecerli.Count)
-                .GroupBy(r => (Port: Deger(r[2]), Tls: string.Join(" | ", gecerli.Select((k, i) => $"{k}={(k == "tls.version" ? TlsAd(Deger(r[3 + i])) : Deger(r[3 + i]))}"))))
-                .Select(g => (g.Key.Port, g.Key.Tls, Adet: g.Sum(Sayi), Istemci: g.Select(r => Deger(r[0])).Distinct().Count(), Cihaz: string.Join(",", g.Select(r => Deger(r[^1])).Distinct()),
-                    Ilk: string.Join(" ", g.GroupBy(r => Deger(r[0])).OrderByDescending(c => c.Sum(Sayi)).Take(3).Select(c => $"{c.Key}({c.Sum(Sayi)})"))))
-                .OrderBy(x => int.TryParse(x.Port, out int p) ? p : 99999).ThenByDescending(x => x.Adet);
-            Console.WriteLine($"{"Port",-7} {(metrikVar ? "ElSıkış" : "Satır"),8} {"İstemci",8}  {"Cihaz",-14} TLS   ‖ en çok bağlanan istemciler");
-            foreach (var o in ozet) Console.WriteLine($"{o.Port,-7} {o.Adet,8} {o.Istemci,8}  {o.Cihaz,-14} {o.Tls}   ‖ {o.Ilk}");
+            // Gelen: IP sunucu (port = kendi portu, karşı = istemci). Giden: IP istemci (port = karşı sunucunun portu, karşı = sunucu IP'si)
+            foreach (bool gelenMi in new[] { true, false })
+            {
+            if (yon == (gelenMi ? "giden" : "gelen")) continue;
+            var yonSatir = satirlar.Where(r => r.Count >= 3 + gecerli.Count && (Deger(r[1]) == ip) == gelenMi).ToList();
+            string Kar(List<JsonNode?> r) => gelenMi ? Deger(r[0]) : Deger(r[1]);
+            string Anah(List<JsonNode?> r) => gelenMi ? Deger(r[2]) : $"{Deger(r[1])}:{Deger(r[2])}";
+            var ozet = yonSatir
+                .GroupBy(r => (Port: Anah(r), Tls: string.Join(" | ", gecerli.Select((k, i) => $"{k}={(k == "tls.version" ? TlsAd(Deger(r[3 + i])) : Deger(r[3 + i]))}"))))
+                .Select(g => (g.Key.Port, g.Key.Tls, Adet: g.Sum(Sayi), Istemci: g.Select(Kar).Distinct().Count(), Cihaz: string.Join(",", g.Select(r => Deger(r[^1])).Distinct()),
+                    Ilk: string.Join(" ", g.GroupBy(r => gelenMi ? Deger(r[0]) : Deger(r[0])).OrderByDescending(c => c.Sum(Sayi)).Take(3).Select(c => $"{c.Key}({c.Sum(Sayi)})"))))
+                .OrderBy(x => int.TryParse(x.Port.Split(':').Last(), out int p) ? p : 99999).ThenByDescending(x => x.Adet).ToList();
+            Console.WriteLine(gelenMi ? $"\n▼ GELEN (bu IP sunucu) · {yonSatir.Count} satır" : $"\n▲ GİDEN (bu IP istemci, başka sunuculara bağlanıyor) · {yonSatir.Count} satır");
+            if (ozet.Count == 0) { Console.WriteLine("  kayıt yok"); continue; }
+            Console.WriteLine($"{(gelenMi ? "Port" : "Hedef:port"),-21} {(metrikVar ? "ElSıkış" : "Satır"),8} {(gelenMi ? "İstemci" : "Hedef"),8}  {"Cihaz",-14} TLS{(gelenMi ? "   ‖ en çok bağlanan istemciler" : "")}");
+            foreach (var o in ozet) Console.WriteLine($"{o.Port,-21} {o.Adet,8} {o.Istemci,8}  {o.Cihaz,-14} {o.Tls}{(gelenMi ? "   ‖ " + o.Ilk : "")}");
+            }
             if (satirlar.Count >= TopN) Console.WriteLine($"  ⚠ {TopN} satır sınırına ulaşıldı: bazı portlar kesilmiş olabilir (süreyi kısaltın).");
 
             // Karşılaştırma: aynı aralıkta flow_tcp'de gelen trafiği olan ama TLS el sıkışması görülmeyen portlar
@@ -208,7 +224,7 @@ switch (args[0].ToLowerInvariant())
             {
                 try
                 {
-                    var tlsPort = satirlar.Where(r => r.Count > 2).Select(r => Deger(r[2])).ToHashSet();
+                    var tlsPort = satirlar.Where(r => r.Count > 2 && Deger(r[1]) == ip).Select(r => Deger(r[2])).ToHashSet();   // yalnız gelen
                     string[] fk = ["cli_tcp.ip", "srv_tcp.ip", "srv_tcp.port"];
                     var fz = Pencere(dk);
                     List<List<JsonNode?>> akis;
