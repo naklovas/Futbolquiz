@@ -489,6 +489,13 @@ erişim talepleri) — DB → şema → tablo ve kim erişiyor bilgisi buradan b
   servislerden biri" + sertifika adı satırı. Nessus kanıtı artık ERT eksiklerinde de (`EksikService.BuildAsync`, DB ipuçlarından sonra,
   `Eksik:NessusMaxKarakter`=2500) ve IP kartı `/api/surec/ai`'de. Segment sayfasında sunucu altında "🛡 Nessus ayrıntısı" sağ paneli
   (portlar, DB instance, ürünler, servisler, süreçler, paylaşımlar, yazılım, CPE) ve 🗄 DB instance satırı.
+  **TLS sürümü** (kullanıcı: "uygulamanın çalıştığı TLS versiyonu, IP aramadaki portlar / süreçler tablosunda"): `NessusPort.Tls` = portun
+  KABUL ETTİĞİ SSL / TLS sürümleri (Nessus el sıkışması; istemcinin fiilen kullandığı sürüm DEĞİL — o AppResponse / PaloAlto ile ayrı adım).
+  Plugin'ler: 56984 desteklenen sürümler, 20007 SSLv2/v3 (yalnız SSL eşleşmeleri), 104743 TLS 1.0, 121010 / 157288 TLS 1.1, 136318 TLS 1.2,
+  138330 TLS 1.3 (sürüme özel plugin'de sürüm plugin ID'sinden — çıktıdaki "TLS 1.2'ye geçin" sayılmaz), 22964 "A TLSv1.2 server answered".
+  `TlsSurumleri` → "TLS 1.0" / "SSL 3.0". `GET /api/nessus/ip?ip=` → `{acik, sunucu | hata}`; topoloji.html IP kartı "Gelen portlar ve
+  çalışan süreçler" tablosunda "TLS (Nessus)" kolonu (SSL / TLS 1.0 / 1.1 kırmızı; "TLS yok" = Nessus portu gördü el sıkışması yok; "—" =
+  port Nessus'ta yok; uç 404 ise kolon gizli). Segment sayfası Nessus hücresi / paneli / CSV de TLS gösterir.
 - **VIP**: sorgulanan IP VIP ise üyeler + GW'ler aynı sorguya eklenir, üyeler "VIP ÜYESİ" (GW→üye trafiği varsa ✓).
   Gidilen IP VIP ise "VIP → n ÜYE"; gelen IP LB GW ise "LB GW"; sorgulanan sunucu havuz üyesiyse VIP kartı.
 - **Uygulama görünümü** (`/api/apps`, `/api/app`): `[kullanan uygulamalar] → [UYGULAMA: VIP'ler + segment grupları] → [bağımlı olunanlar]`,

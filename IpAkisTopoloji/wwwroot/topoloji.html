@@ -403,7 +403,7 @@ async function run() {
   history.replaceState(null, "", "?" + new URLSearchParams({ ip: params.get("ip"), start: params.get("start"), end: params.get("end") }));
 
   abort?.abort(); hopAbort?.abort(); aiAbort?.abort(); procAbort?.abort(); sessAbort?.abort();
-  state.proc = null; state.procAi = null; state.procSel = null; state.sess = null; state.jour = null; jourAbort?.abort();
+  state.proc = null; state.nessus = null; state.procAi = null; state.procSel = null; state.sess = null; state.jour = null; jourAbort?.abort();
   closeFlow();
   abort = new AbortController();
   $("#go").disabled = true; $("#cancel").hidden = false;
@@ -427,6 +427,7 @@ async function run() {
     runF5Uri(params);
     // Dinleyen süreçler (uygulama tablosundaki "Çalışan süreç" kolonu; Süreçler sekmesi de hazır olur)
     if ($("#srcSplunk").checked) runProc(params);
+    loadNessusIp(body.target?.ip ?? params.get("ip"));
     if (body.target?.apps?.some(x => !x.appName)) loadOneri(body.target.ip);
   } catch (e) {
     const msg = e.name === "AbortError" ? "Sorgu iptal edildi." : e.message;
@@ -772,16 +773,17 @@ function listenTable(t) {
   };
   const list = [...rows.values()].sort((a, b) => a.out - b.out || (+a.port || 1e9) - (+b.port || 1e9) || b.hits - a.hits || b.outHits - a.outHits);
   const nExe = new Set(list.map(r => r.name.toLowerCase())).size;
+  const tlsOn = state.nessus?.ip === t.ip;
   return `<div class="small muted" style="margin:-4px 0 6px">${fmt(nExe)} farklı exe · ${fmt(list.filter(r => !r.out).length)} port satırı${list.some(r => r.out) ? ` · ${fmt(list.filter(r => r.out).length)} exe yalnız dışarı bağlanıyor` : ""}</div>
     <div class="tbl-wrap" style="max-height:300px"><table>
-      <thead><tr><th>Gelen port</th><th>Çalışan süreç (exe)</th><th>PID</th><th class="num">Gelen bağlantı</th><th class="num">Karşı IP</th><th class="num">Giden bağlantı</th><th>ERT'deki uygulama</th></tr></thead>
+      <thead><tr><th>Gelen port</th><th>Çalışan süreç (exe)</th><th>PID</th><th class="num">Gelen bağlantı</th><th class="num">Karşı IP</th><th class="num">Giden bağlantı</th>${tlsOn ? `<th title="Portun KABUL ETTİĞİ SSL / TLS sürümleri (Nessus taramasının el sıkışması). İstemcilerin fiilen hangisiyle bağlandığı değil; kırmızı = eski sürüm hâlâ açık.">TLS (Nessus)</th>` : ""}<th>ERT'deki uygulama</th></tr></thead>
       <tbody>${list.map(r => { const apps = r.out ? [] : ertApps(r.port), infra = PROC_INFRA.has(r.port); return `<tr${infra ? ` class="muted" title="Altyapı portu"` : ""}>
         <td class="mono">${r.out ? `<span class="small muted">— yalnız giden</span>` : r.port ? esc(r.port) : `<span class="small muted" title="Carbon Black olayında yerel port yok">?</span>`}${infra ? ` <span class="small muted">altyapı</span>` : ""}</td>
         <td><b class="mono"${r.yol ? ` title="${esc(r.yol)}"` : ""}>${esc(exeShort(r.name))}</b>${HTTPSYS.test(exeShort(r.name)) && !r.out
           ? (m => m ? `<div class="small" style="color:var(--in)" title="ERT'de bu port için kayıtlı ad (${esc(m.nm)}) şu exe'nin yolunda geçiyor: ${esc(m.hit.map(e => e.yol).join(" · "))}">→ asıl uygulama büyük ihtimalle <b class="mono">${esc(m.hit.map(e => e.name).join(", "))}</b> <span class="muted">(yolu ERT'deki "${esc(m.nm)}" ile eşleşiyor)</span></div>` : "")(httpSysApp(r.port))
             + `<div class="small muted" title="Bu portu Windows HTTP.sys sürücüsü dinliyor: bağlantıyı çekirdek kabul eder, isteği URL kaydına göre asıl uygulamaya iletir. Carbon Black bağlantıyı bu yüzden ntoskrnl.exe / System adına yazar. Asıl uygulama exe'si (ör. HTTP.sys ile çalışan bir ASP.NET Core uygulaması ya da w3wp.exe) bu tabloda 'yalnız giden' olarak görünebilir; sunucuda 'netsh http show servicestate' kesin olarak gösterir.">HTTP.sys (Windows çekirdeği) · asıl uygulama ayrı exe ⓘ</div>` : ""}</td>
         <td class="mono small">${esc([...r.pids].join(", ") || "—")}</td>
-        <td class="num">${r.out ? "" : fmt(r.hits)}</td><td class="num">${r.out ? "" : fmt(r.peers)}</td><td class="num">${r.out && r.outHits ? fmt(r.outHits) : ""}</td>
+        <td class="num">${r.out ? "" : fmt(r.hits)}</td><td class="num">${r.out ? "" : fmt(r.peers)}</td><td class="num">${r.out && r.outHits ? fmt(r.outHits) : ""}</td>${tlsOn ? `<td>${r.out || !r.port ? "" : tlsCell(r.port)}</td>` : ""}
         <td>${r.out ? "" : apps.length ? esc(apps.join(", ")) : `<span class="small muted">kayıt yok</span>`}</td></tr>`; }).join("")}</tbody></table></div>`;
 }
 // "AI önerisi" kolonu: ERT eksikleri sayfasının önerileri (/api/eksik/ip); uygulama adı boş satırlarda
@@ -1244,6 +1246,29 @@ function procRange() {
   return { start: `${g}T${PROC_PENCERE.bas}`, end: `${g}T${PROC_PENCERE.bit}` };
 }
 
+// Nessus (Tenable.sc repo sonuçları): port başına kabul edilen SSL / TLS sürümleri → süreç tablosunun "TLS (Nessus)" kolonu
+async function loadNessusIp(ip) {
+  state.nessus = { ip, status: "loading" };
+  try {
+    const r = await fetch("api/nessus/ip?" + new URLSearchParams({ ip }));
+    if (r.status === 404) { state.nessus = null; return; }   // eski DLL: uç yok → kolon gösterilmez
+    const b = await r.json().catch(() => ({ hata: `HTTP ${r.status}` }));
+    if (state.nessus?.ip !== ip) return;
+    state.nessus = !b.acik ? null : b.hata ? { ip, status: "error", error: b.hata } : { ip, status: "ok", sunucu: b.sunucu ?? null };
+  } catch (e) { if (state.nessus?.ip === ip) state.nessus = { ip, status: "error", error: e.message }; }
+  updateTargetApps();
+}
+const TLS_ESKI = /^(SSL|TLS 1\.[01]$)/;
+function tlsCell(port) {
+  const n = state.nessus;
+  if (n.status === "loading") return `<span class="spinner"></span>`;
+  if (n.status === "error") return `<span class="small" style="color:var(--err)" title="${esc(n.error)}">alınamadı</span>`;
+  if (!n.sunucu) return `<span class="small muted" title="Bu IP Nessus repo sonuçlarında yok">Nessus kaydı yok</span>`;
+  const p = (n.sunucu.portlar ?? []).filter(x => x.port === port);
+  const v = [...new Set(p.flatMap(x => x.tls ?? []))].sort();
+  if (!v.length) return `<span class="small muted" title="${p.length ? "Nessus bu portu gördü, SSL / TLS el sıkışması kaydı yok (düz metin servis olabilir)" : "Nessus bu portu raporlamadı"}">${p.length ? "TLS yok" : "—"}</span>`;
+  return v.map(x => `<span class="badge${TLS_ESKI.test(x) ? "" : " strong"}"${TLS_ESKI.test(x) ? ` style="background:var(--err);color:#fff" title="Eski / güvensiz sürüm"` : ""}>${esc(x)}</span>`).join(" ");
+}
 async function runProc(params) {
   procAbort?.abort();
   procAbort = new AbortController();

@@ -796,6 +796,14 @@ app.MapGet("/api/nessus/repolar", async (HttpContext ctx, IConfiguration cfg, Ne
     try { return Results.Ok(await n.RepolarAsync(ct)); }
     catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested) { return Results.Json(new { error = ex.Message }, statusCode: 502); }
 });
+// IP kartı (Gelen portlar ve çalışan süreçler tablosu): o IP'nin Nessus özeti — port başına TLS sürümleri, teknoloji, sertifika
+app.MapGet("/api/nessus/ip", async (string ip, NessusService n, CancellationToken ct) =>
+{
+    if (!n.Acik) return Results.Ok(new { acik = false });
+    if (!LookupQuery.TryParseIpv4(ip, out string v)) return Results.BadRequest(new { error = "Geçerli bir IPv4 girin." });
+    try { return Results.Ok(new { acik = true, sunucu = (await n.SunucularAsync([v], null, ct)).GetValueOrDefault(v) }); }
+    catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested) { return Results.Ok(new { acik = true, hata = ex.Message }); }
+});
 app.MapGet("/api/nessus/test", async (string ip, bool? tum, HttpContext ctx, IConfiguration cfg, NessusService n, CancellationToken ct) =>
 {
     if (!Yetki.Var(cfg, ctx, Yetki.Topoloji)) return Yetki.Red(ctx, "Nessus testi (topoloji)");

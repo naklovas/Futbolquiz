@@ -323,7 +323,7 @@ const sifir = x => !x.port || x.port === "0";
 // Nessus / Tenable.sc (repository'deki son tarama): port başına web sunucusu, teknoloji, sertifika adı, dinleyen program
 const nsOf = (ip, port) => st.data?.nessus?.[ip]?.portlar?.find(p => p.port === String(port)) || null;
 const nsTek = p => p ? [...new Set([p.webSunucu, ...(p.teknoloji || [])].filter(Boolean))] : [];
-const nsText = (ip, port) => { const p = nsOf(ip, port); return p ? [nsTek(p).join(", "), p.sertifika.join(", "), p.dinleyen].filter(Boolean).join(" · ") : ""; };
+const nsText = (ip, port) => { const p = nsOf(ip, port); return p ? [nsTek(p).join(", "), p.sertifika.join(", "), p.dinleyen, p.tls?.length ? "TLS: " + p.tls.join(", ") : ""].filter(Boolean).join(" · ") : ""; };
 function nsCell(ip, port) {
   const n = st.data.nessus?.[ip];
   if (!n) return `<span class="small muted" title="Bu IP için Nessus repository'sinde (son tarama) kayıt yok">kayıt yok</span>`;
@@ -331,7 +331,7 @@ function nsCell(ip, port) {
   if (!p) return `<span class="small muted" title="Nessus bu IP'yi taramış ama bu port için bilgi yok${n.kimlikli === false ? " (kimlik bilgisiz tarama)" : ""}">—</span>`;
   const tek = nsTek(p);
   return `<div title="${esc(nsText(ip, port) + (p.servis ? "\nServis: " + p.servis : "") + (p.son ? "\nNessus son görülme: " + p.son : ""))}">${tek.map(t => `<span class="urun" style="margin:0 3px 2px 0">${esc(t)}</span>`).join("") || (p.servis ? `<span class="small">${esc(p.servis)}</span>` : `<span class="small muted">açık</span>`)}
-    ${p.sertifika.length ? `<div class="small mono">🔒 ${esc(p.sertifika.slice(0, 2).join(", "))}${p.sertifika.length > 2 ? " …" : ""}</div>` : ""}${p.dinleyen ? `<div class="small muted mono">${esc(p.dinleyen.split(/[\\/]/).pop())}</div>` : ""}</div>`;
+    ${p.sertifika.length ? `<div class="small mono">🔒 ${esc(p.sertifika.slice(0, 2).join(", "))}${p.sertifika.length > 2 ? " …" : ""}</div>` : ""}${p.dinleyen ? `<div class="small muted mono">${esc(p.dinleyen.split(/[\\/]/).pop())}</div>` : ""}${p.tls?.length ? `<div class="small">${p.tls.map(v => `<span${/^(SSL|TLS 1\.[01]$)/.test(v) ? ` style="color:var(--err)" title="Eski sürüm"` : ""}>${esc(v)}</span>`).join(", ")}</div>` : ""}</div>`;
 }
 const nsHost = ip => { const n = st.data.nessus?.[ip]; return n ? `<div class="small muted" title="Nessus son tarama ${esc(n.son || "")}${n.kimlikli ? " · kimlik bilgili" : n.kimlikli === false ? " · kimlik bilgisiz" : ""}">${esc(n.os || "Nessus")}${n.kimlikli === false ? " · dış tarama" : ""}
   · <a href="#" data-ns="${esc(ip)}" title="Servisler, veritabanı instance'ları, süreçler, paylaşımlar, kurulu yazılımlar">🛡 Nessus ayrıntısı</a>${n.veritabani?.length ? `<div class="small" style="color:var(--in)">🗄 ${esc(n.veritabani.slice(0, 2).join("; "))}</div>` : ""}</div>` : ""; };
@@ -340,7 +340,7 @@ function nsDrawer(ip) {
   const n = st.data.nessus?.[ip]; if (!n) return;
   const L = (t, a) => a?.length ? `${t}\n${a.map(x => "  • " + x).join("\n")}\n\n` : "";
   const txt = `${n.os || ""}${n.kimlikli ? " · kimlik bilgili tarama" : n.kimlikli === false ? " · kimlik bilgisiz (dış) tarama" : ""} · son tarama ${n.son || "?"}${n.repo ? " · repo " + n.repo : ""}\n${[n.dns, n.netbios].filter(Boolean).join(" · ")}\n\n`
-    + L("Portlar", n.portlar.map(p => `${p.port}/${p.protokol}: ${[p.servis, nsTek(p).join(", "), p.sertifika.length ? "🔒 " + p.sertifika.join(", ") : "", p.dinleyen].filter(Boolean).join(" · ") || "açık"}`))
+    + L("Portlar", n.portlar.map(p => `${p.port}/${p.protokol}: ${[p.servis, nsTek(p).join(", "), p.sertifika.length ? "🔒 " + p.sertifika.join(", ") : "", p.dinleyen, p.tls?.length ? "TLS: " + p.tls.join(", ") : ""].filter(Boolean).join(" · ") || "açık"}`))
     + L("Veritabanı instance'ları", n.veritabani) + L("Nessus'un tespit ettiği ürünler", n.urunler)
     + L("Windows servisleri (Windows'un kendi servisleri hariç)", (n.servisler || []).map(x => `${x.ad}${x.gorunen && x.gorunen !== x.ad ? " (" + x.gorunen + ")" : ""}${x.yol ? " → " + x.yol : ""}${x.hesap ? " [" + x.hesap + "]" : ""}`))
     + L("Çalışan süreçler (tarama anı)", n.surecler) + L("SMB paylaşımları", n.paylasimlar) + L("Kurulu yazılımlar", n.yazilim) + L("CPE", n.cpe);

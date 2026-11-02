@@ -12,7 +12,8 @@ using System.Text.RegularExpressions;
 // yalnız appsettings.Production.json). Ayarlar: Nessus:BaseUrl, Repolar ([121]), MaxGun (30, lastSeen), ParcaIp, SayfaBoyutu, CacheDakika,
 // IgnoreSslErrors. BaseUrl boşsa kapalı (segment tarama Nessus'suz çalışır).
 // ---------------------------------------------------------------------------
-record NessusPort(string Port, string Protokol, string? Servis, string? WebSunucu, List<string> Teknoloji, List<string> Sertifika, string? Dinleyen, string? Son);
+record NessusPort(string Port, string Protokol, string? Servis, string? WebSunucu, List<string> Teknoloji, List<string> Sertifika, string? Dinleyen, string? Son,
+    List<string>? Tls = null);   // Tls: portun KABUL ETTİĞİ SSL / TLS sürümleri (Nessus'un el sıkışması; istemcinin kullandığı sürüm değil)
 record NessusServis(string Ad, string? Gorunen, string? Yol, string? Hesap);
 record NessusSunucu(string Ip, string? Dns, string? Netbios, string? Os, bool? Kimlikli, string? Son, string? Repo,
     List<NessusPort> Portlar, List<string> Yazilim, List<string> Cpe,
@@ -26,7 +27,10 @@ sealed class NessusService(IConfiguration cfg, IHttpClientFactory factory, ILogg
     // 10144 / 10674 SQL Server instance, 10658 Oracle TNS listener, 44401 Windows servisleri, 70329 çalışan süreçler, 10395 SMB paylaşımları.
     // Ürün tespiti (Tomcat, WebLogic, IBM MQ… "Detection" plugin'leri) ayrıca hafif listvuln sorgusuyla (Nessus:UrunTespiti)
     static readonly int[] DefaultPluginler = [19506, 11936, 45590, 10107, 24260, 22964, 10863, 34252, 25221, 20811, 22869, 11219, 10335, 34220, 14272,
-        10144, 10674, 10658, 44401, 70329, 10395];
+        10144, 10674, 10658, 44401, 70329, 10395,
+        // TLS (kullanıcı: "uygulamanın çalıştığı TLS sürümü"): 56984 desteklenen sürümler, 20007 SSLv2/v3, 104743 TLS 1.0, 121010 / 157288 TLS 1.1,
+        // 136318 TLS 1.2, 138330 TLS 1.3; 22964 servis tespitindeki "A TLSv1.2 server answered" de okunur
+        56984, 20007, 104743, 121010, 157288, 136318, 138330];
 
     bool UrunTespiti => cfg.GetValue("Nessus:UrunTespiti", true);
     public bool Acik => !string.IsNullOrWhiteSpace(cfg["Nessus:BaseUrl"]);
@@ -175,6 +179,13 @@ sealed class NessusService(IConfiguration cfg, IHttpClientFactory factory, ILogg
             var v = f(P(r)); string? son = Zaman(S(r, "lastSeen"));
             portlar[k] = (v.Item1, v.Item2, v.Item3, v.Item4, v.Item5, string.CompareOrdinal(son, v.Item6) > 0 ? son : v.Item6);
         }
+        var tls = new Dictionary<(string, string), SortedSet<string>>();
+        void Tls(JsonNode r, IEnumerable<string> v)
+        {
+            var k = (S(r, "port") ?? "0", (S(r, "protocol") ?? "tcp").ToLowerInvariant());
+            P(r);   // port listede olsun
+            foreach (var x in v) (tls.TryGetValue(k, out var t) ? t : tls[k] = new(StringComparer.Ordinal)).Add(x);
+        }
         string? os = rs.Select(r => S(r, "operatingSystem")).FirstOrDefault(x => !string.IsNullOrWhiteSpace(x));
         bool? kimlikli = null; var yazilim = new List<string>(); var cpe = new List<string>();
         foreach (var r in rs)
@@ -203,6 +214,16 @@ sealed class NessusService(IConfiguration cfg, IHttpClientFactory factory, ILogg
                 case "22964":
                     if (Regex.Match(o, @"An? (.+?) is running on this port", RegexOptions.IgnoreCase) is { Success: true } m22)
                         Yaz(r, v => (m22.Groups[1].Value.Trim(), v.Web, v.Tek, v.Cert, v.Dinleyen, v.Son));
+                    if (TlsSurumleri(o).ToList() is { Count: > 0 } t22) Tls(r, t22);
+                    break;
+                case "56984": case "20007": case "104743": case "121010": case "157288": case "136318": case "138330":
+                    // sürüme özel pluginlerde sürüm plugin'den gelir (çıktıdaki "TLS 1.2'ye geçin" gibi öneriler sürüm sayılmasın)
+                    Tls(r, id switch
+                    {
+                        "104743" => ["TLS 1.0"], "121010" or "157288" => ["TLS 1.1"], "136318" => ["TLS 1.2"], "138330" => ["TLS 1.3"],
+                        "20007" => TlsSurumleri(o).Where(x => x.StartsWith("SSL")).ToList(),
+                        _ => TlsSurumleri(o).ToList(),
+                    });
                     break;
                 case "10863":
                     var adlar = new List<string>();
@@ -281,9 +302,10 @@ sealed class NessusService(IConfiguration cfg, IHttpClientFactory factory, ILogg
             if (S(r, "port") is { } pt && pt != "0") portlar[(pt, (S(r, "protocol") ?? "tcp").ToLowerInvariant())] = YazP(portlar, pt, ad, (S(r, "protocol") ?? "tcp").ToLowerInvariant());
             else urunler.Add(ad);
         }
-        var list = portlar.Where(kv => kv.Key.Item1 != "0" || kv.Value.Web != null || kv.Value.Cert.Count > 0)
+        var list = portlar.Where(kv => kv.Key.Item1 != "0" || kv.Value.Web != null || kv.Value.Cert.Count > 0 || tls.ContainsKey(kv.Key))
             .Select(kv => new NessusPort(kv.Key.Item1, kv.Key.Item2, kv.Value.Servis, kv.Value.Web, Tekil(kv.Value.Tek),
-                kv.Value.Cert.Distinct(StringComparer.OrdinalIgnoreCase).Take(12).ToList(), kv.Value.Dinleyen, kv.Value.Son))
+                kv.Value.Cert.Distinct(StringComparer.OrdinalIgnoreCase).Take(12).ToList(), kv.Value.Dinleyen, kv.Value.Son,
+                tls.TryGetValue(kv.Key, out var tt) ? tt.ToList() : null))
             .OrderBy(p => int.TryParse(p.Port, out int n) ? n : 99999).ToList();
         var r0 = rs.Count > 0 ? rs[0] : bilgi[0];
         return new NessusSunucu(ip, S(r0, "dnsName") is { Length: > 0 } d ? d : null, S(r0, "netbiosName") is { Length: > 0 } nb ? nb : null, os, kimlikli,
@@ -317,6 +339,17 @@ sealed class NessusService(IConfiguration cfg, IHttpClientFactory factory, ILogg
         string u = Regex.Replace(ad, @"\s*\((Windows|Linux|Unix|macOS|credentialed check|remote check|uncredentialed check)\)", "", RegexOptions.IgnoreCase);
         u = Regex.Replace(u, @"\s*(Remote\s+)?(Version\s+)?(Detection|Detected|Installed|Installation Detection|Installation|Version Disclosure|Version Check|Version)\b.*$", "", RegexOptions.IgnoreCase).Trim(' ', '-', ':');
         return u.Length >= 3 ? u : null;
+    }
+
+    // Plugin çıktısındaki SSL / TLS sürümleri: "TLSv1", "TLSv1.2", "TLS 1.3", "SSLv3" … → "TLS 1.0", "TLS 1.2", "SSL 3.0" (sıralanabilir ad)
+    public static IEnumerable<string> TlsSurumleri(string o)
+    {
+        foreach (Match m in Regex.Matches(o, @"\b(SSL|TLS)\s?v?(\d)(?:\.(\d))?\b", RegexOptions.IgnoreCase))
+        {
+            string tur = m.Groups[1].Value.ToUpperInvariant(), ana = m.Groups[2].Value, alt = m.Groups[3].Success ? m.Groups[3].Value : "0";
+            if (tur == "TLS" && ana == "1" && alt is "0" or "1" or "2" or "3") yield return $"TLS 1.{alt}";
+            else if (tur == "SSL" && ana is "2" or "3") yield return $"SSL {ana}.0";
+        }
     }
 
     // "ASP.NET" + "ASP.NET 4.0.30319" → yalnız sürümlü olan
@@ -386,6 +419,7 @@ sealed class NessusService(IConfiguration cfg, IHttpClientFactory factory, ILogg
             if (p.Teknoloji.Count > 0) parca.Add("teknoloji: " + string.Join(", ", p.Teknoloji));
             if (p.Sertifika.Count > 0) parca.Add("SSL sertifika adları: " + string.Join(", ", p.Sertifika.Take(6)));
             if (p.Dinleyen != null) parca.Add("dinleyen program: " + p.Dinleyen);
+            if (p.Tls is { Count: > 0 }) parca.Add("TLS: " + string.Join(", ", p.Tls));
             sb.AppendLine($"- port {p.Port}/{p.Protokol}: {(parca.Count > 0 ? string.Join(" · ", parca) : "açık")}");
         }
         if (n.Veritabani.Count > 0) sb.AppendLine($"- Veritabanı instance'ları (instance adı çoğu zaman uygulama adıdır): {string.Join("; ", n.Veritabani)}");
