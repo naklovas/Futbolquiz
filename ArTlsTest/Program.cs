@@ -46,6 +46,19 @@ if (args.Length == 0)
 var argl = args.ToList();
 string? cihazSec = null;
 if (argl.IndexOf("--cihaz") is int ci and >= 0 && ci + 1 < argl.Count) { cihazSec = argl[ci + 1]; argl.RemoveRange(ci, 2); }
+// --bas / --bit "2026-11-01 08:00" (yerel saat): sabit zaman aralığı (tekrar edilebilir karşılaştırma); --bekle <sn>: rapor bekleme (varsayılan 600)
+string? Opsiyon(string ad) { int i = argl.IndexOf(ad); if (i < 0 || i + 1 >= argl.Count) return null; var v = argl[i + 1]; argl.RemoveRange(i, 2); return v; }
+long? Zaman(string? v) => v == null ? null : new DateTimeOffset(DateTime.Parse(v, System.Globalization.CultureInfo.GetCultureInfo("tr-TR"))).ToUnixTimeSeconds();
+long? sabitBas = Zaman(Opsiyon("--bas")), sabitBit = Zaman(Opsiyon("--bit"));
+int BekleSn = int.TryParse(Opsiyon("--bekle"), out int bk) ? bk : 600;
+(long, long) Simdi(int dk) { long b = DateTimeOffset.UtcNow.ToUnixTimeSeconds(); return (b - dk * 60L, b); }
+(long, long) Pencere(int dk)
+{
+    var (b0, b1) = Simdi(dk);
+    if (sabitBas != null) { b0 = sabitBas.Value; b1 = sabitBit ?? (sabitBas.Value + dk * 60L); }
+    Console.WriteLine($"  zaman: {DateTimeOffset.FromUnixTimeSeconds(b0).ToLocalTime():yyyy-MM-dd HH:mm} – {DateTimeOffset.FromUnixTimeSeconds(b1).ToLocalTime():yyyy-MM-dd HH:mm}");
+    return (b0, b1);
+}
 // --anahtar istemciIp,sunucuIp,sunucuPort : kaynağın IP / port kolon adları (varsayılan flow_tcp'ninkiler)
 string[] anahtar = ["cli_tcp.ip", "srv_tcp.ip", "srv_tcp.port"];
 if (argl.IndexOf("--anahtar") is int ai and >= 0 && ai + 1 < argl.Count)
@@ -113,7 +126,7 @@ switch (args[0].ToLowerInvariant())
             }
             string filtre = $"{anahtar[1]} == {ip}";
             // önce anahtar kolonların kendisi (bu kaynakta yoksa her TLS kolonu boşuna ✗ olur)
-            try { await RaporAsync(kaynak, anahtar, filtre, 5); Console.WriteLine($"  ✓ anahtar kolonlar: {string.Join(", ", anahtar)}"); }
+            try { await RaporAsync(kaynak, anahtar, filtre, Simdi(5)); Console.WriteLine($"  ✓ anahtar kolonlar: {string.Join(", ", anahtar)}"); }
             catch (Exception ex)
             {
                 Console.WriteLine($"  ✗ anahtar kolonlar ({string.Join(", ", anahtar)}) bu kaynakta geçersiz: {Kisalt(ex.Message, 300)}");
@@ -124,19 +137,19 @@ switch (args[0].ToLowerInvariant())
             var gecerli = new List<string>();
             foreach (var k in aday)
             {
-                try { await RaporAsync(kaynak, [.. anahtar, k], filtre, 5); gecerli.Add(k); Console.WriteLine($"  ✓ {k}"); }
+                try { await RaporAsync(kaynak, [.. anahtar, k], filtre, Simdi(5)); gecerli.Add(k); Console.WriteLine($"  ✓ {k}"); }
                 catch (Exception ex) { Console.WriteLine($"  ✗ {k}: {Kisalt(ex.Message, 160)}"); }
             }
             if (gecerli.Count == 0) { Console.WriteLine("Geçerli TLS kolonu yok. 'kaynaklar' çıktısındaki diğer kaynakları deneyin (4. parametre)."); return 2; }
-            var satirlar = await RaporAsync(kaynak, [.. anahtar, .. gecerli], filtre, dk, true);
-            Console.WriteLine($"\n{ip} · son {dk} dk · {satirlar.Count} satır (kaynak {kaynak})");
+            var satirlar = await RaporAsync(kaynak, [.. anahtar, .. gecerli], filtre, Pencere(dk), true);
+            Console.WriteLine($"\n{ip} · {(sabitBas != null ? "sabit aralık" : $"son {dk} dk")} · {satirlar.Count} satır (kaynak {kaynak})");
             // port × TLS değerleri → bağlantı sayısı, istemci sayısı
             var ozet = satirlar.Where(r => r.Count >= 3 + gecerli.Count)
                 .GroupBy(r => (Port: Deger(r[2]), Tls: string.Join(" | ", gecerli.Select((k, i) => $"{k}={Deger(r[3 + i])}"))))
-                .Select(g => (g.Key.Port, g.Key.Tls, Adet: g.Count(), Istemci: g.Select(r => Deger(r[0])).Distinct().Count()))
+                .Select(g => (g.Key.Port, g.Key.Tls, Adet: g.Count(), Istemci: g.Select(r => Deger(r[0])).Distinct().Count(), Cihaz: string.Join(",", g.Select(r => Deger(r[^1])).Distinct())))
                 .OrderBy(x => int.TryParse(x.Port, out int p) ? p : 99999).ThenByDescending(x => x.Adet);
-            Console.WriteLine($"{"Port",-7} {"Satır",7} {"İstemci",8}  TLS");
-            foreach (var o in ozet) Console.WriteLine($"{o.Port,-7} {o.Adet,7} {o.Istemci,8}  {o.Tls}");
+            Console.WriteLine($"{"Port",-7} {"Satır",7} {"İstemci",8}  {"Cihaz",-14} TLS");
+            foreach (var o in ozet) Console.WriteLine($"{o.Port,-7} {o.Adet,7} {o.Istemci,8}  {o.Cihaz,-14} {o.Tls}");
             if (satirlar.Count >= TopN) Console.WriteLine($"  ⚠ {TopN} satır sınırına ulaşıldı: bazı portlar kesilmiş olabilir (süreyi kısaltın).");
 
             // Karşılaştırma: aynı aralıkta flow_tcp'de gelen trafiği olan ama TLS el sıkışması görülmeyen portlar
@@ -145,14 +158,14 @@ switch (args[0].ToLowerInvariant())
                 try
                 {
                     var tlsPort = satirlar.Where(r => r.Count > 2).Select(r => Deger(r[2])).ToHashSet();
-                    var akis = await RaporAsync("flow_tcp", ["cli_tcp.ip", "srv_tcp.ip", "srv_tcp.port"], $"srv_tcp.ip == {ip}", dk, true);
+                    var akis = await RaporAsync("flow_tcp", ["cli_tcp.ip", "srv_tcp.ip", "srv_tcp.port"], $"srv_tcp.ip == {ip}", Pencere(dk), true);
                     var portlar = akis.Where(r => r.Count > 2).GroupBy(r => Deger(r[2]))
-                        .Select(g => (Port: g.Key, Satir: g.Count(), Istemci: g.Select(r => Deger(r[0])).Distinct().Count()))
+                        .Select(g => (Port: g.Key, Satir: g.Count(), Istemci: g.Select(r => Deger(r[0])).Distinct().Count(), Cihaz: string.Join(",", g.Select(r => Deger(r[^1])).Distinct())))
                         .OrderBy(x => int.TryParse(x.Port, out int p) ? p : 99999).ToList();
-                    Console.WriteLine($"\nflow_tcp karşılaştırması (aynı {dk} dk): {portlar.Count} portta gelen trafik var, {portlar.Count(x => tlsPort.Contains(x.Port))} tanesinde TLS el sıkışması görüldü.");
-                    Console.WriteLine($"{"Port",-7} {"Satır",7} {"İstemci",8}  Durum");
+                    Console.WriteLine($"\nflow_tcp karşılaştırması (aynı aralık): {portlar.Count} portta gelen trafik var, {portlar.Count(x => tlsPort.Contains(x.Port))} tanesinde TLS el sıkışması görüldü.");
+                    Console.WriteLine($"{"Port",-7} {"Satır",7} {"İstemci",8}  {"Cihaz",-14} Durum");
                     foreach (var x in portlar)
-                        Console.WriteLine($"{x.Port,-7} {x.Satir,7} {x.Istemci,8}  {(tlsPort.Contains(x.Port) ? "TLS ✓" : "el sıkışması yok" + Ipucu(x.Port))}");
+                        Console.WriteLine($"{x.Port,-7} {x.Satir,7} {x.Istemci,8}  {x.Cihaz,-14} {(tlsPort.Contains(x.Port) ? "TLS ✓" : "el sıkışması yok" + Ipucu(x.Port))}");
                     if (akis.Count >= TopN) Console.WriteLine($"  ⚠ flow_tcp {TopN} satır sınırına ulaştı.");
                 }
                 catch (Exception ex) { Console.WriteLine("flow_tcp karşılaştırması yapılamadı: " + Kisalt(ex.Message, 200)); }
@@ -173,7 +186,7 @@ switch (args[0].ToLowerInvariant())
         {
             if (args.Length < 5) { Console.WriteLine("ham <ip> <dakika> <kaynak> <kolon1,kolon2>"); return 1; }
             var kol = args[4].Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToArray();
-            var satirlar = await RaporAsync(args[3], kol, $"{anahtar[0]} == {args[1]} or {anahtar[1]} == {args[1]}", int.Parse(args[2]));
+            var satirlar = await RaporAsync(args[3], kol, $"{anahtar[0]} == {args[1]} or {anahtar[1]} == {args[1]}", Pencere(int.Parse(args[2])), true);
             Console.WriteLine(string.Join(" ; ", kol));
             foreach (var r in satirlar.Take(50)) Console.WriteLine(string.Join(" ; ", r.Select(x => Deger(x))));
             Console.WriteLine($"({satirlar.Count} satır)");
@@ -300,7 +313,7 @@ async Task<List<(string Id, string Etiket)>> KolonlarAsync(string kaynak)
 
 // Tek data_def'li rapor: oluştur → bekle → veri → sil
 // Tüm hedef cihazlarda çalıştırır, satırları birleştirir. Bir cihaz hata verirse diğerleri devam eder; hepsi hata verirse ilk hata fırlatılır.
-async Task<List<List<JsonNode?>>> RaporAsync(string kaynak, string[] kolonlar, string filtre, int dakika, bool yaz = false)
+async Task<List<List<JsonNode?>>> RaporAsync(string kaynak, string[] kolonlar, string filtre, (long Bas, long Bit) zaman, bool yaz = false)
 {
     var tum = new List<List<JsonNode?>>();
     var hatalar = new List<string>();
@@ -314,7 +327,8 @@ async Task<List<List<JsonNode?>>> RaporAsync(string kaynak, string[] kolonlar, s
                 baseUrl = $"https://{h.Ip}";
                 if (!tokenler.TryGetValue(h.Ip, out var t)) tokenler[h.Ip] = t = await TokenAsync();
                 jwt = t;
-                var r = await RaporTekAsync(kaynak, kolonlar, filtre, dakika);
+                var r = await RaporTekAsync(kaynak, kolonlar, filtre, zaman, yaz ? h.Ad : null);
+                foreach (var satir in r) satir.Add(JsonValue.Create(h.Ad));   // son kolon: cihaz
                 if (yaz && hedefler.Count > 1) Console.WriteLine($"  [{h.Ad}] {r.Count} satır");
                 tum.AddRange(r);
             }
@@ -330,9 +344,9 @@ async Task<List<List<JsonNode?>>> RaporAsync(string kaynak, string[] kolonlar, s
     return tum;
 }
 
-async Task<List<List<JsonNode?>>> RaporTekAsync(string kaynak, string[] kolonlar, string filtre, int dakika)
+async Task<List<List<JsonNode?>>> RaporTekAsync(string kaynak, string[] kolonlar, string filtre, (long Bas, long Bit) zaman, string? yazAd)
 {
-    long bitis = DateTimeOffset.UtcNow.ToUnixTimeSeconds(), bas = bitis - dakika * 60L;
+    var (bas, bitis) = zaman;
     var sonuc = new List<List<JsonNode?>>();
     foreach (var vifg in vifgler.Count > 0 ? vifgler : [""])
     {
@@ -350,19 +364,29 @@ async Task<List<List<JsonNode?>>> RaporTekAsync(string kaynak, string[] kolonlar
         try
         {
             bool bitti = false;
-            for (int i = 0; i < 45 && !bitti; i++)
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            JsonNode? sonDurum = null;
+            for (int i = 0; sw.Elapsed.TotalSeconds < BekleSn && !bitti; i++)
             {
                 await Task.Delay(2000);
                 using var st = await http.SendAsync(Req(HttpMethod.Get, $"{baseUrl}/api/npm.reports/1.0/instances/items/{id}"));
                 var def = JsonNode.Parse(await st.Content.ReadAsStringAsync())?["data_defs"]?.AsArray()?[0];
-                string? durum = def?["status"]?["state"]?.ToString();
-                if (durum == "error") throw new Exception("Rapor hata: " + def?["status"]?.ToJsonString());
+                sonDurum = def?["status"];
+                string? durum = sonDurum?["state"]?.ToString();
+                if (durum == "error") throw new Exception("Rapor hata: " + sonDurum?.ToJsonString());
                 bitti = durum == "completed";
+                if (yazAd != null && !bitti && i % 10 == 9) Console.WriteLine($"  [{yazAd}] bekleniyor {sw.Elapsed.TotalSeconds:N0} sn · {Kisalt(sonDurum?.ToJsonString() ?? "", 150)}");
             }
-            if (!bitti) throw new Exception("Rapor 90 sn'de tamamlanmadı");
+            if (!bitti) throw new Exception($"Rapor {BekleSn} sn'de tamamlanmadı (son durum: {Kisalt(sonDurum?.ToJsonString() ?? "", 200)}) — --bekle ile süreyi artırın");
+            // tamamlandı ama durumda state / progress dışında bilgi varsa (uyarı, kısaltma) göster
+            if (yazAd != null && sonDurum is JsonObject so && so.Any(kv => kv.Key is not ("state" or "progress")))
+                Console.WriteLine($"  [{yazAd}] rapor durumu: {Kisalt(so.ToJsonString(), 300)}");
             using var dr = await http.SendAsync(Req(HttpMethod.Get, $"{baseUrl}/api/npm.reports/1.0/instances/items/{id}/data_defs/items/1/data?limit=100000"));
-            foreach (var row in JsonNode.Parse(await dr.Content.ReadAsStringAsync())?["data"]?.AsArray() ?? [])
+            var dj = JsonNode.Parse(await dr.Content.ReadAsStringAsync());
+            int once = sonuc.Count;
+            foreach (var row in dj?["data"]?.AsArray() ?? [])
                 if (row is JsonArray a) sonuc.Add(a.Select(x => x?.DeepClone()).ToList());
+            if (yazAd != null && dj?["meta"] is JsonNode meta) Console.WriteLine($"  [{yazAd}{(vifg != "" ? "/" + vifg : "")}] {sonuc.Count - once} satır · meta: {Kisalt(meta.ToJsonString(), 200)}");
         }
         finally
         {
