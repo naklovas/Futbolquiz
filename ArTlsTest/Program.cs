@@ -42,14 +42,23 @@ if (args.Length == 0)
 {
     Console.WriteLine("Komut girin (ör: kaynaklar  |  kolonlar tls_handshakes ip|port  |  tls 10.1.2.3 60  |  --cihaz 1 kaynaklar  |  ham 10.1.2.3 30 flow_tcp cli_tcp.ip,srv_tcp.ip,srv_tcp.port):");
     Console.Write("> ");
-    args = (Console.ReadLine() ?? "").Split(' ', StringSplitOptions.RemoveEmptyEntries);
+    // tırnaklı parçalar ("2026-11-01 09:00") tek argüman
+    args = Regex.Matches(Console.ReadLine() ?? "", "\"([^\"]*)\"|(\\S+)").Select(m => m.Groups[1].Success ? m.Groups[1].Value : m.Groups[2].Value).ToArray();
 }
 var argl = args.ToList();
 string? cihazSec = null;
 if (argl.IndexOf("--cihaz") is int ci and >= 0 && ci + 1 < argl.Count) { cihazSec = argl[ci + 1]; argl.RemoveRange(ci, 2); }
 // --bas / --bit "2026-11-01 08:00" (yerel saat): sabit zaman aralığı (tekrar edilebilir karşılaştırma); --bekle <sn>: rapor bekleme (varsayılan 600)
 string? Opsiyon(string ad) { int i = argl.IndexOf(ad); if (i < 0 || i + 1 >= argl.Count) return null; var v = argl[i + 1]; argl.RemoveRange(i, 2); return v; }
-long? Zaman(string? v) => v == null ? null : new DateTimeOffset(DateTime.Parse(v, System.Globalization.CultureInfo.GetCultureInfo("tr-TR"))).ToUnixTimeSeconds();
+// "2026-11-01 09:00", "2026-11-01T09:00", "2026-11-01_09:00", "01.11.2026 09:00" kabul edilir
+long? Zaman(string? v)
+{
+    if (v == null) return null;
+    v = v.Trim().Trim('"').Replace('_', ' ').Replace('T', ' ');
+    if (!DateTime.TryParse(v, System.Globalization.CultureInfo.GetCultureInfo("tr-TR"), System.Globalization.DateTimeStyles.AssumeLocal, out var d))
+        throw new FormatException($"Tarih anlaşılamadı: '{v}' (örnek: 2026-11-01 09:00 ya da 2026-11-01_09:00)");
+    return new DateTimeOffset(d).ToUnixTimeSeconds();
+}
 long? sabitBas = Zaman(Opsiyon("--bas")), sabitBit = Zaman(Opsiyon("--bit"));
 int BekleSn = int.TryParse(Opsiyon("--bekle"), out int bk) ? bk : 600;
 (long, long) Simdi(int dk) { long b = DateTimeOffset.UtcNow.ToUnixTimeSeconds(); return (b - dk * 60L, b); }
