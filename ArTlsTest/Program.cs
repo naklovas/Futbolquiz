@@ -159,31 +159,43 @@ switch (args[0].ToLowerInvariant())
             }
             if (gecerli.Count == 0) { Console.WriteLine("Geçerli TLS kolonu yok. 'kaynaklar' çıktısındaki diğer kaynakları deneyin (4. parametre)."); return 2; }
             // Cihaz tarafında gruplama: istemci × sunucu × port × TLS kolonları + el sıkışması sayısı (metrik)
-            string[] grupKol = [.. anahtar, .. gecerli];
-            List<List<JsonNode?>> satirlar;
-            bool metrikVar = false;
-            try
+            // Cihaz tarafında gruplama. Her kolon grup anahtarı olamıyor (ör. "invalid group by: tls.version_name"), sırayla denenir:
+            //  1) anahtar + TLS kolonları  2) *_name yerine değer kolonu (tls.version: 771 = TLS 1.2)  3) yalnız tls.version
+            //  4) yalnız anahtar (IP / port) grup, TLS kolonu değer  5) ham satırlar (100.000 sınırı)
+            List<string> AdsizKol(IEnumerable<string> k) => k.Select(x => x.EndsWith("_name") ? x[..^5] : x).Distinct().ToList();
+            var denemeler = new List<(string Ad, List<string> Tls, string[]? Grup)>
             {
-                var zaman = Pencere(dk);
-                try { satirlar = await RaporAsync(kaynak, [.. grupKol, Metrik], filtre, zaman, true, grupKol); metrikVar = true; }
-                catch (Exception ex1)
+                ("anahtar + TLS kolonları", gecerli, [.. anahtar, .. gecerli]),
+                ("*_name yerine değer kolonları", AdsizKol(gecerli), [.. anahtar, .. AdsizKol(gecerli)]),
+                ("yalnız tls.version", ["tls.version"], [.. anahtar, "tls.version"]),
+                ("yalnız IP / port grup", gecerli, anahtar),
+            };
+            List<List<JsonNode?>> satirlar = [];
+            bool metrikVar = false, oldu = false;
+            var zaman = Pencere(dk);
+            foreach (var d in denemeler.DistinctBy(d => string.Join(",", d.Tls) + "|" + string.Join(",", d.Grup ?? [])))
+            {
+                try
                 {
-                    Console.WriteLine($"  gruplu + {Metrik} olmadı ({Kisalt(ex1.Message, 150)}); metriksiz gruplu deneniyor");
-                    satirlar = await RaporAsync(kaynak, grupKol, filtre, zaman, true, grupKol);
+                    satirlar = await RaporAsync(kaynak, [.. anahtar, .. d.Tls, Metrik], filtre, zaman, true, d.Grup);
+                    gecerli = d.Tls; metrikVar = true; oldu = true;
+                    Console.WriteLine($"  ✓ cihaz tarafında gruplandı: {d.Ad} · group_by = {string.Join(", ", d.Grup!)} · {Metrik} = el sıkışması sayısı");
+                    break;
                 }
-                Console.WriteLine($"  ✓ cihaz tarafında gruplandı{(metrikVar ? $" ({Metrik} = el sıkışması sayısı)" : "")}");
+                catch (Exception ex) { Console.WriteLine($"  ✗ gruplama '{d.Ad}' olmadı: {Kisalt(HataMetni(ex.Message), 400)}"); }
             }
-            catch (Exception ex)
+            if (!oldu)
             {
-                Console.WriteLine($"  ⚠ gruplu rapor olmadı ({Kisalt(ex.Message, 200)}); ham satırlar alınıyor (100.000 sınırı)");
-                satirlar = await RaporAsync(kaynak, grupKol, filtre, Pencere(dk), true);
+                Console.WriteLine("  ⚠ hiçbir gruplama olmadı; ham satırlar alınıyor (100.000 sınırı — --port ve kısa aralık kullanın)");
+                satirlar = await RaporAsync(kaynak, [.. anahtar, .. gecerli], filtre, zaman, true);
             }
+            string[] grupKol = [.. anahtar, .. gecerli];
             int mi = grupKol.Length;   // metrik kolonun sırası (varsa); son kolon her zaman cihaz adı
             long Sayi(List<JsonNode?> r) => metrikVar && r.Count > mi + 1 && double.TryParse(Deger(r[mi]), System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out double d) ? (long)d : 1;
             Console.WriteLine($"\n{ip} · {(sabitBas != null ? "sabit aralık" : $"son {dk} dk")} · {satirlar.Count} satır (kaynak {kaynak})");
             // port × TLS değerleri → bağlantı sayısı, istemci sayısı
             var ozet = satirlar.Where(r => r.Count >= 3 + gecerli.Count)
-                .GroupBy(r => (Port: Deger(r[2]), Tls: string.Join(" | ", gecerli.Select((k, i) => $"{k}={Deger(r[3 + i])}"))))
+                .GroupBy(r => (Port: Deger(r[2]), Tls: string.Join(" | ", gecerli.Select((k, i) => $"{k}={(k == "tls.version" ? TlsAd(Deger(r[3 + i])) : Deger(r[3 + i]))}"))))
                 .Select(g => (g.Key.Port, g.Key.Tls, Adet: g.Sum(Sayi), Istemci: g.Select(r => Deger(r[0])).Distinct().Count(), Cihaz: string.Join(",", g.Select(r => Deger(r[^1])).Distinct()),
                     Ilk: string.Join(" ", g.GroupBy(r => Deger(r[0])).OrderByDescending(c => c.Sum(Sayi)).Take(3).Select(c => $"{c.Key}({c.Sum(Sayi)})"))))
                 .OrderBy(x => int.TryParse(x.Port, out int p) ? p : 99999).ThenByDescending(x => x.Adet);
@@ -326,12 +338,15 @@ async Task<(List<string> Kaynaklar, List<(string Kaynak, string Id, string Etike
 async Task<List<(string Id, string Etiket)>> KolonlarAsync(string kaynak)
 {
     var bulunan = new List<(string, string)>();
+    // etiketin yanına kolonun kısa özellikleri (type, grouped_by / key / metric gibi bayraklar) eklenir
+    static string Ek(JsonObject o) => string.Join(" ", o.Where(kv => kv.Key is not ("id" or "label" or "description" or "name") && kv.Value is JsonValue)
+        .Select(kv => $"{kv.Key}={kv.Value}").Take(8));
     void Gez(JsonNode? n)
     {
         if (n is JsonObject o)
         {
             if (o["id"]?.GetValueKind() == JsonValueKind.String && (o["label"] != null || o["type"] != null))
-                bulunan.Add((o["id"]!.ToString(), o["label"]?.ToString() ?? ""));
+                bulunan.Add((o["id"]!.ToString(), (o["label"]?.ToString() ?? "") + (Ek(o) is { Length: > 0 } e ? "  [" + e + "]" : "")));
             foreach (var kv in o) Gez(kv.Value);
         }
         else if (n is JsonArray a) foreach (var x in a) Gez(x);
@@ -378,7 +393,7 @@ async Task<List<List<JsonNode?>>> RaporAsync(string kaynak, string[] kolonlar, s
             catch (Exception ex)
             {
                 hatalar.Add($"[{h.Ad}] {ex.Message}");
-                if (yaz) Console.WriteLine($"  [{h.Ad}] HATA: {Kisalt(ex.Message, 200)}");
+                if (yaz) Console.WriteLine($"  [{h.Ad}] HATA: {Kisalt(HataMetni(ex.Message), 300)}");
             }
         }
     }
@@ -449,6 +464,25 @@ static string Ipucu(string port) => port switch
     "80" or "8080" => " (büyük ihtimalle düz HTTP)",
     "135" or "5985" => " (RPC / WinRM HTTP: TLS değil)",
     _ => ""
+};
+// AppResponse hata JSON'undan okunur metin: messages[].text + details
+static string HataMetni(string m)
+{
+    int i = m.IndexOf('{');
+    if (i < 0) return m;
+    try
+    {
+        var j = JsonNode.Parse(m[i..]);
+        var msj = (j?["messages"] as JsonArray)?.Select(x => x?["text"] + (x?["details"] is JsonNode dt ? " " + dt.ToJsonString() : ""));
+        return msj != null && msj.Any() ? m[..i] + string.Join(" | ", msj) : m;
+    }
+    catch { return m; }
+}
+// tls.version değeri → ad (0x0300 SSL 3.0 … 0x0304 TLS 1.3)
+static string TlsAd(string v) => v switch
+{
+    "768" or "0x0300" => "SSL 3.0", "769" or "0x0301" => "TLS 1.0", "770" or "0x0302" => "TLS 1.1",
+    "771" or "0x0303" => "TLS 1.2", "772" or "0x0304" => "TLS 1.3", _ => v
 };
 static string Deger(JsonNode? n) => n switch { null => "", JsonValue v => v.ToString(), _ => n.ToJsonString() } is { Length: > 0 } s ? s : "(boş)";
 static string Kisalt(string s, int n) => s.Length <= n ? s : s[..n] + "…";
