@@ -1,4 +1,5 @@
-ayar.json
+appsettings*.json
 bin/
 obj/
 *.dump.json
+!appsettings.ornek.json

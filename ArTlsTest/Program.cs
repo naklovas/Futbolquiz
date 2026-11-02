@@ -8,30 +8,54 @@
 //        Kolon verilmezse "kaynaklar" ile bulunan SSL/TLS kolonları tek tek denenir; geçersiz olan atlanır.
 //   dotnet run -- ham <sunucu-ip> <dakika> <kaynak> <kolon1,kolon2,...>
 //        Verilen kolonlarla ham satırları yazar (ilk 50).
-// Ayarlar: exe'nin yanındaki ayar.json (ayar.ornek.json'u kopyalayın). Şifre repoya girmez.
+// Ayarlar: DeltaFlow'un appsettings.json'u (aynı yapı) bu klasöre kopyalanır. Şifre repoya girmez.
+//   Birden fazla AppResponse cihazı varsa: dotnet run -- --cihaz 1 kaynaklar   (ya da --cihaz Riverbed-2)
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 
-var ayarYol = new[] { Path.Combine(AppContext.BaseDirectory, "ayar.json"), "ayar.json" }.FirstOrDefault(File.Exists)
-    ?? throw new FileNotFoundException("ayar.json bulunamadı (ayar.ornek.json'u ayar.json olarak kopyalayıp doldurun).");
-var ayar = JsonNode.Parse(File.ReadAllText(ayarYol))!;
-string cihaz = ayar["Ip"]?.ToString() ?? "", kul = ayar["Username"]?.ToString() ?? "", sifre = ayar["Password"]?.ToString() ?? "";
-if (cihaz == "" || kul == "" || sifre == "") { Console.WriteLine("ayar.json: Ip, Username, Password dolu olmalı."); return 1; }
-var vifgler = ayar["VifgIds"]?.AsArray().Select(x => x?.ToString() ?? "").Where(x => x != "").ToList() ?? [];
+// Ayarlar: DeltaFlow'un appsettings.json'u ile AYNI yapı (dosya olduğu gibi kopyalanabilir). Kullanılan anahtarlar:
+//   Credentials:Username / Password, Servers[{Name, Ip}], VifgIds, SourcePathType, AppResponseIgnoreSslErrors
+// appsettings.Production.json varsa üzerine yazılır (DeltaFlow gibi). Birden fazla cihaz: --cihaz <sıra (0'dan) | ad>, yoksa ilki.
+var jsonSec = new JsonDocumentOptions { CommentHandling = JsonCommentHandling.Skip, AllowTrailingCommas = true };
+JsonObject? Oku(string ad) =>
+    new[] { Path.Combine(AppContext.BaseDirectory, ad), ad }.FirstOrDefault(File.Exists) is string y ? JsonNode.Parse(File.ReadAllText(y), null, jsonSec) as JsonObject : null;
+static void Birlestir(JsonObject hedef, JsonObject ek)
+{
+    foreach (var kv in ek.ToList())
+        if (kv.Value is JsonObject eo && hedef[kv.Key] is JsonObject ho) Birlestir(ho, eo);
+        else hedef[kv.Key] = kv.Value?.DeepClone();
+}
+var ayar = Oku("appsettings.json") ?? throw new FileNotFoundException("appsettings.json bulunamadı (DeltaFlow'unkini bu klasöre kopyalayın).");
+if (Oku("appsettings.Production.json") is JsonObject prod) Birlestir(ayar, prod);
+
+var argl = args.ToList();
+string? cihazSec = null;
+if (argl.IndexOf("--cihaz") is int ci and >= 0 && ci + 1 < argl.Count) { cihazSec = argl[ci + 1]; argl.RemoveRange(ci, 2); }
+args = argl.ToArray();
+
+var sunucular = (ayar["Servers"] as JsonArray ?? []).OfType<JsonObject>().ToList();
+var secili = cihazSec == null ? sunucular.FirstOrDefault()
+    : int.TryParse(cihazSec, out int si) ? sunucular.ElementAtOrDefault(si)
+    : sunucular.FirstOrDefault(x => string.Equals(x["Name"]?.ToString(), cihazSec, StringComparison.OrdinalIgnoreCase));
+string cihaz = secili?["Ip"]?.ToString()?.Trim() ?? "", cihazAd = secili?["Name"]?.ToString() ?? "AppResponse";
+string kul = ayar["Credentials"]?["Username"]?.ToString() ?? "", sifre = ayar["Credentials"]?["Password"]?.ToString() ?? "";
+if (cihaz == "") { Console.WriteLine($"Servers listesinde {(cihazSec == null ? "Ip'si dolu cihaz yok" : $"'{cihazSec}' yok")}. Cihazlar: {string.Join(", ", sunucular.Select((x, i) => $"{i}={x["Name"]}"))}"); return 1; }
+if (kul == "" || sifre == "") { Console.WriteLine("Credentials:Username / Password boş (appsettings.json ya da appsettings.Production.json)."); return 1; }
+var vifgler = (ayar["VifgIds"] as JsonArray ?? []).Select(x => x?.ToString()?.Trim() ?? "").Where(x => x != "").ToList();
 string yolTuru = ayar["SourcePathType"]?.ToString() ?? "jobs";
 
 var handler = new HttpClientHandler();
-if (ayar["IgnoreSsl"]?.GetValue<bool>() != false) handler.ServerCertificateCustomValidationCallback = (_, _, _, _) => true;
+if (ayar["AppResponseIgnoreSslErrors"]?.ToString()?.ToLowerInvariant() != "false") handler.ServerCertificateCustomValidationCallback = (_, _, _, _) => true;
 var http = new HttpClient(handler) { Timeout = TimeSpan.FromMinutes(3) };
 string baseUrl = $"https://{cihaz}";
 
 if (args.Length == 0) { Console.WriteLine("Komut: kaynaklar | tls <ip> [dakika] [kaynak] [kolonlar] | ham <ip> <dakika> <kaynak> <kolonlar>"); return 1; }
 
 string jwt = await TokenAsync();
-Console.WriteLine($"Token alındı ({cihaz}).");
+Console.WriteLine($"Token alındı ({cihazAd} / {cihaz}).");
 
 switch (args[0].ToLowerInvariant())
 {
