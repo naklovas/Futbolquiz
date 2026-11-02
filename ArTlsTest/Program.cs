@@ -6,6 +6,9 @@
 //   dotnet run -- tls <sunucu-ip> [dakika=60] [kaynak=flow_tcp] [kolon1,kolon2,...]
 //        Sunucuya gelen bağlantılarda TLS kolonlarını raporlar: port × TLS değeri × bağlantı sayısı.
 //        Kolon verilmezse "kaynaklar" ile bulunan SSL/TLS kolonları tek tek denenir; geçersiz olan atlanır.
+//   dotnet run -- kolonlar <kaynak> [regex]
+//        Kaynağın tüm kolonları (ör: kolonlar tls_handshakes ip|port).
+//   --anahtar istemciIp,sunucuIp,sunucuPort  : tls / ham için kaynağın IP-port kolon adları (varsayılan cli_tcp.ip,srv_tcp.ip,srv_tcp.port)
 //   dotnet run -- ham <sunucu-ip> <dakika> <kaynak> <kolon1,kolon2,...>
 //        Verilen kolonlarla ham satırları yazar (ilk 50).
 // Ayarlar: DeltaFlow'un appsettings.json'u (aynı yapı) bu klasöre kopyalanır. Şifre repoya girmez.
@@ -34,13 +37,21 @@ if (Oku("appsettings.Production.json") is JsonObject prod) Birlestir(ayar, prod)
 // Visual Studio'dan argümansız başlatılırsa komut sorulur
 if (args.Length == 0)
 {
-    Console.WriteLine("Komut girin (ör: kaynaklar  |  tls 10.1.2.3 60  |  --cihaz 1 kaynaklar  |  ham 10.1.2.3 30 flow_tcp cli_tcp.ip,srv_tcp.ip,srv_tcp.port):");
+    Console.WriteLine("Komut girin (ör: kaynaklar  |  kolonlar tls_handshakes ip|port  |  tls 10.1.2.3 60  |  --cihaz 1 kaynaklar  |  ham 10.1.2.3 30 flow_tcp cli_tcp.ip,srv_tcp.ip,srv_tcp.port):");
     Console.Write("> ");
     args = (Console.ReadLine() ?? "").Split(' ', StringSplitOptions.RemoveEmptyEntries);
 }
 var argl = args.ToList();
 string? cihazSec = null;
 if (argl.IndexOf("--cihaz") is int ci and >= 0 && ci + 1 < argl.Count) { cihazSec = argl[ci + 1]; argl.RemoveRange(ci, 2); }
+// --anahtar istemciIp,sunucuIp,sunucuPort : kaynağın IP / port kolon adları (varsayılan flow_tcp'ninkiler)
+string[] anahtar = ["cli_tcp.ip", "srv_tcp.ip", "srv_tcp.port"];
+if (argl.IndexOf("--anahtar") is int ai and >= 0 && ai + 1 < argl.Count)
+{
+    anahtar = argl[ai + 1].Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+    argl.RemoveRange(ai, 2);
+    if (anahtar.Length != 3) { Console.WriteLine("--anahtar üç kolon ister: istemciIp,sunucuIp,sunucuPort"); return 1; }
+}
 args = argl.ToArray();
 
 var sunucular = (ayar["Servers"] as JsonArray ?? []).OfType<JsonObject>().ToList();
@@ -93,8 +104,15 @@ switch (args[0].ToLowerInvariant())
                 }
                 else Console.WriteLine($"'{kaynak}' SSL/TLS kolonları: {string.Join(", ", aday)}");
             }
-            var anahtar = new[] { "cli_tcp.ip", "srv_tcp.ip", "srv_tcp.port" };
-            string filtre = $"srv_tcp.ip == {ip}";
+            string filtre = $"{anahtar[1]} == {ip}";
+            // önce anahtar kolonların kendisi (bu kaynakta yoksa her TLS kolonu boşuna ✗ olur)
+            try { await RaporAsync(kaynak, anahtar, filtre, 5); Console.WriteLine($"  ✓ anahtar kolonlar: {string.Join(", ", anahtar)}"); }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"  ✗ anahtar kolonlar ({string.Join(", ", anahtar)}) bu kaynakta geçersiz: {Kisalt(ex.Message, 300)}");
+                Console.WriteLine($"    → 'kolonlar {kaynak} ip|port' ile doğru adları bulup --anahtar a,b,c verin.");
+                return 2;
+            }
             // önce her kolonu tek tek dene (geçersiz kolon tüm raporu bozar)
             var gecerli = new List<string>();
             foreach (var k in aday)
@@ -114,11 +132,21 @@ switch (args[0].ToLowerInvariant())
             foreach (var o in ozet) Console.WriteLine($"{o.Port,-7} {o.Adet,7} {o.Istemci,8}  {o.Tls}");
             break;
         }
+    case "kolonlar":
+        {
+            if (args.Length < 2) { Console.WriteLine("kolonlar <kaynak> [arama regex, ör: ip|port]"); return 1; }
+            var liste = await KolonlarAsync(args[1]);
+            var rx = args.Length > 2 ? new Regex(args[2], RegexOptions.IgnoreCase) : null;
+            var sec = liste.Where(k => rx == null || rx.IsMatch(k.Id + " " + k.Etiket)).ToList();
+            Console.WriteLine($"{args[1]}: {liste.Count} kolon{(rx != null ? $", '{args[2]}' ile eşleşen {sec.Count}" : "")}");
+            foreach (var k in sec) Console.WriteLine($"  {k.Id,-45} {k.Etiket}");
+            break;
+        }
     case "ham":
         {
             if (args.Length < 5) { Console.WriteLine("ham <ip> <dakika> <kaynak> <kolon1,kolon2>"); return 1; }
             var kol = args[4].Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToArray();
-            var satirlar = await RaporAsync(args[3], kol, $"cli_tcp.ip == {args[1]} or srv_tcp.ip == {args[1]}", int.Parse(args[2]));
+            var satirlar = await RaporAsync(args[3], kol, $"{anahtar[0]} == {args[1]} or {anahtar[1]} == {args[1]}", int.Parse(args[2]));
             Console.WriteLine(string.Join(" ; ", kol));
             foreach (var r in satirlar.Take(50)) Console.WriteLine(string.Join(" ; ", r.Select(x => Deger(x))));
             Console.WriteLine($"({satirlar.Count} satır)");
@@ -209,6 +237,38 @@ async Task<(List<string> Kaynaklar, List<(string Kaynak, string Id, string Etike
         Gez(kv.Value, m.Success ? m.Groups[1].Value : "?");
     }
     return (adlar, kolonlar.Distinct().ToList());
+}
+
+// Bir kaynağın TÜM kolonları (id + etiket)
+async Task<List<(string Id, string Etiket)>> KolonlarAsync(string kaynak)
+{
+    var bulunan = new List<(string, string)>();
+    void Gez(JsonNode? n)
+    {
+        if (n is JsonObject o)
+        {
+            if (o["id"]?.GetValueKind() == JsonValueKind.String && (o["label"] != null || o["type"] != null))
+                bulunan.Add((o["id"]!.ToString(), o["label"]?.ToString() ?? ""));
+            foreach (var kv in o) Gez(kv.Value);
+        }
+        else if (n is JsonArray a) foreach (var x in a) Gez(x);
+    }
+    foreach (var u in new[] { $"/api/npm.reports.sources/1.0/sources/items/{kaynak}", $"/api/npm.reports.sources/1.0/sources/items/{kaynak}/columns" })
+    {
+        using var r = await http.SendAsync(Req(HttpMethod.Get, baseUrl + u));
+        if (r.IsSuccessStatusCode) try { Gez(JsonNode.Parse(await r.Content.ReadAsStringAsync())); } catch { }
+    }
+    if (bulunan.Count == 0)
+        foreach (var u in new[] { "/api/npm.reports.sources/1.0/sources", "/api/npm.reports/1.0/sources" })
+        {
+            using var r = await http.SendAsync(Req(HttpMethod.Get, baseUrl + u));
+            if (!r.IsSuccessStatusCode) continue;
+            var j = JsonNode.Parse(await r.Content.ReadAsStringAsync());
+            foreach (var it in (j?["items"] as JsonArray) ?? (j as JsonArray) ?? [])
+                if (it?["name"]?.ToString() == kaynak) Gez(it);
+            if (bulunan.Count > 0) break;
+        }
+    return bulunan.Distinct().ToList();
 }
 
 // Tek data_def'li rapor: oluştur → bekle → veri → sil
