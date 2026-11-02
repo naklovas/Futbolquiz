@@ -24,6 +24,7 @@ using System.Text.RegularExpressions;
 //   Credentials:Username / Password, Servers[{Name, Ip}], VifgIds, SourcePathType, AppResponseIgnoreSslErrors
 // appsettings.Production.json varsa üzerine yazılır (DeltaFlow gibi). Birden fazla cihaz: --cihaz <sıra (0'dan) | ad>, yoksa ilki.
 const int TopN = 100000;
+const string Metrik = "sum_tls.session_attempted";   // tls_handshakes: Handshakes Attempted
 var jsonSec = new JsonDocumentOptions { CommentHandling = JsonCommentHandling.Skip, AllowTrailingCommas = true };
 JsonObject? Oku(string ad) =>
     new[] { Path.Combine(AppContext.BaseDirectory, ad), ad }.FirstOrDefault(File.Exists) is string y ? JsonNode.Parse(File.ReadAllText(y), null, jsonSec) as JsonObject : null;
@@ -141,15 +142,37 @@ switch (args[0].ToLowerInvariant())
                 catch (Exception ex) { Console.WriteLine($"  ✗ {k}: {Kisalt(ex.Message, 160)}"); }
             }
             if (gecerli.Count == 0) { Console.WriteLine("Geçerli TLS kolonu yok. 'kaynaklar' çıktısındaki diğer kaynakları deneyin (4. parametre)."); return 2; }
-            var satirlar = await RaporAsync(kaynak, [.. anahtar, .. gecerli], filtre, Pencere(dk), true);
+            // Cihaz tarafında gruplama: istemci × sunucu × port × TLS kolonları + el sıkışması sayısı (metrik)
+            string[] grupKol = [.. anahtar, .. gecerli];
+            List<List<JsonNode?>> satirlar;
+            bool metrikVar = false;
+            try
+            {
+                var zaman = Pencere(dk);
+                try { satirlar = await RaporAsync(kaynak, [.. grupKol, Metrik], filtre, zaman, true, grupKol); metrikVar = true; }
+                catch (Exception ex1)
+                {
+                    Console.WriteLine($"  gruplu + {Metrik} olmadı ({Kisalt(ex1.Message, 150)}); metriksiz gruplu deneniyor");
+                    satirlar = await RaporAsync(kaynak, grupKol, filtre, zaman, true, grupKol);
+                }
+                Console.WriteLine($"  ✓ cihaz tarafında gruplandı{(metrikVar ? $" ({Metrik} = el sıkışması sayısı)" : "")}");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"  ⚠ gruplu rapor olmadı ({Kisalt(ex.Message, 200)}); ham satırlar alınıyor (100.000 sınırı)");
+                satirlar = await RaporAsync(kaynak, grupKol, filtre, Pencere(dk), true);
+            }
+            int mi = grupKol.Length;   // metrik kolonun sırası (varsa); son kolon her zaman cihaz adı
+            long Sayi(List<JsonNode?> r) => metrikVar && r.Count > mi + 1 && double.TryParse(Deger(r[mi]), System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out double d) ? (long)d : 1;
             Console.WriteLine($"\n{ip} · {(sabitBas != null ? "sabit aralık" : $"son {dk} dk")} · {satirlar.Count} satır (kaynak {kaynak})");
             // port × TLS değerleri → bağlantı sayısı, istemci sayısı
             var ozet = satirlar.Where(r => r.Count >= 3 + gecerli.Count)
                 .GroupBy(r => (Port: Deger(r[2]), Tls: string.Join(" | ", gecerli.Select((k, i) => $"{k}={Deger(r[3 + i])}"))))
-                .Select(g => (g.Key.Port, g.Key.Tls, Adet: g.Count(), Istemci: g.Select(r => Deger(r[0])).Distinct().Count(), Cihaz: string.Join(",", g.Select(r => Deger(r[^1])).Distinct())))
+                .Select(g => (g.Key.Port, g.Key.Tls, Adet: g.Sum(Sayi), Istemci: g.Select(r => Deger(r[0])).Distinct().Count(), Cihaz: string.Join(",", g.Select(r => Deger(r[^1])).Distinct()),
+                    Ilk: string.Join(" ", g.GroupBy(r => Deger(r[0])).OrderByDescending(c => c.Sum(Sayi)).Take(3).Select(c => $"{c.Key}({c.Sum(Sayi)})"))))
                 .OrderBy(x => int.TryParse(x.Port, out int p) ? p : 99999).ThenByDescending(x => x.Adet);
-            Console.WriteLine($"{"Port",-7} {"Satır",7} {"İstemci",8}  {"Cihaz",-14} TLS");
-            foreach (var o in ozet) Console.WriteLine($"{o.Port,-7} {o.Adet,7} {o.Istemci,8}  {o.Cihaz,-14} {o.Tls}");
+            Console.WriteLine($"{"Port",-7} {(metrikVar ? "ElSıkış" : "Satır"),8} {"İstemci",8}  {"Cihaz",-14} TLS   ‖ en çok bağlanan istemciler");
+            foreach (var o in ozet) Console.WriteLine($"{o.Port,-7} {o.Adet,8} {o.Istemci,8}  {o.Cihaz,-14} {o.Tls}   ‖ {o.Ilk}");
             if (satirlar.Count >= TopN) Console.WriteLine($"  ⚠ {TopN} satır sınırına ulaşıldı: bazı portlar kesilmiş olabilir (süreyi kısaltın).");
 
             // Karşılaştırma: aynı aralıkta flow_tcp'de gelen trafiği olan ama TLS el sıkışması görülmeyen portlar
@@ -158,7 +181,11 @@ switch (args[0].ToLowerInvariant())
                 try
                 {
                     var tlsPort = satirlar.Where(r => r.Count > 2).Select(r => Deger(r[2])).ToHashSet();
-                    var akis = await RaporAsync("flow_tcp", ["cli_tcp.ip", "srv_tcp.ip", "srv_tcp.port"], $"srv_tcp.ip == {ip}", Pencere(dk), true);
+                    string[] fk = ["cli_tcp.ip", "srv_tcp.ip", "srv_tcp.port"];
+                    var fz = Pencere(dk);
+                    List<List<JsonNode?>> akis;
+                    try { akis = await RaporAsync("flow_tcp", fk, $"srv_tcp.ip == {ip}", fz, true, fk); }
+                    catch (Exception exg) { Console.WriteLine($"  flow_tcp gruplu olmadı ({Kisalt(exg.Message, 120)}); ham"); akis = await RaporAsync("flow_tcp", fk, $"srv_tcp.ip == {ip}", fz, true); }
                     var portlar = akis.Where(r => r.Count > 2).GroupBy(r => Deger(r[2]))
                         .Select(g => (Port: g.Key, Satir: g.Count(), Istemci: g.Select(r => Deger(r[0])).Distinct().Count(), Cihaz: string.Join(",", g.Select(r => Deger(r[^1])).Distinct())))
                         .OrderBy(x => int.TryParse(x.Port, out int p) ? p : 99999).ToList();
@@ -313,7 +340,7 @@ async Task<List<(string Id, string Etiket)>> KolonlarAsync(string kaynak)
 
 // Tek data_def'li rapor: oluştur → bekle → veri → sil
 // Tüm hedef cihazlarda çalıştırır, satırları birleştirir. Bir cihaz hata verirse diğerleri devam eder; hepsi hata verirse ilk hata fırlatılır.
-async Task<List<List<JsonNode?>>> RaporAsync(string kaynak, string[] kolonlar, string filtre, (long Bas, long Bit) zaman, bool yaz = false)
+async Task<List<List<JsonNode?>>> RaporAsync(string kaynak, string[] kolonlar, string filtre, (long Bas, long Bit) zaman, bool yaz = false, string[]? grup = null)
 {
     var tum = new List<List<JsonNode?>>();
     var hatalar = new List<string>();
@@ -327,7 +354,7 @@ async Task<List<List<JsonNode?>>> RaporAsync(string kaynak, string[] kolonlar, s
                 baseUrl = $"https://{h.Ip}";
                 if (!tokenler.TryGetValue(h.Ip, out var t)) tokenler[h.Ip] = t = await TokenAsync();
                 jwt = t;
-                var r = await RaporTekAsync(kaynak, kolonlar, filtre, zaman, yaz ? h.Ad : null);
+                var r = await RaporTekAsync(kaynak, kolonlar, filtre, zaman, yaz ? h.Ad : null, grup);
                 foreach (var satir in r) satir.Add(JsonValue.Create(h.Ad));   // son kolon: cihaz
                 if (yaz && hedefler.Count > 1) Console.WriteLine($"  [{h.Ad}] {r.Count} satır");
                 tum.AddRange(r);
@@ -344,19 +371,18 @@ async Task<List<List<JsonNode?>>> RaporAsync(string kaynak, string[] kolonlar, s
     return tum;
 }
 
-async Task<List<List<JsonNode?>>> RaporTekAsync(string kaynak, string[] kolonlar, string filtre, (long Bas, long Bit) zaman, string? yazAd)
+async Task<List<List<JsonNode?>>> RaporTekAsync(string kaynak, string[] kolonlar, string filtre, (long Bas, long Bit) zaman, string? yazAd, string[]? grup = null)
 {
     var (bas, bitis) = zaman;
     var sonuc = new List<List<JsonNode?>>();
     foreach (var vifg in vifgler.Count > 0 ? vifgler : [""])
     {
         object src = vifg == "" ? new { name = kaynak } : new { name = kaynak, path = $"{yolTuru}/{vifg}" };
-        var payload = new
-        {
-            info = new { name = "DeltaFlow TLS deneme", description = "" },
-            data_defs = new[] { new { source = src, columns = kolonlar, time = new { start = bas.ToString(), end = bitis.ToString() },
-                filters = new object[] { new { id = "f", type = "STEELFILTER", value = filtre } }, topn = TopN } }
-        };
+        // grup verilirse cihaz kendisi toplar (group_by): her kombinasyon tek satır → 100.000 satır sınırına takılmaz
+        var dd = JsonSerializer.SerializeToNode(new { source = src, columns = kolonlar, time = new { start = bas.ToString(), end = bitis.ToString() },
+            filters = new object[] { new { id = "f", type = "STEELFILTER", value = filtre } }, topn = TopN })!.AsObject();
+        if (grup != null) dd["group_by"] = JsonSerializer.SerializeToNode(grup);
+        var payload = new JsonObject { ["info"] = new JsonObject { ["name"] = "DeltaFlow TLS deneme", ["description"] = "" }, ["data_defs"] = new JsonArray(dd) };
         using var cr = await http.SendAsync(Req(HttpMethod.Post, $"{baseUrl}/api/npm.reports/1.0/instances", payload));
         string cb = await cr.Content.ReadAsStringAsync();
         if (!cr.IsSuccessStatusCode) throw new Exception($"Rapor oluşturulamadı HTTP {(int)cr.StatusCode}: {cb}");
