@@ -5,4 +5,8 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
+  <ItemGroup>
+    <!-- Visual Studio exe'yi bin\Debug\net9.0 içinde çalıştırır: proje klasöründeki ayar dosyaları oraya kopyalanır -->
+    <None Update="appsettings.json;appsettings.Production.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>

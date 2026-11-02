@@ -31,6 +31,13 @@ static void Birlestir(JsonObject hedef, JsonObject ek)
 var ayar = Oku("appsettings.json") ?? throw new FileNotFoundException("appsettings.json bulunamadı (DeltaFlow'unkini bu klasöre kopyalayın).");
 if (Oku("appsettings.Production.json") is JsonObject prod) Birlestir(ayar, prod);
 
+// Visual Studio'dan argümansız başlatılırsa komut sorulur
+if (args.Length == 0)
+{
+    Console.WriteLine("Komut girin (ör: kaynaklar  |  tls 10.1.2.3 60  |  --cihaz 1 kaynaklar  |  ham 10.1.2.3 30 flow_tcp cli_tcp.ip,srv_tcp.ip,srv_tcp.port):");
+    Console.Write("> ");
+    args = (Console.ReadLine() ?? "").Split(' ', StringSplitOptions.RemoveEmptyEntries);
+}
 var argl = args.ToList();
 string? cihazSec = null;
 if (argl.IndexOf("--cihaz") is int ci and >= 0 && ci + 1 < argl.Count) { cihazSec = argl[ci + 1]; argl.RemoveRange(ci, 2); }
