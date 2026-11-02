@@ -8,6 +8,8 @@
 //        Kolon verilmezse "kaynaklar" ile bulunan SSL/TLS kolonları tek tek denenir; geçersiz olan atlanır.
 //   dotnet run -- kolonlar <kaynak> [regex]
 //        Kaynağın tüm kolonları (ör: kolonlar tls_handshakes ip|port).
+//   --port 443,8443 : yalnız bu portlar (büyük veride rapor hızlanır)
+//   --bas / --bit "2026-11-01 09:00" : sabit aralık · --bekle <sn> : rapor bekleme (600)
 //   --anahtar istemciIp,sunucuIp,sunucuPort  : tls / ham için kaynağın IP-port kolon adları (varsayılan cli_tcp.ip,srv_tcp.ip,srv_tcp.port)
 //   dotnet run -- ham <sunucu-ip> <dakika> <kaynak> <kolon1,kolon2,...>
 //        Verilen kolonlarla ham satırları yazar (ilk 50).
@@ -61,6 +63,10 @@ long? Zaman(string? v)
 }
 long? sabitBas = Zaman(Opsiyon("--bas")), sabitBit = Zaman(Opsiyon("--bit"));
 int BekleSn = int.TryParse(Opsiyon("--bekle"), out int bk) ? bk : 600;
+// --port 443  ya da  --port 443,8443 : yalnız bu sunucu portları (veri azalır, rapor hızlanır)
+var portSec = Opsiyon("--port")?.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries).ToList();
+if (portSec?.Any(x => !int.TryParse(x, out _)) == true) { Console.WriteLine("--port sayı olmalı (ör: --port 443,8443)"); return 1; }
+string PortF(string kolon) => portSec is { Count: > 0 } ? " and (" + string.Join(" or ", portSec.Select(x => $"{kolon} == {x}")) + ")" : "";
 (long, long) Simdi(int dk) { long b = DateTimeOffset.UtcNow.ToUnixTimeSeconds(); return (b - dk * 60L, b); }
 (long, long) Pencere(int dk)
 {
@@ -134,7 +140,8 @@ switch (args[0].ToLowerInvariant())
                 }
                 else Console.WriteLine($"'{kaynak}' SSL/TLS kolonları: {string.Join(", ", aday)}");
             }
-            string filtre = $"{anahtar[1]} == {ip}";
+            string filtre = $"{anahtar[1]} == {ip}" + PortF(anahtar[2]);
+            if (portSec != null) Console.WriteLine($"  port süzgeci: {string.Join(", ", portSec)}");
             // önce anahtar kolonların kendisi (bu kaynakta yoksa her TLS kolonu boşuna ✗ olur)
             try { await RaporAsync(kaynak, anahtar, filtre, Simdi(5)); Console.WriteLine($"  ✓ anahtar kolonlar: {string.Join(", ", anahtar)}"); }
             catch (Exception ex)
@@ -193,8 +200,8 @@ switch (args[0].ToLowerInvariant())
                     string[] fk = ["cli_tcp.ip", "srv_tcp.ip", "srv_tcp.port"];
                     var fz = Pencere(dk);
                     List<List<JsonNode?>> akis;
-                    try { akis = await RaporAsync("flow_tcp", fk, $"srv_tcp.ip == {ip}", fz, true, fk); }
-                    catch (Exception exg) { Console.WriteLine($"  flow_tcp gruplu olmadı ({Kisalt(exg.Message, 120)}); ham"); akis = await RaporAsync("flow_tcp", fk, $"srv_tcp.ip == {ip}", fz, true); }
+                    try { akis = await RaporAsync("flow_tcp", fk, $"srv_tcp.ip == {ip}" + PortF("srv_tcp.port"), fz, true, fk); }
+                    catch (Exception exg) { Console.WriteLine($"  flow_tcp gruplu olmadı ({Kisalt(exg.Message, 120)}); ham"); akis = await RaporAsync("flow_tcp", fk, $"srv_tcp.ip == {ip}" + PortF("srv_tcp.port"), fz, true); }
                     var portlar = akis.Where(r => r.Count > 2).GroupBy(r => Deger(r[2]))
                         .Select(g => (Port: g.Key, Satir: g.Count(), Istemci: g.Select(r => Deger(r[0])).Distinct().Count(), Cihaz: string.Join(",", g.Select(r => Deger(r[^1])).Distinct())))
                         .OrderBy(x => int.TryParse(x.Port, out int p) ? p : 99999).ToList();
