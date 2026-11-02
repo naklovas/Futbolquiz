@@ -1,0 +1,4 @@
+ayar.json
+bin/
+obj/
+*.dump.json
