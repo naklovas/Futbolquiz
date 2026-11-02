@@ -12,7 +12,8 @@
 //   dotnet run -- ham <sunucu-ip> <dakika> <kaynak> <kolon1,kolon2,...>
 //        Verilen kolonlarla ham satırları yazar (ilk 50).
 // Ayarlar: DeltaFlow'un appsettings.json'u (aynı yapı) bu klasöre kopyalanır. Şifre repoya girmez.
-//   Birden fazla AppResponse cihazı varsa: dotnet run -- --cihaz 1 kaynaklar   (ya da --cihaz Riverbed-2)
+//   Raporlar (tls / ham) Servers listesindeki TÜM cihazlardan alınıp birleştirilir. Tek cihaz: --cihaz 1 (sıra 0'dan) ya da --cihaz Riverbed-2.
+//   kaynaklar / kolonlar ilk (ya da seçilen) cihazdan okunur.
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
@@ -22,6 +23,7 @@ using System.Text.RegularExpressions;
 // Ayarlar: DeltaFlow'un appsettings.json'u ile AYNI yapı (dosya olduğu gibi kopyalanabilir). Kullanılan anahtarlar:
 //   Credentials:Username / Password, Servers[{Name, Ip}], VifgIds, SourcePathType, AppResponseIgnoreSslErrors
 // appsettings.Production.json varsa üzerine yazılır (DeltaFlow gibi). Birden fazla cihaz: --cihaz <sıra (0'dan) | ad>, yoksa ilki.
+const int TopN = 100000;
 var jsonSec = new JsonDocumentOptions { CommentHandling = JsonCommentHandling.Skip, AllowTrailingCommas = true };
 JsonObject? Oku(string ad) =>
     new[] { Path.Combine(AppContext.BaseDirectory, ad), ad }.FirstOrDefault(File.Exists) is string y ? JsonNode.Parse(File.ReadAllText(y), null, jsonSec) as JsonObject : null;
@@ -69,11 +71,16 @@ var handler = new HttpClientHandler();
 if (ayar["AppResponseIgnoreSslErrors"]?.ToString()?.ToLowerInvariant() != "false") handler.ServerCertificateCustomValidationCallback = (_, _, _, _) => true;
 var http = new HttpClient(handler) { Timeout = TimeSpan.FromMinutes(3) };
 string baseUrl = $"https://{cihaz}";
+// Raporlar varsayılan olarak TÜM cihazlardan alınır (DeltaFlow QueryAnyAsync gibi); --cihaz verilirse yalnız o
+var hedefler = (cihazSec == null ? sunucular : [secili!])
+    .Select(x => (Ad: x["Name"]?.ToString() ?? "AppResponse", Ip: x["Ip"]?.ToString()?.Trim() ?? "")).Where(x => x.Ip != "").ToList();
+var tokenler = new Dictionary<string, string>();
 
 if (args.Length == 0) { Console.WriteLine("Komut: kaynaklar | tls <ip> [dakika] [kaynak] [kolonlar] | ham <ip> <dakika> <kaynak> <kolonlar>"); return 1; }
 
 string jwt = await TokenAsync();
-Console.WriteLine($"Token alındı ({cihazAd} / {cihaz}).");
+tokenler[cihaz] = jwt;
+Console.WriteLine($"Token alındı ({cihazAd} / {cihaz}). Raporlar: {(hedefler.Count > 1 ? $"{hedefler.Count} cihaz ({string.Join(", ", hedefler.Select(h => h.Ad))})" : hedefler[0].Ad)}");
 
 switch (args[0].ToLowerInvariant())
 {
@@ -121,7 +128,7 @@ switch (args[0].ToLowerInvariant())
                 catch (Exception ex) { Console.WriteLine($"  ✗ {k}: {Kisalt(ex.Message, 160)}"); }
             }
             if (gecerli.Count == 0) { Console.WriteLine("Geçerli TLS kolonu yok. 'kaynaklar' çıktısındaki diğer kaynakları deneyin (4. parametre)."); return 2; }
-            var satirlar = await RaporAsync(kaynak, [.. anahtar, .. gecerli], filtre, dk);
+            var satirlar = await RaporAsync(kaynak, [.. anahtar, .. gecerli], filtre, dk, true);
             Console.WriteLine($"\n{ip} · son {dk} dk · {satirlar.Count} satır (kaynak {kaynak})");
             // port × TLS değerleri → bağlantı sayısı, istemci sayısı
             var ozet = satirlar.Where(r => r.Count >= 3 + gecerli.Count)
@@ -130,6 +137,26 @@ switch (args[0].ToLowerInvariant())
                 .OrderBy(x => int.TryParse(x.Port, out int p) ? p : 99999).ThenByDescending(x => x.Adet);
             Console.WriteLine($"{"Port",-7} {"Satır",7} {"İstemci",8}  TLS");
             foreach (var o in ozet) Console.WriteLine($"{o.Port,-7} {o.Adet,7} {o.Istemci,8}  {o.Tls}");
+            if (satirlar.Count >= TopN) Console.WriteLine($"  ⚠ {TopN} satır sınırına ulaşıldı: bazı portlar kesilmiş olabilir (süreyi kısaltın).");
+
+            // Karşılaştırma: aynı aralıkta flow_tcp'de gelen trafiği olan ama TLS el sıkışması görülmeyen portlar
+            if (kaynak != "flow_tcp")
+            {
+                try
+                {
+                    var tlsPort = satirlar.Where(r => r.Count > 2).Select(r => Deger(r[2])).ToHashSet();
+                    var akis = await RaporAsync("flow_tcp", ["cli_tcp.ip", "srv_tcp.ip", "srv_tcp.port"], $"srv_tcp.ip == {ip}", dk, true);
+                    var portlar = akis.Where(r => r.Count > 2).GroupBy(r => Deger(r[2]))
+                        .Select(g => (Port: g.Key, Satir: g.Count(), Istemci: g.Select(r => Deger(r[0])).Distinct().Count()))
+                        .OrderBy(x => int.TryParse(x.Port, out int p) ? p : 99999).ToList();
+                    Console.WriteLine($"\nflow_tcp karşılaştırması (aynı {dk} dk): {portlar.Count} portta gelen trafik var, {portlar.Count(x => tlsPort.Contains(x.Port))} tanesinde TLS el sıkışması görüldü.");
+                    Console.WriteLine($"{"Port",-7} {"Satır",7} {"İstemci",8}  Durum");
+                    foreach (var x in portlar)
+                        Console.WriteLine($"{x.Port,-7} {x.Satir,7} {x.Istemci,8}  {(tlsPort.Contains(x.Port) ? "TLS ✓" : "el sıkışması yok" + Ipucu(x.Port))}");
+                    if (akis.Count >= TopN) Console.WriteLine($"  ⚠ flow_tcp {TopN} satır sınırına ulaştı.");
+                }
+                catch (Exception ex) { Console.WriteLine("flow_tcp karşılaştırması yapılamadı: " + Kisalt(ex.Message, 200)); }
+            }
             break;
         }
     case "kolonlar":
@@ -272,7 +299,38 @@ async Task<List<(string Id, string Etiket)>> KolonlarAsync(string kaynak)
 }
 
 // Tek data_def'li rapor: oluştur → bekle → veri → sil
-async Task<List<List<JsonNode?>>> RaporAsync(string kaynak, string[] kolonlar, string filtre, int dakika)
+// Tüm hedef cihazlarda çalıştırır, satırları birleştirir. Bir cihaz hata verirse diğerleri devam eder; hepsi hata verirse ilk hata fırlatılır.
+async Task<List<List<JsonNode?>>> RaporAsync(string kaynak, string[] kolonlar, string filtre, int dakika, bool yaz = false)
+{
+    var tum = new List<List<JsonNode?>>();
+    var hatalar = new List<string>();
+    string anaUrl = baseUrl, anaJwt = jwt;
+    try
+    {
+        foreach (var h in hedefler)
+        {
+            try
+            {
+                baseUrl = $"https://{h.Ip}";
+                if (!tokenler.TryGetValue(h.Ip, out var t)) tokenler[h.Ip] = t = await TokenAsync();
+                jwt = t;
+                var r = await RaporTekAsync(kaynak, kolonlar, filtre, dakika);
+                if (yaz && hedefler.Count > 1) Console.WriteLine($"  [{h.Ad}] {r.Count} satır");
+                tum.AddRange(r);
+            }
+            catch (Exception ex)
+            {
+                hatalar.Add($"[{h.Ad}] {ex.Message}");
+                if (yaz) Console.WriteLine($"  [{h.Ad}] HATA: {Kisalt(ex.Message, 200)}");
+            }
+        }
+    }
+    finally { baseUrl = anaUrl; jwt = anaJwt; }
+    if (hatalar.Count == hedefler.Count) throw new Exception(string.Join(" | ", hatalar));
+    return tum;
+}
+
+async Task<List<List<JsonNode?>>> RaporTekAsync(string kaynak, string[] kolonlar, string filtre, int dakika)
 {
     long bitis = DateTimeOffset.UtcNow.ToUnixTimeSeconds(), bas = bitis - dakika * 60L;
     var sonuc = new List<List<JsonNode?>>();
@@ -283,7 +341,7 @@ async Task<List<List<JsonNode?>>> RaporAsync(string kaynak, string[] kolonlar, s
         {
             info = new { name = "DeltaFlow TLS deneme", description = "" },
             data_defs = new[] { new { source = src, columns = kolonlar, time = new { start = bas.ToString(), end = bitis.ToString() },
-                filters = new object[] { new { id = "f", type = "STEELFILTER", value = filtre } }, topn = 10000 } }
+                filters = new object[] { new { id = "f", type = "STEELFILTER", value = filtre } }, topn = TopN } }
         };
         using var cr = await http.SendAsync(Req(HttpMethod.Post, $"{baseUrl}/api/npm.reports/1.0/instances", payload));
         string cb = await cr.Content.ReadAsStringAsync();
@@ -314,5 +372,17 @@ async Task<List<List<JsonNode?>>> RaporAsync(string kaynak, string[] kolonlar, s
     return sonuc;
 }
 
+// Bilinen portlarda TLS neden el sıkışması olarak görünmeyebilir
+static string Ipucu(string port) => port switch
+{
+    "1433" => " (SQL Server: TLS TDS paketinin içinde, ayrı el sıkışması görünmez)",
+    "3389" => " (RDP: TLS CredSSP / X.224 içinde)",
+    "389" or "3268" => " (LDAP: StartTLS ya da düz)",
+    "445" or "139" => " (SMB: TLS değil, SMB3 şifrelemesi)",
+    "25" or "587" or "21" => " (StartTLS: düz başlar)",
+    "80" or "8080" => " (büyük ihtimalle düz HTTP)",
+    "135" or "5985" => " (RPC / WinRM HTTP: TLS değil)",
+    _ => ""
+};
 static string Deger(JsonNode? n) => n switch { null => "", JsonValue v => v.ToString(), _ => n.ToJsonString() } is { Length: > 0 } s ? s : "(boş)";
 static string Kisalt(string s, int n) => s.Length <= n ? s : s[..n] + "…";
