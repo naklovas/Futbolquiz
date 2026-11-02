@@ -8,6 +8,7 @@
 //        Kolon verilmezse "kaynaklar" ile bulunan SSL/TLS kolonları tek tek denenir; geçersiz olan atlanır.
 //   dotnet run -- kolonlar <kaynak> [regex]
 //        Kaynağın tüm kolonları (ör: kolonlar tls_handshakes ip|port).
+//   --grupsuz : tls'de gruplama yok, her iletişim ayrı satır (CSV'ye de yazılır)
 //   --yon gelen | giden | ikisi (varsayılan) : IP sunucu olarak mı, istemci olarak mı
 //   --port 443,8443 : yalnız bu portlar (büyük veride rapor hızlanır)
 //   --bas / --bit "2026-11-01 09:00" : sabit aralık · --bekle <sn> : rapor bekleme (600)
@@ -66,6 +67,7 @@ long? sabitBas = Zaman(Opsiyon("--bas")), sabitBit = Zaman(Opsiyon("--bit"));
 int BekleSn = int.TryParse(Opsiyon("--bekle"), out int bk) ? bk : 600;
 // --port 443  ya da  --port 443,8443 : yalnız bu sunucu portları (veri azalır, rapor hızlanır)
 string yon = (Opsiyon("--yon") ?? "ikisi").ToLowerInvariant();
+bool grupsuz = argl.Remove("--grupsuz");   // tls: gruplama denemeden ham satırlar (her iletişim ayrı satır)
 if (yon is not ("gelen" or "giden" or "ikisi")) { Console.WriteLine("--yon gelen | giden | ikisi"); return 1; }
 var portSec = Opsiyon("--port")?.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries).ToList();
 if (portSec?.Any(x => !int.TryParse(x, out _)) == true) { Console.WriteLine("--port sayı olmalı (ör: --port 443,8443)"); return 1; }
@@ -179,7 +181,7 @@ switch (args[0].ToLowerInvariant())
             List<List<JsonNode?>> satirlar = [];
             bool metrikVar = false, oldu = false;
             var zaman = Pencere(dk);
-            foreach (var d in denemeler.DistinctBy(d => string.Join(",", d.Tls) + "|" + string.Join(",", d.Grup ?? [])))
+            foreach (var d in grupsuz ? [] : denemeler.DistinctBy(d => string.Join(",", d.Tls) + "|" + string.Join(",", d.Grup ?? [])))
             {
                 try
                 {
@@ -192,8 +194,10 @@ switch (args[0].ToLowerInvariant())
             }
             if (!oldu)
             {
-                Console.WriteLine("  ⚠ hiçbir gruplama olmadı; ham satırlar alınıyor (100.000 sınırı — --port ve kısa aralık kullanın)");
+                Console.WriteLine(grupsuz ? "  gruplamasız: her iletişim ayrı satır (cihaz başına en fazla 100.000 — --port ve kısa aralık kullanın)"
+                    : "  ⚠ hiçbir gruplama olmadı; ham satırlar alınıyor (100.000 sınırı — --port ve kısa aralık kullanın)");
                 satirlar = await RaporAsync(kaynak, [.. anahtar, .. gecerli], filtre, zaman, true);
+                CsvYaz($"tls_{ip}", [.. anahtar, .. gecerli], satirlar);
             }
             string[] grupKol = [.. anahtar, .. gecerli];
             int mi = grupKol.Length;   // metrik kolonun sırası (varsa); son kolon her zaman cihaz adı
@@ -257,10 +261,15 @@ switch (args[0].ToLowerInvariant())
         {
             if (args.Length < 5) { Console.WriteLine("ham <ip> <dakika> <kaynak> <kolon1,kolon2>"); return 1; }
             var kol = args[4].Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToArray();
-            var satirlar = await RaporAsync(args[3], kol, $"{anahtar[0]} == {args[1]} or {anahtar[1]} == {args[1]}", Pencere(int.Parse(args[2])), true);
-            Console.WriteLine(string.Join(" ; ", kol));
-            foreach (var r in satirlar.Take(50)) Console.WriteLine(string.Join(" ; ", r.Select(x => Deger(x))));
-            Console.WriteLine($"({satirlar.Count} satır)");
+            string hip = args[1];
+            string hg = $"{anahtar[1]} == {hip}" + PortF(anahtar[2]), hd = $"{anahtar[0]} == {hip}" + PortF(anahtar[2]);
+            string hf = yon switch { "gelen" => hg, "giden" => hd, _ => $"({hg}) or ({hd})" };
+            Console.WriteLine($"  filtre: {hf}");
+            var satirlar = await RaporAsync(args[3], kol, hf, Pencere(int.Parse(args[2])), true);
+            Console.WriteLine(string.Join(" ; ", kol) + " ; cihaz");
+            foreach (var r in satirlar.Take(50)) Console.WriteLine(string.Join(" ; ", r.Select((x, i) => i < kol.Length && kol[i] == "tls.version" ? TlsAd(Deger(x)) : Deger(x))));
+            Console.WriteLine($"({satirlar.Count} satır; ilk 50 gösterildi)");
+            CsvYaz($"ham_{hip}", kol, satirlar);
             break;
         }
     default: Console.WriteLine("Bilinmeyen komut."); return 1;
@@ -481,6 +490,19 @@ static string Ipucu(string port) => port switch
     "135" or "5985" => " (RPC / WinRM HTTP: TLS değil)",
     _ => ""
 };
+// Tüm satırlar CSV'ye (Excel için ; ayraçlı, UTF-8 BOM); son kolon cihaz
+static void CsvYaz(string ad, string[] kol, List<List<JsonNode?>> satirlar)
+{
+    string dosya = $"{ad}_{DateTime.Now:yyyyMMdd_HHmmss}.csv".Replace(':', '_');
+    static string Q(string v) => v.Contains(';') || v.Contains('"') ? "\"" + v.Replace("\"", "\"\"") + "\"" : v;
+    var sb = new StringBuilder();
+    sb.AppendLine(string.Join(";", kol.Append("cihaz")));
+    foreach (var r in satirlar)
+        sb.AppendLine(string.Join(";", r.Select((x, i) => Q(i < kol.Length && kol[i] == "tls.version" ? TlsAd(Deger(x)) : Deger(x)))));
+    File.WriteAllText(dosya, sb.ToString(), new UTF8Encoding(true));
+    Console.WriteLine($"  CSV: {Path.GetFullPath(dosya)} ({satirlar.Count} satır)");
+}
+
 // AppResponse hata JSON'undan okunur metin: messages[].text + details
 static string HataMetni(string m)
 {
