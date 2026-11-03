@@ -273,11 +273,19 @@ switch (args[0].ToLowerInvariant())
             // yön kolonu: istemci / sunucu IP kolonları listede varsa
             int ci2 = Array.IndexOf(kol, anahtar[0]), si2 = Array.IndexOf(kol, anahtar[1]);
             bool yonVar = ci2 >= 0 && si2 >= 0;
-            if (yonVar) foreach (var r in satirlar) r.Add(JsonValue.Create(YonBul(Deger(r[ci2]), Deger(r[si2]), hip)));
+            if (yonVar)
+            {
+                foreach (var r in satirlar) r.Add(JsonValue.Create(YonBul(Deger(r[ci2]), Deger(r[si2]), hip)));
+                // ekranda ve CSV'de önce gelenler (az olan taraf ilk 50'nin dışında kalmasın)
+                int Sira(string y) => y switch { "gelen" => 0, "kendine" => 1, "belirsiz" => 2, _ => 3 };
+                satirlar = satirlar.OrderBy(r => Sira(Deger(r[^1]))).ToList();
+            }
             else Console.WriteLine($"  (yön kolonu için {anahtar[0]} ve {anahtar[1]} kolonları da listede olmalı)");
             Console.WriteLine(string.Join(" ; ", kol) + " ; cihaz" + (yonVar ? " ; yön" : ""));
-            foreach (var r in satirlar.Take(50)) Console.WriteLine(string.Join(" ; ", r.Select((x, i) => i < kol.Length && kol[i] == "tls.version" ? TlsAd(Deger(x)) : Deger(x))));
-            Console.WriteLine($"({satirlar.Count} satır; ilk 50 gösterildi)");
+            // gelenlerin hepsi + toplam en az 50 satır
+            int goster = Math.Max(50, yonVar ? satirlar.Count(r => Deger(r[^1]) != "giden") : 0);
+            foreach (var r in satirlar.Take(goster)) Console.WriteLine(string.Join(" ; ", r.Select((x, i) => i < kol.Length && kol[i] == "tls.version" ? TlsAd(Deger(x)) : Deger(x))));
+            Console.WriteLine($"({satirlar.Count} satır; ilk {Math.Min(goster, satirlar.Count)} gösterildi, gelenler önce — tamamı CSV'de)");
             CsvYaz($"ham_{hip}", kol, satirlar, yonVar ? ["yön"] : []);
             if (yonVar) Console.WriteLine("  yön: " + string.Join(", ", satirlar.GroupBy(r => Deger(r[^1])).Select(g => $"{g.Key} {g.Count()}")));
             break;
