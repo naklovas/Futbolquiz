@@ -509,7 +509,9 @@ erişim talepleri) — DB → şema → tablo ve kim erişiyor bilgisi buradan b
   aralık seçici 1 / 6 / 24 saat. Uç 404 → "DLL güncel değil". Sahte AppResponse ile backend, mock'la arayüz test edildi.
   TOPLU (kullanıcı: "Excel'den bir kolon IP girip karşılığı olan port – uygulama – TLS versiyonu"): sekme çubuğunda "TLS toplu sorgu"
   (`wwwroot/tlstoplu.js`, `data-ui="tls"`, `?tls=1`; tarih / kaynak / Sorgula gizli). IP'ler metinden regex ile (satır / sekme / virgül; başlık ve
-  port sütunu yok sayılır) ya da CSV / TXT dosyasından. Arka plan işi (`TlsToplu`, IIS zaman aşımı): POST `/api/tls/toplu {ips, saat}` → id,
+  port sütunu yok sayılır) ya da dosyadan: .xlsx / .xlsm (kullanıcı: Excel seçince kutuya ikili veri düşüp "IP bulunamadı" oldu → `ttXlsxMetni`:
+  zip merkezi dizini elle okunur, xl/sharedStrings.xml + xl/worksheets/*.xml `DecompressionStream("deflate-raw")` ile açılır, etiketler atılır;
+  dış kütüphane yok), .xls (OLE2: latin1 + UTF-16 olarak taranır), CSV / TXT (UTF-8, BOM'lu UTF-16); kutuya yalnız bulunan IP'ler yazılır. Arka plan işi (`TlsToplu`, IIS zaman aşımı): POST `/api/tls/toplu {ips, saat}` → id,
   GET `/api/tls/toplu/{id}` (3 sn), POST `…/durdur`; `Tls:TopluParca`=20 IP'lik gruplar sırayla, `Tls:TopluMaxIp`=500, iş 1 saat bellekte.
   Ortak çekirdek `TlsAkis.CekAsync(ips, …, gelenYalniz)` (tek IP paneli de kullanır); toplu yalnız GELEN (srv IN grup). Satır = IP × port:
   ERT portları ∪ TLS görülen portlar; uygulama ERT IP + port (port ERT'de yoksa IP'nin uygulaması "(IP)"); sürüm yüzdeleri, el sıkışması, istemci,

@@ -27,12 +27,12 @@ function ttShell() {
   $("#main").innerHTML = `<section class="panel" id="ttShell">
     <div class="toolbar"><h2 style="margin:0">🔒 TLS toplu sorgu <span class="small muted">AppResponse · IP başına port, uygulama ve kullanılan TLS sürümü</span></h2></div>
     <div class="tt-giris">
-      <label style="flex:1">IP listesi <span class="small muted">(Excel'den kolonu kopyalayıp yapıştırın; satır / sekme / virgül fark etmez)</span>
+      <label style="flex:1">IP listesi <span class="small muted">(Excel'den kolonu kopyalayıp yapıştırın ya da sağdan Excel / CSV dosyası seçin)</span>
         <textarea id="ttIp" rows="7" class="mono" placeholder="10.50.20.15&#10;10.50.20.16&#10;…">${esc(tt.metin)}</textarea></label>
       <div class="tt-yan">
         <div id="ttSay" class="small muted"></div>
         <label>Aralık <select id="ttSaat">${[1, 6, 24].map(h => `<option value="${h}"${tt.saat === h ? " selected" : ""}>son ${h} saat</option>`).join("")}</select></label>
-        <label class="small" title="CSV / TXT dosyasındaki IP'ler"><input type="file" id="ttDosya" accept=".csv,.txt" style="max-width:220px"></label>
+        <label class="small" title="Excel (.xlsx / .xls), CSV ya da TXT dosyasındaki IP'ler (tüm sayfalar)"><input type="file" id="ttDosya" accept=".xlsx,.xlsm,.xls,.csv,.txt" style="max-width:220px"></label>
         <button type="button" class="primary" id="ttGo">Sorgula</button>
         <button type="button" id="ttDur" hidden>Durdur</button>
       </div>
@@ -45,12 +45,59 @@ function ttShell() {
   $("#ttSaat").addEventListener("change", e => tt.saat = +e.target.value);
   $("#ttDosya").addEventListener("change", async e => {
     const f = e.target.files?.[0]; if (!f) return;
-    $("#ttIp").value = tt.metin = await f.text(); say();
+    $("#ttSay").textContent = "dosya okunuyor…";
+    try {
+      const ips = ttIpler(await ttDosyaMetni(f));
+      // kutuya ham dosya değil, bulunan IP'ler yazılır (Excel'in iç yapısı görünmesin)
+      $("#ttIp").value = tt.metin = ips.join("\n");
+      say();
+      if (!ips.length) alert(`"${f.name}" içinde IP adresi bulunamadı.`);
+    } catch (err) { $("#ttSay").textContent = ""; alert(`"${f.name}" okunamadı: ${err.message}`); }
+    e.target.value = "";
   });
   $("#ttGo").addEventListener("click", ttBasla);
   $("#ttDur").addEventListener("click", () => tt.id && fetch(`api/tls/toplu/${tt.id}/durdur`, { method: "POST" }));
   say();
   if (tt.body) ttCiz();
+}
+
+// Dosyadan metin: .xlsx / .xlsm (zip: xl/sharedStrings.xml + sayfalar; DecompressionStream ile açılır), .xls (eski ikili biçim:
+// metinler 8 bit ya da UTF-16 durur, ikisi de okunur), diğerleri düz metin. Dış kütüphane yok (iç ağ).
+async function ttDosyaMetni(f) {
+  const buf = new Uint8Array(await f.arrayBuffer());
+  const zip = buf[0] === 0x50 && buf[1] === 0x4b;   // "PK"
+  if (zip) return ttXlsxMetni(buf);
+  if (buf[0] === 0xd0 && buf[1] === 0xcf) {           // OLE2 (.xls)
+    return new TextDecoder("latin1").decode(buf) + "\n" + new TextDecoder("utf-16le").decode(buf.subarray(0, buf.length - (buf.length % 2)));
+  }
+  let t = new TextDecoder("utf-8").decode(buf);
+  if (buf[0] === 0xff && buf[1] === 0xfe) t = new TextDecoder("utf-16le").decode(buf);   // "Unicode metin" olarak kaydedilmiş
+  return t;
+}
+async function ttXlsxMetni(buf) {
+  if (typeof DecompressionStream === "undefined") throw new Error("Tarayıcı Excel açmayı desteklemiyor; dosyayı CSV olarak kaydedin ya da kolonu kopyalayıp yapıştırın.");
+  const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+  // merkezi dizin sonu (EOCD) kaydını sondan ara
+  let eocd = -1;
+  for (let i = buf.length - 22; i >= Math.max(0, buf.length - 66000); i--) if (dv.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+  if (eocd < 0) throw new Error("Excel dosyası çözülemedi (zip dizini yok).");
+  const n = dv.getUint16(eocd + 10, true);
+  let p = dv.getUint32(eocd + 16, true);
+  const parcalar = [];
+  for (let k = 0; k < n && dv.getUint32(p, true) === 0x02014b50; k++) {
+    const yontem = dv.getUint16(p + 10, true), boy = dv.getUint32(p + 20, true);
+    const ad = new TextDecoder().decode(buf.subarray(p + 46, p + 46 + dv.getUint16(p + 28, true)));
+    const yerel = dv.getUint32(p + 42, true);
+    p += 46 + dv.getUint16(p + 28, true) + dv.getUint16(p + 30, true) + dv.getUint16(p + 32, true);
+    if (!/^xl\/(sharedStrings\.xml|worksheets\/[^/]+\.xml)$/i.test(ad)) continue;
+    const bas = yerel + 30 + dv.getUint16(yerel + 26, true) + dv.getUint16(yerel + 28, true);
+    const veri = buf.subarray(bas, bas + boy);
+    if (yontem === 0) parcalar.push(new TextDecoder().decode(veri));
+    else if (yontem === 8) parcalar.push(await new Response(new Blob([veri]).stream().pipeThrough(new DecompressionStream("deflate-raw"))).text());
+  }
+  if (!parcalar.length) throw new Error("Excel dosyasında sayfa bulunamadı.");
+  // XML etiketleri arasında IP bölünmesin: etiketleri boşluğa çevir
+  return parcalar.join("\n").replace(/<[^>]+>/g, " ");
 }
 
 async function ttBasla() {
