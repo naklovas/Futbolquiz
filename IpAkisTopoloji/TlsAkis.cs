@@ -299,6 +299,8 @@ static class TlsToplu
                 {
                     j.Cts.Token.ThrowIfCancellationRequested();
                     List<TlsAkis.Ham> ham = [];
+                    // TCP trafiği (şifresiz kontrolü) TLS sorgusuyla AYNI ANDA başlar (sırayla beklemek süreyi ikiye katlıyordu)
+                    var akisTask = sifresiz ? TlsAkis.AkisAsync(grup, bas, bit, cfg, http, j.Cts.Token) : null;
                     try
                     {
                         var (s, cihazlar, mesajlar, _) = await TlsAkis.CekAsync(grup, bas, bit, [], true, cfg, http, j.Cts.Token);
@@ -313,13 +315,14 @@ static class TlsToplu
                         lock (j) j.Mesajlar.Add($"{grup.First()}…{grup.Last()} ({grup.Length} IP) alınamadı: {ex.Message}");
                         var hatali = grup.Select(ip => new TlsTopluSatir(ip, Host(env, ip), "", null, false, [], 0, 0, [], "TLS verisi alınamadı (hata)")).ToList();
                         lock (j) { j.Satirlar.AddRange(hatali); j.Parca++; }
+                        _ = akisTask?.ContinueWith(t => _ = t.Exception, TaskScheduler.Default);   // sonucu kullanılmayacak; hata gözlenmiş sayılsın
                         continue;
                     }
                     // TCP trafiği (şifresiz kontrolü): hata TLS sonucunu bozmaz, satırlar "bilinmiyor" kalır
                     Dictionary<(string Ip, string Port), long>? akis = null;
-                    if (sifresiz) try
+                    if (akisTask != null) try
                     {
-                        var (ap, aok, amsg) = await TlsAkis.AkisAsync(grup, bas, bit, cfg, http, j.Cts.Token);
+                        var (ap, aok, amsg) = await akisTask;
                         if (aok) akis = ap;
                         lock (j) foreach (var m in amsg) if (!j.Mesajlar.Contains(m) && j.Mesajlar.Count < 30) j.Mesajlar.Add(m);
                     }

@@ -5,7 +5,9 @@
 // topoloji.html'deki ortak yardımcıları ($, esc, fmt, yetki, yetkiYok, tlsBadge, tlsEski) kullanır.
 // ============================================================================
 
-const tt = { id: null, body: null, timer: null, metin: "", saat: 24, filtre: "", yalnizEski: false, yalnizTls: false, yalnizSifresiz: false, sifresizKontrol: true };
+const tt = { id: null, body: null, timer: null, metin: "", saat: 24, filtre: "", yalnizEski: false, yalnizTls: false, yalnizSifresiz: false, sifresizKontrol: false };
+// "Şifresiz portları da bul" seçimi hatırlanır (varsayılan kapalı: ek trafik sorgusu sorguyu yavaşlatır)
+try { tt.sifresizKontrol = localStorage.getItem("df.ttSifresiz") === "1"; } catch { }
 // Şifreleme durumu (sunucu: TlsTopluSatir.Sifreleme): tls | sifresiz | protokol | trafikyok | bilinmiyor
 const TT_SIF = {
   tls: ["🔒 TLS", "tt-sif-tls", "El sıkışmalarında TLS görüldü"],
@@ -43,12 +45,12 @@ function ttShell() {
         <div id="ttSay" class="small muted"></div>
         <label>Aralık <select id="ttSaat">${[1, 6, 24].map(h => `<option value="${h}"${tt.saat === h ? " selected" : ""}>son ${h} saat</option>`).join("")}</select></label>
         <label class="small" title="Excel (.xlsx / .xls), CSV ya da TXT dosyasındaki IP'ler (tüm sayfalar)"><input type="file" id="ttDosya" accept=".xlsx,.xlsm,.xls,.csv,.txt" style="max-width:220px"></label>
-        <label class="small" style="flex-direction:row;gap:4px;align-items:center" title="Her 20 IP'lik grupta AppResponse'tan ek bir gruplu flow_tcp raporu çekilir: trafik olan ama TLS el sıkışması görülmeyen portlar '⚠ olası şifresiz' olarak işaretlenir. Kapalıyken yalnız TLS verisi çekilir."><input type="checkbox" id="ttSifK"${tt.sifresizKontrol ? " checked" : ""}> Şifresiz portları da bul (ek trafik sorgusu)</label>
+        <label class="small" style="flex-direction:row;gap:4px;align-items:center" title="Her 20 IP'lik grupta AppResponse'tan ek bir gruplu flow_tcp raporu çekilir: trafik olan ama TLS el sıkışması görülmeyen portlar '⚠ olası şifresiz' olarak işaretlenir. Kapalıyken yalnız TLS verisi çekilir."><input type="checkbox" id="ttSifK"${tt.sifresizKontrol ? " checked" : ""}> TCP trafiğini de al (olası şifresiz portları bulur, sorgu uzar)</label>
         <button type="button" class="primary" id="ttGo">Sorgula</button>
         <button type="button" id="ttDur" hidden>Durdur</button>
       </div>
     </div>
-    <div class="small muted">Yalnız gelen bağlantılar: IP sunucu, port onun portu. "Şifresiz portları da bul" açıksa AppResponse'un TCP trafiği gördüğü ama TLS el sıkışması görmediği portlar "⚠ olası şifresiz" olarak işaretlenir (grup başına bir ek, gruplu trafik raporu). Sürüm, el sıkışmalarında fiilen kullanılan sürümdür (Nessus'un "kabul ettiği" değil). Çok IP'de birkaç dakika sürebilir; IP'ler ${20}'şerli gruplarla sorgulanır.</div>
+    <div class="small muted">Yalnız gelen bağlantılar: IP sunucu, port onun portu. "TCP trafiğini de al" işaretliyse AppResponse'un TCP trafiği gördüğü ama TLS el sıkışması görmediği portlar "⚠ olası şifresiz" olarak işaretlenir (grup başına bir ek, gruplu trafik raporu). Sürüm, el sıkışmalarında fiilen kullanılan sürümdür (Nessus'un "kabul ettiği" değil). Çok IP'de birkaç dakika sürebilir; IP'ler ${20}'şerli gruplarla sorgulanır.</div>
   </section>
   <section class="panel" id="ttSonuc"${tt.body ? "" : " hidden"}></section>`;
   const say = () => { const n = ttIpler($("#ttIp").value).length; $("#ttSay").textContent = n ? `${fmt(n)} IP bulundu` : "IP yok"; };
@@ -67,7 +69,10 @@ function ttShell() {
     e.target.value = "";
   });
   $("#ttGo").addEventListener("click", ttBasla);
-  $("#ttSifK").addEventListener("change", e => tt.sifresizKontrol = e.target.checked);
+  $("#ttSifK").addEventListener("change", e => {
+    tt.sifresizKontrol = e.target.checked;
+    try { localStorage.setItem("df.ttSifresiz", e.target.checked ? "1" : "0"); } catch { }
+  });
   $("#ttDur").addEventListener("click", () => tt.id && fetch(`api/tls/toplu/${tt.id}/durdur`, { method: "POST" }));
   say();
   if (tt.body) ttCiz();

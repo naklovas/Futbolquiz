@@ -518,8 +518,9 @@ erişim talepleri) — DB → şema → tablo ve kim erişiyor bilgisi buradan b
   not ("TLS el sıkışması görülmedi", "ERT'de bu port yok", "ERT'de kayıt yok…", grup hatası). Arama, "Yalnız eski sürüm", "Yalnız TLS görülen",
   Excel (CSV, `data-csv`, Yetki:Disari), IP bağlantısı yeni sekmede IP sorgusu. Mock'la arayüz, sahte AppResponse ile çekirdek test edildi.
   OLASI ŞİFRESİZ (kullanıcı: "şifreleme olmadan çalışıyorsa araya giren dinleyebilir" → "evet"; sonra "zaten trafiği çekiyorsun, ek veri
-  çekmeyeceğiz aslında" → toplu sorguda trafik YOKTU, isteğe bağlı yapıldı): "Şifresiz portları da bul (ek trafik sorgusu)" kutucuğu (varsayılan
-  açık; istek `sifresiz`) → grup başına `TlsAkis.AkisAsync` (flow_tcp, srv IN grup, group_by srv ip + port + `Tls:AkisMetrikleri`
+  çekmeyeceğiz aslında" → toplu sorguda trafik YOKTU, isteğe bağlı yapıldı): "TCP trafiğini de al" kutucuğu (kullanıcı: "baya yavaşlattı, seçeyim" →
+  varsayılan KAPALI, seçim localStorage `df.ttSifresiz`; istek `sifresiz`, sunucu varsayılanı false; açıkken trafik sorgusu TLS sorgusuyla
+  aynı anda başlar) → grup başına `TlsAkis.AkisAsync` (flow_tcp, srv IN grup, group_by srv ip + port + `Tls:AkisMetrikleri`
   [sum_tcp.new_connections, sum_traffic.total_bytes] → metriksiz gruplu → ham sayım). Satır `Sifreleme`: tls | sifresiz (trafik var, TLS yok) |
   protokol (trafik var, şifreleme protokolün içinde: 5985/47001 WinRM mesaj düzeyinde, 1433 TDS, 3389 CredSSP, 389 StartTLS, 445 SMB3, 1521 Oracle
   NNE, 22 SSH…; `TlsToplu.Protokol`, `Ipucu`) | trafikyok | bilinmiyor; `Trafik`. Trafikte görülen portlar da satır olur (≥ `Tls:DinamikPortBaslangic`

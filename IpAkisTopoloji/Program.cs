@@ -814,7 +814,7 @@ app.MapPost("/api/tls/toplu", (TlsTopluIstek req, HttpContext ctx, IConfiguratio
     int max = cfg.GetValue("Tls:TopluMaxIp", 500);
     if (ips.Count > max) return Results.BadRequest(new { error = $"En çok {max} IP sorgulanabilir ({ips.Count} verildi; Tls:TopluMaxIp)." });
     int saat = Math.Clamp(req.Saat ?? cfg.GetValue("Tls:Saat", 24), 1, cfg.GetValue("Tls:MaxSaat", 24));
-    var j = TlsToplu.Start(ips, saat, req.Sifresiz ?? true, ctx.User.Identity?.Name ?? "", cfg, factory.CreateClient("appresponse"), envanter);
+    var j = TlsToplu.Start(ips, saat, req.Sifresiz ?? false, ctx.User.Identity?.Name ?? "", cfg, factory.CreateClient("appresponse"), envanter);
     return Results.Ok(new { id = j.Id, ipSayisi = ips.Count, toplamParca = j.ToplamParca });
 });
 app.MapGet("/api/tls/toplu/{id}", (string id) =>
