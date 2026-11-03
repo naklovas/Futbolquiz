@@ -205,10 +205,14 @@ switch (args[0].ToLowerInvariant())
             Console.WriteLine($"\n{ip} · {(sabitBas != null ? "sabit aralık" : $"son {dk} dk")} · {satirlar.Count} satır (kaynak {kaynak})");
             // port × TLS değerleri → bağlantı sayısı, istemci sayısı
             // Gelen: IP sunucu (port = kendi portu, karşı = istemci). Giden: IP istemci (port = karşı sunucunun portu, karşı = sunucu IP'si)
+            var belirsiz = satirlar.Where(r => r.Count > 2 && YonBul(Deger(r[0]), Deger(r[1]), ip) == "belirsiz").ToList();
+            if (belirsiz.Count > 0)
+                Console.WriteLine($"  ⚠ {belirsiz.Count} satırda {ip} ne istemci ({anahtar[0]}) ne sunucu ({anahtar[1]}) kolonunda; örnek: " +
+                    string.Join(" | ", belirsiz.Take(3).Select(r => $"{anahtar[0]}={Deger(r[0])} {anahtar[1]}={Deger(r[1])}")) + " → --anahtar ile doğru kolonları verin");
             foreach (bool gelenMi in new[] { true, false })
             {
             if (yon == (gelenMi ? "giden" : "gelen")) continue;
-            var yonSatir = satirlar.Where(r => r.Count >= 3 + gecerli.Count && (Deger(r[1]) == ip) == gelenMi).ToList();
+            var yonSatir = satirlar.Where(r => r.Count >= 3 + gecerli.Count && YonBul(Deger(r[0]), Deger(r[1]), ip) == (gelenMi ? "gelen" : "giden")).ToList();
             string Kar(List<JsonNode?> r) => gelenMi ? Deger(r[0]) : Deger(r[1]);
             string Anah(List<JsonNode?> r) => gelenMi ? Deger(r[2]) : $"{Deger(r[1])}:{Deger(r[2])}";
             var ozet = yonSatir
@@ -228,7 +232,7 @@ switch (args[0].ToLowerInvariant())
             {
                 try
                 {
-                    var tlsPort = satirlar.Where(r => r.Count > 2 && Deger(r[1]) == ip).Select(r => Deger(r[2])).ToHashSet();   // yalnız gelen
+                    var tlsPort = satirlar.Where(r => r.Count > 2 && AyniIp(Deger(r[1]), ip)).Select(r => Deger(r[2])).ToHashSet();   // yalnız gelen
                     string[] fk = ["cli_tcp.ip", "srv_tcp.ip", "srv_tcp.port"];
                     var fz = Pencere(dk);
                     List<List<JsonNode?>> akis;
@@ -266,10 +270,16 @@ switch (args[0].ToLowerInvariant())
             string hf = yon switch { "gelen" => hg, "giden" => hd, _ => $"({hg}) or ({hd})" };
             Console.WriteLine($"  filtre: {hf}");
             var satirlar = await RaporAsync(args[3], kol, hf, Pencere(int.Parse(args[2])), true);
-            Console.WriteLine(string.Join(" ; ", kol) + " ; cihaz");
+            // yön kolonu: istemci / sunucu IP kolonları listede varsa
+            int ci2 = Array.IndexOf(kol, anahtar[0]), si2 = Array.IndexOf(kol, anahtar[1]);
+            bool yonVar = ci2 >= 0 && si2 >= 0;
+            if (yonVar) foreach (var r in satirlar) r.Add(JsonValue.Create(YonBul(Deger(r[ci2]), Deger(r[si2]), hip)));
+            else Console.WriteLine($"  (yön kolonu için {anahtar[0]} ve {anahtar[1]} kolonları da listede olmalı)");
+            Console.WriteLine(string.Join(" ; ", kol) + " ; cihaz" + (yonVar ? " ; yön" : ""));
             foreach (var r in satirlar.Take(50)) Console.WriteLine(string.Join(" ; ", r.Select((x, i) => i < kol.Length && kol[i] == "tls.version" ? TlsAd(Deger(x)) : Deger(x))));
             Console.WriteLine($"({satirlar.Count} satır; ilk 50 gösterildi)");
-            CsvYaz($"ham_{hip}", kol, satirlar);
+            CsvYaz($"ham_{hip}", kol, satirlar, yonVar ? ["yön"] : []);
+            if (yonVar) Console.WriteLine("  yön: " + string.Join(", ", satirlar.GroupBy(r => Deger(r[^1])).Select(g => $"{g.Key} {g.Count()}")));
             break;
         }
     default: Console.WriteLine("Bilinmeyen komut."); return 1;
@@ -491,17 +501,28 @@ static string Ipucu(string port) => port switch
     _ => ""
 };
 // Tüm satırlar CSV'ye (Excel için ; ayraçlı, UTF-8 BOM); son kolon cihaz
-static void CsvYaz(string ad, string[] kol, List<List<JsonNode?>> satirlar)
+static void CsvYaz(string ad, string[] kol, List<List<JsonNode?>> satirlar, string[]? ek = null)
 {
     string dosya = $"{ad}_{DateTime.Now:yyyyMMdd_HHmmss}.csv".Replace(':', '_');
     static string Q(string v) => v.Contains(';') || v.Contains('"') ? "\"" + v.Replace("\"", "\"\"") + "\"" : v;
     var sb = new StringBuilder();
-    sb.AppendLine(string.Join(";", kol.Append("cihaz")));
+    sb.AppendLine(string.Join(";", kol.Append("cihaz").Concat(ek ?? [])));
     foreach (var r in satirlar)
         sb.AppendLine(string.Join(";", r.Select((x, i) => Q(i < kol.Length && kol[i] == "tls.version" ? TlsAd(Deger(x)) : Deger(x)))));
     File.WriteAllText(dosya, sb.ToString(), new UTF8Encoding(true));
     Console.WriteLine($"  CSV: {Path.GetFullPath(dosya)} ({satirlar.Count} satır)");
 }
+
+// IP karşılaştırması biçimden bağımsız (::ffff:10.1.2.3, boşluk, baştaki sıfır vb.)
+static bool AyniIp(string a, string b)
+{
+    static System.Net.IPAddress? P(string x) => System.Net.IPAddress.TryParse(x.Trim(), out var i) ? (i.IsIPv4MappedToIPv6 ? i.MapToIPv4() : i) : null;
+    var (x, y) = (P(a), P(b));
+    return x != null && y != null ? x.Equals(y) : string.Equals(a.Trim(), b.Trim(), StringComparison.OrdinalIgnoreCase);
+}
+// Sorgulanan IP sunucu kolonundaysa gelen, istemci kolonundaysa giden; ikisinde de değilse belirsiz (kolon adı / biçim sorunu)
+static string YonBul(string cli, string srv, string ip) =>
+    AyniIp(srv, ip) ? (AyniIp(cli, ip) ? "kendine" : "gelen") : AyniIp(cli, ip) ? "giden" : "belirsiz";
 
 // AppResponse hata JSON'undan okunur metin: messages[].text + details
 static string HataMetni(string m)
