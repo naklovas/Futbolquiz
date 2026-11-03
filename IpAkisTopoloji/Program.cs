@@ -806,6 +806,26 @@ app.MapGet("/api/tls", async (string ip, int? saat, string? port, IConfiguration
     catch (Exception ex) { return Results.Json(new { error = ex.Message }, statusCode: 502); }
 });
 
+// Toplu TLS: IP listesi (Excel'den yapıştırılan kolon) → arka plan işi; IP × port × uygulama × TLS sürümleri (yalnız gelen)
+app.MapPost("/api/tls/toplu", (TlsTopluIstek req, HttpContext ctx, IConfiguration cfg, IHttpClientFactory factory, EnvanterService envanter) =>
+{
+    var ips = (req.Ips ?? []).Select(x => LookupQuery.TryParseIpv4(x, out string v) ? v : null).OfType<string>().Distinct().ToList();
+    if (ips.Count == 0) return Results.BadRequest(new { error = "Geçerli IPv4 adresi yok." });
+    int max = cfg.GetValue("Tls:TopluMaxIp", 500);
+    if (ips.Count > max) return Results.BadRequest(new { error = $"En çok {max} IP sorgulanabilir ({ips.Count} verildi; Tls:TopluMaxIp)." });
+    int saat = Math.Clamp(req.Saat ?? cfg.GetValue("Tls:Saat", 24), 1, cfg.GetValue("Tls:MaxSaat", 24));
+    var j = TlsToplu.Start(ips, saat, ctx.User.Identity?.Name ?? "", cfg, factory.CreateClient("appresponse"), envanter);
+    return Results.Ok(new { id = j.Id, ipSayisi = ips.Count, toplamParca = j.ToplamParca });
+});
+app.MapGet("/api/tls/toplu/{id}", (string id) =>
+{
+    var j = TlsToplu.Get(id);
+    if (j == null) return Results.NotFound(new { error = "İş bulunamadı (süresi dolmuş olabilir)." });
+    lock (j) return Results.Ok(new { j.Id, j.Saat, j.Bas, j.Bit, ipSayisi = j.Ips.Count, j.Parca, j.ToplamParca, j.Bitti, j.Hata,
+        yontem = string.Join(", ", j.Yontemler), mesajlar = j.Mesajlar.ToList(), satirlar = j.Satirlar.ToList() });
+});
+app.MapPost("/api/tls/toplu/{id}/durdur", (string id) => { TlsToplu.Get(id)?.Cts.Cancel(); return Results.Ok(); });
+
 // IP kartı (Gelen portlar ve çalışan süreçler tablosu): o IP'nin Nessus özeti — port başına TLS sürümleri, teknoloji, sertifika
 app.MapGet("/api/nessus/ip", async (string ip, NessusService n, CancellationToken ct) =>
 {
@@ -1665,3 +1685,5 @@ record AppResponseResult(string Appliance, int VifgCount, int RawL4, int RawL7,
 
 record L4Row(string Vifg, string ClientIp, string ServerIp, string Port, int Hit);
 record L7Row(string Vifg, string ClientIp, string ServerIp, string Url, int Hit);
+
+record TlsTopluIstek(List<string>? Ips, int? Saat);

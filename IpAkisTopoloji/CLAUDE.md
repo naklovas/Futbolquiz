@@ -507,6 +507,14 @@ erişim talepleri) — DB → şema → tablo ve kim erişiyor bilgisi buradan b
   EN ÜSTÜNDE (durum satırının altı) "🔒 TLS bağlantıları" paneli (`tlsHtml` / `loadTls`; AppResponse kaynağı seçiliyse sorgudan sonra arka planda,
   değilse "Getir"): gelen / giden sürüm dağılımı (yüzde), "▼ Gelen TLS | ▲ Giden TLS" sekmeleri, SSL / TLS 1.0 / 1.1 kırmızı, kutu durumları,
   aralık seçici 1 / 6 / 24 saat. Uç 404 → "DLL güncel değil". Sahte AppResponse ile backend, mock'la arayüz test edildi.
+  TOPLU (kullanıcı: "Excel'den bir kolon IP girip karşılığı olan port – uygulama – TLS versiyonu"): sekme çubuğunda "TLS toplu sorgu"
+  (`wwwroot/tlstoplu.js`, `data-ui="tls"`, `?tls=1`; tarih / kaynak / Sorgula gizli). IP'ler metinden regex ile (satır / sekme / virgül; başlık ve
+  port sütunu yok sayılır) ya da CSV / TXT dosyasından. Arka plan işi (`TlsToplu`, IIS zaman aşımı): POST `/api/tls/toplu {ips, saat}` → id,
+  GET `/api/tls/toplu/{id}` (3 sn), POST `…/durdur`; `Tls:TopluParca`=20 IP'lik gruplar sırayla, `Tls:TopluMaxIp`=500, iş 1 saat bellekte.
+  Ortak çekirdek `TlsAkis.CekAsync(ips, …, gelenYalniz)` (tek IP paneli de kullanır); toplu yalnız GELEN (srv IN grup). Satır = IP × port:
+  ERT portları ∪ TLS görülen portlar; uygulama ERT IP + port (port ERT'de yoksa IP'nin uygulaması "(IP)"); sürüm yüzdeleri, el sıkışması, istemci,
+  not ("TLS el sıkışması görülmedi", "ERT'de bu port yok", "ERT'de kayıt yok…", grup hatası). Arama, "Yalnız eski sürüm", "Yalnız TLS görülen",
+  Excel (CSV, `data-csv`, Yetki:Disari), IP bağlantısı yeni sekmede IP sorgusu. Mock'la arayüz, sahte AppResponse ile çekirdek test edildi.
 - **VIP**: sorgulanan IP VIP ise üyeler + GW'ler aynı sorguya eklenir, üyeler "VIP ÜYESİ" (GW→üye trafiği varsa ✓).
   Gidilen IP VIP ise "VIP → n ÜYE"; gelen IP LB GW ise "LB GW"; sorgulanan sunucu havuz üyesiyse VIP kartı.
 - **Uygulama görünümü** (`/api/apps`, `/api/app`): `[kullanan uygulamalar] → [UYGULAMA: VIP'ler + segment grupları] → [bağımlı olunanlar]`,

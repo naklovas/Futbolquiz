@@ -75,6 +75,11 @@
   .kpi b { display: block; font-size: 20px; font-variant-numeric: tabular-nums; }
   .kpi span { font-size: 12px; color: var(--muted); }
   .toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+  .tt-giris { display: flex; gap: 14px; align-items: stretch; flex-wrap: wrap; margin: 6px 0; }
+  .tt-giris textarea { width: 100%; min-height: 130px; resize: vertical; }
+  .tt-yan { display: flex; flex-direction: column; gap: 8px; justify-content: flex-end; min-width: 200px; }
+  .tt-bar { height: 4px; background: var(--line); border-radius: 2px; margin: 4px 0 8px; overflow: hidden; }
+  .tt-bar i { display: block; height: 100%; background: var(--in); transition: width .3s; }
   .tls-ozet { display: flex; gap: 28px; flex-wrap: wrap; font-size: 13px; line-height: 1.8; }
   .badge.tls-eski { background: var(--err); color: #fff; }
   tr.tls-eski-satir td { background: color-mix(in srgb, var(--err) 7%, transparent); }
@@ -245,6 +250,7 @@ body.no-topoloji .need-topo, body.no-topoloji #ivDep, body.no-topoloji #ktAgain 
     <button type="button" data-ui="topo">Topoloji</button>
     <button type="button" data-ui="erisim">Erişim sorgula</button>
     <button type="button" data-ui="etiket">Sunucu etiketleme</button>
+    <button type="button" data-ui="tls" title="Excel'den IP listesi: her IP için port, uygulama ve kullanılan TLS sürümü (AppResponse)">TLS toplu sorgu</button>
     <a href="eksik.html" target="_blank" rel="noopener" class="tablink" title="ERT'de uygulama adı boş portlar için AI önerisi (ayrı sayfa)">ERT eksikleri ↗</a>
     <a href="segment.html" target="_blank" rel="noopener" class="tablink" title="Segmentteki ya da etiketteki tüm IP'lerin Carbon Black gelen portları ve exe'leri (ayrı sayfa)">Segment / etiket tarama ↗</a>
     <!-- DB'ye gelenler: menüde gizli; kod duruyor, adresle açılabilir: ?db= (geri getirmek için hidden'ı kaldırın) -->
@@ -386,12 +392,13 @@ function initForm() {
     $("#end").value = toLocalInput(end); $("#start").value = toLocalInput(new Date(end - 3600e3));
   }
   if (p.get("etiket") != null) return "etiket";
+  if (p.get("tls") != null) return "tls";   // TLS toplu sorgu sekmesi (tlstoplu.js)
   if (p.get("topo")) { topoWanted = p.get("topo"); return "topo"; }
   if (p.get("exeag")) return "exeag";   // exe ilişki ağı (segment / etiket taramasından, kumetopo.js ktExeRun)
   return p.get("app") ? "app" : p.get("ip") ? "ip" : null;
 }
 
-$("#f").addEventListener("submit", ev => { ev.preventDefault(); uiMode === "app" ? runApp() : uiMode === "topo" ? runTopo() : uiMode === "erisim" ? runAccess() : uiMode === "etiket" ? runEtiket() : run(); });
+$("#f").addEventListener("submit", ev => { ev.preventDefault(); uiMode === "app" ? runApp() : uiMode === "topo" ? runTopo() : uiMode === "erisim" ? runAccess() : uiMode === "etiket" ? runEtiket() : uiMode === "tls" ? runTlsToplu() : run(); });
 $("#cancel").addEventListener("click", () => abort?.abort());
 
 async function run() {
@@ -2247,7 +2254,7 @@ fetch("api/me").then(r => r.ok ? r.json() : null).then(me => {
   document.body.classList.toggle("no-topoloji", !yetki.topoloji);
 }).catch(() => {});
 function yetkiYok(ne) { alert(`${ne} yetkiniz yok. Yetki DokuPanel'den verilir.`); }
-loadAppliances().then(() => { const m = initForm(); if (m) uiMode = m; /* adres çubuğundaki aralık o sekmenin aralığıdır */ if (m === "app") runApp(); else if (m === "topo") runTopo(); else if (m === "erisim") runAccess(); else if (m === "etiket") runEtiket(); else if (m === "ip") run();
+loadAppliances().then(() => { const m = initForm(); if (m) uiMode = m; /* adres çubuğundaki aralık o sekmenin aralığıdır */ if (m === "app") runApp(); else if (m === "topo") runTopo(); else if (m === "erisim") runAccess(); else if (m === "etiket") runEtiket(); else if (m === "tls") { uiMode = "ip"; runTlsToplu(); } else if (m === "ip") run();
   else if (m === "exeag") { const q = new URLSearchParams(location.search); uiMode = "topo"; ktExeRun({ tur: q.get("tur"), ad: q.get("ad"), id: q.get("id"), genel: q.get("genel") === "1" }); } });
 </script>
 <script src="uygulama.js"></script>
@@ -2256,5 +2263,6 @@ loadAppliances().then(() => { const m = initForm(); if (m) uiMode = m; /* adres 
 <script src="kurum.js"></script>
 <script src="islev.js"></script>
 <script src="kumetopo.js"></script>
+<script src="tlstoplu.js"></script>
 </body>
 </html>

@@ -31,6 +31,8 @@ function setUiMode(m) {
   if (m !== uiMode) switchRange(uiMode, m);
   // Etiketleme tablosu başka sekmede kalmasın: sekmeden çıkınca içerik temizlenir
   if (uiMode === "etiket" && m !== "etiket") { $("#main").innerHTML = ""; etq.shell = false; }
+  // TLS toplu sorgu: sekmeden çıkınca içerik temizlenir (sonuç tt'de kalır, dönünce yeniden çizilir)
+  if (uiMode === "tls" && m !== "tls") $("#main").innerHTML = "";
   // İşlev haritası da başka sekmede kalmasın; ilerleme yoklaması durur
   if (uiMode === "topo" && m !== "topo") { $("#main").innerHTML = ""; ivStopPoll(); iv.sel = null; kt.abort?.abort(); ktClose(); }
   uiMode = m;
@@ -40,11 +42,11 @@ function setUiMode(m) {
   $("#topoLabel").hidden = m !== "topo";
   $("#tenantLabel").hidden = m !== "topo";
   // Etiketleme trafik sorgulamaz: tarih, kutu, kaynak seçimleri ve Sorgula gizli (filtreler tablonun içinde)
-  $("#startLabel").hidden = $("#endLabel").hidden = $("#srcChecks").hidden = $("#go").hidden = m === "etiket";
+  $("#startLabel").hidden = $("#endLabel").hidden = $("#srcChecks").hidden = $("#go").hidden = m === "etiket" || m === "tls";
   $("#hop2Label").hidden = m !== "ip";
   // Erişim sorgusu Firewall + Carbon Black ile çalışır; AppResponse kutusu ve 2. seviye anlamsız.
   $("#accLabel").hidden = m !== "erisim";
-  $("#applianceLabel").hidden = m === "erisim" || m === "etiket";
+  $("#applianceLabel").hidden = m === "erisim" || m === "etiket" || m === "tls";
   $("#srcArLabel").hidden = m === "erisim";
   $("#srcF5Label").hidden = m !== "erisim";
   $("#srcOpLabel").hidden = m !== "erisim";
@@ -54,8 +56,9 @@ function setUiMode(m) {
 document.querySelectorAll("#modeTabs button").forEach(b => b.addEventListener("click", () => {
   setUiMode(b.dataset.ui);
   const u = b.dataset.ui;
-  (u === "app" ? $("#appName") : u === "topo" ? $("#topoTag") : u === "erisim" ? $("#accSrc") : u === "etiket" ? $("#modeTabs") : $("#ip")).focus();
+  (u === "app" ? $("#appName") : u === "topo" ? $("#topoTag") : u === "erisim" ? $("#accSrc") : u === "etiket" || u === "tls" ? $("#modeTabs") : $("#ip")).focus();
   if (u === "etiket") runEtiket();
+  if (u === "tls") { runTlsToplu(); $("#ttIp")?.focus(); }
 }));
 
 // ---------- Topoloji sekmesi: etiketli sunucuların işlev haritası (islev.js); bağımlılık çizimi oradaki düğmeyle ----------
