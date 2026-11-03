@@ -230,10 +230,11 @@
   .grid2 { display: grid; gap: 16px; }
 /* İşlem yetkileri (/api/me → yetki; DokuPanel, Yetki.cs): yüklenene kadar ve yetki yoksa dışa aktarma / topoloji çizme düğmeleri gizli */
 body.no-disari #dlSvg, body.no-disari #dlPng, body.no-disari [data-csv] { display:none !important; }
+body.no-tls [data-ui="tls"] { display:none !important; }
 body.no-topoloji .need-topo, body.no-topoloji #ivDep, body.no-topoloji #ktAgain { display:none !important; }
 </style>
 </head>
-<body class="no-disari no-topoloji">
+<body class="no-disari no-topoloji no-tls">
 <header>
   <div class="brand">
     <img src="deltaflow.svg" alt="DeltaFlow logosu">
@@ -2254,6 +2255,8 @@ fetch("api/me").then(r => r.ok ? r.json() : null).then(me => {
   yetki = me?.yetki || {};
   document.body.classList.toggle("no-disari", !yetki.disari);
   document.body.classList.toggle("no-topoloji", !yetki.topoloji);
+  document.body.classList.toggle("no-tls", !yetki.tls);
+  if (uiMode === "tls" && !yetki.tls) globalThis.ttYetkiYok?.();
 }).catch(() => {});
 function yetkiYok(ne) { alert(`${ne} yetkiniz yok. Yetki DokuPanel'den verilir.`); }
 loadAppliances().then(() => { const m = initForm(); if (m) uiMode = m; /* adres çubuğundaki aralık o sekmenin aralığıdır */ if (m === "app") runApp(); else if (m === "topo") runTopo(); else if (m === "erisim") runAccess(); else if (m === "etiket") runEtiket(); else if (m === "tls") { uiMode = "ip"; runTlsToplu(); } else if (m === "ip") run();

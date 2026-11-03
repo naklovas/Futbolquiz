@@ -809,6 +809,7 @@ app.MapGet("/api/tls", async (string ip, int? saat, string? port, IConfiguration
 // Toplu TLS: IP listesi (Excel'den yapıştırılan kolon) → arka plan işi; IP × port × uygulama × TLS sürümleri (yalnız gelen)
 app.MapPost("/api/tls/toplu", (TlsTopluIstek req, HttpContext ctx, IConfiguration cfg, IHttpClientFactory factory, EnvanterService envanter) =>
 {
+    if (!Yetki.Var(cfg, ctx, Yetki.Tls)) return Yetki.Red(ctx, "TLS toplu sorgu");
     var ips = (req.Ips ?? []).Select(x => LookupQuery.TryParseIpv4(x, out string v) ? v : null).OfType<string>().Distinct().ToList();
     if (ips.Count == 0) return Results.BadRequest(new { error = "Geçerli IPv4 adresi yok." });
     int max = cfg.GetValue("Tls:TopluMaxIp", 500);
@@ -817,14 +818,19 @@ app.MapPost("/api/tls/toplu", (TlsTopluIstek req, HttpContext ctx, IConfiguratio
     var j = TlsToplu.Start(ips, saat, req.Sifresiz ?? false, ctx.User.Identity?.Name ?? "", cfg, factory.CreateClient("appresponse"), envanter);
     return Results.Ok(new { id = j.Id, ipSayisi = ips.Count, toplamParca = j.ToplamParca });
 });
-app.MapGet("/api/tls/toplu/{id}", (string id) =>
+app.MapGet("/api/tls/toplu/{id}", (string id, HttpContext ctx, IConfiguration cfg) =>
 {
+    if (!Yetki.Var(cfg, ctx, Yetki.Tls)) return Yetki.Red(ctx, "TLS toplu sorgu");
     var j = TlsToplu.Get(id);
     if (j == null) return Results.NotFound(new { error = "İş bulunamadı (süresi dolmuş olabilir)." });
     lock (j) return Results.Ok(new { j.Id, j.Saat, j.Bas, j.Bit, ipSayisi = j.Ips.Count, j.Parca, j.ToplamParca, j.Bitti, j.Hata,
         yontem = string.Join(", ", j.Yontemler), sifresiz = j.Sifresiz, mesajlar = j.Mesajlar.ToList(), satirlar = j.Satirlar.ToList() });
 });
-app.MapPost("/api/tls/toplu/{id}/durdur", (string id) => { TlsToplu.Get(id)?.Cts.Cancel(); return Results.Ok(); });
+app.MapPost("/api/tls/toplu/{id}/durdur", (string id, HttpContext ctx, IConfiguration cfg) =>
+{
+    if (!Yetki.Var(cfg, ctx, Yetki.Tls)) return Yetki.Red(ctx, "TLS toplu sorgu");
+    TlsToplu.Get(id)?.Cts.Cancel(); return Results.Ok();
+});
 
 // IP kartı (Gelen portlar ve çalışan süreçler tablosu): o IP'nin Nessus özeti — port başına TLS sürümleri, teknoloji, sertifika
 app.MapGet("/api/nessus/ip", async (string ip, NessusService n, CancellationToken ct) =>

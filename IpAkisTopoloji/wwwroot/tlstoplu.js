@@ -32,7 +32,12 @@ function ttIpler(metin) {
 
 function runTlsToplu() {
   setUiMode("tls");
+  if (yetki && yetki.tls === false) { ttYetkiYok(); return; }
   if (!$("#ttShell")) ttShell();
+}
+// Yetki:Tls (DokuPanel) yoksa sekme gizli; adresle (?tls=1) gelinirse açıklama gösterilir
+function ttYetkiYok() {
+  $("#main").innerHTML = `<div class="panel empty" style="color:var(--err)">TLS toplu sorgu yetkiniz yok. Yetki DokuPanel'den verilir.</div>`;
 }
 
 function ttShell() {
@@ -126,6 +131,7 @@ async function ttBasla() {
   try {
     const r = await fetch("api/tls/toplu", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ips, saat: tt.saat, sifresiz: tt.sifresizKontrol }) });
     const b = await r.json().catch(() => ({ error: `HTTP ${r.status}` }));
+    if (r.status === 403) throw new Error(b.error || "TLS toplu sorgu yetkiniz yok. Yetki DokuPanel'den verilir.");
     if (r.status === 404 || r.status === 405) throw new Error("Sunucudaki DeltaFlow sürümünde toplu TLS ucu yok (DLL güncel değil).");
     if (!r.ok) throw new Error(b.error || `HTTP ${r.status}`);
     tt.id = b.id; tt.body = { ipSayisi: b.ipSayisi, toplamParca: b.toplamParca, parca: 0, satirlar: [], mesajlar: [], bitti: false, sifresiz: tt.sifresizKontrol };
