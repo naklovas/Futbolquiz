@@ -42,6 +42,7 @@ builder.Services.AddSingleton<IslevService>();
 builder.Services.AddSingleton<EksikService>();
 builder.Services.AddSingleton<SegmentTaramaService>();
 builder.Services.AddSingleton<NessusService>();
+builder.Services.AddSingleton<FizikselService>();
 builder.Services.AddMemoryCache();
 
 // Windows Authentication: IIS'te IIS'in Windows Auth'u, Kestrel'de Negotiate kullanılır.
@@ -796,6 +797,34 @@ app.MapGet("/api/nessus/repolar", async (HttpContext ctx, IConfiguration cfg, Ne
     try { return Results.Ok(await n.RepolarAsync(ct)); }
     catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested) { return Results.Json(new { error = ex.Message }, statusCode: 502); }
 });
+// ---------- Fiziksel envanter (FizikselEnvanter.cs): oda planı → kabin → host → VM → uygulama; doku DB'deki nlyte tablolarını YALNIZ okur ----------
+static async Task<IResult> Fiz(FizikselService f, CancellationToken ct, Func<FizikselSnapshot, IResult> run)
+{
+    try { return run(await f.GetAsync(false, ct)); }
+    catch (OperationCanceledException) when (ct.IsCancellationRequested) { return Results.StatusCode(499); }
+    catch (Exception ex) { return Results.Json(new { error = ex.Message }, statusCode: 502); }
+}
+app.MapGet("/api/fiziksel/ozet", (FizikselService f, CancellationToken ct) => Fiz(f, ct, s => Results.Ok(f.Ozet(s))));
+app.MapGet("/api/fiziksel/oda", (string ad, FizikselService f, CancellationToken ct) => Fiz(f, ct, s => Results.Ok(f.Oda(s, ad))));
+app.MapGet("/api/fiziksel/kabin", (string ad, FizikselService f, CancellationToken ct) =>
+    Fiz(f, ct, s => f.Kabin(s, ad) is { } k ? Results.Ok(k) : Results.NotFound(new { error = $"Kabin bulunamadı: {ad}" })));
+app.MapGet("/api/fiziksel/ara", (string q, FizikselService f, CancellationToken ct) => Fiz(f, ct, s => Results.Ok(f.Ara(s, q))));
+app.MapGet("/api/fiziksel/ip", (string ip, FizikselService f, CancellationToken ct) =>
+    Fiz(f, ct, s => Results.Ok(new { bulundu = f.Ip(s, ip.Trim()) is not null, konum = f.Ip(s, ip.Trim()) })));
+app.MapGet("/api/fiziksel/eksik", (bool? csv, HttpContext ctx, IConfiguration cfg, FizikselService f, CancellationToken ct) => Fiz(f, ct, s =>
+{
+    var l = f.Eksik(s).ToList();
+    if (csv == true)
+        return !Yetki.Var(cfg, ctx, Yetki.Disari) ? Yetki.Red(ctx, "Dışa aktarma")
+            : Results.File(Encoding.UTF8.GetBytes(FizikselService.EksikCsv(l)), "text/csv; charset=utf-8", $"nlyte_eksik_hostlar_{DateTime.Now:yyyyMMdd}.csv");
+    return Results.Ok(new { hostlar = l, tablodan = s.EksikTablodan, vm = l.Sum(e => e.VmSayisi) });
+}));
+app.MapPost("/api/fiziksel/yenile", async (FizikselService f, CancellationToken ct) =>
+{
+    try { var s = await f.GetAsync(true, ct); return Results.Ok(new { satir = s.Vmler.Count, kabin = s.KabinVm.Count, yuklendi = s.LoadedAt }); }
+    catch (Exception ex) { return Results.Json(new { error = ex.Message }, statusCode: 502); }
+});
+
 // TLS bağlantıları (AppResponse tls_handshakes): sorgulanan IP'ye gelen ve onun başlattığı el sıkışmalarında kullanılan TLS sürümleri
 app.MapGet("/api/tls", async (string ip, int? saat, string? port, IConfiguration cfg, IHttpClientFactory factory, EnvanterService envanter, CancellationToken ct) =>
 {

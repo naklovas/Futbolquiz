@@ -42,6 +42,7 @@ topoloji çizer ve şirket içi AI'a etki analizi yaptırır. Canlıda IIS'te, W
 | `Benzer.cs` | Benzer sunucular: segment / etiket taramasında exe + port + trafik + Nessus parmak izi, aynı / yakın amaçlı / alakasız |
 | `ExeAgi.cs` | Exe ilişki ağı: segment / etiket taramasının exe → exe bağları, küme topolojisi çiziminde (topoloji.html `?exeag=1`) |
 | `TlsAkis.cs` | TLS bağlantıları: AppResponse tls_handshakes, IP'nin gelen / giden el sıkışmalarında kullanılan TLS sürümleri |
+| `FizikselEnvanter.cs` | Fiziksel envanter: nlyte kabin → host → VM → uygulama (doku DB'deki KabinHostVm vb., yalnız okur; `wwwroot/fiziksel.js`) |
 | `Nessus.cs` | Nessus / Tenable.sc: repository'deki tarama sonuçlarından teknoloji, sertifika, OS, kurulu yazılım |
 | `Yetki.cs` | İşlem yetkileri (yazma, topoloji, dışa aktarma, toplu tahmin) — DokuPanel site kayıtları |
 | `AuthHelper.cs` | Kullanıcının verdiği DokuPanel yetki helper'ı (namespace `AppRel`), anahtar config'den |
@@ -527,6 +528,28 @@ erişim talepleri) — DB → şema → tablo ve kim erişiyor bilgisi buradan b
   =49152 hariç). Arayüzde "Şifreleme" + "TCP trafiği" kolonları (kutucuk kapalıysa gizli), "N portta olası şifresiz", "Yalnız olası şifresiz",
   olası şifresiz satır kırmızı; CSV ŞİFRELEME / ŞİFRELEME NOTU / TCP TRAFİĞİ. Tek IP panelinde bu ayrım henüz yok (IP sorgusunun flow_tcp verisi
   orada zaten var, ek sorgusuz eklenebilir).
+- **Fiziksel envanter** (`FizikselEnvanter.cs`, `wwwroot/fiziksel.js`, sekme "Fiziksel envanter" `data-ui="fiziksel"`, `?fiziksel=1&kabin=&host=`;
+  claude.ai sohbetindeki görev tanımı: "Bu kabin kapanırsa hangi uygulamalar etkilenir?"): veri doku DB'de HAZIR — NlyteCollector (nlyte OData →
+  dbo.NlyteRaw) + `EXEC dbo.sp_KabinZincirYenile` doldurur; DeltaFlow YALNIZ OKUR (yazmaz, prosedürü çağırmaz). Betik kullanıcıda
+  (`sql/05_kabin_zincir_tablolar.sql`, repoya henüz eklenmedi). `dbo.KabinHostVm` (VM başına satır: Kabin, KabinUYukseklik, KabinUSirasi, KabinBosU,
+  HostUAlt, HostUYukseklik, HostYuz Front/Rear, HostModel, ChassisAdi, BladeSlot, Konum, FizikselHost, HostSeri, CabinetAssetID, Cluster, HostFqdn,
+  Vm, Ip, DnsName, Os, Uygulamalar / Muhafizlar ' | ' ile, Kaynak MSY/ÇSY, Kapsam, EslesmeTuru, YenilemeZamani) + `dbo.NlyteHostEslesme`
+  (EslesmeTuru='Yok' → "nlyte'ta eksik host'lar"; tablo yoksa KabinHostVm'den türetilir). `SELECT *`, kolonlar ADLA okunur (tip / sıra farkına
+  dayanıklı; sayılar float'tan da). `FizikselService` EnvanterService kalıbı: bellekte, `Fiziksel:CacheMinutes`=30, `POST /api/fiziksel/yenile`;
+  tablo adları `Fiziksel:Tablolar:*`, bağlantı ConnectionStrings:Envanter (`Fiziksel:Baglanti` ile değişir); tablo yoksa (208) "sp_KabinZincirYenile
+  çalıştırılmamış". `Olustur(vmler, eksik, tablodan)` anlık görüntü (sahte veriyle test için de). Uçlar: `/api/fiziksel/ozet` (kapsam sayıları,
+  son yenileme, odalar), `/oda?ad=`, `/kabin?ad=`, `/ara?q=` (en çok 50; IP > VM > host > kabin > uygulama > cluster), `/eksik` (+`?csv=1`, Yetki:Disari),
+  `/ip?ip=`. Kabin kalıbı `DR{oda}-{sıra}{no}` (`KabinKalip`) → oda planı; uymayanlar oda "Diğer". Kapsam: varsayılan `Fiziksel:AnaKapsam`="Ana veri
+  merkezi" (nlyte yalnız Esenyurt); diğerleri yalnız sayı. Kabin U kapasitesi = KabinUYukseklik (NULL → 42) ya da en üst dolu U. U1 yönü
+  `KabinUSirasi`: değerler kesin bilinmiyor (kullanıcıya soruldu) → `Fiziksel:UstSirasiIfadeleri` doluysa o değerler "U1 üstte", boşsa "top…/yukar…/
+  TopToBottom/descending" ile başlayan. "Kabin kapanırsa" etkisi: uygulamanın bu kabindeki VM'i / ana DC'deki toplamı, başka kabinler; sıra "tamamı bu
+  kabinde" > "başka kabin yok (kabini bilinmeyen VM var)" > "başka kabinlerde de var". Arayüz üç bölme: oda planı (satır = sıra harfi, sütun = no;
+  renk VM sayısı, tek ton; "Diğer kabinler"), ölçekli kabin çizimi (13 px/U, U etiketleri 1/5'in katları, Ön | Arka seçici — yeni kabin Ön ile açılır,
+  chassis kutusu içinde yuva sırasıyla blade'ler, "U bilgisi yok" listesi), sağ detay (host: cluster, FQDN, model, seri, U, chassis, eşleşme; VM
+  tablosu, IP → IP sorgusu, uygulama → `?app=` yeni sekmede; "Bu kabinin uygulamaları" / "Kabin kapanırsa" tabloları). Arama: sonuç düğmeleri, eşleşen
+  kabinler planda turuncu halka. Altta katlanır "nlyte'ta eksik host'lar" + CSV. IP kartında `#fizKonum` satırı (`loadFizIp`, sorgudan sonra; ana DC
+  dışıysa "… — nlyte kapsamı dışı", kabin yoksa "kabin bilinmiyor"; kabin bağlantısı derin bağlantıyla açar). Sahte veriyle backend (fiztest
+  düzeneği, scratch) ve Playwright'la arayüz test edildi. Sonraki: "Kabin kapanırsa" için AI etki analizi; KabinBosU ile "taşınacak host'lara yer var mı?".
 - **VIP**: sorgulanan IP VIP ise üyeler + GW'ler aynı sorguya eklenir, üyeler "VIP ÜYESİ" (GW→üye trafiği varsa ✓).
   Gidilen IP VIP ise "VIP → n ÜYE"; gelen IP LB GW ise "LB GW"; sorgulanan sunucu havuz üyesiyse VIP kartı.
 - **Uygulama görünümü** (`/api/apps`, `/api/app`): `[kullanan uygulamalar] → [UYGULAMA: VIP'ler + segment grupları] → [bağımlı olunanlar]`,

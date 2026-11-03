@@ -75,6 +75,39 @@
   .kpi b { display: block; font-size: 20px; font-variant-numeric: tabular-nums; }
   .kpi span { font-size: 12px; color: var(--muted); }
   .toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+  .fz-grid { display: grid; grid-template-columns: minmax(260px, 1fr) minmax(300px, 360px) minmax(320px, 1.3fr); gap: 16px; align-items: start; margin-top: 8px; }
+  @media (max-width: 1100px) { .fz-grid { grid-template-columns: 1fr; } }
+  .fz-plan-wrap { overflow-x: auto; }
+  .fz-plan { display: grid; gap: 3px; align-items: center; }
+  .fz-ax { font-size: 11px; color: var(--muted); text-align: center; }
+  .fz-bos { height: 28px; border: 1px dashed var(--line); border-radius: 4px; opacity: .45; }
+  .fz-tile { height: 28px; padding: 0; font-size: 11px; font-weight: 600; border: 1px solid var(--line); border-radius: 4px; cursor: pointer; }
+  .fz-tile.on, .fz-diger .on, .fz-host.on, .fz-blade.on { outline: 2px solid var(--text); outline-offset: 1px; }
+  .fz-tile.vurgu, .fz-diger .vurgu { box-shadow: 0 0 0 3px var(--out); }
+  .fz-diger { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+  .fz-kabin-bas { line-height: 1.5; }
+  .fz-rack-wrap { display: flex; gap: 4px; }
+  .fz-u { position: relative; width: 22px; font-size: 10px; color: var(--muted); }
+  .fz-u span { position: absolute; right: 2px; line-height: 13px; }
+  .fz-rack { position: relative; flex: 1; border: 2px solid var(--muted); border-radius: 4px; background: repeating-linear-gradient(to bottom, transparent 0 12px, var(--line) 12px 13px); }
+  .fz-host { position: absolute; left: 3px; right: 3px; display: flex; gap: 6px; align-items: center; justify-content: space-between; padding: 0 6px; overflow: hidden;
+    font-size: 11px; text-align: left; border: 1px solid color-mix(in srgb, var(--in) 60%, var(--line)); background: color-mix(in srgb, var(--in) 14%, var(--panel)); border-radius: 3px; cursor: pointer; white-space: nowrap; }
+  .fz-host b { overflow: hidden; text-overflow: ellipsis; }
+  .fz-chassis { position: absolute; left: 3px; right: 3px; border: 1px solid var(--warn); background: color-mix(in srgb, var(--warn) 10%, var(--panel)); border-radius: 3px; padding: 14px 3px 3px; overflow: hidden; }
+  .fz-chassis-ad { position: absolute; top: 1px; left: 5px; font-size: 10px; color: var(--warn); font-weight: 600; }
+  .fz-bladeler { display: flex; gap: 2px; height: 100%; }
+  .fz-blade { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; padding: 1px; font-size: 10px;
+    border: 1px solid var(--line); background: var(--panel); border-radius: 2px; cursor: pointer; overflow: hidden; }
+  .fz-blade .fz-bad { writing-mode: vertical-rl; transform: rotate(180deg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-height: 70%; }
+  .fz-slot { font-weight: 700; color: var(--muted); }
+  .fz-bos-yuz { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 12px; }
+  .fz-dl { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; font-size: 12px; margin: 0; }
+  .fz-dl dt { color: var(--muted); } .fz-dl dd { margin: 0; }
+  .fz-ara { display: flex; flex-wrap: wrap; gap: 4px; margin: 4px 0 8px; }
+  .fz-ara-s { font-size: 12px; text-align: left; } .fz-ara-s:disabled { opacity: .55; cursor: default; }
+  .badge.fz-kritik { background: var(--err); color: #fff; } .badge.fz-uyari { background: var(--warn); color: #fff; }
+  .fz-eksik { margin-top: 14px; } .fz-eksik summary { cursor: pointer; }
+  .fz-konum { margin: 4px 0 8px; padding: 4px 8px; border-left: 3px solid var(--in); background: color-mix(in srgb, var(--in) 6%, transparent); }
   .tt-sif { font-size: 12px; font-weight: 600; white-space: nowrap; }
   .tt-sif-tls { color: var(--ok); } .tt-sif-yok { color: var(--err); } .tt-sif-pr { color: var(--warn); } .tt-sif-nt { color: var(--muted); font-weight: 400; }
   .tt-giris { display: flex; gap: 14px; align-items: stretch; flex-wrap: wrap; margin: 6px 0; }
@@ -253,6 +286,7 @@ body.no-topoloji .need-topo, body.no-topoloji #ivDep, body.no-topoloji #ktAgain 
     <button type="button" data-ui="topo">Topoloji</button>
     <button type="button" data-ui="erisim">Erişim sorgula</button>
     <button type="button" data-ui="etiket">Sunucu etiketleme</button>
+    <button type="button" data-ui="fiziksel" title="nlyte: oda planı → kabin → host → VM → uygulama; bu kabin kapanırsa hangi uygulamalar etkilenir">Fiziksel envanter</button>
     <button type="button" data-ui="tls" title="Excel'den IP listesi: her IP için port, uygulama ve kullanılan TLS sürümü (AppResponse)">TLS toplu sorgu</button>
     <a href="eksik.html" target="_blank" rel="noopener" class="tablink" title="ERT'de uygulama adı boş portlar için AI önerisi (ayrı sayfa)">ERT eksikleri ↗</a>
     <a href="segment.html" target="_blank" rel="noopener" class="tablink" title="Segmentteki ya da etiketteki tüm IP'lerin Carbon Black gelen portları ve exe'leri (ayrı sayfa)">Segment / etiket tarama ↗</a>
@@ -395,13 +429,14 @@ function initForm() {
     $("#end").value = toLocalInput(end); $("#start").value = toLocalInput(new Date(end - 3600e3));
   }
   if (p.get("etiket") != null) return "etiket";
-  if (p.get("tls") != null) return "tls";   // TLS toplu sorgu sekmesi (tlstoplu.js)
+  if (p.get("tls") != null) return "tls";
+  if (p.get("fiziksel") != null) return "fiziksel";   // fiziksel envanter (fiziksel.js); &kabin=&host= doğrudan kabin   // TLS toplu sorgu sekmesi (tlstoplu.js)
   if (p.get("topo")) { topoWanted = p.get("topo"); return "topo"; }
   if (p.get("exeag")) return "exeag";   // exe ilişki ağı (segment / etiket taramasından, kumetopo.js ktExeRun)
   return p.get("app") ? "app" : p.get("ip") ? "ip" : null;
 }
 
-$("#f").addEventListener("submit", ev => { ev.preventDefault(); uiMode === "app" ? runApp() : uiMode === "topo" ? runTopo() : uiMode === "erisim" ? runAccess() : uiMode === "etiket" ? runEtiket() : uiMode === "tls" ? runTlsToplu() : run(); });
+$("#f").addEventListener("submit", ev => { ev.preventDefault(); uiMode === "app" ? runApp() : uiMode === "topo" ? runTopo() : uiMode === "erisim" ? runAccess() : uiMode === "etiket" ? runEtiket() : uiMode === "tls" ? runTlsToplu() : uiMode === "fiziksel" ? runFiziksel() : run(); });
 $("#cancel").addEventListener("click", () => abort?.abort());
 
 async function run() {
@@ -441,6 +476,7 @@ async function run() {
     // Dinleyen süreçler (uygulama tablosundaki "Çalışan süreç" kolonu; Süreçler sekmesi de hazır olur)
     if ($("#srcSplunk").checked) runProc(params);
     loadNessusIp(body.target?.ip ?? params.get("ip"));
+    globalThis.loadFizIp?.(body.target?.ip ?? params.get("ip"));
     if ($("#srcAr").checked) loadTls(body.target?.ip ?? params.get("ip"));
     if (body.target?.apps?.some(x => !x.appName)) loadOneri(body.target.ip);
   } catch (e) {
@@ -658,7 +694,7 @@ function renderTarget(d) {
   const apps = `<div id="tgtApps">${targetApps(t)}</div>`;
 
   return `<div class="target-grid">
-      <div><div class="bigip">${esc(t.ip)}</div><div class="tagrow">${(tagMap?.[t.ip] ?? []).map(x => tagChip(x, t.ip, true)).join("")}<button type="button" class="eg-add" data-tagip="${esc(t.ip)}" title="Bu sunucuya etiket ekle (ERT TAG kolonuna yazılır)">+ Etiket</button></div>${segDl}</div>
+      <div><div class="bigip">${esc(t.ip)}</div><div class="tagrow">${(tagMap?.[t.ip] ?? []).map(x => tagChip(x, t.ip, true)).join("")}<button type="button" class="eg-add" data-tagip="${esc(t.ip)}" title="Bu sunucuya etiket ekle (ERT TAG kolonuna yazılır)">+ Etiket</button></div><div id="fizKonum">${globalThis.fizKonumHtml?.(t.ip) ?? ""}</div>${segDl}</div>
       <div>
         <div class="kpis" style="margin-bottom:12px">
           <div class="kpi"><b style="color:var(--in)">${fmt(inPeers)}</b><span>gelen IP · ${fmt(inSegs)} segment</span></div>
@@ -2259,7 +2295,7 @@ fetch("api/me").then(r => r.ok ? r.json() : null).then(me => {
   if (uiMode === "tls" && !yetki.tls) globalThis.ttYetkiYok?.();
 }).catch(() => {});
 function yetkiYok(ne) { alert(`${ne} yetkiniz yok. Yetki DokuPanel'den verilir.`); }
-loadAppliances().then(() => { const m = initForm(); if (m) uiMode = m; /* adres çubuğundaki aralık o sekmenin aralığıdır */ if (m === "app") runApp(); else if (m === "topo") runTopo(); else if (m === "erisim") runAccess(); else if (m === "etiket") runEtiket(); else if (m === "tls") { uiMode = "ip"; runTlsToplu(); } else if (m === "ip") run();
+loadAppliances().then(() => { const m = initForm(); if (m) uiMode = m; /* adres çubuğundaki aralık o sekmenin aralığıdır */ if (m === "app") runApp(); else if (m === "topo") runTopo(); else if (m === "erisim") runAccess(); else if (m === "etiket") runEtiket(); else if (m === "tls") { uiMode = "ip"; runTlsToplu(); } else if (m === "fiziksel") { uiMode = "ip"; runFiziksel(); } else if (m === "ip") run();
   else if (m === "exeag") { const q = new URLSearchParams(location.search); uiMode = "topo"; ktExeRun({ tur: q.get("tur"), ad: q.get("ad"), id: q.get("id"), genel: q.get("genel") === "1" }); } });
 </script>
 <script src="uygulama.js"></script>
@@ -2269,5 +2305,6 @@ loadAppliances().then(() => { const m = initForm(); if (m) uiMode = m; /* adres 
 <script src="islev.js"></script>
 <script src="kumetopo.js"></script>
 <script src="tlstoplu.js"></script>
+<script src="fiziksel.js"></script>
 </body>
 </html>
