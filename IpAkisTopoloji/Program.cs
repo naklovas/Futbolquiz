@@ -796,6 +796,16 @@ app.MapGet("/api/nessus/repolar", async (HttpContext ctx, IConfiguration cfg, Ne
     try { return Results.Ok(await n.RepolarAsync(ct)); }
     catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested) { return Results.Json(new { error = ex.Message }, statusCode: 502); }
 });
+// TLS bağlantıları (AppResponse tls_handshakes): sorgulanan IP'ye gelen ve onun başlattığı el sıkışmalarında kullanılan TLS sürümleri
+app.MapGet("/api/tls", async (string ip, int? saat, string? port, IConfiguration cfg, IHttpClientFactory factory, EnvanterService envanter, CancellationToken ct) =>
+{
+    if (!LookupQuery.TryParseIpv4(ip, out string v)) return Results.BadRequest(new { error = "Geçerli bir IPv4 girin." });
+    var (env, _) = await Capture(() => envanter.GetAsync(false, ct), ct);
+    try { return Results.Ok(await TlsAkis.RunAsync(v, saat ?? cfg.GetValue("Tls:Saat", 24), port, cfg, factory.CreateClient("appresponse"), env, ct)); }
+    catch (OperationCanceledException) when (ct.IsCancellationRequested) { return Results.StatusCode(499); }
+    catch (Exception ex) { return Results.Json(new { error = ex.Message }, statusCode: 502); }
+});
+
 // IP kartı (Gelen portlar ve çalışan süreçler tablosu): o IP'nin Nessus özeti — port başına TLS sürümleri, teknoloji, sertifika
 app.MapGet("/api/nessus/ip", async (string ip, NessusService n, CancellationToken ct) =>
 {

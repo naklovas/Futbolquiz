@@ -75,6 +75,9 @@
   .kpi b { display: block; font-size: 20px; font-variant-numeric: tabular-nums; }
   .kpi span { font-size: 12px; color: var(--muted); }
   .toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+  .tls-ozet { display: flex; gap: 28px; flex-wrap: wrap; font-size: 13px; line-height: 1.8; }
+  .badge.tls-eski { background: var(--err); color: #fff; }
+  tr.tls-eski-satir td { background: color-mix(in srgb, var(--err) 7%, transparent); }
   .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
   .seg button { border: 0; border-radius: 0; padding: 5px 12px; }
   .seg button.on { background: var(--text); color: var(--panel); }
@@ -403,7 +406,7 @@ async function run() {
   history.replaceState(null, "", "?" + new URLSearchParams({ ip: params.get("ip"), start: params.get("start"), end: params.get("end") }));
 
   abort?.abort(); hopAbort?.abort(); aiAbort?.abort(); procAbort?.abort(); sessAbort?.abort();
-  state.proc = null; state.nessus = null; state.procAi = null; state.procSel = null; state.sess = null; state.jour = null; jourAbort?.abort();
+  state.proc = null; state.nessus = null; state.tls = null; tlsAbort?.abort(); state.procAi = null; state.procSel = null; state.sess = null; state.jour = null; jourAbort?.abort();
   closeFlow();
   abort = new AbortController();
   $("#go").disabled = true; $("#cancel").hidden = false;
@@ -428,6 +431,7 @@ async function run() {
     // Dinleyen süreçler (uygulama tablosundaki "Çalışan süreç" kolonu; Süreçler sekmesi de hazır olur)
     if ($("#srcSplunk").checked) runProc(params);
     loadNessusIp(body.target?.ip ?? params.get("ip"));
+    if ($("#srcAr").checked) loadTls(body.target?.ip ?? params.get("ip"));
     if (body.target?.apps?.some(x => !x.appName)) loadOneri(body.target.ip);
   } catch (e) {
     const msg = e.name === "AbortError" ? "Sorgu iptal edildi." : e.message;
@@ -510,6 +514,7 @@ function render() {
   const prevAi = $("#aiDock") && { q: $("#aiQ").value, out: $("#aiOut").innerHTML, closed: $("#aiPanel").hidden };
   $("#main").innerHTML = `
     <section class="panel">${renderStatus(d)}</section>
+    <section class="panel tls-panel" id="tlsPanel">${tlsHtml()}</section>
     <section class="panel">${renderTarget(d)}</section>
     <section class="panel">
       <div class="toolbar">
@@ -1245,6 +1250,98 @@ function procRange() {
   const g = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
   return { start: `${g}T${PROC_PENCERE.bas}`, end: `${g}T${PROC_PENCERE.bit}` };
 }
+
+// ---------- TLS bağlantıları (AppResponse tls_handshakes; /api/tls) ----------
+// IP sonucunun en üstünde: gelen (bu IP sunucu) ve giden (bu IP istemci) el sıkışmalarında FİİLEN kullanılan TLS sürümleri.
+let tlsAbort = null;
+const TLS_SAATLER = [1, 6, 24];
+const tlsEski = v => /^(SSL|TLS 1\.[01]$)/.test(v);
+const tlsBadge = v => `<span class="badge${tlsEski(v) ? " tls-eski" : v.startsWith("TLS") ? " strong" : ""}"${tlsEski(v) ? ` title="Eski / güvensiz sürüm"` : ""}>${esc(v)}</span>`;
+async function loadTls(ip, saat) {
+  tlsAbort?.abort(); tlsAbort = new AbortController();
+  const prev = state.tls?.ip === ip ? state.tls : null;
+  saat = saat ?? prev?.saat ?? 24;
+  state.tls = { ip, saat, status: "loading", tab: prev?.tab ?? "gelen", acik: {} };
+  updateTls();
+  try {
+    const r = await fetch("api/tls?" + new URLSearchParams({ ip, saat }), { signal: tlsAbort.signal });
+    if (r.status === 404) { state.tls = { ip, saat, status: "yok" }; updateTls(); return; }   // eski DLL
+    const b = await r.json().catch(() => ({ error: `HTTP ${r.status}` }));
+    if (!r.ok) throw new Error(b.error || `HTTP ${r.status}`);
+    if (state.tls?.ip === ip) Object.assign(state.tls, { status: "ok", body: b });
+  } catch (e) {
+    if (e.name === "AbortError") return;
+    if (state.tls?.ip === ip) Object.assign(state.tls, { status: "error", error: e.message });
+  }
+  updateTls();
+}
+function updateTls() { const el = $("#tlsPanel"); if (el) el.innerHTML = tlsHtml(); }
+// sürüm dağılımı: [{v, n, pct}]
+function tlsDagilim(rows) {
+  const m = new Map(); let top = 0;
+  for (const r of rows) { m.set(r.surum, (m.get(r.surum) ?? 0) + r.sayi); top += r.sayi; }
+  return [...m.entries()].map(([v, n]) => ({ v, n, pct: top ? n * 100 / top : 0 })).sort((a, b) => b.n - a.n);
+}
+const tlsPct = p => p >= 99.95 ? "%100" : p < 0.1 ? "<%0,1" : "%" + p.toFixed(1).replace(/\.0$/, "").replace(".", ",");
+function tlsOzet(rows) {
+  if (!rows.length) return `<span class="small muted">kayıt yok</span>`;
+  return tlsDagilim(rows).map(x => `${tlsBadge(x.v)} <b>${tlsPct(x.pct)}</b>`).join(" · ");
+}
+function tlsKarsiHtml(r, key) {
+  const ac = state.tls.acik[key], list = ac ? r.karsilar : r.karsilar.slice(0, 4);
+  return list.map(k => `<span class="mono" title="${esc(k.uygulama ?? "")}">${esc(k.ip)}</span><span class="small muted">${k.uygulama ? " · " + esc(k.uygulama) : ""} (${fmt(k.sayi)})</span>`).join("<br>")
+    + (r.karsilar.length > 4 ? `<br><button type="button" class="mini" data-tlsac="${esc(key)}">${ac ? "daha az" : `+${r.karsilar.length - 4} daha`}</button>` : "")
+    + (r.karsiSayisi > r.karsilar.length ? `<div class="small muted">ilk ${r.karsilar.length} / ${fmt(r.karsiSayisi)}</div>` : "");
+}
+function tlsHtml() {
+  const t = state.tls;
+  const saatSec = ip => `<label style="flex-direction:row;align-items:center;gap:6px">Aralık
+      <select id="tlsSaat">${TLS_SAATLER.map(h => `<option value="${h}"${(t?.saat ?? 24) === h ? " selected" : ""}>son ${h} saat</option>`).join("")}</select></label>
+    <button type="button" class="mini" id="tlsYenile">${t && t.status !== "yok" ? "↻ Yenile" : "Getir"}</button>`;
+  const head = `<div class="toolbar"><h2 style="margin:0">🔒 TLS bağlantıları <span class="small muted">AppResponse · el sıkışmalarında kullanılan sürüm</span></h2>${t?.status === "loading" ? "" : saatSec()}</div>`;
+  if (!t) return head + `<div class="small muted">AppResponse kaynağı seçili değil. "Getir" ile son 24 saatin TLS el sıkışmaları sorgulanır.</div>`;
+  if (t.status === "yok") return head + `<div class="small muted">Sunucudaki DeltaFlow sürümünde TLS ucu yok (DLL güncel değil).</div>`;
+  if (t.status === "loading") return head + `<div class="small muted"><span class="spinner"></span> AppResponse'tan son ${t.saat} saatin TLS el sıkışmaları alınıyor (tüm kutular; birkaç dakika sürebilir)…</div>`;
+  if (t.status === "error") return head + `<div class="unk" style="color:var(--err)">Alınamadı: ${esc(t.error)}</div>`;
+  const b = t.body, gelen = b.gelen ?? [], giden = b.giden ?? [];
+  const tab = t.tab === "giden" ? "giden" : "gelen";
+  const fmtT = x => new Date(x).toLocaleString("tr-TR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+  const ozet = `<div class="tls-ozet">
+      <div><b>▼ Gelen</b> <span class="small muted">(bu IP sunucu · ${fmt(gelen.reduce((a, r) => a + r.sayi, 0))} el sıkışması)</span><br>${tlsOzet(gelen)}</div>
+      <div><b>▲ Giden</b> <span class="small muted">(bu IP istemci · ${fmt(giden.reduce((a, r) => a + r.sayi, 0))} el sıkışması)</span><br>${tlsOzet(giden)}</div>
+    </div>`;
+  const tabs = `<div class="seg" style="margin:8px 0">
+      <button type="button" data-tlstab="gelen" class="${tab === "gelen" ? "on" : ""}">▼ Gelen TLS (${fmt(gelen.length)})</button>
+      <button type="button" data-tlstab="giden" class="${tab === "giden" ? "on" : ""}">▲ Giden TLS (${fmt(giden.length)})</button></div>`;
+  let tbl;
+  if (tab === "gelen") {
+    tbl = !gelen.length ? `<div class="unk">Bu aralıkta bu IP'ye gelen TLS el sıkışması görülmedi.</div>` : `<div class="tbl-wrap" style="max-height:340px"><table>
+      <thead><tr><th>Port</th><th>TLS sürümü</th><th class="num">El sıkışması</th><th class="num">İstemci</th><th>En çok bağlanan istemciler</th><th>Kutu</th></tr></thead>
+      <tbody>${gelen.map((r, i) => `<tr${tlsEski(r.surum) ? ` class="tls-eski-satir"` : ""}><td class="mono">${esc(r.port)}</td><td>${tlsBadge(r.surum)}${r.sni?.length ? `<div class="small muted mono">${esc(r.sni.join(", "))}</div>` : ""}</td>
+        <td class="num">${fmt(r.sayi)}</td><td class="num">${fmt(r.karsiSayisi)}</td><td class="small">${tlsKarsiHtml(r, "g" + i)}</td><td class="small muted">${esc(r.cihazlar.join(", "))}</td></tr>`).join("")}</tbody></table></div>`;
+  } else {
+    tbl = !giden.length ? `<div class="unk">Bu aralıkta bu IP'nin başlattığı TLS el sıkışması görülmedi.</div>` : `<div class="tbl-wrap" style="max-height:340px"><table>
+      <thead><tr><th>Hedef IP</th><th>Hedef uygulama / segment</th><th>Port</th><th>TLS sürümü</th><th class="num">El sıkışması</th><th>Kutu</th></tr></thead>
+      <tbody>${giden.map(r => `<tr${tlsEski(r.surum) ? ` class="tls-eski-satir"` : ""}><td class="mono">${esc(r.karsi)}</td><td>${esc(r.karsilar[0]?.uygulama ?? "")}</td><td class="mono">${esc(r.port)}</td>
+        <td>${tlsBadge(r.surum)}${r.sni?.length ? `<div class="small muted mono">${esc(r.sni.join(", "))}</div>` : ""}</td><td class="num">${fmt(r.sayi)}</td><td class="small muted">${esc(r.cihazlar.join(", "))}</td></tr>`).join("")}</tbody></table></div>`;
+  }
+  const kutular = (b.cihazlar ?? []).map(c => c.hata ? `<span style="color:var(--err)" title="${esc(c.hata)}">${esc(c.ad)}: hata</span>` : `${esc(c.ad)}: ${fmt(c.satir)} satır`).join(" · ");
+  return head + ozet + tabs + tbl
+    + `<div class="small muted" style="margin-top:6px">${fmtT(b.bas)} – ${fmtT(b.bit)} · ${esc(b.yontem ?? "")} · ${kutular} · ${(b.ms / 1000).toFixed(1)} sn
+       · Nessus'un "TLS (Nessus)" kolonu portun kabul ettiği sürümleri gösterir; bu tablo istemcilerin fiilen kullandığı sürümleri.</div>`
+    + (b.mesajlar?.length ? `<div class="msgs">${esc(b.mesajlar.join("\n"))}</div>` : "");
+}
+document.addEventListener("click", e => {
+  const t = state.tls;
+  const tb = e.target.closest("[data-tlstab]");
+  if (tb && t) { t.tab = tb.dataset.tlstab; updateTls(); return; }
+  const ac = e.target.closest("[data-tlsac]");
+  if (ac && t) { t.acik[ac.dataset.tlsac] = !t.acik[ac.dataset.tlsac]; updateTls(); return; }
+  if (e.target.closest("#tlsYenile") && state.data?.target) loadTls(state.data.target.ip, +($("#tlsSaat")?.value || 24));
+});
+document.addEventListener("change", e => {
+  if (e.target.id === "tlsSaat" && state.data?.target) loadTls(state.data.target.ip, +e.target.value);
+});
 
 // Nessus (Tenable.sc repo sonuçları): port başına kabul edilen SSL / TLS sürümleri → süreç tablosunun "TLS (Nessus)" kolonu
 async function loadNessusIp(ip) {

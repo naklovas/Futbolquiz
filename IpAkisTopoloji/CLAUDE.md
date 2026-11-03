@@ -41,6 +41,7 @@ topoloji çizer ve şirket içi AI'a etki analizi yaptırır. Canlıda IIS'te, W
 | `Segment.cs` | Segment tarama: segmentteki tüm IP'lerin Carbon Black gelen portları + exe'leri, ERT karşılaştırması (`wwwroot/segment.html`) |
 | `Benzer.cs` | Benzer sunucular: segment / etiket taramasında exe + port + trafik + Nessus parmak izi, aynı / yakın amaçlı / alakasız |
 | `ExeAgi.cs` | Exe ilişki ağı: segment / etiket taramasının exe → exe bağları, küme topolojisi çiziminde (topoloji.html `?exeag=1`) |
+| `TlsAkis.cs` | TLS bağlantıları: AppResponse tls_handshakes, IP'nin gelen / giden el sıkışmalarında kullanılan TLS sürümleri |
 | `Nessus.cs` | Nessus / Tenable.sc: repository'deki tarama sonuçlarından teknoloji, sertifika, OS, kurulu yazılım |
 | `Yetki.cs` | İşlem yetkileri (yazma, topoloji, dışa aktarma, toplu tahmin) — DokuPanel site kayıtları |
 | `AuthHelper.cs` | Kullanıcının verdiği DokuPanel yetki helper'ı (namespace `AppRel`), anahtar config'den |
@@ -496,6 +497,16 @@ erişim talepleri) — DB → şema → tablo ve kim erişiyor bilgisi buradan b
   `TlsSurumleri` → "TLS 1.0" / "SSL 3.0". `GET /api/nessus/ip?ip=` → `{acik, sunucu | hata}`; topoloji.html IP kartı "Gelen portlar ve
   çalışan süreçler" tablosunda "TLS (Nessus)" kolonu (SSL / TLS 1.0 / 1.1 kırmızı; "TLS yok" = Nessus portu gördü el sıkışması yok; "—" =
   port Nessus'ta yok; uç 404 ise kolon gizli). Segment sayfası Nessus hücresi / paneli / CSV de TLS gösterir.
+- **TLS bağlantıları** (`TlsAkis.cs`, `GET /api/tls?ip=&saat=&port=`; kullanıcı: "IP arama ekranının üstünde gelen ve giden TLS bağlantıları,
+  yeni bir tab"): AppResponse `tls_handshakes` kaynağı (canlıda `ArTlsTest/` deneme aracıyla bulundu; kolon listesi o araçla). Tüm kutular paralel,
+  VifgIds destekli. Sırayla: group_by (istemci, sunucu, port, `tls.version`) + `sum_tls.session_attempted` → metriksiz gruplu → ham satırlar
+  (`tls.version_name`; cihaz başına 100.000'de kesilir, `Kesik` uyarısı). Canlıda `tls.version_name` ile group_by "invalid group by" verdi;
+  `tls.version` değeri 769/770/771/772 → TLS 1.0–1.3 (`SurumAd`). Filtre `(srv == ip) or (cli == ip)`; IP karşılaştırması biçimden bağımsız
+  (`::ffff:`). Gelen = IP sunucu (port × sürüm; istemciler + ERT uygulaması / segment, ilk 50), giden = IP istemci (hedef IP × port × sürüm).
+  Ayarlar `Tls:*` (kolon adları, `Saat`=24, `MaxSaat`=24, `BeklemeSaniye`=300, `CacheDakika`=30, `Sni` boş). Arayüz: topoloji.html IP sonucunun
+  EN ÜSTÜNDE (durum satırının altı) "🔒 TLS bağlantıları" paneli (`tlsHtml` / `loadTls`; AppResponse kaynağı seçiliyse sorgudan sonra arka planda,
+  değilse "Getir"): gelen / giden sürüm dağılımı (yüzde), "▼ Gelen TLS | ▲ Giden TLS" sekmeleri, SSL / TLS 1.0 / 1.1 kırmızı, kutu durumları,
+  aralık seçici 1 / 6 / 24 saat. Uç 404 → "DLL güncel değil". Sahte AppResponse ile backend, mock'la arayüz test edildi.
 - **VIP**: sorgulanan IP VIP ise üyeler + GW'ler aynı sorguya eklenir, üyeler "VIP ÜYESİ" (GW→üye trafiği varsa ✓).
   Gidilen IP VIP ise "VIP → n ÜYE"; gelen IP LB GW ise "LB GW"; sorgulanan sunucu havuz üyesiyse VIP kartı.
 - **Uygulama görünümü** (`/api/apps`, `/api/app`): `[kullanan uygulamalar] → [UYGULAMA: VIP'ler + segment grupları] → [bağımlı olunanlar]`,
