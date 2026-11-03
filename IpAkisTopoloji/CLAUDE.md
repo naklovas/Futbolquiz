@@ -550,6 +550,18 @@ erişim talepleri) — DB → şema → tablo ve kim erişiyor bilgisi buradan b
   kabinler planda turuncu halka. Altta katlanır "nlyte'ta eksik host'lar" + CSV. IP kartında `#fizKonum` satırı (`loadFizIp`, sorgudan sonra; ana DC
   dışıysa "… — nlyte kapsamı dışı", kabin yoksa "kabin bilinmiyor"; kabin bağlantısı derin bağlantıyla açar). Sahte veriyle backend (fiztest
   düzeneği, scratch) ve Playwright'la arayüz test edildi. Sonraki: "Kabin kapanırsa" için AI etki analizi; KabinBosU ile "taşınacak host'lara yer var mı?".
+  TÜM KABİNLER + CİHAZLAR (kullanıcı: "eksik kabinler var, bilgisi boş da olsa tümü gelsin; bazı kabinlerde 2 host var, mümkün değil"; canlıda
+  NlyteKabin 640 / KabinHostVm'de 59 kabin; DR4-B5'te nlyte'ta 7 sunucu, DF'de 2): KabinHostVm VM'DEN başladığı için yalnız VM'li + eşleşen ESX'leri
+  bilir. Artık `dbo.NlyteKabin` (CabinetAssetID, KabinAdi, KabinUniqueAd, KabinUYukseklik decimal, KabinUSirasi, BosU, BitisikBosU) ve `dbo.NlyteSunucu`
+  (Rid, AssetID, AssetName, Ad, AdKisa, AdOneksiz, AdTiresiz, UniqueAssetName "ad (Room=SISTEM ODASI-4 - 3 - Area (…))", SerialNumber, CabinetAssetID,
+  RecordStatus, OperationalStatus, UAlt, UNumara, UEtiket, Yuz, UYukseklik, Model, MalzemeAdi, MalzemeTip…) da okunur (`Fiziksel:Tablolar:NlyteKabin /
+  NlyteSunucu`; yoksa eski davranış, özet `nlyte=false`). Plan = NlyteKabin ∪ KabinHostVm kabinleri; karo: VM'li (mavi ton), cihaz var VM yok (gri
+  çizgili `vmsiz`), cihaz yok (kesikli `bosk`) + lejant. Kabin çizimi = aktif (RecordStatus Active / NULL) nlyte cihazları; VM'li host grubu cihaza
+  ÖNCE SerialNumber = HostSeri, sonra ad (AssetName/Ad/AdKisa/AdOneksiz/AdTiresiz ↔ FizikselHost / HostFqdn kısa adı) ile eşlenir; eşleşmeyen VM'li
+  host'lar yine çizilir ("nlyte cihaz listesinde eşleşmeyen" notu); VM'siz cihaz gri çizgili "VM yok", detayda tür / durum / AssetID ve açıklama;
+  aktif olmayan kayıtlar katlanır listede. Başlık "N cihaz · M VM'li host · K VM". Konum: KabinHostVm.Konum ya da UniqueAssetName / KabinUniqueAd
+  içindeki "Room=…" (dıştaki tek ')' atılır). Arama nlyte cihaz adı / serisi ("Cihaz") ve VM'siz kabin adlarını da bulur. KabinUSirasi canlıda yalnız
+  `Ascending` / NULL → U1 altta (mevcut kural doğru).
 - **VIP**: sorgulanan IP VIP ise üyeler + GW'ler aynı sorguya eklenir, üyeler "VIP ÜYESİ" (GW→üye trafiği varsa ✓).
   Gidilen IP VIP ise "VIP → n ÜYE"; gelen IP LB GW ise "LB GW"; sorgulanan sunucu havuz üyesiyse VIP kartı.
 - **Uygulama görünümü** (`/api/apps`, `/api/app`): `[kullanan uygulamalar] → [UYGULAMA: VIP'ler + segment grupları] → [bağımlı olunanlar]`,
