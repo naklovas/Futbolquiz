@@ -814,7 +814,7 @@ app.MapPost("/api/tls/toplu", (TlsTopluIstek req, HttpContext ctx, IConfiguratio
     int max = cfg.GetValue("Tls:TopluMaxIp", 500);
     if (ips.Count > max) return Results.BadRequest(new { error = $"En çok {max} IP sorgulanabilir ({ips.Count} verildi; Tls:TopluMaxIp)." });
     int saat = Math.Clamp(req.Saat ?? cfg.GetValue("Tls:Saat", 24), 1, cfg.GetValue("Tls:MaxSaat", 24));
-    var j = TlsToplu.Start(ips, saat, ctx.User.Identity?.Name ?? "", cfg, factory.CreateClient("appresponse"), envanter);
+    var j = TlsToplu.Start(ips, saat, req.Sifresiz ?? true, ctx.User.Identity?.Name ?? "", cfg, factory.CreateClient("appresponse"), envanter);
     return Results.Ok(new { id = j.Id, ipSayisi = ips.Count, toplamParca = j.ToplamParca });
 });
 app.MapGet("/api/tls/toplu/{id}", (string id) =>
@@ -822,7 +822,7 @@ app.MapGet("/api/tls/toplu/{id}", (string id) =>
     var j = TlsToplu.Get(id);
     if (j == null) return Results.NotFound(new { error = "İş bulunamadı (süresi dolmuş olabilir)." });
     lock (j) return Results.Ok(new { j.Id, j.Saat, j.Bas, j.Bit, ipSayisi = j.Ips.Count, j.Parca, j.ToplamParca, j.Bitti, j.Hata,
-        yontem = string.Join(", ", j.Yontemler), mesajlar = j.Mesajlar.ToList(), satirlar = j.Satirlar.ToList() });
+        yontem = string.Join(", ", j.Yontemler), sifresiz = j.Sifresiz, mesajlar = j.Mesajlar.ToList(), satirlar = j.Satirlar.ToList() });
 });
 app.MapPost("/api/tls/toplu/{id}/durdur", (string id) => { TlsToplu.Get(id)?.Cts.Cancel(); return Results.Ok(); });
 
@@ -1686,4 +1686,4 @@ record AppResponseResult(string Appliance, int VifgCount, int RawL4, int RawL7,
 record L4Row(string Vifg, string ClientIp, string ServerIp, string Port, int Hit);
 record L7Row(string Vifg, string ClientIp, string ServerIp, string Url, int Hit);
 
-record TlsTopluIstek(List<string>? Ips, int? Saat);
+record TlsTopluIstek(List<string>? Ips, int? Saat, bool? Sifresiz);

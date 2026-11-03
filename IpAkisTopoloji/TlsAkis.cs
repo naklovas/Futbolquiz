@@ -176,6 +176,75 @@ static class TlsAkis
     }
 
     internal static bool AyniIpDis(string a, string b) => AyniIp(a, b);
+
+    // flow_tcp: IP'lerin SUNUCU olduğu TCP trafiği, (sunucu IP, port) → bağlantı / satır sayısı. "Trafik var ama TLS el sıkışması yok"
+    // (olası şifresiz) ayrımı için. Kutu başına sırayla: gruplu + metrik (Tls:AkisMetrikleri), gruplu metriksiz, ham satır sayımı.
+    internal static async Task<(Dictionary<(string Ip, string Port), long> Portlar, bool Ok, List<string> Mesajlar)> AkisAsync(
+        IReadOnlyList<string> ips, DateTime bas, DateTime bit, IConfiguration cfg, HttpClient http, CancellationToken ct)
+    {
+        string kaynak = cfg["SourceL4"] ?? "flow_tcp", pathType = cfg["SourcePathType"] ?? "jobs";
+        string srvIp = cfg["Tls:SunucuIp"] ?? "srv_tcp.ip", srvPort = cfg["Tls:SunucuPort"] ?? "srv_tcp.port";
+        var metrikler = cfg.GetSection("Tls:AkisMetrikleri").GetChildren().Select(x => (x.Value ?? "").Trim()).Where(x => x != "").ToList();
+        if (metrikler.Count == 0) metrikler = ["sum_tcp.new_connections", "sum_traffic.total_bytes"];
+        var vifgler = cfg.GetSection("VifgIds").GetChildren().Select(x => (x.Value ?? "").Trim()).Where(x => x != "").ToList();
+        if (vifgler.Count == 0) vifgler.Add("");
+        bool sil = cfg.GetValue("DeleteReportInstances", true);
+        int bekle = cfg.GetValue("Tls:BeklemeSaniye", 300);
+        string filtre = "(" + string.Join(" or ", ips.Select(ip => $"{srvIp} == {ip}")) + ")";
+        long sBas = new DateTimeOffset(bas).ToUnixTimeSeconds(), sBit = new DateTimeOffset(bit).ToUnixTimeSeconds();
+        var denemeler = metrikler.Select(m => (Kol: new[] { srvIp, srvPort, m }, Grup: (string[]?)new[] { srvIp, srvPort }, Metrik: true))
+            .Append((Kol: new[] { srvIp, srvPort }, Grup: new[] { srvIp, srvPort }, Metrik: false))
+            .Append((Kol: new[] { srvIp, srvPort }, Grup: null, Metrik: false)).ToList();
+
+        var names = cfg.GetSection("Servers").GetChildren().Select((s, i) => (Ad: s["Name"] ?? $"Cihaz {i + 1}", I: i)).ToList();
+        var sonuc = await Task.WhenAll(names.Select(async n =>
+        {
+            var d0 = new Dictionary<(string, string), long>();
+            string? hata = null; bool ok = false;
+            try
+            {
+                var (_, baseUrl, jwt) = await AppResponseService.ConnectAsync(n.I, cfg, http, ct);
+                foreach (var d in denemeler)
+                {
+                    try
+                    {
+                        var tmp = new Dictionary<(string, string), long>();
+                        foreach (var vifg in vifgler)
+                        {
+                            var dd = JsonSerializer.SerializeToNode(new
+                            {
+                                source = vifg == "" ? (object)new { name = kaynak } : new { name = kaynak, path = $"{pathType}/{vifg}" },
+                                columns = d.Kol,
+                                time = new { start = sBas.ToString(), end = sBit.ToString() },
+                                filters = new object[] { new { id = "akis", type = "STEELFILTER", value = filtre } },
+                                topn = 100000
+                            })!.AsObject();
+                            if (d.Grup != null) dd["group_by"] = JsonSerializer.SerializeToNode(d.Grup);
+                            var data = await AppResponseService.RunSingleAsync(baseUrl, jwt, dd, sil, http, ct, bekle);
+                            foreach (var a in data.OfType<JsonArray>())
+                            {
+                                string C(int i) => i < a.Count ? a[i]?.ToString() ?? "" : "";
+                                long v = d.Metrik && double.TryParse(C(2), NumberStyles.Any, CultureInfo.InvariantCulture, out var x) ? (long)x : 1;
+                                var k = (Ip(C(0)), C(1));
+                                tmp[k] = tmp.GetValueOrDefault(k) + Math.Max(v, 1);
+                            }
+                        }
+                        d0 = tmp; ok = true; hata = null;
+                        break;
+                    }
+                    catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+                    catch (Exception ex) { hata = ex.Message; }
+                }
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+            catch (Exception ex) { hata = ex is TaskCanceledException ? "Zaman aşımı" : ex.Message; }
+            return (n.Ad, d0, ok, hata);
+        }));
+        var tum = new Dictionary<(string, string), long>();
+        foreach (var s in sonuc) foreach (var kv in s.d0) tum[kv.Key] = tum.GetValueOrDefault(kv.Key) + kv.Value;
+        var mesajlar = sonuc.Where(s => !s.ok).Select(s => $"[{s.Ad}] flow_tcp (şifresiz kontrolü): {Kisalt(s.hata, 200)}").ToList();
+        return (tum, sonuc.Any(s => s.ok), mesajlar);
+    }
     static string Kisalt(string? s, int n) => s == null ? "" : s.Length <= n ? s : s[..n] + "…";
 }
 
@@ -185,8 +254,10 @@ static class TlsAkis
 // Satır = IP × port: ERT'deki portlar + TLS görülen portlar birleşimi; uygulama ERT'den (IP + port, yoksa IP'nin uygulamaları).
 // ---------------------------------------------------------------------------
 record TlsTopluSurum(string Surum, long Sayi, double Yuzde);
+// Sifreleme: "tls" (el sıkışması görüldü) | "sifresiz" (TCP trafiği var, TLS yok — olası şifresiz) | "protokol" (trafik var, şifreleme
+// protokolün içinde, AppResponse'ta TLS olarak görünmez: WinRM, SQL, RDP…) | "trafikyok" (AppResponse bu portta trafik görmedi) | "bilinmiyor"
 record TlsTopluSatir(string Ip, string? Sunucu, string Port, string? Uygulama, bool ErtPortu, List<TlsTopluSurum> Surumler,
-    long Sayi, int Istemci, List<string> Kutular, string? Not);
+    long Sayi, int Istemci, List<string> Kutular, string? Not, string Sifreleme = "bilinmiyor", long Trafik = 0, string? Ipucu = null);
 
 class TlsTopluIs
 {
@@ -196,6 +267,7 @@ class TlsTopluIs
     public List<string> Ips = [];
     public int Parca, ToplamParca;
     public bool Bitti;
+    public bool Sifresiz;   // ek flow_tcp sorgusu yapıldı mı (trafik var / TLS yok ayrımı)
     public string? Hata;
     public DateTime Bas, Bit, Basladi = DateTime.UtcNow;
     public List<TlsTopluSatir> Satirlar = [];
@@ -210,13 +282,13 @@ static class TlsToplu
 
     public static TlsTopluIs? Get(string id) => _isler.TryGetValue(id, out var j) ? j : null;
 
-    public static TlsTopluIs Start(List<string> ips, int saat, string kullanici, IConfiguration cfg, HttpClient http, EnvanterService envanter)
+    public static TlsTopluIs Start(List<string> ips, int saat, bool sifresiz, string kullanici, IConfiguration cfg, HttpClient http, EnvanterService envanter)
     {
         // eski işler (1 saat) temizlenir
         foreach (var kv in _isler.Where(kv => (DateTime.UtcNow - kv.Value.Basladi).TotalHours > 1).ToList()) _isler.TryRemove(kv.Key, out _);
         int parca = Math.Max(1, cfg.GetValue("Tls:TopluParca", 20));
         var (bas, bit) = TlsAkis.Aralik(saat);
-        var j = new TlsTopluIs { Kullanici = kullanici, Saat = saat, Ips = ips, Bas = bas, Bit = bit, ToplamParca = (ips.Count + parca - 1) / parca };
+        var j = new TlsTopluIs { Kullanici = kullanici, Saat = saat, Ips = ips, Bas = bas, Bit = bit, ToplamParca = (ips.Count + parca - 1) / parca, Sifresiz = sifresiz };
         _isler[j.Id] = j;
         _ = Task.Run(async () =>
         {
@@ -243,8 +315,22 @@ static class TlsToplu
                         lock (j) { j.Satirlar.AddRange(hatali); j.Parca++; }
                         continue;
                     }
+                    // TCP trafiği (şifresiz kontrolü): hata TLS sonucunu bozmaz, satırlar "bilinmiyor" kalır
+                    Dictionary<(string Ip, string Port), long>? akis = null;
+                    if (sifresiz) try
+                    {
+                        var (ap, aok, amsg) = await TlsAkis.AkisAsync(grup, bas, bit, cfg, http, j.Cts.Token);
+                        if (aok) akis = ap;
+                        lock (j) foreach (var m in amsg) if (!j.Mesajlar.Contains(m) && j.Mesajlar.Count < 30) j.Mesajlar.Add(m);
+                    }
+                    catch (OperationCanceledException) when (j.Cts.IsCancellationRequested) { throw; }
+                    catch (Exception ex) { lock (j) if (j.Mesajlar.Count < 30) j.Mesajlar.Add("flow_tcp (şifresiz kontrolü) alınamadı: " + ex.Message); }
                     var yeni = new List<TlsTopluSatir>();
-                    foreach (var ip in grup) yeni.AddRange(Satirlar(ip, ham.Where(h => TlsAkis.AyniIpDis(h.Srv, ip)).ToList(), env));
+                    foreach (var ip in grup)
+                    {
+                        var ipAkis = akis?.Where(kv => TlsAkis.AyniIpDis(kv.Key.Ip, ip)).ToDictionary(kv => kv.Key.Port, kv => kv.Value);
+                        yeni.AddRange(Satirlar(ip, ham.Where(h => TlsAkis.AyniIpDis(h.Srv, ip)).ToList(), ipAkis, sifresiz, env, cfg));
+                    }
                     lock (j) { j.Satirlar.AddRange(yeni); j.Parca++; }
                 }
             }
@@ -257,18 +343,38 @@ static class TlsToplu
 
     static string? Host(EnvanterSnapshot env, string ip) => env.AppsOnIp(ip).Select(h => h.UnixName).FirstOrDefault(x => !string.IsNullOrWhiteSpace(x));
 
-    static IEnumerable<TlsTopluSatir> Satirlar(string ip, List<TlsAkis.Ham> ham, EnvanterSnapshot env)
+    // Şifrelemesi protokolün içinde olan / TLS el sıkışması olarak görünmeyen bilinen portlar
+    static readonly Dictionary<string, string> Protokol = new()
+    {
+        ["5985"] = "WinRM (HTTP): içerik varsayılan olarak Kerberos / NTLM ile mesaj düzeyinde şifreli — AllowUnencrypted ve Basic kapalı olmalı",
+        ["47001"] = "WinRM (HTTP): içerik varsayılan olarak mesaj düzeyinde şifreli — AllowUnencrypted ve Basic kapalı olmalı",
+        ["1433"] = "SQL Server: TLS TDS paketinin içinde, ayrı el sıkışması görünmez (Force Encryption ayarına bakın)",
+        ["3389"] = "RDP: TLS CredSSP / X.224 içinde",
+        ["389"] = "LDAP: StartTLS ya da düz (LDAP signing / channel binding)", ["3268"] = "LDAP GC: StartTLS ya da düz",
+        ["88"] = "Kerberos: kendi şifrelemesi", ["135"] = "RPC: kimlik doğrulama düzeyine göre şifreli olabilir",
+        ["445"] = "SMB: TLS değil, SMB3 şifrelemesi olabilir", ["139"] = "NetBIOS / SMB1: şifresiz olabilir",
+        ["1521"] = "Oracle: TLS değil, native network encryption olabilir", ["1522"] = "Oracle: native network encryption olabilir",
+        ["25"] = "SMTP: StartTLS ile düz başlar", ["587"] = "SMTP: StartTLS ile düz başlar", ["21"] = "FTP: düz ya da FTPS (StartTLS)",
+        ["22"] = "SSH: kendi şifrelemesi (TLS değil)", ["53"] = "DNS: şifresiz (UDP/TCP)", ["161"] = "SNMP: v3 değilse şifresiz",
+    };
+
+    static IEnumerable<TlsTopluSatir> Satirlar(string ip, List<TlsAkis.Ham> ham, Dictionary<string, long>? akis, bool sifresiz, EnvanterSnapshot env, IConfiguration cfg)
     {
         var ert = env.AppsOnIp(ip);
         string? host = Host(env, ip);
+        int dinamik = cfg.GetValue("Tls:DinamikPortBaslangic", 49152);
         var ertPort = ert.Where(h => !string.IsNullOrWhiteSpace(h.Port)).GroupBy(h => h.Port!.Trim())
             .ToDictionary(g => g.Key, g => g.Select(h => h.AppName).Where(a => !string.IsNullOrWhiteSpace(a)).Distinct().ToList());
         string? genel = env.AppNamesOnIp(ip).FirstOrDefault(a => !env.IsSystemApp(a));
-        var portlar = ertPort.Keys.Union(ham.Select(h => h.Port)).Where(p => p != "")
+        // TCP trafiğinden gelen portlar da satır olur (dinamik / geçici portlar hariç; TLS görülmüşse yine de girer)
+        var akisPort = (akis?.Keys ?? Enumerable.Empty<string>()).Where(p => !(int.TryParse(p, out int n) && n >= dinamik));
+        var portlar = ertPort.Keys.Union(ham.Select(h => h.Port)).Union(akisPort).Where(p => p != "" && p != "0")
             .OrderBy(p => int.TryParse(p, out int n) ? n : 99999).ToList();
         if (portlar.Count == 0)
         {
-            yield return new TlsTopluSatir(ip, host, "", genel, false, [], 0, 0, [], ert.Count == 0 ? "ERT'de kayıt yok, TLS el sıkışması görülmedi" : "TLS el sıkışması görülmedi");
+            yield return new TlsTopluSatir(ip, host, "", genel, false, [], 0, 0, [],
+                ert.Count == 0 ? "ERT'de kayıt yok, AppResponse'ta trafik görülmedi" : "AppResponse'ta bu IP'ye gelen trafik görülmedi",
+                akis == null ? "bilinmiyor" : "trafikyok");
             yield break;
         }
         foreach (var p in portlar)
@@ -279,9 +385,16 @@ static class TlsToplu
                 .OrderByDescending(x => x.N).Select(x => new TlsTopluSurum(x.S, x.N, top > 0 ? Math.Round(x.N * 100.0 / top, 1) : 0)).ToList();
             bool ertte = ertPort.TryGetValue(p, out var appler);
             string? uyg = ertte && appler!.Count > 0 ? string.Join(", ", appler) : null;
-            string? not = hs.Count == 0 ? "TLS el sıkışması görülmedi" : !ertte ? "ERT'de bu port yok" : null;
+            long trafik = akis?.GetValueOrDefault(p) ?? 0;
+            string sif; string? ipucu = null, not;
+            if (hs.Count > 0) { sif = "tls"; not = !ertte ? "ERT'de bu port yok" : null; }
+            else if (akis == null) { sif = "bilinmiyor"; not = sifresiz ? "TLS el sıkışması görülmedi (TCP trafiği bilgisi alınamadı)" : "TLS el sıkışması görülmedi"; }
+            else if (trafik == 0) { sif = "trafikyok"; not = "AppResponse bu portta trafik görmedi"; }
+            else if (Protokol.TryGetValue(p, out var pr)) { sif = "protokol"; ipucu = pr; not = "Trafik var, TLS el sıkışması yok — şifreleme protokolün içinde olabilir"; }
+            else { sif = "sifresiz"; not = "Trafik var ama TLS el sıkışması yok — olası şifresiz iletişim"; }
+            if (!ertte && sif != "tls") not += " · ERT'de bu port yok";
             yield return new TlsTopluSatir(ip, host, p, uyg ?? (ertte ? null : genel), ertte, surumler, top, hs.Select(h => h.Cli).Distinct().Count(),
-                hs.Select(h => h.Cihaz).Distinct().ToList(), not);
+                hs.Select(h => h.Cihaz).Distinct().ToList(), not, sif, trafik, ipucu);
         }
     }
 }

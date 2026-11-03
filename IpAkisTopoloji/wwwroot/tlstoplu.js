@@ -5,7 +5,17 @@
 // topoloji.html'deki ortak yardımcıları ($, esc, fmt, yetki, yetkiYok, tlsBadge, tlsEski) kullanır.
 // ============================================================================
 
-const tt = { id: null, body: null, timer: null, metin: "", saat: 24, filtre: "", yalnizEski: false, yalnizTls: false };
+const tt = { id: null, body: null, timer: null, metin: "", saat: 24, filtre: "", yalnizEski: false, yalnizTls: false, yalnizSifresiz: false, sifresizKontrol: true };
+// Şifreleme durumu (sunucu: TlsTopluSatir.Sifreleme): tls | sifresiz | protokol | trafikyok | bilinmiyor
+const TT_SIF = {
+  tls: ["🔒 TLS", "tt-sif-tls", "El sıkışmalarında TLS görüldü"],
+  sifresiz: ["⚠ olası şifresiz", "tt-sif-yok", "AppResponse bu porta TCP trafiği gördü ama hiç TLS el sıkışması görmedi: iletişim büyük ihtimalle şifresiz (düz HTTP vb.). Sunucuda netsh http show sslcert / uygulama ayarıyla doğrulayın."],
+  protokol: ["◐ protokol içinde", "tt-sif-pr", "Trafik var, TLS el sıkışması yok; bu portun protokolü şifrelemeyi kendi içinde yapar (WinRM, SQL, RDP, SMB…) — AppResponse'ta TLS olarak görünmez, ayarı ayrıca kontrol edin."],
+  trafikyok: ["— trafik yok", "tt-sif-nt", "AppResponse bu aralıkta bu porta trafik görmedi (trafik yok ya da AppResponse'un gördüğü yoldan geçmiyor)."],
+  bilinmiyor: ["?", "tt-sif-nt", "TCP trafiği bilgisi alınamadı"],
+};
+const ttSifHtml = r => { const x = TT_SIF[r.sifreleme] ?? TT_SIF.bilinmiyor;
+  return `<span class="tt-sif ${x[1]}" title="${esc(x[2] + (r.ipucu ? " · " + r.ipucu : ""))}">${x[0]}</span>${r.ipucu ? `<div class="small muted">${esc(r.ipucu.split(":")[0])}</div>` : ""}`; };
 
 // Excel'den yapıştırılan metinden IPv4'ler (satır, sekme, virgül, noktalı virgül, boşluk ayraçlı; başlık satırı vb. atlanır)
 function ttIpler(metin) {
@@ -33,11 +43,12 @@ function ttShell() {
         <div id="ttSay" class="small muted"></div>
         <label>Aralık <select id="ttSaat">${[1, 6, 24].map(h => `<option value="${h}"${tt.saat === h ? " selected" : ""}>son ${h} saat</option>`).join("")}</select></label>
         <label class="small" title="Excel (.xlsx / .xls), CSV ya da TXT dosyasındaki IP'ler (tüm sayfalar)"><input type="file" id="ttDosya" accept=".xlsx,.xlsm,.xls,.csv,.txt" style="max-width:220px"></label>
+        <label class="small" style="flex-direction:row;gap:4px;align-items:center" title="Her 20 IP'lik grupta AppResponse'tan ek bir gruplu flow_tcp raporu çekilir: trafik olan ama TLS el sıkışması görülmeyen portlar '⚠ olası şifresiz' olarak işaretlenir. Kapalıyken yalnız TLS verisi çekilir."><input type="checkbox" id="ttSifK"${tt.sifresizKontrol ? " checked" : ""}> Şifresiz portları da bul (ek trafik sorgusu)</label>
         <button type="button" class="primary" id="ttGo">Sorgula</button>
         <button type="button" id="ttDur" hidden>Durdur</button>
       </div>
     </div>
-    <div class="small muted">Yalnız gelen bağlantılar: IP sunucu, port onun portu. Sürüm, el sıkışmalarında fiilen kullanılan sürümdür (Nessus'un "kabul ettiği" değil). Çok IP'de birkaç dakika sürebilir; IP'ler ${20}'şerli gruplarla sorgulanır.</div>
+    <div class="small muted">Yalnız gelen bağlantılar: IP sunucu, port onun portu. "Şifresiz portları da bul" açıksa AppResponse'un TCP trafiği gördüğü ama TLS el sıkışması görmediği portlar "⚠ olası şifresiz" olarak işaretlenir (grup başına bir ek, gruplu trafik raporu). Sürüm, el sıkışmalarında fiilen kullanılan sürümdür (Nessus'un "kabul ettiği" değil). Çok IP'de birkaç dakika sürebilir; IP'ler ${20}'şerli gruplarla sorgulanır.</div>
   </section>
   <section class="panel" id="ttSonuc"${tt.body ? "" : " hidden"}></section>`;
   const say = () => { const n = ttIpler($("#ttIp").value).length; $("#ttSay").textContent = n ? `${fmt(n)} IP bulundu` : "IP yok"; };
@@ -56,6 +67,7 @@ function ttShell() {
     e.target.value = "";
   });
   $("#ttGo").addEventListener("click", ttBasla);
+  $("#ttSifK").addEventListener("change", e => tt.sifresizKontrol = e.target.checked);
   $("#ttDur").addEventListener("click", () => tt.id && fetch(`api/tls/toplu/${tt.id}/durdur`, { method: "POST" }));
   say();
   if (tt.body) ttCiz();
@@ -107,11 +119,11 @@ async function ttBasla() {
   clearTimeout(tt.timer);
   $("#ttGo").disabled = true;
   try {
-    const r = await fetch("api/tls/toplu", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ips, saat: tt.saat }) });
+    const r = await fetch("api/tls/toplu", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ips, saat: tt.saat, sifresiz: tt.sifresizKontrol }) });
     const b = await r.json().catch(() => ({ error: `HTTP ${r.status}` }));
     if (r.status === 404 || r.status === 405) throw new Error("Sunucudaki DeltaFlow sürümünde toplu TLS ucu yok (DLL güncel değil).");
     if (!r.ok) throw new Error(b.error || `HTTP ${r.status}`);
-    tt.id = b.id; tt.body = { ipSayisi: b.ipSayisi, toplamParca: b.toplamParca, parca: 0, satirlar: [], mesajlar: [], bitti: false };
+    tt.id = b.id; tt.body = { ipSayisi: b.ipSayisi, toplamParca: b.toplamParca, parca: 0, satirlar: [], mesajlar: [], bitti: false, sifresiz: tt.sifresizKontrol };
     $("#ttSonuc").hidden = false; ttCiz(); ttIzle();
   } catch (e) {
     $("#ttGo").disabled = false;
@@ -143,6 +155,7 @@ function ttSatirlar() {
   return (tt.body?.satirlar ?? []).filter(r =>
     (!tt.yalnizEski || r.surumler?.some(s => tlsEski(s.surum))) &&
     (!tt.yalnizTls || r.surumler?.length) &&
+    (!tt.yalnizSifresiz || tt.body?.sifresiz === false || r.sifreleme === "sifresiz") &&
     (!q || [r.ip, r.sunucu, r.port, r.uygulama, ...(r.surumler ?? []).map(s => s.surum)].some(x => String(x ?? "").toLocaleLowerCase("tr").includes(q))));
 }
 
@@ -152,6 +165,8 @@ function ttCiz() {
   const all = b.satirlar ?? [], list = ttSatirlar();
   const ipTls = new Set(all.filter(r => r.surumler?.length).map(r => r.ip)).size;
   const eski = all.filter(r => r.surumler?.some(s => tlsEski(s.surum)));
+  const sifresiz = all.filter(r => r.sifreleme === "sifresiz");
+  const sk = b.sifresiz !== false;   // ek trafik sorgusu yapıldıysa şifreleme / trafik kolonları
   const pct = b.toplamParca ? Math.round((b.parca ?? 0) * 100 / b.toplamParca) : 0;
   const fmtT = x => x ? new Date(x).toLocaleString("tr-TR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) : "";
   $("#ttDur") && ($("#ttDur").hidden = !!b.bitti);
@@ -159,36 +174,39 @@ function ttCiz() {
     <div class="toolbar">
       <h2 style="margin:0">Sonuç</h2>
       ${!b.bitti ? `<span class="small"><span class="spinner"></span> ${fmt(b.parca ?? 0)} / ${fmt(b.toplamParca ?? 0)} grup · %${pct}</span>` : b.hata ? `<span class="small" style="color:var(--err)">${esc(b.hata)}</span>` : `<span class="small" style="color:var(--ok)">✓ tamamlandı</span>`}
-      <span class="small muted">${fmt(b.ipSayisi ?? 0)} IP · ${fmt(ipTls)} IP'de TLS görüldü · ${fmt(eski.length)} satırda eski sürüm${b.bas ? ` · ${fmtT(b.bas)} – ${fmtT(b.bit)}` : ""}${b.yontem ? ` · ${esc(b.yontem)}` : ""}</span>
+      <span class="small muted">${fmt(b.ipSayisi ?? 0)} IP · ${fmt(ipTls)} IP'de TLS görüldü · ${fmt(eski.length)} satırda eski sürüm ${sk ? ` · <b style="color:${sifresiz.length ? "var(--err)" : "inherit"}">${fmt(sifresiz.length)} portta olası şifresiz</b>` : ""}${b.bas ? ` · ${fmtT(b.bas)} – ${fmtT(b.bit)}` : ""}${b.yontem ? ` · ${esc(b.yontem)}` : ""}</span>
       <input type="search" id="ttAra" placeholder="ara: IP, sunucu, uygulama, sürüm" value="${esc(tt.filtre)}" style="margin-left:auto;min-width:220px">
       <label class="small" style="flex-direction:row;gap:4px"><input type="checkbox" id="ttEski"${tt.yalnizEski ? " checked" : ""}> Yalnız eski sürüm</label>
       <label class="small" style="flex-direction:row;gap:4px"><input type="checkbox" id="ttTls"${tt.yalnizTls ? " checked" : ""}> Yalnız TLS görülen</label>
+      ${sk ? `<label class="small" style="flex-direction:row;gap:4px" title="Trafik var ama TLS el sıkışması yok"><input type="checkbox" id="ttSif"${tt.yalnizSifresiz ? " checked" : ""}> Yalnız olası şifresiz</label>` : ""}
       <button type="button" data-csv id="ttCsv"${all.length ? "" : " disabled"}>Excel (CSV)</button>
     </div>
     ${!b.bitti ? `<div class="tt-bar"><i style="width:${pct}%"></i></div>` : ""}
     <div class="tbl-wrap" style="max-height:62vh"><table>
-      <thead><tr><th>IP</th><th>Sunucu</th><th>Port</th><th>Uygulama (ERT)</th><th>TLS sürümü</th><th class="num">El sıkışması</th><th class="num">İstemci</th><th>Not</th></tr></thead>
-      <tbody>${list.length ? list.map(r => `<tr${r.surumler?.some(s => tlsEski(s.surum)) ? ` class="tls-eski-satir"` : ""}>
+      <thead><tr><th>IP</th><th>Sunucu</th><th>Port</th><th>Uygulama (ERT)</th>${sk ? `<th>Şifreleme</th>` : ""}<th>TLS sürümü</th><th class="num">El sıkışması</th>${sk ? `<th class="num" title="AppResponse flow_tcp: bu porta gelen TCP trafiği (bağlantı / satır sayısı)">TCP trafiği</th>` : ""}<th class="num">İstemci</th><th>Not</th></tr></thead>
+      <tbody>${list.length ? list.map(r => `<tr${r.surumler?.some(s => tlsEski(s.surum)) || r.sifreleme === "sifresiz" ? ` class="tls-eski-satir"` : ""}>
         <td class="mono"><a href="${esc(ipTabUrl(r.ip))}" target="_blank" rel="noopener" title="IP sorgusunu yeni sekmede aç">${esc(r.ip)}</a></td>
         <td class="small">${esc(r.sunucu ?? "")}</td><td class="mono">${esc(r.port || "—")}</td>
         <td>${r.uygulama ? esc(r.uygulama) : `<span class="small muted">${r.port ? "kayıt yok" : ""}</span>`}${r.port && !r.ertPortu && r.uygulama ? ` <span class="small muted" title="Bu port ERT'de yok; IP'nin uygulaması gösteriliyor">(IP)</span>` : ""}</td>
-        <td>${ttSurumHtml(r)}</td><td class="num">${r.sayi ? fmt(r.sayi) : ""}</td><td class="num">${r.istemci ? fmt(r.istemci) : ""}</td>
+        ${sk ? `<td>${r.port ? ttSifHtml(r) : ""}</td>` : ""}<td>${ttSurumHtml(r)}</td><td class="num">${r.sayi ? fmt(r.sayi) : ""}</td>${sk ? `<td class="num">${r.trafik ? fmt(r.trafik) : ""}</td>` : ""}<td class="num">${r.istemci ? fmt(r.istemci) : ""}</td>
         <td class="small muted">${r.surumler?.length ? esc(r.not ?? "") : ""}</td></tr>`).join("")
-        : `<tr><td colspan="8" class="unk">${all.length ? "Filtreye uyan satır yok." : b.bitti ? "Sonuç yok." : "Sonuçlar geldikçe burada listelenecek…"}</td></tr>`}</tbody></table></div>
+        : `<tr><td colspan="${sk ? 10 : 8}" class="unk">${all.length ? "Filtreye uyan satır yok." : b.bitti ? "Sonuç yok." : "Sonuçlar geldikçe burada listelenecek…"}</td></tr>`}</tbody></table></div>
     ${b.mesajlar?.length ? `<div class="msgs">${esc(b.mesajlar.join("\n"))}</div>` : ""}`;
   $("#ttAra").addEventListener("input", e => { tt.filtre = e.target.value; const pos = e.target.selectionStart; ttCiz(); const i = $("#ttAra"); i.focus(); i.setSelectionRange(pos, pos); });
   $("#ttEski").addEventListener("change", e => { tt.yalnizEski = e.target.checked; ttCiz(); });
   $("#ttTls").addEventListener("change", e => { tt.yalnizTls = e.target.checked; ttCiz(); });
+  $("#ttSif")?.addEventListener("change", e => { tt.yalnizSifresiz = e.target.checked; ttCiz(); });
   $("#ttCsv").addEventListener("click", ttCsv);
 }
 
 function ttCsv() {
   if (!yetki.disari) return yetkiYok("Dışa aktarma");
   const Q = v => { v = String(v ?? ""); return /[;"\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v; };
-  const rows = [["IP", "SUNUCU", "PORT", "UYGULAMA", "ERT PORTU", "TLS SÜRÜMLERİ", "EN ÇOK KULLANILAN", "ESKİ SÜRÜM", "EL SIKIŞMASI", "İSTEMCİ", "KUTULAR", "NOT"]];
-  for (const r of ttSatirlar()) rows.push([r.ip, r.sunucu, r.port, r.uygulama, r.ertPortu ? "evet" : "hayır",
+  const rows = [["IP", "SUNUCU", "PORT", "UYGULAMA", "ERT PORTU", "ŞİFRELEME", "ŞİFRELEME NOTU", "TLS SÜRÜMLERİ", "EN ÇOK KULLANILAN", "ESKİ SÜRÜM", "EL SIKIŞMASI", "TCP TRAFİĞİ", "İSTEMCİ", "KUTULAR", "NOT"]];
+  const SIF_CSV = { tls: "TLS", sifresiz: "OLASI ŞİFRESİZ", protokol: "PROTOKOL İÇİNDE", trafikyok: "TRAFİK YOK", bilinmiyor: "BİLİNMİYOR" };
+  for (const r of ttSatirlar()) rows.push([r.ip, r.sunucu, r.port, r.uygulama, r.ertPortu ? "evet" : "hayır", r.port ? SIF_CSV[r.sifreleme] ?? "" : "", r.ipucu ?? "",
     (r.surumler ?? []).map(s => `${s.surum} %${String(s.yuzde).replace(".", ",")}`).join(" | "), r.surumler?.[0]?.surum ?? "",
-    r.surumler?.some(s => tlsEski(s.surum)) ? "VAR" : "", r.sayi || "", r.istemci || "", (r.kutular ?? []).join(", "), r.not]);
+    r.surumler?.some(s => tlsEski(s.surum)) ? "VAR" : "", r.sayi || "", r.trafik || "", r.istemci || "", (r.kutular ?? []).join(", "), r.not]);
   const blob = new Blob(["﻿" + rows.map(r => r.map(Q).join(";")).join("\r\n")], { type: "text/csv;charset=utf-8" });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob); a.download = `tls_toplu_${new Date().toISOString().slice(0, 16).replace(/[:T]/g, "")}.csv`; a.click();
