@@ -562,6 +562,18 @@ erişim talepleri) — DB → şema → tablo ve kim erişiyor bilgisi buradan b
   aktif olmayan kayıtlar katlanır listede. Başlık "N cihaz · M VM'li host · K VM". Konum: KabinHostVm.Konum ya da UniqueAssetName / KabinUniqueAd
   içindeki "Room=…" (dıştaki tek ')' atılır). Arama nlyte cihaz adı / serisi ("Cihaz") ve VM'siz kabin adlarını da bulur. KabinUSirasi canlıda yalnız
   `Ascending` / NULL → U1 altta (mevcut kural doğru).
+  TÜM CİHAZ TÜRLERİ (kullanıcı: "sadece sunucuları çekiyoruz, ne varsa her şey"; veri tarafı NlyteCollector'da genişletildi: Servers, Chassis,
+  Networks, Peripherals, PowerStrips / PDUs, UPSs, KVMSwitches, StaticSwitches, Auxiliaries, AirConditionings): cihazlar önce `dbo.NlyteCihaz`
+  (`Fiziksel:Tablolar:NlyteCihaz`; NlyteSunucu ile aynı kolonlar + **CihazTuru** Server / Firewall / LoadBalancer / Network / PatchPanel / Storage / PDU /
+  Chassis / KVM / UPS / Peripheral / Cooling / StaticSwitch / Auxiliary / Other, `MalzemeTipi` (MalzemeTip değil), Kaynak, ChassisAssetID), yoksa
+  NlyteSunucu (hepsi Server; bilgi satırında "yalnız sunucular" uyarısı). CihazTuru boşsa `TurBul` malzeme tipi / entity adından. `dbo.NlyteChassis`
+  (`Fiziksel:Tablolar:NlyteChassis`; yoksa Chassis türündeki cihazlar): BLADE = UAlt NULL + ChassisAssetID → U / yüz chassis'ten, kabin de chassis'ten
+  (blade'in CabinetAssetID'si boşsa); çizimde chassis cihazı kutu (adı tıklanır), blade'ler içinde. VM'li host ↔ cihaz eşleşmesi önce
+  `NlyteHostEslesme.NlyteAssetID` (HostKey / HostFqdn / NlyteAdi → AssetID), sonra seri, sonra ad; uygulama tablosundaki host adları da nlyte adına
+  çevrilir. Türe göre renk / lejant (`FZ_TUR`: sunucu mavi — VM'li dolu, VM'siz gri çizgili; ağ yeşil, firewall kırmızı, PDU turuncu, storage mor…),
+  kabin başlığı ve oda karosu ipucunda "15 cihaz: 10 sunucu (VM'li: 1), 1 firewall, …" (`turlar`); 1U kutular küçük yazı. UAlt NULL ve blade değil →
+  "0U / U bilgisi yok" listesi (tür etiketli). Kabine bağlı olmayan / kabin kaydı bulunamayan aktif cihazlar (klimalar) `/api/fiziksel/kabindisi` →
+  katlanır "Kabin dışı cihazlar" bölümü. Sahte veriyle (switch, firewall, patch panel, 0U PDU, chassis + 3 blade, AssetID ile farklı adlı host, klima) test edildi.
 - **VIP**: sorgulanan IP VIP ise üyeler + GW'ler aynı sorguya eklenir, üyeler "VIP ÜYESİ" (GW→üye trafiği varsa ✓).
   Gidilen IP VIP ise "VIP → n ÜYE"; gelen IP LB GW ise "LB GW"; sorgulanan sunucu havuz üyesiyse VIP kartı.
 - **Uygulama görünümü** (`/api/apps`, `/api/app`): `[kullanan uygulamalar] → [UYGULAMA: VIP'ler + segment grupları] → [bağımlı olunanlar]`,

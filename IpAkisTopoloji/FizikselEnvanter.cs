@@ -3,7 +3,10 @@
 // Veri doku DB'de HAZIR: NlyteCollector (nlyte OData → dbo.NlyteRaw) + EXEC dbo.sp_KabinZincirYenile doldurur. DeltaFlow YALNIZ OKUR
 // (tabloya yazmaz, prosedürü çağırmaz). Tablolar `SELECT *` ile okunur, kolonlar adla eşlenir (tip / sıra farkına dayanıklı).
 //  - dbo.KabinHostVm: VM başına satır (kabin, U konumu, host, cluster, VM, IP, uygulamalar, kapsam, eşleşme türü)
-//  - dbo.NlyteHostEslesme: ESX host başına seçilen nlyte kaydı ("nlyte'ta eksik host'lar" listesi; yoksa KabinHostVm'den türetilir)
+//  - dbo.NlyteHostEslesme: ESX host başına seçilen nlyte kaydı ("nlyte'ta eksik host'lar" listesi; yoksa KabinHostVm'den türetilir;
+//    NlyteAssetID → host'un nlyte cihazı)
+//  - dbo.NlyteKabin: tüm kabinler; dbo.NlyteCihaz: kabine monte TÜM cihazlar (CihazTuru: Server, Network, Firewall, PDU, Storage…;
+//    yoksa dbo.NlyteSunucu = yalnız sunucular); dbo.NlyteChassis: chassis → kabin / U (blade'lerin UAlt'ı NULL, ChassisAssetID dolu)
 // Kabin adı kalıbı `DR{oda}-{sıra harfi}{numara}` (ör. DR4-D3) → oda planı ızgarası; uymayanlar "Diğer".
 // Ayarlar `Fiziksel:*` (tablo adları, CacheMinutes=30, AnaKapsam, UstSirasiIfadeleri).
 // ---------------------------------------------------------------------------
@@ -20,10 +23,12 @@ record FizVm(string? Kabin, int? KabinU, string? KabinUSirasi, int? KabinBosU, i
 // nlyte kabini (dbo.NlyteKabin: tüm kabinler, boş olanlar dahil) ve kabindeki cihaz (dbo.NlyteSunucu: VM'li olsun olmasın tüm sunucular)
 record FizKabin(string Ad, string? CabinetAssetId, string? UniqueAd, int? UYukseklik, string? USirasi, int? BosU, string? BitisikBosU);
 record FizCihaz(string Ad, List<string> Adlar, string? AssetId, string? Seri, string? CabinetAssetId, string? Record, string? Operational,
-    int? UAlt, int? UYukseklik, string? Yuz, string? Model, string? MalzemeTip, string? UniqueAssetName, string? Chassis, string? Slot)
+    int? UAlt, int? UYukseklik, string? Yuz, string? Model, string? MalzemeTip, string? UniqueAssetName, string? Chassis, string? Slot,
+    string Tur = "Server", string? Kaynak = null, string? ChassisId = null)
 {
     public bool Aktif => Record == null || Record.Equals("Active", StringComparison.OrdinalIgnoreCase);
 }
+record FizChassis(string Id, string? Ad, string? CabinetAssetId, int? UAlt, int? UYukseklik, string? Yuz, string? Model);
 record FizEksik(string Host, string? Fqdn, int VmSayisi, string? Kapsam, string? Cluster, string? EslesmeTuru, int? AdaySayisi, string? Not);
 
 sealed class FizikselSnapshot
@@ -37,7 +42,11 @@ sealed class FizikselSnapshot
     public Dictionary<string, List<FizVm>> IpVm { get; } = new(StringComparer.OrdinalIgnoreCase);
     public Dictionary<string, FizKabin> Kabinler { get; } = new(StringComparer.OrdinalIgnoreCase);
     public Dictionary<string, List<FizCihaz>> KabinCihaz { get; } = new(StringComparer.OrdinalIgnoreCase);
-    public bool NlyteVar { get; set; }   // NlyteKabin / NlyteSunucu okunabildi mi
+    public bool NlyteVar { get; set; }   // NlyteKabin / NlyteCihaz okunabildi mi
+    public string? CihazTablosu { get; set; }   // okunan cihaz tablosu (NlyteCihaz ya da eski NlyteSunucu)
+    public List<FizCihaz> KabinDisi { get; } = [];   // kabine bağlı olmayan cihazlar (klima vb.)
+    public Dictionary<string, FizChassis> Chassisler { get; } = new(StringComparer.OrdinalIgnoreCase);
+    public Dictionary<string, string> HostAsset { get; } = new(StringComparer.OrdinalIgnoreCase);   // host adı (kısa, küçük) → nlyte AssetID
     // Planda gösterilecek tüm kabinler: nlyte kabinleri + KabinHostVm'de geçenler
     public IEnumerable<string> TumKabinler => Kabinler.Keys.Union(KabinVm.Keys, StringComparer.OrdinalIgnoreCase);
 }
@@ -105,6 +114,7 @@ sealed class FizikselService(IConfiguration cfg, ILogger<FizikselService> log)
 
         // nlyte'ta eksik host'lar: NlyteHostEslesme (EslesmeTuru = 'Yok'); tablo yoksa KabinHostVm'den (kabini olmayan host'lar)
         var eksik = new List<FizEksik>();
+        var hostAsset = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         bool tablodan = true;
         try
         {
@@ -113,6 +123,8 @@ sealed class FizikselService(IConfiguration cfg, ILogger<FizikselService> log)
             var k = Kolonlar(r);
             while (await r.ReadAsync(ct))
             {
+                if (S(r, k, "NlyteAssetID") is string aid)
+                    foreach (var h in new[] { S(r, k, "HostKey"), S(r, k, "HostFqdn"), S(r, k, "NlyteAdi") }.OfType<string>()) hostAsset.TryAdd(Norm(h), aid);
                 if (!string.Equals(S(r, k, "EslesmeTuru"), "Yok", StringComparison.OrdinalIgnoreCase)) continue;
                 string host = S(r, k, "HostKey") ?? S(r, k, "HostFqdn") ?? "?";
                 eksik.Add(new FizEksik(host, S(r, k, "HostFqdn"), I(r, k, "VmSayisi") ?? 0, S(r, k, "Kapsam"), null, "Yok", I(r, k, "AdaySayisi"), null));
@@ -132,45 +144,79 @@ sealed class FizikselService(IConfiguration cfg, ILogger<FizikselService> log)
         // Tüm kabinler ve cihazlar (nlyte): bunlar yoksa yalnız KabinHostVm'deki (VM'li host'u olan) kabinler görünür
         var kabinler = new List<FizKabin>();
         var cihazlar = new List<FizCihaz>();
-        string kabTablo = cfg["Fiziksel:Tablolar:NlyteKabin"] ?? "dbo.NlyteKabin", sunTablo = cfg["Fiziksel:Tablolar:NlyteSunucu"] ?? "dbo.NlyteSunucu";
+        var chassisler = new List<FizChassis>();
+        string kabTablo = cfg["Fiziksel:Tablolar:NlyteKabin"] ?? "dbo.NlyteKabin";
         try
         {
-            await using (var cmd = new SqlCommand($"SELECT * FROM {kabTablo}", conn) { CommandTimeout = 60 })
-            await using (var r = await cmd.ExecuteReaderAsync(ct))
+            await using var cmd = new SqlCommand($"SELECT * FROM {kabTablo}", conn) { CommandTimeout = 60 };
+            await using var r = await cmd.ExecuteReaderAsync(ct);
+            var k = Kolonlar(r);
+            while (await r.ReadAsync(ct))
+                if (S(r, k, "KabinAdi") is string ad)
+                    kabinler.Add(new FizKabin(ad, S(r, k, "CabinetAssetID"), S(r, k, "KabinUniqueAd"), I(r, k, "KabinUYukseklik"), S(r, k, "KabinUSirasi"),
+                        I(r, k, "BosU"), S(r, k, "BitisikBosU")));
+        }
+        catch (SqlException ex) when (ex.Number == 208) { log.LogWarning("{K} yok; yalnız KabinHostVm'deki kabinler gösterilecek.", kabTablo); }
+
+        // Cihazlar: önce NlyteCihaz (tüm türler), yoksa NlyteSunucu (yalnız sunucular)
+        string? cihazTablo = null;
+        foreach (var (tablo, varsayilanTur) in new[] { (cfg["Fiziksel:Tablolar:NlyteCihaz"] ?? "dbo.NlyteCihaz", "Other"), (cfg["Fiziksel:Tablolar:NlyteSunucu"] ?? "dbo.NlyteSunucu", "Server") })
+        {
+            try
             {
-                var k = Kolonlar(r);
-                while (await r.ReadAsync(ct))
-                    if (S(r, k, "KabinAdi") is string ad)
-                        kabinler.Add(new FizKabin(ad, S(r, k, "CabinetAssetID"), S(r, k, "KabinUniqueAd"), I(r, k, "KabinUYukseklik"), S(r, k, "KabinUSirasi"),
-                            I(r, k, "BosU"), S(r, k, "BitisikBosU")));
-            }
-            await using (var cmd = new SqlCommand($"SELECT * FROM {sunTablo}", conn) { CommandTimeout = 120 })
-            await using (var r = await cmd.ExecuteReaderAsync(ct))
-            {
+                await using var cmd = new SqlCommand($"SELECT * FROM {tablo}", conn) { CommandTimeout = 120 };
+                await using var r = await cmd.ExecuteReaderAsync(ct);
                 var k = Kolonlar(r);
                 while (await r.ReadAsync(ct))
                 {
                     var adlar = new[] { "AssetName", "Ad", "AdKisa", "AdOneksiz", "AdTiresiz" }.Select(x => S(r, k, x)).OfType<string>()
                         .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
                     if (adlar.Count == 0) continue;
+                    string? tip = S(r, k, "MalzemeTipi") ?? S(r, k, "MalzemeTip"), kaynak = S(r, k, "Kaynak");
                     cihazlar.Add(new FizCihaz(adlar[0], adlar, S(r, k, "AssetID"), S(r, k, "SerialNumber"), S(r, k, "CabinetAssetID"),
                         S(r, k, "RecordStatus"), S(r, k, "OperationalStatus"), I(r, k, "UAlt"), I(r, k, "UYukseklik"), S(r, k, "Yuz"),
-                        S(r, k, "Model") ?? S(r, k, "MalzemeAdi"), S(r, k, "MalzemeTip") ?? S(r, k, "MalzemeTipi"), S(r, k, "UniqueAssetName"),
-                        S(r, k, "ChassisAdi") ?? S(r, k, "Chassis"), S(r, k, "BladeSlot") ?? S(r, k, "Slot")));
+                        S(r, k, "Model") ?? S(r, k, "MalzemeAdi"), tip, S(r, k, "UniqueAssetName"),
+                        S(r, k, "ChassisAdi") ?? S(r, k, "Chassis"), S(r, k, "BladeSlot") ?? S(r, k, "Slot"),
+                        TurBul(S(r, k, "CihazTuru"), tip, kaynak, varsayilanTur), kaynak, S(r, k, "ChassisAssetID")));
                 }
+                cihazTablo = tablo;
+                break;
             }
+            catch (SqlException ex) when (ex.Number == 208) { log.LogWarning("{T} yok.", tablo); cihazlar.Clear(); }
         }
-        catch (SqlException ex) when (ex.Number == 208)
+        string chTablo = cfg["Fiziksel:Tablolar:NlyteChassis"] ?? "dbo.NlyteChassis";
+        try
         {
-            log.LogWarning("{K} / {S} yok; yalnız KabinHostVm'deki kabinler gösterilecek.", kabTablo, sunTablo);
-            kabinler.Clear(); cihazlar.Clear();
+            await using var cmd = new SqlCommand($"SELECT * FROM {chTablo}", conn) { CommandTimeout = 60 };
+            await using var r = await cmd.ExecuteReaderAsync(ct);
+            var k = Kolonlar(r);
+            while (await r.ReadAsync(ct))
+                if (S(r, k, "ChassisAssetID") is string id)
+                    chassisler.Add(new FizChassis(id, S(r, k, "ChassisAdi"), S(r, k, "CabinetAssetID"), I(r, k, "UAlt"), I(r, k, "UYukseklik"), S(r, k, "Yuz"), S(r, k, "Model")));
         }
+        catch (SqlException ex) when (ex.Number == 208) { log.LogInformation("{T} yok; blade'lerin chassis'i NlyteCihaz'dan bulunur.", chTablo); }
 
-        return Olustur(vmler, eksik, tablodan, kabinler, cihazlar);
+        var snap = Olustur(vmler, eksik, tablodan, kabinler, cihazlar, chassisler, hostAsset);
+        snap.CihazTablosu = cihazTablo;
+        return snap;
+    }
+
+    // Cihaz türü: tablodaki CihazTuru; yoksa malzeme tipi / nlyte entity adından (eski NlyteSunucu → Server)
+    public static string TurBul(string? cihazTuru, string? malzemeTipi, string? kaynak, string varsayilan = "Other")
+    {
+        if (!string.IsNullOrWhiteSpace(cihazTuru)) return cihazTuru.Trim();
+        string t = ((malzemeTipi ?? "") + " " + (kaynak ?? "")).ToLowerInvariant();
+        if (t.Trim() == "") return varsayilan;
+        return t.Contains("panelnetwork") ? "PatchPanel" : t.Contains("network") ? "Network" : t.Contains("server") ? "Server" : t.Contains("storage") ? "Storage"
+            : t.Contains("pdu") || t.Contains("powerstrip") ? "PDU" : t.Contains("chassis") ? "Chassis" : t.Contains("kvm") ? "KVM" : t.Contains("ups") ? "UPS"
+            : t.Contains("aircondition") ? "Cooling" : t.Contains("staticswitch") ? "StaticSwitch" : t.Contains("auxiliar") ? "Auxiliary"
+            : t.Contains("peripheral") ? "Peripheral" : varsayilan;
+
     }
 
     // Anlık görüntü + dizinler (kabin → VM'ler, IP → VM'ler); sahte veriyle test için de kullanılır
-    public static FizikselSnapshot Olustur(List<FizVm> vmler, List<FizEksik> eksik, bool tablodan, List<FizKabin>? kabinler = null, List<FizCihaz>? cihazlar = null)
+    public static FizikselSnapshot Olustur(List<FizVm> vmler, List<FizEksik> eksik, bool tablodan, List<FizKabin>? kabinler = null, List<FizCihaz>? cihazlar = null,
+        List<FizChassis>? chassisler = null, Dictionary<string, string>? hostAsset = null)
     {
         // Cluster bilgisi eksik listesine KabinHostVm'den eklenir (FQDN ya da kısa ad)
         var clusterOf = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -192,9 +238,18 @@ sealed class FizikselService(IConfiguration cfg, ILogger<FizikselService> log)
             s.Kabinler.TryAdd(kb.Ad, kb);
             if (kb.CabinetAssetId != null) idAd.TryAdd(kb.CabinetAssetId, kb.Ad);
         }
+        foreach (var ch in chassisler ?? []) s.Chassisler.TryAdd(ch.Id, ch);
+        // Chassis olarak kayıtlı cihazlar da chassis sözlüğüne (NlyteChassis yoksa blade'in kabini / U'su buradan)
+        foreach (var c in (cihazlar ?? []).Where(c => c.Tur.Equals("Chassis", StringComparison.OrdinalIgnoreCase) && c.AssetId != null))
+            s.Chassisler.TryAdd(c.AssetId!, new FizChassis(c.AssetId!, c.Ad, c.CabinetAssetId, c.UAlt, c.UYukseklik, c.Yuz, c.Model));
+        foreach (var kv in hostAsset ?? []) s.HostAsset.TryAdd(kv.Key, kv.Value);
         foreach (var c in cihazlar ?? [])
-            if (c.CabinetAssetId != null && idAd.TryGetValue(c.CabinetAssetId, out var kad))
+        {
+            string? kabinId = c.CabinetAssetId ?? (c.ChassisId != null ? s.Chassisler.GetValueOrDefault(c.ChassisId)?.CabinetAssetId : null);
+            if (kabinId != null && idAd.TryGetValue(kabinId, out var kad))
                 (s.KabinCihaz.TryGetValue(kad, out var l3) ? l3 : s.KabinCihaz[kad] = []).Add(c);
+            else s.KabinDisi.Add(c);
+        }
         return s;
     }
 
@@ -254,7 +309,9 @@ sealed class FizikselService(IConfiguration cfg, ILogger<FizikselService> log)
             })
             .OrderBy(x => x.ad == "Diğer").ThenBy(x => int.TryParse(x.ad.AsSpan(2), out int n) ? n : 999).ToList();
         return new { yenileme = s.Yenileme, yuklendi = s.LoadedAt, anaKapsam = AnaKapsam, kapsamlar, odalar, nlyte = s.NlyteVar,
-            toplamKabin = s.TumKabinler.Count(), vmliKabin = s.KabinVm.Count, cihaz = s.KabinCihaz.Values.Sum(l => l.Count(c => c.Aktif)), eksikSayisi = s.Eksik.Count(e => e.Kapsam == null || e.Kapsam == AnaKapsam) };
+            toplamKabin = s.TumKabinler.Count(), vmliKabin = s.KabinVm.Count, cihaz = s.KabinCihaz.Values.Sum(l => l.Count(c => c.Aktif)),
+            cihazTablosu = s.CihazTablosu, turlar = TurSayim(s.KabinCihaz.Values.SelectMany(l => l).Where(c => c.Aktif)),
+            kabinDisi = s.KabinDisi.Count(c => c.Aktif), kabinDisiTurlar = TurSayim(s.KabinDisi.Where(c => c.Aktif)), eksikSayisi = s.Eksik.Count(e => e.Kapsam == null || e.Kapsam == AnaKapsam) };
     }
 
     public object Oda(FizikselSnapshot s, string ad)
@@ -267,7 +324,7 @@ sealed class FizikselService(IConfiguration cfg, ILogger<FizikselService> log)
             int vmHost = vs.Select(v => v.Host ?? v.HostFqdn).Where(x => x != null).Distinct(StringComparer.OrdinalIgnoreCase).Count();
             return new
             {
-                ad = k, sira = p.Sira, no = p.No, vm = vs.Count, cihaz = cs.Count, vmHost, host = Math.Max(cs.Count, vmHost),
+                ad = k, sira = p.Sira, no = p.No, vm = vs.Count, cihaz = cs.Count, vmHost, host = Math.Max(cs.Count, vmHost), turlar = TurSayim(cs),
                 uygulama = vs.SelectMany(v => v.Uygulamalar).Distinct(StringComparer.OrdinalIgnoreCase).Count(),
                 bosU = s.Kabinler.GetValueOrDefault(k)?.BosU ?? vs.Select(v => v.KabinBosU).FirstOrDefault(x => x != null), konum = KabinKonum(s, k),
             };
@@ -286,6 +343,11 @@ sealed class FizikselService(IConfiguration cfg, ILogger<FizikselService> log)
 
     static string Norm(string x) => x.Trim().ToLowerInvariant().Split('.')[0];
 
+    // Tür sayımı: [{tur, adet, vmli}] — en kalabalık önce
+    static List<object> TurSayim(IEnumerable<FizCihaz> cs, ISet<FizCihaz>? vmli = null) =>
+        cs.GroupBy(c => c.Tur, StringComparer.OrdinalIgnoreCase).OrderByDescending(g => g.Count()).ThenBy(g => g.Key)
+            .Select(g => (object)new { tur = g.Key, adet = g.Count(), vmli = vmli == null ? 0 : g.Count(vmli.Contains) }).ToList();
+
     public object? Kabin(FizikselSnapshot s, string ad)
     {
         var vs = s.KabinVm.GetValueOrDefault(ad) ?? [];
@@ -302,20 +364,27 @@ sealed class FizikselService(IConfiguration cfg, ILogger<FizikselService> log)
         foreach (var g in gruplar)
         {
             var h = g.First();
-            var c = cihazlar.FirstOrDefault(c => h.HostSeri != null && c.Seri != null && c.Seri.Equals(h.HostSeri, StringComparison.OrdinalIgnoreCase) && !cihazGrup.ContainsKey(c))
+            string? aid = new[] { g.Key, h.HostFqdn, h.Host }.OfType<string>().Select(x => s.HostAsset.GetValueOrDefault(Norm(x))).FirstOrDefault(x => x != null);
+            var c = (aid != null ? cihazlar.FirstOrDefault(c => c.AssetId != null && c.AssetId.Equals(aid, StringComparison.OrdinalIgnoreCase) && !cihazGrup.ContainsKey(c)) : null)
+                ?? cihazlar.FirstOrDefault(c => h.HostSeri != null && c.Seri != null && c.Seri.Equals(h.HostSeri, StringComparison.OrdinalIgnoreCase) && !cihazGrup.ContainsKey(c))
                 ?? cihazlar.FirstOrDefault(c => !cihazGrup.ContainsKey(c) && c.Adlar.Any(a => Norm(a) == Norm(g.Key) || (h.HostFqdn != null && Norm(a) == Norm(h.HostFqdn))));
             if (c != null) cihazGrup[c] = g; else eslesmeyen.Add(g);
         }
         object Satir(FizCihaz? c, IGrouping<string, FizVm>? g)
         {
             var h = g?.First();
+            // blade: UAlt'ı NULL, chassis'in U / yüzü kullanılır
+            var ch = c?.ChassisId != null ? s.Chassisler.GetValueOrDefault(c.ChassisId) : null;
+            bool blade = c != null && c.UAlt == null && ch != null;
+            if (blade) c = c! with { UAlt = ch!.UAlt, UYukseklik = ch.UYukseklik, Yuz = c.Yuz ?? ch.Yuz, Chassis = c.Chassis ?? ch.Ad ?? ch.Id };
             return new
             {
                 ad = c?.Ad ?? g!.Key, fqdn = h?.HostFqdn, seri = c?.Seri ?? h?.HostSeri, assetId = c?.AssetId, cluster = h?.Cluster, model = c?.Model ?? h?.HostModel,
                 tip = c?.MalzemeTip, durum = c?.Operational, uAlt = c?.UAlt ?? h?.HostUAlt, uYukseklik = c?.UYukseklik ?? h?.HostUYukseklik, yuz = c?.Yuz ?? h?.HostYuz,
                 chassis = c?.Chassis ?? h?.ChassisAdi, slot = c?.Slot ?? h?.BladeSlot, eslesme = h?.Eslesme, kaynak = h?.Kaynak,
                 vm = g?.Count(v => v.Vm != null) ?? 0, uygulama = g?.SelectMany(v => v.Uygulamalar).Distinct(StringComparer.OrdinalIgnoreCase).Count() ?? 0,
-                nlyte = c != null, vmBilgisi = g != null,
+                nlyte = c != null, vmBilgisi = g != null, tur = c?.Tur ?? "Server", chassisId = blade ? c!.ChassisId : null, blade,
+                kaynakTablo = c?.Kaynak,
             };
         }
         var hostlar = cihazlar.Select(c => Satir(c, cihazGrup.GetValueOrDefault(c))).Concat(eslesmeyen.Select(g => Satir(null, g))).ToList();
@@ -327,19 +396,19 @@ sealed class FizikselService(IConfiguration cfg, ILogger<FizikselService> log)
             .OrderBy(v => v.host).ThenBy(v => v.Vm).ToList();
         // VM'li host'ların adı nlyte cihaz adıyla değiştiyse VM tablosu da o adla eşlenebilsin
         var hostAd = cihazGrup.ToDictionary(kv => kv.Value.Key, kv => kv.Key.Ad, StringComparer.OrdinalIgnoreCase);
-        var pasif = tumCihaz.Where(c => !c.Aktif).Select(c => new { ad = c.Ad, durum = c.Record, operasyon = c.Operational, model = c.Model, uAlt = c.UAlt }).ToList();
+        var pasif = tumCihaz.Where(c => !c.Aktif).Select(c => new { ad = c.Ad, tur = c.Tur, durum = c.Record, operasyon = c.Operational, model = c.Model, uAlt = c.UAlt }).ToList();
         return new
         {
             ad, konum = KabinKonum(s, ad), cabinetAssetId = kb?.CabinetAssetId ?? ilk?.CabinetAssetId, uKapasite = uKap, uSirasi = usira, u1Ustte = U1Ustte(usira),
             bosU = kb?.BosU ?? vs.Select(v => v.KabinBosU).FirstOrDefault(x => x != null), bitisikBosU = kb?.BitisikBosU,
-            cihazSayisi = cihazlar.Count, vmHostSayisi = gruplar.Count, nlyteEslesmeyen = eslesmeyen.Select(g => g.Key).ToList(),
+            cihazSayisi = cihazlar.Count, vmHostSayisi = gruplar.Count, turlar = TurSayim(cihazlar, cihazGrup.Keys.ToHashSet()), nlyteEslesmeyen = eslesmeyen.Select(g => g.Key).ToList(),
             hostlar, vmler = vmler.Select(v => new { host = v.host != null && hostAd.TryGetValue(v.host, out var n) ? n : v.host, v.Vm, v.Ip, v.dns, v.Os, v.uygulamalar, v.muhafizlar, v.Kaynak }).ToList(),
-            uygulamalar = Uygulamalar(s, vs, ad), pasif,
+            uygulamalar = Uygulamalar(s, vs, ad, hostAd), pasif,
         };
     }
 
     // Kabinin uygulamaları + "kabin kapanırsa" etkisi: uygulamanın bu kabindeki VM'leri / tüm (ana DC) VM'leri → tamamı bu kabindeyse kritik
-    object Uygulamalar(FizikselSnapshot s, List<FizVm> vs, string kabin)
+    object Uygulamalar(FizikselSnapshot s, List<FizVm> vs, string kabin, Dictionary<string, string>? hostAd = null)
     {
         var tumu = s.Vmler.Where(v => v.Kapsam == null || v.Kapsam == AnaKapsam).SelectMany(v => v.Uygulamalar.Select(a => (a, v)))
             .GroupBy(x => x.a, StringComparer.OrdinalIgnoreCase).ToDictionary(g => g.Key, g => g.Select(x => x.v).ToList(), StringComparer.OrdinalIgnoreCase);
@@ -354,7 +423,7 @@ sealed class FizikselService(IConfiguration cfg, ILogger<FizikselService> log)
             return new
             {
                 ad = g.Key, vm = buKabin, toplamVm = Math.Max(toplam, buKabin), etki, digerKabinler = digerKabin.Take(10).ToList(), digerKabinSayisi = digerKabin.Count, kabinsizVm = kabinsiz,
-                hostlar = g.Select(x => x.v.Host ?? x.v.HostFqdn).OfType<string>().Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
+                hostlar = g.Select(x => x.v.Host ?? x.v.HostFqdn).OfType<string>().Select(h => hostAd?.GetValueOrDefault(h) ?? h).Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
                 muhafizlar = g.SelectMany(x => x.v.Muhafizlar).Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
             };
         }).OrderBy(x => x.etki == "tamamı bu kabinde" ? 0 : x.etki.StartsWith("başka kabin yok") ? 1 : 2).ThenByDescending(x => x.vm).ThenBy(x => x.ad).ToList();
@@ -382,7 +451,7 @@ sealed class FizikselService(IConfiguration cfg, ILogger<FizikselService> log)
             foreach (var c in cs)
                 if (c.Adlar.Any(Has) || Has(c.Seri))
                     list.Add((3, "Cihaz", c.Ad, new FizVm(kabin, null, null, null, c.UAlt, c.UYukseklik, c.Yuz, c.Model, c.Chassis, c.Slot, null, c.Ad, c.Seri, c.CabinetAssetId,
-                        null, null, null, null, null, null, [], [], "nlyte", AnaKapsam, null, null)));
+                        null, null, null, null, null, null, [], [], c.Tur, AnaKapsam, null, null)));
         // Host / kabin / uygulama / cluster eşleşmeleri tekilleşir (VM'leri tek tek listelenmez)
         var sonuc = list.GroupBy(x => x.Tur is "IP" or "VM" ? $"{x.Tur}|{x.Deger}|{x.V.Vm}" : $"{x.Tur}|{x.Deger}|{x.V.Kabin}", StringComparer.OrdinalIgnoreCase)
             .Select(g => (g.First(), N: g.Count())).OrderBy(x => x.Item1.Sira).ThenBy(x => x.Item1.Deger)
@@ -390,6 +459,7 @@ sealed class FizikselService(IConfiguration cfg, ILogger<FizikselService> log)
             {
                 tur = x.Item1.Tur, deger = x.Item1.Deger, kabin = x.Item1.V.Kabin, oda = x.Item1.V.Kabin != null ? Parcala(x.Item1.V.Kabin).Oda ?? "Diğer" : null,
                 host = x.Item1.V.Host ?? x.Item1.V.HostFqdn, vm = x.Item1.V.Vm, ip = x.Item1.V.Ip, kapsam = x.Item1.V.Kapsam, adet = x.N,
+                cihazTuru = x.Item1.Tur == "Cihaz" ? x.Item1.V.Kaynak : null,
             }).ToList();
         var kabinler = sonuc.Select(x => x.kabin).OfType<string>().Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         return new { q, sonuclar = sonuc, kabinler, kesik = list.Count > max };
@@ -404,6 +474,21 @@ sealed class FizikselService(IConfiguration cfg, ILogger<FizikselService> log)
             ip, kabin = v.Kabin, oda = v.Kabin != null ? Parcala(v.Kabin).Oda : null, konum = v.Konum, odaAdi = OdaAdi(v.Konum), host = v.Host ?? v.HostFqdn,
             cluster = v.Cluster, vm = v.Vm, kapsam = v.Kapsam, anaDc = v.Kapsam == null || v.Kapsam == AnaKapsam, uAlt = v.HostUAlt, uYukseklik = v.HostUYukseklik,
             yuz = v.HostYuz, chassis = v.ChassisAdi, eslesme = v.Eslesme,
+        };
+    }
+
+    // Kabine bağlı olmayan aktif cihazlar (klima vb.; kabin kaydı bulunamayanlar)
+    public object KabinDisi(FizikselSnapshot s, int max = 3000)
+    {
+        var l = s.KabinDisi.Where(c => c.Aktif).OrderBy(c => c.Tur).ThenBy(c => c.Ad).ToList();
+        return new
+        {
+            toplam = l.Count, turlar = TurSayim(l), kesik = l.Count > max,
+            cihazlar = l.Take(max).Select(c => new
+            {
+                ad = c.Ad, tur = c.Tur, model = c.Model, seri = c.Seri, assetId = c.AssetId, durum = c.Operational, cabinetAssetId = c.CabinetAssetId,
+                konum = c.UniqueAssetName != null && Regex.Match(c.UniqueAssetName, @"Room=(.+?)\)?\s*$") is { Success: true } m ? m.Groups[1].Value.Trim() : null,
+            }).ToList(),
         };
     }
 
