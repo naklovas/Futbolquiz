@@ -587,7 +587,11 @@ erişim talepleri) — DB → şema → tablo ve kim erişiyor bilgisi buradan b
   SerialNumber, Mac, Vendor, Model, PowerState, DnsName, DnsIp, IloIp, OsName, OsVersion, OnlineHbaWwnn, LastReboot, InsertedAt; `Fiziksel:Tablolar:MsyFiziksel`,
   yoksa atlanır): yedek eşleşmede adla bulunamayan host için önce KabinHostVm.HostSeri, sonra MSY'deki DnsName → SerialNumber → kabindeki TEK nlyte cihazının
   SerialNumber'ı ("seri (MSY fiziksel envanter)", nlyte'ta farklı adla kayıtlı); Kabin() VM grubu ↔ cihaz eşleşmesinde de MSY serisi; host satırında `msy`
-  (iLO, yönetim IP, OS, güç, son reboot) detayda. Eksik bölümündeki tablo "Ek eşleştirmeyle kabine bağlanan ESX host'ları" + "Nasıl" (ad · tür yanlış / seri · ad farklı), CSV notu. Sahte veriyle (switch, firewall, patch panel, 0U PDU, chassis + 3 blade, AssetID ile farklı adlı host, klima) test edildi.
+  (iLO, yönetim IP, OS, güç, son reboot) detayda. Eksik bölümündeki tablo "Ek eşleştirmeyle kabine bağlanan ESX host'ları" + "Nasıl" (ad · tür yanlış / seri · ad farklı), CSV notu. ALT İSTATİSTİK (kullanıcı: "toplam yerleşen
+  sunucu ve uygulama sayısı önemli"): `/api/fiziksel/ozet` → `istatistik` (`Istatistik`, ana kapsam): kabine yerleşen sunucu (aktif Server cihazları,
+  U'su bilinen, kabin dışı sunucu), ESX host yerleşimi (kabini bilinen / toplam, ek eşleşme, nlyte'ta yok), VM yerleşimi (%), kabine yerleşen uygulama
+  (en az bir VM'i kabinde / toplam, tümü yerleşen, hiç yerleşmeyen), tek kabine bağlı uygulama (kabin kapanırsa tamamen durur), kabin sayıları → sayfanın
+  altında kart ızgarası (`fzIstCiz`, `#fzIst`). Sahte veriyle (switch, firewall, patch panel, 0U PDU, chassis + 3 blade, AssetID ile farklı adlı host, klima) test edildi.
 - **VIP**: sorgulanan IP VIP ise üyeler + GW'ler aynı sorguya eklenir, üyeler "VIP ÜYESİ" (GW→üye trafiği varsa ✓).
   Gidilen IP VIP ise "VIP → n ÜYE"; gelen IP LB GW ise "LB GW"; sorgulanan sunucu havuz üyesiyse VIP kartı.
 - **Uygulama görünümü** (`/api/apps`, `/api/app`): `[kullanan uygulamalar] → [UYGULAMA: VIP'ler + segment grupları] → [bağımlı olunanlar]`,

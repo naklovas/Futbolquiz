@@ -52,6 +52,7 @@ function fzShell() {
     </div>
     <details id="fzDisi" class="fz-eksik"><summary><b>Kabin dışı cihazlar</b> <span class="small muted" id="fzDisiSay"></span></summary><div id="fzDisiIc"></div></details>
     <details id="fzEksik" class="fz-eksik"><summary><b>nlyte'ta eksik host'lar</b> <span class="small muted" id="fzEksikSay"></span></summary><div id="fzEksikIc"></div></details>
+    <div id="fzIst" class="fz-ist"></div>
   </section>`;
   let t = null;
   $("#fzQ").addEventListener("input", e => { clearTimeout(t); t = setTimeout(() => fzAra(e.target.value), 300); });
@@ -82,12 +83,32 @@ async function fzOzetYukle(yeniden) {
     + (ana ? `<b>${esc(ana.kapsam)}</b>: ${fmt(ana.vm)} VM, kabini bilinen %${ana.vm ? Math.round(ana.kabinli * 100 / ana.vm) : 0}` : "")
     + (diger.length ? ` · <span title="nlyte yalnız ana veri merkezini kapsar">${diger.map(k => `${esc(k.kapsam)} ${fmt(k.vm)}`).join(" · ")}</span>` : "")
     + (o.yenileme ? ` · son yenileme ${new Date(o.yenileme).toLocaleString("tr-TR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}` : "");
+  fzIstCiz(o.istatistik);
   $("#fzEksikSay").textContent = (o.eksikSayisi ? `(${fmt(o.eksikSayisi)} host)` : "") + (o.turFarkliSayisi ? ` · ${fmt(o.turFarkliSayisi)} host ek eşleştirmeyle kabine bağlandı` : "");
   $("#fzDisiSay").textContent = o.kabinDisi ? `(${fzTurOzet(o.kabinDisiTurlar, o.kabinDisi)})` : "(yok)";
   $("#fzOda").innerHTML = o.odalar.map(x => `<option value="${esc(x.ad)}">${esc(x.ad)}${x.konum && x.ad !== "Diğer" ? " · " + esc(x.konum) : ""} (${fmt(x.kabin)} kabin)</option>`).join("");
   const ilk = (!yeniden && fz.oda && o.odalar.some(x => x.ad === fz.oda)) ? fz.oda : o.odalar[0]?.ad;
   if (ilk) { $("#fzOda").value = ilk; fzOdaAc(ilk); } else $("#fzPlan").innerHTML = `<div class="unk">Kabin bilgisi olan kayıt yok.</div>`;
   if (yeniden && fz.kabin) fzKabinAc(fz.kabin);
+}
+
+// Alt istatistik kartları (ana veri merkezi)
+function fzIstCiz(i) {
+  const el = $("#fzIst");
+  if (!el) return;
+  if (!i) { el.innerHTML = ""; return; }
+  const yuz = (a, b) => b ? `%${(a * 100 / b).toFixed(1).replace(".0", "")}` : "—";
+  const kart = (baslik, ana, alt, ipucu, renk) => `<div class="fz-ist-k" title="${esc(ipucu ?? "")}"${renk ? ` style="border-top-color:${renk}"` : ""}>
+      <div class="small muted">${baslik}</div><div class="fz-ist-n">${ana}</div><div class="small">${alt}</div></div>`;
+  el.innerHTML = `<h3 style="margin:16px 0 8px">İstatistik <span class="small muted">${esc(fz.ozet?.anaKapsam ?? "Ana veri merkezi")}</span></h3>
+    <div class="fz-ist-g">
+      ${kart("Kabine yerleşen sunucu", fmt(i.sunucu), `U konumu bilinen: ${fmt(i.sunucuU)} · kabin dışı (depo vb.): ${fmt(i.kabinDisiSunucu)}`, "nlyte'ta bir kabine bağlı aktif sunucu cihazları (blade'ler chassis'in kabininde sayılır)", "var(--in)")}
+      ${kart("ESX host yerleşimi", `${fmt(i.esxYerlesen)} <span class="small muted">/ ${fmt(i.esxHost)}</span>`, `${yuz(i.esxYerlesen, i.esxHost)} · ek eşleşme: ${fmt(i.esxEkEslesme)} · nlyte'ta yok: ${fmt(i.esxEksik)}`, "VM envanterindeki ESX host'larından kabini bilinenler", "var(--in)")}
+      ${kart("VM yerleşimi", `${fmt(i.vmKabinli)} <span class="small muted">/ ${fmt(i.vm)}</span>`, `%${i.vmOran} kabini bilinen · uygulaması yok: ${fmt(i.vmUygulamasiz)}`, "Kabini bilinen VM'ler", "var(--in)")}
+      ${kart("Kabine yerleşen uygulama", `${fmt(i.uygulamaYerlesen)} <span class="small muted">/ ${fmt(i.uygulama)}</span>`, `${yuz(i.uygulamaYerlesen, i.uygulama)} · tüm VM'leri yerleşen: ${fmt(i.uygulamaTamami)} · hiç yerleşmeyen: ${fmt(i.uygulamaHicKabin)}`, "En az bir VM'i kabini bilinen host'ta çalışan ERT uygulamaları", "#2e9d5b")}
+      ${kart("Tek kabine bağlı uygulama", fmt(i.uygulamaTekKabin), "tüm VM'leri aynı kabinde — kabin kapanırsa tamamen durur", "Kabini bilinen tüm VM'leri tek bir kabinde olan uygulamalar", "var(--err)")}
+      ${kart("Kabin", fmt(i.kabin), `cihazlı: ${fmt(i.kabinCihazli)} · VM'li: ${fmt(i.kabinVmli)} · ${fmt(i.cihaz)} aktif cihaz`, "nlyte kabinleri", "var(--muted)")}
+    </div>`;
 }
 
 async function fzOdaAc(ad) {

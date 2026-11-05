@@ -398,10 +398,38 @@ sealed class FizikselService(IConfiguration cfg, ILogger<FizikselService> log)
                     .GroupBy(x => x).OrderByDescending(x => x.Count()).Select(x => x.Key).FirstOrDefault(),
             })
             .OrderBy(x => x.ad == "Diğer").ThenBy(x => int.TryParse(x.ad.AsSpan(2), out int n) ? n : 999).ToList();
-        return new { yenileme = s.Yenileme, yuklendi = s.LoadedAt, anaKapsam = AnaKapsam, kapsamlar, odalar, nlyte = s.NlyteVar,
+        return new { yenileme = s.Yenileme, yuklendi = s.LoadedAt, anaKapsam = AnaKapsam, kapsamlar, odalar, nlyte = s.NlyteVar, istatistik = Istatistik(s),
             toplamKabin = s.TumKabinler.Count(), vmliKabin = s.KabinVm.Count, cihaz = s.KabinCihaz.Values.Sum(l => l.Count(c => c.Aktif)),
             cihazTablosu = s.CihazTablosu, turlar = TurSayim(s.KabinCihaz.Values.SelectMany(l => l).Where(c => c.Aktif)),
             kabinDisi = s.KabinDisi.Count(c => c.Aktif), kabinDisiTurlar = TurSayim(s.KabinDisi.Where(c => c.Aktif)), turFarkliSayisi = s.TurFarkli.Count, msy = s.MsyVar, eksikSayisi = s.Eksik.Count(e => e.Kapsam == null || e.Kapsam == AnaKapsam) };
+    }
+
+    // Alt istatistik (kullanıcı: "toplam yerleşen sunucu ve uygulama sayısı önemli"): ana veri merkezi kapsamında
+    object Istatistik(FizikselSnapshot s)
+    {
+        bool Ana(FizVm v) => v.Kapsam == null || v.Kapsam == AnaKapsam;
+        var vm = s.Vmler.Where(Ana).ToList();
+        string HostKey(FizVm v) => Norm(v.HostFqdn ?? v.Host ?? "?");
+        var hostlar = vm.Where(v => v.Host != null || v.HostFqdn != null).GroupBy(HostKey).ToList();
+        int hostYerlesen = hostlar.Count(g => g.Any(v => v.Kabin != null));
+        var aktifCihaz = s.KabinCihaz.Values.SelectMany(l => l).Where(c => c.Aktif).ToList();
+        int sunucu = aktifCihaz.Count(c => c.Tur.Equals("Server", StringComparison.OrdinalIgnoreCase));
+        int sunucuU = aktifCihaz.Count(c => c.Tur.Equals("Server", StringComparison.OrdinalIgnoreCase) && (c.UAlt != null || c.ChassisId != null));
+        // uygulama → VM'ler (kabinli / toplam) ve kabin sayısı
+        var uyg = vm.SelectMany(v => v.Uygulamalar.Select(a => (a, v))).GroupBy(x => x.a, StringComparer.OrdinalIgnoreCase)
+            .Select(g => (Ad: g.Key, Toplam: g.Count(), Kabinli: g.Count(x => x.v.Kabin != null),
+                Kabin: g.Select(x => x.v.Kabin).OfType<string>().Distinct(StringComparer.OrdinalIgnoreCase).Count())).ToList();
+        int vmKabinli = vm.Count(v => v.Kabin != null);
+        return new
+        {
+            kabin = s.TumKabinler.Count(), kabinCihazli = s.TumKabinler.Count(k => s.KabinCihaz.GetValueOrDefault(k)?.Any(c => c.Aktif) == true), kabinVmli = s.KabinVm.Count,
+            cihaz = aktifCihaz.Count, sunucu, sunucuU, kabinDisiSunucu = s.KabinDisi.Count(c => c.Aktif && c.Tur.Equals("Server", StringComparison.OrdinalIgnoreCase)),
+            esxHost = hostlar.Count, esxYerlesen = hostYerlesen, esxEkEslesme = s.TurFarkli.Count, esxEksik = s.Eksik.Count(e => e.Kapsam == null || e.Kapsam == AnaKapsam),
+            vm = vm.Count, vmKabinli, vmOran = vm.Count == 0 ? 0 : Math.Round(vmKabinli * 100.0 / vm.Count, 1),
+            uygulama = uyg.Count, uygulamaYerlesen = uyg.Count(u => u.Kabinli > 0), uygulamaTamami = uyg.Count(u => u.Kabinli == u.Toplam),
+            uygulamaTekKabin = uyg.Count(u => u.Kabinli == u.Toplam && u.Kabin == 1), uygulamaHicKabin = uyg.Count(u => u.Kabinli == 0),
+            vmUygulamasiz = vm.Count(v => v.Uygulamalar.Count == 0),
+        };
     }
 
     public object Oda(FizikselSnapshot s, string ad)
