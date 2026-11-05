@@ -29,12 +29,14 @@ record FizCihaz(string Ad, List<string> Adlar, string? AssetId, string? Seri, st
     public bool Aktif => Record == null || Record.Equals("Active", StringComparison.OrdinalIgnoreCase);
 }
 record FizChassis(string Id, string? Ad, string? CabinetAssetId, int? UAlt, int? UYukseklik, string? Yuz, string? Model);
+// sp_KabinZincirYenile'ın eşleştiremediği ama nlyte'ta başka türde (ör. Network) kayıtlı host'lar — DeltaFlow bellekte adla bağlar
+record FizTurFarkli(string Host, string? Fqdn, int VmSayisi, string? Cluster, string CihazAd, string Tur, string Kabin, string? AssetId, int? UAlt);
 record FizEksik(string Host, string? Fqdn, int VmSayisi, string? Kapsam, string? Cluster, string? EslesmeTuru, int? AdaySayisi, string? Not);
 
 sealed class FizikselSnapshot
 {
-    public required List<FizVm> Vmler { get; init; }
-    public required List<FizEksik> Eksik { get; init; }
+    public required List<FizVm> Vmler { get; set; }
+    public required List<FizEksik> Eksik { get; set; }
     public required bool EksikTablodan { get; init; }
     public required DateTimeOffset LoadedAt { get; init; }
     public DateTime? Yenileme => Vmler.Select(v => v.Yenileme).Where(x => x != null).Max();
@@ -46,6 +48,7 @@ sealed class FizikselSnapshot
     public string? CihazTablosu { get; set; }   // okunan cihaz tablosu (NlyteCihaz ya da eski NlyteSunucu)
     public List<FizCihaz> KabinDisi { get; } = [];   // kabine bağlı olmayan cihazlar (klima vb.)
     public Dictionary<string, FizChassis> Chassisler { get; } = new(StringComparer.OrdinalIgnoreCase);
+    public List<FizTurFarkli> TurFarkli { get; } = [];
     public Dictionary<string, string> HostAsset { get; } = new(StringComparer.OrdinalIgnoreCase);   // host adı (kısa, küçük) → nlyte AssetID
     // Planda gösterilecek tüm kabinler: nlyte kabinleri + KabinHostVm'de geçenler
     public IEnumerable<string> TumKabinler => Kabinler.Keys.Union(KabinVm.Keys, StringComparer.OrdinalIgnoreCase);
@@ -225,12 +228,6 @@ sealed class FizikselService(IConfiguration cfg, ILogger<FizikselService> log)
         eksik = eksik.Select(e => e.Cluster == null && (clusterOf.GetValueOrDefault(e.Fqdn ?? "") ?? clusterOf.GetValueOrDefault(e.Host)) is string c ? e with { Cluster = c } : e)
             .OrderByDescending(e => e.VmSayisi).ThenBy(e => e.Host).ToList();
         var s = new FizikselSnapshot { Vmler = vmler, Eksik = eksik, EksikTablodan = tablodan, LoadedAt = DateTimeOffset.Now };
-        foreach (var v in vmler)
-        {
-            if (v.Kabin != null) (s.KabinVm.TryGetValue(v.Kabin, out var l) ? l : s.KabinVm[v.Kabin] = []).Add(v);
-            if (v.Ip != null) foreach (var ip in v.Ip.Split(new[] { ',', ';', ' ', '|' }, StringSplitOptions.RemoveEmptyEntries))
-                    (s.IpVm.TryGetValue(ip, out var l2) ? l2 : s.IpVm[ip] = []).Add(v);
-        }
         s.NlyteVar = kabinler is { Count: > 0 };
         var idAd = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var kb in kabinler ?? [])
@@ -249,6 +246,60 @@ sealed class FizikselService(IConfiguration cfg, ILogger<FizikselService> log)
             if (kabinId != null && idAd.TryGetValue(kabinId, out var kad))
                 (s.KabinCihaz.TryGetValue(kad, out var l3) ? l3 : s.KabinCihaz[kad] = []).Add(c);
             else s.KabinDisi.Add(c);
+        }
+
+        // Yedek eşleşme: kabini olmayan VM'lerin host'u, nlyte'ta bir kabindeki TEK bir cihazla aynı adlıysa (çoğunlukla Network / başka türde
+        // kayıtlı ESX — prosedür yalnız sunucularla eşleştiriyor) VM'ler bellekte o kabine bağlanır. Veritabanına yazılmaz.
+        var adIndeks = new Dictionary<string, List<(FizCihaz C, string Kabin)>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (kad, cs) in s.KabinCihaz)
+            foreach (var c in cs.Where(c => c.Aktif))
+                foreach (var a in c.Adlar.Select(Norm).Distinct())
+                    (adIndeks.TryGetValue(a, out var l) ? l : adIndeks[a] = []).Add((c, kad));
+        if (adIndeks.Count > 0)
+        {
+            var bulunan = new Dictionary<string, (FizCihaz C, string Kabin)>(StringComparer.OrdinalIgnoreCase);
+            (FizCihaz C, string Kabin)? Bul(FizVm v)
+            {
+                foreach (var h in new[] { v.Host, v.HostFqdn }.OfType<string>().Select(Norm).Distinct())
+                {
+                    if (bulunan.TryGetValue(h, out var b)) return b;
+                    if (adIndeks.TryGetValue(h, out var l) && l.Select(x => x.C).Distinct().Count() == 1) return bulunan[h] = l[0];
+                }
+                return null;
+            }
+            var yeni = new List<FizVm>(vmler.Count);
+            var eslenen = new Dictionary<string, (FizCihaz C, string Kabin, List<FizVm> Vm)>(StringComparer.OrdinalIgnoreCase);
+            foreach (var v in vmler)
+            {
+                if (v.Kabin == null && v.Eslesme is null or "Yok" && Bul(v) is { } b)
+                {
+                    var kb = s.Kabinler.GetValueOrDefault(b.Kabin);
+                    var nv = v with
+                    {
+                        Kabin = b.Kabin, KabinU = kb?.UYukseklik, KabinUSirasi = kb?.USirasi, KabinBosU = kb?.BosU, HostUAlt = b.C.UAlt, HostUYukseklik = b.C.UYukseklik,
+                        HostYuz = b.C.Yuz, HostModel = v.HostModel ?? b.C.Model, HostSeri = v.HostSeri ?? b.C.Seri, CabinetAssetId = b.C.CabinetAssetId,
+                        Eslesme = $"Ad (DeltaFlow; nlyte'ta {b.C.Tur})",
+                    };
+                    yeni.Add(nv);
+                    string key = v.HostFqdn ?? v.Host ?? "?";
+                    (eslenen.TryGetValue(key, out var e) ? e : eslenen[key] = (b.C, b.Kabin, [])).Vm.Add(nv);
+                }
+                else yeni.Add(v);
+            }
+            if (eslenen.Count > 0)
+            {
+                s.Vmler = yeni;
+                foreach (var (key, e) in eslenen.OrderByDescending(x => x.Value.Vm.Count))
+                    s.TurFarkli.Add(new FizTurFarkli(e.Vm[0].Host ?? key, e.Vm[0].HostFqdn, e.Vm.Count, e.Vm[0].Cluster, e.C.Ad, e.C.Tur, e.Kabin, e.C.AssetId, e.C.UAlt));
+                var anahtar = eslenen.Values.SelectMany(e => new[] { e.Vm[0].Host, e.Vm[0].HostFqdn }).OfType<string>().Select(Norm).ToHashSet(StringComparer.OrdinalIgnoreCase);
+                s.Eksik = s.Eksik.Where(e => !anahtar.Contains(Norm(e.Host)) && !(e.Fqdn != null && anahtar.Contains(Norm(e.Fqdn)))).ToList();
+            }
+        }
+        foreach (var v in s.Vmler)
+        {
+            if (v.Kabin != null) (s.KabinVm.TryGetValue(v.Kabin, out var l) ? l : s.KabinVm[v.Kabin] = []).Add(v);
+            if (v.Ip != null) foreach (var ip in v.Ip.Split(new[] { ',', ';', ' ', '|' }, StringSplitOptions.RemoveEmptyEntries))
+                    (s.IpVm.TryGetValue(ip, out var l2) ? l2 : s.IpVm[ip] = []).Add(v);
         }
         return s;
     }
@@ -313,7 +364,7 @@ sealed class FizikselService(IConfiguration cfg, ILogger<FizikselService> log)
         return new { yenileme = s.Yenileme, yuklendi = s.LoadedAt, anaKapsam = AnaKapsam, kapsamlar, odalar, nlyte = s.NlyteVar,
             toplamKabin = s.TumKabinler.Count(), vmliKabin = s.KabinVm.Count, cihaz = s.KabinCihaz.Values.Sum(l => l.Count(c => c.Aktif)),
             cihazTablosu = s.CihazTablosu, turlar = TurSayim(s.KabinCihaz.Values.SelectMany(l => l).Where(c => c.Aktif)),
-            kabinDisi = s.KabinDisi.Count(c => c.Aktif), kabinDisiTurlar = TurSayim(s.KabinDisi.Where(c => c.Aktif)), eksikSayisi = s.Eksik.Count(e => e.Kapsam == null || e.Kapsam == AnaKapsam) };
+            kabinDisi = s.KabinDisi.Count(c => c.Aktif), kabinDisiTurlar = TurSayim(s.KabinDisi.Where(c => c.Aktif)), turFarkliSayisi = s.TurFarkli.Count, eksikSayisi = s.Eksik.Count(e => e.Kapsam == null || e.Kapsam == AnaKapsam) };
     }
 
     public object Oda(FizikselSnapshot s, string ad)
@@ -387,6 +438,7 @@ sealed class FizikselService(IConfiguration cfg, ILogger<FizikselService> log)
                 vm = g?.Count(v => v.Vm != null) ?? 0, uygulama = g?.SelectMany(v => v.Uygulamalar).Distinct(StringComparer.OrdinalIgnoreCase).Count() ?? 0,
                 nlyte = c != null, vmBilgisi = g != null, tur = c?.Tur ?? "Server", chassisId = blade ? c!.ChassisId : null, blade,
                 kaynakTablo = c?.Kaynak,
+                turUyari = g != null && c != null && !c.Tur.Equals("Server", StringComparison.OrdinalIgnoreCase) ? $"nlyte'ta {c.Tur} olarak kayıtlı (VM'li ESX host'u — türü düzeltilmeli)" : null,
             };
         }
         var hostlar = cihazlar.Select(c => Satir(c, cihazGrup.GetValueOrDefault(c))).Concat(eslesmeyen.Select(g => Satir(null, g))).ToList();
@@ -507,11 +559,14 @@ sealed class FizikselService(IConfiguration cfg, ILogger<FizikselService> log)
 
     public IEnumerable<FizEksik> Eksik(FizikselSnapshot s) => s.Eksik.Where(e => e.Kapsam == null || e.Kapsam == AnaKapsam);
 
-    public static string EksikCsv(IEnumerable<FizEksik> l)
+    public static string EksikCsv(IEnumerable<FizEksik> l, IEnumerable<FizTurFarkli>? turFarkli = null)
     {
         static string Q(string? v) { v ??= ""; return v.Contains(';') || v.Contains('"') ? "\"" + v.Replace("\"", "\"\"") + "\"" : v; }
         var sb = new StringBuilder("﻿HOST;FQDN;VM SAYISI;CLUSTER;KAPSAM;ADAY SAYISI;NOT\r\n");
         foreach (var e in l) sb.Append(string.Join(";", Q(e.Host), Q(e.Fqdn), e.VmSayisi, Q(e.Cluster), Q(e.Kapsam), e.AdaySayisi?.ToString() ?? "", Q(e.Not))).Append("\r\n");
+        foreach (var t in turFarkli ?? [])
+            sb.Append(string.Join(";", Q(t.Host), Q(t.Fqdn), t.VmSayisi, Q(t.Cluster), "", "",
+                Q($"nlyte'ta '{t.CihazAd}' adıyla {t.Tur} türünde kayıtlı (kabin {t.Kabin}{(t.UAlt != null ? ", U" + t.UAlt : "")}, AssetID {t.AssetId}) — türü Server olmalı"))).Append("\r\n");
         return sb.ToString();
     }
 }
