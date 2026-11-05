@@ -437,10 +437,22 @@ sealed class FizikselService(IConfiguration cfg, ILogger<FizikselService> log)
         v.Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
 
     // ---- görünümler ----
+    // Kabin adından oda / sıra / numara. Kalıplar (kullanıcı örnekleri; "Eski " ve "ZB." öneki atılır):
+    //  1) oda + sıra + no: DR4-D3, ZB.DR1.B10, ZB.DR2.A12-1, ZB.DR1.E13_43_46U, ZB.DR3.A1_A2.45_46U (→ A1), ZB.DR4.F8.46U, EF1-A1, ZB.TR1.B2, YZ-A1
+    //  2) oda + sıra (no yok): DR1-B-EMC-1, DR4-A-HUAWEI-1, ZB.DR3.C.NS6.45_46U, ZB.DR4.A.NS2, TR-B-EMC-1, CO-1-A-HITACHI-1
+    //  3) yalnız oda: CO2-ORACLE-1, ZB.DR1.DZON.42
+    // Oda kodu büyük harf, 2–3 harf + isteğe bağlı numara (CO-1 → CO1). Asset_… gibi adlar "Diğer".
+    static readonly Regex Kalip1 = new(@"^(?:ZB\.)?([A-Z]{2,3}(?:-?\d+)?)[-.]([A-Z])(\d+)(?=$|[_.\-\s(])", RegexOptions.Compiled);
+    static readonly Regex Kalip2 = new(@"^(?:ZB\.)?([A-Z]{2,3}(?:-?\d+)?)[-.]([A-Z])[-.]", RegexOptions.Compiled);
+    static readonly Regex Kalip3 = new(@"^(?:ZB\.)?([A-Z]{2,3}(?:-?\d+)?)[-.][A-Z0-9]", RegexOptions.Compiled);
     public static (string? Oda, string? Sira, int? No) Parcala(string kabin)
     {
-        var m = KabinKalip.Match(kabin);
-        return m.Success ? (m.Groups[1].Value.ToUpperInvariant(), m.Groups[2].Value.ToUpperInvariant(), int.Parse(m.Groups[3].Value)) : (null, null, null);
+        string k = Regex.Replace(kabin.Trim(), @"^Eski\s+", "", RegexOptions.IgnoreCase);
+        static string O(string x) => x.Replace("-", "");
+        if (Kalip1.Match(k) is { Success: true } m1) return (O(m1.Groups[1].Value), m1.Groups[2].Value, int.Parse(m1.Groups[3].Value));
+        if (Kalip2.Match(k) is { Success: true } m2) return (O(m2.Groups[1].Value), m2.Groups[2].Value, null);
+        if (Kalip3.Match(k) is { Success: true } m3) return (O(m3.Groups[1].Value), null, null);
+        return (null, null, null);
     }
     static string OdaAdi(string? konum) => konum == null ? "" : konum.Split(" - ")[0].Trim();
 
@@ -469,7 +481,8 @@ sealed class FizikselService(IConfiguration cfg, ILogger<FizikselService> log)
                 konum = g.Select(x => KabinKonum(s, x.k)).Where(x => x != null).Select(x => OdaAdi(x)).Where(x => x != "")
                     .GroupBy(x => x).OrderByDescending(x => x.Count()).Select(x => x.Key).FirstOrDefault(),
             })
-            .OrderBy(x => x.ad == "Diğer").ThenBy(x => int.TryParse(x.ad.AsSpan(2), out int n) ? n : 999).ToList();
+            .OrderBy(x => x.ad == "Diğer").ThenBy(x => x.ad.StartsWith("DR") ? 0 : 1).ThenBy(x => Regex.Replace(x.ad, @"\d+$", ""))
+            .ThenBy(x => int.TryParse(Regex.Match(x.ad, @"\d+$").Value, out int n) ? n : 0).ToList();
         return new { yenileme = s.Yenileme, yuklendi = s.LoadedAt, anaKapsam = AnaKapsam, kapsamlar, odalar, nlyte = s.NlyteVar, istatistik = Istatistik(s),
             toplamKabin = s.TumKabinler.Count(), vmliKabin = s.KabinVm.Count, cihaz = s.KabinCihaz.Values.Sum(l => l.Count(c => c.Aktif)),
             cihazTablosu = s.CihazTablosu, turlar = TurSayim(s.KabinCihaz.Values.SelectMany(l => l).Where(c => c.Aktif)),
@@ -528,8 +541,16 @@ sealed class FizikselService(IConfiguration cfg, ILogger<FizikselService> log)
                 deger = Deger(s, vs.SelectMany(v => v.Uygulamalar)),
                 bosU = s.Kabinler.GetValueOrDefault(k)?.BosU ?? vs.Select(v => v.KabinBosU).FirstOrDefault(x => x != null), konum = KabinKonum(s, k),
             };
-        }).OrderBy(k => k.sira).ThenBy(k => k.no).ThenBy(k => k.ad).ToList();
-        return new { ad, kabinler };
+        }).OrderBy(k => k.sira).ThenBy(k => k.no).ThenByDescending(k => k.vm).ThenByDescending(k => k.cihaz).ThenBy(k => k.ad.StartsWith("ZB.", StringComparison.OrdinalIgnoreCase)).ThenBy(k => k.ad).ToList();
+        // Aynı (sıra, no) konumuna düşen birden çok kayıt (ör. DR3-A1 ve ZB.DR3.A1_A2.45_46U): VM / cihazı en çok olan ızgarada, diğerleri ona "ek"
+        var asil = new Dictionary<string, string>();
+        var sonuc = kabinler.Select(k =>
+        {
+            string? ek = null;
+            if (k.sira != null && k.no != null) { string key = k.sira + "|" + k.no; if (!asil.TryAdd(key, k.ad)) ek = asil[key]; }
+            return new { k.ad, k.sira, k.no, k.vm, k.cihaz, k.vmHost, k.host, k.turlar, k.uygulama, k.deger, k.bosU, k.konum, ek };
+        }).ToList();
+        return new { ad, kabinler = sonuc };
     }
 
     // Kabinin konumu: KabinHostVm.Konum, yoksa nlyte UniqueAssetName / KabinUniqueAd içindeki "Room=…"
@@ -613,7 +634,7 @@ sealed class FizikselService(IConfiguration cfg, ILogger<FizikselService> log)
         var pasif = tumCihaz.Where(c => !c.Aktif).Select(c => new { ad = c.Ad, tur = c.Tur, durum = c.Record, operasyon = c.Operational, model = c.Model, uAlt = c.UAlt }).ToList();
         return new
         {
-            ad, konum = KabinKonum(s, ad), cabinetAssetId = kb?.CabinetAssetId ?? ilk?.CabinetAssetId, uKapasite = uKap, uSirasi = usira, u1Ustte = U1Ustte(usira),
+            ad, oda = Parcala(ad).Oda ?? "Diğer", konum = KabinKonum(s, ad), cabinetAssetId = kb?.CabinetAssetId ?? ilk?.CabinetAssetId, uKapasite = uKap, uSirasi = usira, u1Ustte = U1Ustte(usira),
             bosU = kb?.BosU ?? vs.Select(v => v.KabinBosU).FirstOrDefault(x => x != null), bitisikBosU = kb?.BitisikBosU,
             cihazSayisi = cihazlar.Count, vmHostSayisi = gruplar.Count, turlar = TurSayim(cihazlar, cihazGrup.Keys.ToHashSet()), nlyteEslesmeyen = eslesmeyen.Select(g => g.Key).ToList(),
             deger = Deger(s, vs.SelectMany(v => v.Uygulamalar)), degerAdlari = DegerAdlari,

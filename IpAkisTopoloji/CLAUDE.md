@@ -539,7 +539,7 @@ erişim talepleri) — DB → şema → tablo ve kim erişiyor bilgisi buradan b
   tablo adları `Fiziksel:Tablolar:*`, bağlantı ConnectionStrings:Envanter (`Fiziksel:Baglanti` ile değişir); tablo yoksa (208) "sp_KabinZincirYenile
   çalıştırılmamış". `Olustur(vmler, eksik, tablodan)` anlık görüntü (sahte veriyle test için de). Uçlar: `/api/fiziksel/ozet` (kapsam sayıları,
   son yenileme, odalar), `/oda?ad=`, `/kabin?ad=`, `/ara?q=` (en çok 50; IP > VM > host > kabin > uygulama > cluster), `/eksik` (+`?csv=1`, Yetki:Disari),
-  `/ip?ip=`. Kabin kalıbı `DR{oda}-{sıra}{no}` (`KabinKalip`) → oda planı; uymayanlar oda "Diğer". Kapsam: varsayılan `Fiziksel:AnaKapsam`="Ana veri
+  `/ip?ip=`. Kabin adı → oda / sıra / no (`Parcala`, aşağıda KABİN ADI → ODA) → oda planı; uymayanlar oda "Diğer". Kapsam: varsayılan `Fiziksel:AnaKapsam`="Ana veri
   merkezi" (nlyte yalnız Esenyurt); diğerleri yalnız sayı. Kabin U kapasitesi = KabinUYukseklik (NULL → 42) ya da en üst dolu U. U1 yönü
   `KabinUSirasi`: değerler kesin bilinmiyor (kullanıcıya soruldu) → `Fiziksel:UstSirasiIfadeleri` doluysa o değerler "U1 üstte", boşsa "top…/yukar…/
   TopToBottom/descending" ile başlayan. "Kabin kapanırsa" etkisi: uygulamanın bu kabindeki VM'i / ana DC'deki toplamı, başka kabinler; sıra "tamamı bu
@@ -611,7 +611,13 @@ erişim talepleri) — DB → şema → tablo ve kim erişiyor bilgisi buradan b
   boyut başına en yüksek + kaynağı uygulama ({v,i,e,g,b,kaynak}). Uygulama / VM / host / kabin satırlarında `deger`, IP kartı `kabinDeger`, istatistikte
   `kabinDeger` dağılımı. Arayüz: `fzDeger` rozetleri (0 gri, 1 yeşil, 2 turuncu, 3 kırmızı; ipucunda en yüksek değeri veren uygulama), oda planında
   "Renk: VM sayısı | <boyut> değeri" seçicisi (localStorage `df.fzRenk`), kabin başlığında "Kabin değeri", host detayı, VM ve uygulama tablolarında "Değer" kolonu,
-  "Kabin değerleri" istatistik kartı. Sahte veriyle (switch, firewall, patch panel, 0U PDU, chassis + 3 blade, AssetID ile farklı adlı host, klima) test edildi.
+  "Kabin değerleri" istatistik kartı. KABİN ADI → ODA (kullanıcı: "Diğer'de DR1 / DR2 yazan net isimler var, yerleştir; EF odası
+  da oluşsun; Asset_ ile başlayanların içi boş"): `Parcala` üç kalıp ("Eski " / "ZB." öneki atılır, oda kodu büyük harf 2–3 harf + numara, CO-1 → CO1):
+  oda+sıra+no (DR4-D3, ZB.DR1.B10, ZB.DR2.A12-1, ZB.DR3.A1_A2.45_46U → A1, ZB.DR4.F8.46U, EF1-A1, ZB.TR1.B2, YZ-A1) → ızgara; oda+sıra (DR1-B-EMC-1,
+  ZB.DR3.C.NS6.45_46U, TR-B-EMC-1) → odada "Sıra X" listesi; yalnız oda (CO2-ORACLE-1) → odanın diğer kabinleri; kalanlar "Diğer" (Asset_… katlanır
+  "Adsız kabin kayıtları"). Odalar: DR'ler numara sırasıyla, sonra diğerleri, en sonda Diğer. Aynı (sıra, no)'ya düşen birden çok kayıt: VM / cihazı
+  en çok (ZB. öneksiz önce) ızgarada, diğerleri `ek` (karoda "+N", katlanır "Aynı konumda ek kabin kayıtları"). `/api/fiziksel/kabin` `oda` döner;
+  `fzKabinAc` kabin başka odadaysa o odayı açar (derin bağlantı / eksik listesi regex'i kaldırıldı). Sahte veriyle (switch, firewall, patch panel, 0U PDU, chassis + 3 blade, AssetID ile farklı adlı host, klima) test edildi.
 - **VIP**: sorgulanan IP VIP ise üyeler + GW'ler aynı sorguya eklenir, üyeler "VIP ÜYESİ" (GW→üye trafiği varsa ✓).
   Gidilen IP VIP ise "VIP → n ÜYE"; gelen IP LB GW ise "LB GW"; sorgulanan sunucu havuz üyesiyse VIP kartı.
 - **Uygulama görünümü** (`/api/apps`, `/api/app`): `[kullanan uygulamalar] → [UYGULAMA: VIP'ler + segment grupları] → [bağımlı olunanlar]`,

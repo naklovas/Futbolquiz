@@ -147,7 +147,11 @@ async function fzOdaAc(ad) {
 function fzPlanCiz() {
   const v = fz.odaVeri, el = $("#fzPlan");
   if (!v) return;
-  const izgara = v.kabinler.filter(k => k.sira && k.no), digerler = v.kabinler.filter(k => !(k.sira && k.no));
+  // ızgara: sıra + no belli olan asıl kayıtlar; aynı konumdaki diğer kayıtlar "ek" (ZB.… raf üstü vb.), sırası belli no'su yok, hiç kalıba uymayan
+  const izgara = v.kabinler.filter(k => k.sira && k.no && !k.ek), ekler = v.kabinler.filter(k => k.ek);
+  const siraliDiger = v.kabinler.filter(k => k.sira && !k.no), digerler = v.kabinler.filter(k => !k.sira);
+  const adsiz = digerler.filter(k => /^Asset_/i.test(k.ad)), kalan = digerler.filter(k => !/^Asset_/i.test(k.ad));
+  const ekSay = new Map(); for (const k of ekler) ekSay.set(k.ek, [...(ekSay.get(k.ek) ?? []), k.ad]);
   const maxVm = Math.max(1, ...v.kabinler.map(k => k.vm));
   // renk VM sayısına göre; VM'i olmayan ama cihazı olan kabin gri, hiç cihazı olmayan kesikli çerçeve
   const dg = fz.renk && fz.renk !== "vm" ? fz.renk : null;
@@ -158,8 +162,9 @@ function fzPlanCiz() {
     const stil = dg ? (dv != null ? ` style="background:${fzDegerRenk(dv)};color:#fff"` : "")
       : k.vm > 0 ? ` style="background:color-mix(in srgb, var(--in) ${p}%, var(--panel));color:${koyu ? "#fff" : "var(--text)"}"` : "";
     return `<button type="button" class="fz-tile${tur}${fz.kabin === k.ad ? " on" : ""}${fz.vurgu.has(k.ad) ? " vurgu" : ""}" data-kabin="${esc(k.ad)}"${stil}
-      title="${esc(k.ad)} · ${k.turlar?.length ? esc(fzTurOzet(k.turlar, k.cihaz)) : fmt(k.cihaz ?? k.host) + " nlyte cihazı"} · ${fmt(k.vmHost ?? k.host)} VM'li host · ${fmt(k.vm)} VM · ${fmt(k.uygulama)} uygulama${k.bosU != null ? ` · ${k.bosU} boş U` : ""}${k.vm ? "" : (k.cihaz ? " — VM bilgisi olan host yok" : " — nlyte'ta cihaz yok")}${k.deger ? " · değer " + esc(fzDegerMetin(k.deger)) : ""}">${esc(k.sira ? k.sira + k.no : k.ad)}</button>`;
+      title="${esc(k.ad)} · ${k.turlar?.length ? esc(fzTurOzet(k.turlar, k.cihaz)) : fmt(k.cihaz ?? k.host) + " nlyte cihazı"} · ${fmt(k.vmHost ?? k.host)} VM'li host · ${fmt(k.vm)} VM · ${fmt(k.uygulama)} uygulama${k.bosU != null ? ` · ${k.bosU} boş U` : ""}${k.vm ? "" : (k.cihaz ? " — VM bilgisi olan host yok" : " — nlyte'ta cihaz yok")}${k.deger ? " · değer " + esc(fzDegerMetin(k.deger)) : ""}${ekSay.has(k.ad) ? " · aynı konumda ek kayıt: " + esc(ekSay.get(k.ad).join(", ")) : ""}">${esc(k.sira ? k.sira + k.no : k.ad)}${ekSay.has(k.ad) ? `<sup class="fz-ek">+${ekSay.get(k.ad).length}</sup>` : ""}</button>`;
   };
+  const btn = (k, not) => `<button type="button" class="mini${fz.kabin === k.ad ? " on" : ""}${fz.vurgu.has(k.ad) ? " vurgu" : ""}" data-kabin="${esc(k.ad)}" title="${fmt(k.cihaz ?? 0)} cihaz · ${fmt(k.vm)} VM${k.deger ? " · değer " + esc(fzDegerMetin(k.deger)) : ""}">${esc(k.ad)} <span class="muted">${not ? esc(not) + " · " : ""}${fmt(k.cihaz ?? 0)}c${k.vm ? " · " + fmt(k.vm) + " VM" : ""}</span></button>`;
   let plan = "";
   if (izgara.length) {
     const siralar = [...new Set(izgara.map(k => k.sira))].sort((a, b) => a.length - b.length || a.localeCompare(b));
@@ -178,8 +183,14 @@ function fzPlanCiz() {
           + `<span><i class="bosk"></i>değer yok (${v.kabinler.filter(k => k.deger?.[dg] == null).length})</span>`
         : `<span><i style="background:color-mix(in srgb, var(--in) 55%, var(--panel))"></i>VM'li (${vmli})</span><span><i class="vmsiz"></i>cihaz var, VM yok (${cihazli})</span><span><i class="bosk"></i>cihaz yok (${bos})</span>`}</div></div>
     <div class="fz-plan-wrap">${plan}</div>
-    ${digerler.length ? `<div class="small" style="margin-top:8px"><b>${izgara.length ? "Diğer kabinler" : "Kabinler"}</b> <span class="muted">(DR&lt;oda&gt;-&lt;sıra&gt;&lt;no&gt; kalıbına uymayan)</span></div>
-      <div class="fz-diger">${digerler.map(k => `<button type="button" class="mini${fz.kabin === k.ad ? " on" : ""}${fz.vurgu.has(k.ad) ? " vurgu" : ""}" data-kabin="${esc(k.ad)}" title="${fmt(k.host)} host · ${fmt(k.vm)} VM">${esc(k.ad)} <span class="muted">${fmt(k.vm)}</span></button>`).join("")}</div>` : ""}`;
+    ${siraliDiger.length ? `<div class="small" style="margin-top:8px"><b>Sırası belli, numarası adında yok</b> <span class="muted">(ör. DR1-B-EMC-1, ZB.DR3.C.NS6)</span></div>
+      ${[...new Set(siraliDiger.map(k => k.sira))].sort().map(s => `<div class="fz-diger"><span class="fz-ax" style="min-width:42px;text-align:left">Sıra ${esc(s)}</span>${siraliDiger.filter(k => k.sira === s).map(btn).join("")}</div>`).join("")}` : ""}
+    ${ekler.length ? `<details class="small" style="margin-top:8px"><summary><b>Aynı konumda ek kabin kayıtları</b> (${fmt(ekler.length)}) <span class="muted">— ızgaradaki kabinin yerine düşen ikinci kayıtlar (ör. ZB.… raf üstü)</span></summary>
+      <div class="fz-diger">${ekler.map(k => btn(k, `→ ${k.sira}${k.no}`)).join("")}</div></details>` : ""}
+    ${kalan.length ? `<div class="small" style="margin-top:8px"><b>${izgara.length || siraliDiger.length ? "Diğer kabinler" : "Kabinler"}</b> <span class="muted">(adından oda / sıra çıkmayan)</span></div>
+      <div class="fz-diger">${kalan.map(k => btn(k)).join("")}</div>` : ""}
+    ${adsiz.length ? `<details class="small" style="margin-top:8px"><summary><b>Adsız kabin kayıtları</b> (Asset_…, ${fmt(adsiz.length)}) <span class="muted">— nlyte'ta adı verilmemiş, ${fmt(adsiz.filter(k => k.cihaz || k.vm).length)} tanesinde cihaz var</span></summary>
+      <div class="fz-diger">${adsiz.sort((a, b) => (b.cihaz ?? 0) - (a.cihaz ?? 0)).map(k => btn(k)).join("")}</div></details>` : ""}`;
   el.querySelectorAll("[data-kabin]").forEach(b => b.addEventListener("click", () => fzKabinAc(b.dataset.kabin)));
   $("#fzRenk").addEventListener("change", e => { fz.renk = e.target.value; try { localStorage.setItem("df.fzRenk", fz.renk); } catch { } fzPlanCiz(); });
 }
@@ -191,6 +202,9 @@ async function fzKabinAc(ad, host) {
   $("#fzKabin").innerHTML = `<div class="small muted"><span class="spinner"></span> ${esc(ad)}…</div>`;
   try { fz.kabinVeri = await fzGet("api/fiziksel/kabin?" + new URLSearchParams({ ad })); }
   catch (e) { $("#fzKabin").innerHTML = `<div class="unk" style="color:var(--err)">${esc(e.message)}</div>`; return; }
+  // kabin başka odadaysa (arama, derin bağlantı, eksik listesi) o odayı aç
+  const oda = fz.kabinVeri.oda;
+  if (oda && oda !== fz.oda && fz.ozet?.odalar.some(o => o.ad === oda)) { $("#fzOda").value = oda; await fzOdaAc(oda); }
   // seçili host arka yüzdeyse yüzü ona göre aç
   const h = host && fz.kabinVeri.hostlar.find(x => x.ad.toLowerCase() === host.toLowerCase());
   if (h?.yuz) fz.yuz = /rear/i.test(h.yuz) ? "Rear" : "Front";
@@ -386,9 +400,7 @@ async function fzEksikYukle() {
         || `<tr><td colspan="5" class="unk">Eksik host yok.</td></tr>`}</tbody></table></div>`;
   el.querySelectorAll("[data-fzk]").forEach(a => a.addEventListener("click", async e => {
     e.preventDefault();
-    const k = a.dataset.fzk, m = k.match(/^(DR\d+)-[A-Z]+\d+$/i), oda = m ? m[1].toUpperCase() : "Diğer";
-    if (oda !== fz.oda && fz.ozet?.odalar.some(o => o.ad === oda)) { $("#fzOda").value = oda; await fzOdaAc(oda); }
-    fzKabinAc(k); $("#fzShell").scrollIntoView({ behavior: "smooth" });
+    fzKabinAc(a.dataset.fzk); $("#fzShell").scrollIntoView({ behavior: "smooth" });
   }));
 }
 
@@ -494,7 +506,5 @@ async function fzDerinBaglanti() {
   const p = new URLSearchParams(location.search), kabin = p.get("kabin");
   if (!kabin) return;
   for (let i = 0; i < 50 && !fz.ozet; i++) await new Promise(r => setTimeout(r, 100));
-  const m = kabin.match(/^(DR\d+)-[A-Z]+\d+$/i), oda = m ? m[1].toUpperCase() : "Diğer";
-  if (fz.ozet?.odalar.some(o => o.ad === oda) && oda !== fz.oda) { $("#fzOda").value = oda; await fzOdaAc(oda); }
   fzKabinAc(kabin, p.get("host") || null);
 }
