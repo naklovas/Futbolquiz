@@ -604,7 +604,14 @@ erişim talepleri) — DB → şema → tablo ve kim erişiyor bilgisi buradan b
   (VM, IP, DNS, OS, uygulamalar, kaynak, kapsam, host, FQDN, cluster, host modeli / serisi / iLO, host'taki VM sayısı, neden, nlyte adayları); neden host
   düzeyinde: VM kaydında host yok / nlyte kapsamı dışı / nlyte'ta var ama kabine bağlı değil / kayıt aktif değil / birden çok aday / IP, MSY'de yok /
   seri nlyte'ta yok / benzer ad var / bulunamadı; adaylar ad, seri ve ≥5 harf parça eşleşmesinden (kabin dışı dahil). Snapshot başına önbellek.
-  Arayüz katlanır "Kabine yerleşmeyen MSY / ÇSY VM'leri" (kaynak / kapsam / neden seçicileri, arama, ilk 2000 satır, CSV). Sahte veriyle (switch, firewall, patch panel, 0U PDU, chassis + 3 blade, AssetID ile farklı adlı host, klima) test edildi.
+  Arayüz katlanır "Kabine yerleşmeyen MSY / ÇSY VM'leri" (kaynak / kapsam / neden seçicileri, arama, ilk 2000 satır, CSV). UYGULAMA DEĞERLERİ (kullanıcı:
+  "ERT'de VARLIKDEGERI / ISDEGERI / ERISILEBILIRLIKDEGERI / GIZLILIKDEGERI / BUTUNLUKDEGERI (0–3) var; uygulama çoklanmış, bazı satırlar NULL → dolu
+  olanları bul; VM'deki uygulamaların maksimumu ESX'in ve kabinin değeri"): `DegerleriYukleAsync` ERT'den APPNAME başına MAX(TRY_CONVERT) (`Fiziksel:
+  DegerKolonlari` 5 kolon, sıra Varlık, İş, Erişilebilirlik, Gizlilik, Bütünlük; kolon yoksa 207 → gösterilmez) → `AppDeger`; `Deger(s, uygulamalar)`
+  boyut başına en yüksek + kaynağı uygulama ({v,i,e,g,b,kaynak}). Uygulama / VM / host / kabin satırlarında `deger`, IP kartı `kabinDeger`, istatistikte
+  `kabinDeger` dağılımı. Arayüz: `fzDeger` rozetleri (0 gri, 1 yeşil, 2 turuncu, 3 kırmızı; ipucunda en yüksek değeri veren uygulama), oda planında
+  "Renk: VM sayısı | <boyut> değeri" seçicisi (localStorage `df.fzRenk`), kabin başlığında "Kabin değeri", host detayı, VM ve uygulama tablolarında "Değer" kolonu,
+  "Kabin değerleri" istatistik kartı. Sahte veriyle (switch, firewall, patch panel, 0U PDU, chassis + 3 blade, AssetID ile farklı adlı host, klima) test edildi.
 - **VIP**: sorgulanan IP VIP ise üyeler + GW'ler aynı sorguya eklenir, üyeler "VIP ÜYESİ" (GW→üye trafiği varsa ✓).
   Gidilen IP VIP ise "VIP → n ÜYE"; gelen IP LB GW ise "LB GW"; sorgulanan sunucu havuz üyesiyse VIP kartı.
 - **Uygulama görünümü** (`/api/apps`, `/api/app`): `[kullanan uygulamalar] → [UYGULAMA: VIP'ler + segment grupları] → [bağımlı olunanlar]`,

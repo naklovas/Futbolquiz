@@ -59,6 +59,8 @@ sealed class FizikselSnapshot
     public Dictionary<string, FizMsy> MsyIp { get; } = new(StringComparer.OrdinalIgnoreCase);    // yönetim / iLO IP → kayıt (host alanında IP yazan VM'ler)
     public bool MsyVar { get; set; }
     public List<FizEslesmeyen>? EslesmeyenOnbellek { get; set; }
+    // Uygulama → değerler (ERT'de uygulamanın dolu satırlarından en yüksek): [Varlık, İş, Erişilebilirlik, Gizlilik, Bütünlük]
+    public Dictionary<string, int?[]> AppDeger { get; } = new(StringComparer.OrdinalIgnoreCase);
     public Dictionary<string, string> HostAsset { get; } = new(StringComparer.OrdinalIgnoreCase);   // host adı (kısa, küçük) → nlyte AssetID
     // Planda gösterilecek tüm kabinler: nlyte kabinleri + KabinHostVm'de geçenler
     public IEnumerable<string> TumKabinler => Kabinler.Keys.Union(KabinVm.Keys, StringComparer.OrdinalIgnoreCase);
@@ -237,8 +239,47 @@ sealed class FizikselService(IConfiguration cfg, ILogger<FizikselService> log)
         }
 
         var snap = Olustur(vmler, eksik, tablodan, kabinler, cihazlar, chassisler, hostAsset, msy, AnaKapsam);
+        await DegerleriYukleAsync(conn, snap, ct);
         snap.CihazTablosu = cihazTablo;
         return snap;
+    }
+
+    // Uygulama değerleri (kullanıcı: "VM'deki uygulamaların değerlerinin maksimumu → ESX'in ve kabinin değeri"): ERT'de aynı uygulama
+    // çoklanmış, bazı satırlarda NULL → APPNAME başına dolu satırların en yükseği. Kolonlar Fiziksel:DegerKolonlari (sıra: Varlık, İş,
+    // Erişilebilirlik, Gizlilik, Bütünlük); tablo Envanter:HostTablosu. Kolon yoksa (207) değerler gösterilmez.
+    public static readonly string[] DegerAdlari = ["Varlık", "İş", "Erişilebilirlik", "Gizlilik", "Bütünlük"];
+    async Task DegerleriYukleAsync(SqlConnection conn, FizikselSnapshot s, CancellationToken ct)
+    {
+        var kolonlar = cfg.GetSection("Fiziksel:DegerKolonlari").GetChildren().Select(c => c.Value).OfType<string>().ToArray();
+        if (kolonlar.Length != 5) kolonlar = ["VARLIKDEGERI", "ISDEGERI", "ERISILEBILIRLIKDEGERI", "GIZLILIKDEGERI", "BUTUNLUKDEGERI"];
+        if (kolonlar.Any(k => !Regex.IsMatch(k, @"^\w+$"))) { log.LogWarning("Fiziksel:DegerKolonlari geçersiz"); return; }
+        string ert = cfg["Envanter:HostTablosu"] ?? "dbo.ERT_HOSTIPADDRESS";
+        string sql = $"SELECT APPNAME, {string.Join(", ", kolonlar.Select(k => $"MAX(TRY_CONVERT(int, TRY_CONVERT(decimal(9,2), CONVERT(nvarchar(50), {k}))))"))} " +
+                     $"FROM {ert} WITH (NOLOCK) WHERE APPNAME IS NOT NULL AND LTRIM(RTRIM(APPNAME)) <> '' GROUP BY APPNAME";
+        try
+        {
+            await using var cmd = new SqlCommand(sql, conn) { CommandTimeout = 120 };
+            await using var r = await cmd.ExecuteReaderAsync(ct);
+            while (await r.ReadAsync(ct))
+            {
+                var d = Enumerable.Range(1, 5).Select(i => r.IsDBNull(i) ? (int?)null : Convert.ToInt32(r.GetValue(i))).ToArray();
+                if (d.Any(x => x != null)) s.AppDeger[r.GetString(0).Trim()] = d;
+            }
+            log.LogInformation("Uygulama değerleri: {N} uygulama", s.AppDeger.Count);
+        }
+        catch (SqlException ex) when (ex.Number is 207 or 208) { log.LogInformation("Uygulama değer kolonları okunamadı: {M}", ex.Message); }
+    }
+
+    // Uygulama kümesinin değerleri: her boyutta en yüksek + o değeri veren uygulama
+    static object? Deger(FizikselSnapshot s, IEnumerable<string> uygulamalar)
+    {
+        var mx = new int?[5]; var kaynak = new string?[5];
+        foreach (var a in uygulamalar.Distinct(StringComparer.OrdinalIgnoreCase))
+            if (s.AppDeger.TryGetValue(a.Trim(), out var d))
+                for (int i = 0; i < 5; i++)
+                    if (d[i] is int v && (mx[i] == null || v > mx[i])) { mx[i] = v; kaynak[i] = a; }
+        if (mx.All(x => x == null)) return null;
+        return new { v = mx[0], i = mx[1], e = mx[2], g = mx[3], b = mx[4], kaynak = new { v = kaynak[0], i = kaynak[1], e = kaynak[2], g = kaynak[3], b = kaynak[4] } };
     }
 
     // Cihaz türü: tablodaki CihazTuru; yoksa malzeme tipi / nlyte entity adından (eski NlyteSunucu → Server)
@@ -460,6 +501,11 @@ sealed class FizikselService(IConfiguration cfg, ILogger<FizikselService> log)
             uygulama = uyg.Count, uygulamaYerlesen = uyg.Count(u => u.Kabinli > 0), uygulamaTamami = uyg.Count(u => u.Kabinli == u.Toplam),
             uygulamaTekKabin = uyg.Count(u => u.Kabinli == u.Toplam && u.Kabin == 1), uygulamaHicKabin = uyg.Count(u => u.Kabinli == 0),
             vmUygulamasiz = vm.Count(v => v.Uygulamalar.Count == 0),
+            // kabin değer dağılımı: boyut başına "değer → kabin sayısı" (kabin değeri = kabindeki uygulamaların en yükseği)
+            degerAdlari = DegerAdlari, degerVar = s.AppDeger.Count > 0,
+            kabinDeger = Enumerable.Range(0, 5).Select(i => s.KabinVm.Values
+                .Select(vs => vs.SelectMany(v => v.Uygulamalar).Select(a => s.AppDeger.GetValueOrDefault(a.Trim())?[i]).Max())
+                .GroupBy(x => x?.ToString() ?? "yok").OrderByDescending(g => g.Key).ToDictionary(g => g.Key, g => g.Count())).ToList(),
             tumVm = s.Vmler.Count, tumVmKabinli = s.Vmler.Count(v => v.Kabin != null),
             kapsamlar = s.Vmler.GroupBy(v => v.Kapsam ?? "(boş)").Select(g => new { kapsam = g.Key, vm = g.Count(), kabinli = g.Count(v => v.Kabin != null), ana = g.Key == AnaKapsam })
                 .OrderByDescending(x => x.ana).ThenByDescending(x => x.vm).ToList(),
@@ -479,6 +525,7 @@ sealed class FizikselService(IConfiguration cfg, ILogger<FizikselService> log)
             {
                 ad = k, sira = p.Sira, no = p.No, vm = vs.Count, cihaz = cs.Count, vmHost, host = Math.Max(cs.Count, vmHost), turlar = TurSayim(cs),
                 uygulama = vs.SelectMany(v => v.Uygulamalar).Distinct(StringComparer.OrdinalIgnoreCase).Count(),
+                deger = Deger(s, vs.SelectMany(v => v.Uygulamalar)),
                 bosU = s.Kabinler.GetValueOrDefault(k)?.BosU ?? vs.Select(v => v.KabinBosU).FirstOrDefault(x => x != null), konum = KabinKonum(s, k),
             };
         }).OrderBy(k => k.sira).ThenBy(k => k.no).ThenBy(k => k.ad).ToList();
@@ -546,6 +593,7 @@ sealed class FizikselService(IConfiguration cfg, ILogger<FizikselService> log)
                 tip = c?.MalzemeTip, durum = c?.Operational, uAlt = c?.UAlt ?? h?.HostUAlt, uYukseklik = c?.UYukseklik ?? h?.HostUYukseklik, yuz = c?.Yuz ?? h?.HostYuz,
                 chassis = c?.Chassis ?? h?.ChassisAdi, slot = c?.Slot ?? h?.BladeSlot, eslesme = h?.Eslesme, kaynak = h?.Kaynak,
                 vm = g?.Count(v => v.Vm != null) ?? 0, uygulama = g?.SelectMany(v => v.Uygulamalar).Distinct(StringComparer.OrdinalIgnoreCase).Count() ?? 0,
+                deger = g != null ? Deger(s, g.SelectMany(v => v.Uygulamalar)) : null,
                 nlyte = c != null, vmBilgisi = g != null, tur = c?.Tur ?? "Server", chassisId = blade ? c!.ChassisId : null, blade,
                 kaynakTablo = c?.Kaynak,
                 msy = MsyBul(c, h) is { } m ? new { m.DnsName, m.DnsIp, m.IloIp, m.Vendor, m.Model, m.PowerState, m.OsName, m.OsVersion, m.LastReboot } : null,
@@ -568,7 +616,9 @@ sealed class FizikselService(IConfiguration cfg, ILogger<FizikselService> log)
             ad, konum = KabinKonum(s, ad), cabinetAssetId = kb?.CabinetAssetId ?? ilk?.CabinetAssetId, uKapasite = uKap, uSirasi = usira, u1Ustte = U1Ustte(usira),
             bosU = kb?.BosU ?? vs.Select(v => v.KabinBosU).FirstOrDefault(x => x != null), bitisikBosU = kb?.BitisikBosU,
             cihazSayisi = cihazlar.Count, vmHostSayisi = gruplar.Count, turlar = TurSayim(cihazlar, cihazGrup.Keys.ToHashSet()), nlyteEslesmeyen = eslesmeyen.Select(g => g.Key).ToList(),
-            hostlar, vmler = vmler.Select(v => new { host = v.host != null && hostAd.TryGetValue(v.host, out var n) ? n : v.host, v.Vm, v.Ip, v.dns, v.Os, v.uygulamalar, v.muhafizlar, v.Kaynak }).ToList(),
+            deger = Deger(s, vs.SelectMany(v => v.Uygulamalar)), degerAdlari = DegerAdlari,
+            hostlar, vmler = vmler.Select(v => new { host = v.host != null && hostAd.TryGetValue(v.host, out var n) ? n : v.host, v.Vm, v.Ip, v.dns, v.Os, v.uygulamalar, v.muhafizlar, v.Kaynak,
+                deger = Deger(s, v.uygulamalar) }).ToList(),
             uygulamalar = Uygulamalar(s, vs, ad, hostAd), pasif,
         };
     }
@@ -588,7 +638,7 @@ sealed class FizikselService(IConfiguration cfg, ILogger<FizikselService> log)
             string etki = digerKabin.Count == 0 && kabinsiz == 0 ? "tamamı bu kabinde" : digerKabin.Count == 0 ? "başka kabin yok (kabini bilinmeyen VM var)" : "başka kabinlerde de var";
             return new
             {
-                ad = g.Key, vm = buKabin, toplamVm = Math.Max(toplam, buKabin), etki, digerKabinler = digerKabin.Take(10).ToList(), digerKabinSayisi = digerKabin.Count, kabinsizVm = kabinsiz,
+                ad = g.Key, deger = Deger(s, [g.Key]), vm = buKabin, toplamVm = Math.Max(toplam, buKabin), etki, digerKabinler = digerKabin.Take(10).ToList(), digerKabinSayisi = digerKabin.Count, kabinsizVm = kabinsiz,
                 hostlar = g.Select(x => x.v.Host ?? x.v.HostFqdn).OfType<string>().Select(h => hostAd?.GetValueOrDefault(h) ?? h).Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
                 muhafizlar = g.SelectMany(x => x.v.Muhafizlar).Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
             };
@@ -640,6 +690,7 @@ sealed class FizikselService(IConfiguration cfg, ILogger<FizikselService> log)
             ip, kabin = v.Kabin, oda = v.Kabin != null ? Parcala(v.Kabin).Oda : null, konum = v.Konum, odaAdi = OdaAdi(v.Konum), host = v.Host ?? v.HostFqdn,
             cluster = v.Cluster, vm = v.Vm, kapsam = v.Kapsam, anaDc = v.Kapsam == null || v.Kapsam == AnaKapsam, uAlt = v.HostUAlt, uYukseklik = v.HostUYukseklik,
             yuz = v.HostYuz, chassis = v.ChassisAdi, eslesme = v.Eslesme,
+            kabinDeger = v.Kabin != null ? Deger(s, (s.KabinVm.GetValueOrDefault(v.Kabin) ?? []).SelectMany(x => x.Uygulamalar)) : null,
         };
     }
 
