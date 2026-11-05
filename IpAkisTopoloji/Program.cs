@@ -819,6 +819,14 @@ app.MapGet("/api/fiziksel/eksik", (bool? csv, HttpContext ctx, IConfiguration cf
             : Results.File(Encoding.UTF8.GetBytes(FizikselService.EksikCsv(l, s.TurFarkli)), "text/csv; charset=utf-8", $"nlyte_eksik_hostlar_{DateTime.Now:yyyyMMdd}.csv");
     return Results.Ok(new { hostlar = l, tablodan = s.EksikTablodan, vm = l.Sum(e => e.VmSayisi), turFarkli = s.TurFarkli });
 }));
+app.MapGet("/api/fiziksel/eslesmeyen", (bool? csv, HttpContext ctx, IConfiguration cfg, FizikselService f, CancellationToken ct) => Fiz(f, ct, s =>
+{
+    var l = f.Eslesmeyen(s);
+    if (csv == true)
+        return !Yetki.Var(cfg, ctx, Yetki.Disari) ? Yetki.Red(ctx, "Dışa aktarma")
+            : Results.File(Encoding.UTF8.GetBytes(FizikselService.EslesmeyenCsv(l)), "text/csv; charset=utf-8", $"eslesmeyen_hostlar_{DateTime.Now:yyyyMMdd}.csv");
+    return Results.Ok(new { vmler = l, anaKapsam = f.AnaKapsam });
+}));
 app.MapGet("/api/fiziksel/kabindisi", (FizikselService f, CancellationToken ct) => Fiz(f, ct, s => Results.Ok(f.KabinDisi(s))));
 app.MapPost("/api/fiziksel/yenile", async (FizikselService f, CancellationToken ct) =>
 {

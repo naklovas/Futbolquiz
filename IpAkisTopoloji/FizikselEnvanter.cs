@@ -33,6 +33,9 @@ record FizChassis(string Id, string? Ad, string? CabinetAssetId, int? UAlt, int?
 record FizTurFarkli(string Host, string? Fqdn, int VmSayisi, string? Cluster, string CihazAd, string Tur, string Kabin, string? AssetId, int? UAlt, string Yontem = "ad", string? EskiKapsam = null);
 // MSY fiziksel envanteri (dbo.MsyFizikselEnvanter): host DNS adı ↔ seri numarası, iLO, OS (ESX host'larının donanım kaydı)
 record FizMsy(string? Seri, string? DnsName, string? DnsIp, string? IloIp, string? Vendor, string? Model, string? PowerState, string? OsName, string? OsVersion, DateTime? LastReboot);
+// Kabine yerleşmeyen VM (satır başına bir VM) + host'unun bilgisi, neden ve nlyte adayları
+record FizEslesmeyen(string? Vm, string? Ip, string? Dns, string? Os, List<string> Uygulamalar, string? Kaynak, string? Kapsam,
+    string Host, string? Fqdn, string? Cluster, string? HostModel, string? Seri, string? Ilo, int HostVmSayisi, string Neden, List<string> Adaylar);
 record FizEksik(string Host, string? Fqdn, int VmSayisi, string? Kapsam, string? Cluster, string? EslesmeTuru, int? AdaySayisi, string? Not);
 
 sealed class FizikselSnapshot
@@ -55,6 +58,7 @@ sealed class FizikselSnapshot
     public Dictionary<string, FizMsy> MsySeri { get; } = new(StringComparer.OrdinalIgnoreCase);  // seri → kayıt
     public Dictionary<string, FizMsy> MsyIp { get; } = new(StringComparer.OrdinalIgnoreCase);    // yönetim / iLO IP → kayıt (host alanında IP yazan VM'ler)
     public bool MsyVar { get; set; }
+    public List<FizEslesmeyen>? EslesmeyenOnbellek { get; set; }
     public Dictionary<string, string> HostAsset { get; } = new(StringComparer.OrdinalIgnoreCase);   // host adı (kısa, küçük) → nlyte AssetID
     // Planda gösterilecek tüm kabinler: nlyte kabinleri + KabinHostVm'de geçenler
     public IEnumerable<string> TumKabinler => Kabinler.Keys.Union(KabinVm.Keys, StringComparer.OrdinalIgnoreCase);
@@ -490,9 +494,12 @@ sealed class FizikselService(IConfiguration cfg, ILogger<FizikselService> log)
         return null;
     }
 
-    static string Norm(string x) => x.Trim().ToLowerInvariant().Split('.')[0];
+    // Host / cihaz adı anahtarı: kısa ad, küçük harf. IP (ya da "10.6.30.99.msy.zb" gibi IP'li FQDN) olduğu gibi IP kalır —
+    // eskiden ilk noktaya kadar kırpılıp "10" oluyor, tüm IP host'lar aynı anahtara düşüp yanlış kabine bağlanabiliyordu
+    static readonly Regex IpBas = new(@"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}", RegexOptions.Compiled);
+    static string Norm(string x) { x = x.Trim().ToLowerInvariant(); var m = IpBas.Match(x); return m.Success ? m.Value : x.Split('.')[0]; }
     // host anahtarı: IP olduğu gibi (Norm "10.6.30.21"i "10"a indirirdi), ad kısa + küçük harf
-    static string HostAnahtar(string x) => System.Net.IPAddress.TryParse(x.Trim(), out _) && x.Contains('.') ? x.Trim() : Norm(x);
+    static string HostAnahtar(string x) => Norm(x);
 
     // Tür sayımı: [{tur, adet, vmli}] — en kalabalık önce
     static List<object> TurSayim(IEnumerable<FizCihaz> cs, ISet<FizCihaz>? vmli = null) =>
@@ -660,6 +667,61 @@ sealed class FizikselService(IConfiguration cfg, ILogger<FizikselService> log)
                 konum = c.UniqueAssetName != null && Regex.Match(c.UniqueAssetName, @"Room=(.+?)\)?\s*$") is { Success: true } m ? m.Groups[1].Value.Trim() : null,
             }).ToList(),
         };
+    }
+
+    // Eşleşmeyen MSY / ÇSY host'ları: tüm ek eşleştirmelerden sonra hâlâ kabini bilinmeyen VM'lerin host'ları, neden + nlyte adayları
+    public List<FizEslesmeyen> Eslesmeyen(FizikselSnapshot s) => s.EslesmeyenOnbellek ??= EslesmeyenHesapla(s);
+    List<FizEslesmeyen> EslesmeyenHesapla(FizikselSnapshot s)
+    {
+        var tum = s.KabinCihaz.SelectMany(kv => kv.Value.Select(c => (C: c, Kabin: (string?)kv.Key))).Concat(s.KabinDisi.Select(c => (C: c, Kabin: (string?)null))).ToList();
+        var adIdx = new Dictionary<string, List<(FizCihaz C, string? Kabin)>>(StringComparer.OrdinalIgnoreCase);
+        var seriIdx = new Dictionary<string, List<(FizCihaz C, string? Kabin)>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var x in tum)
+        {
+            foreach (var a in x.C.Adlar.Select(Norm).Distinct()) (adIdx.TryGetValue(a, out var l) ? l : adIdx[a] = []).Add(x);
+            if (x.C.Seri != null) (seriIdx.TryGetValue(x.C.Seri.Trim(), out var l2) ? l2 : seriIdx[x.C.Seri.Trim()] = []).Add(x);
+        }
+        string Aday((FizCihaz C, string? Kabin) x) => $"{x.C.Ad} ({x.C.Tur}{(x.Kabin != null ? ", " + x.Kabin : ", kabin yok")}{(x.C.Aktif ? "" : ", " + x.C.Record)})";
+        return s.Vmler.Where(v => v.Kabin == null).GroupBy(v => v.HostFqdn ?? v.Host ?? "", StringComparer.OrdinalIgnoreCase).Select(g =>
+        {
+            var v = g.First();
+            string key = g.Key;
+            var hlar = new[] { v.Host, v.HostFqdn }.OfType<string>().Select(Norm).Distinct().ToList();
+            var msy = hlar.Select(h => s.MsyAd.GetValueOrDefault(h) ?? s.MsyIp.GetValueOrDefault(h)).FirstOrDefault(x => x != null);
+            string? seri = v.HostSeri ?? msy?.Seri;
+            var adAday = hlar.SelectMany(h => adIdx.GetValueOrDefault(h) ?? []).Distinct().ToList();
+            var seriAday = seri != null ? seriIdx.GetValueOrDefault(seri.Trim()) ?? [] : [];
+            // ad parça eşleşmesi (≥5 harf): nlyte adı host adını içeriyor ya da tersi — yalnız ipucu
+            var kisa = hlar.FirstOrDefault(h => h.Length >= 5 && !IpBas.IsMatch(h));
+            var parca = adAday.Count == 0 && kisa != null
+                ? tum.Where(x => x.C.Adlar.Any(a => { var n = Norm(a); return n.Length >= 5 && (n.Contains(kisa) || kisa.Contains(n)); })).Take(5).ToList() : [];
+            bool anaDisi = v.Kapsam != null && v.Kapsam != AnaKapsam && !v.Kapsam.StartsWith("Host ad", StringComparison.OrdinalIgnoreCase);
+            string neden =
+                key == "" ? "VM kaydında host yok"
+                : anaDisi ? $"nlyte kapsamı dışı ({v.Kapsam})"
+                : seriAday.Count > 0 && seriAday.All(x => x.Kabin == null) ? "nlyte'ta var (seri) ama kabine bağlı değil"
+                : adAday.Count > 0 && adAday.All(x => x.Kabin == null) ? "nlyte'ta var (ad) ama kabine bağlı değil"
+                : adAday.Count > 0 && adAday.Any(x => !x.C.Aktif) && !adAday.Any(x => x.C.Aktif && x.Kabin != null) ? "nlyte kaydı aktif değil"
+                : adAday.Count > 1 || seriAday.Count > 1 ? "nlyte'ta birden çok aday"
+                : IpBas.IsMatch(key) && msy == null ? "host alanında IP, MSY fiziksel envanterinde yok"
+                : seri != null && seriAday.Count == 0 ? $"seri {seri} nlyte'ta yok"
+                : parca.Count > 0 ? "ad tam tutmuyor, benzer ad var"
+                : "nlyte'ta ad / seri bulunamadı";
+            var adaylar = adAday.Concat(seriAday).Concat(parca).Distinct().Take(5).Select(Aday).ToList();
+            int n = g.Count();
+            return g.Select(x => new FizEslesmeyen(x.Vm, x.Ip, x.DnsName, x.Os, x.Uygulamalar, x.Kaynak, x.Kapsam, v.Host ?? key, v.HostFqdn, x.Cluster ?? v.Cluster,
+                msy?.Model ?? v.HostModel, seri, msy?.IloIp, n, neden, adaylar));
+        }).SelectMany(x => x).OrderByDescending(x => x.HostVmSayisi).ThenBy(x => x.Host).ThenBy(x => x.Vm).ToList();
+    }
+
+    public static string EslesmeyenCsv(IEnumerable<FizEslesmeyen> l)
+    {
+        static string Q(string? v) { v ??= ""; return v.Contains(';') || v.Contains('"') ? "\"" + v.Replace("\"", "\"\"") + "\"" : v; }
+        var sb = new StringBuilder("\uFEFFVM;IP;DNS;OS;UYGULAMALAR;KAYNAK;KAPSAM;HOST;HOST FQDN;CLUSTER;HOST MODEL;HOST SERİ;HOST ILO;HOST VM SAYISI;NEDEN;NLYTE ADAYLARI\r\n");
+        foreach (var e in l)
+            sb.Append(string.Join(";", Q(e.Vm), Q(e.Ip), Q(e.Dns), Q(e.Os), Q(string.Join(" | ", e.Uygulamalar)), Q(e.Kaynak), Q(e.Kapsam), Q(e.Host), Q(e.Fqdn), Q(e.Cluster),
+                Q(e.HostModel), Q(e.Seri), Q(e.Ilo), e.HostVmSayisi, Q(e.Neden), Q(string.Join(" | ", e.Adaylar)))).Append("\r\n");
+        return sb.ToString();
     }
 
     public IEnumerable<FizEksik> Eksik(FizikselSnapshot s) => s.Eksik.Where(e => e.Kapsam == null || e.Kapsam == AnaKapsam);

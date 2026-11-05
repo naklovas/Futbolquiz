@@ -51,6 +51,7 @@ function fzShell() {
       <div id="fzDetay"></div>
     </div>
     <details id="fzDisi" class="fz-eksik"><summary><b>Kabin dışı cihazlar</b> <span class="small muted" id="fzDisiSay"></span></summary><div id="fzDisiIc"></div></details>
+    <details id="fzEsl" class="fz-eksik"><summary><b>Kabine yerleşmeyen MSY / ÇSY VM'leri</b> <span class="small muted">— VM başına satır; host'u, neden ve nlyte adaylarıyla</span></summary><div id="fzEslIc"></div></details>
     <details id="fzEksik" class="fz-eksik"><summary><b>nlyte'ta eksik host'lar</b> <span class="small muted" id="fzEksikSay"></span></summary><div id="fzEksikIc"></div></details>
     <div id="fzIst" class="fz-ist"></div>
   </section>`;
@@ -60,9 +61,10 @@ function fzShell() {
   $("#fzYenile").addEventListener("click", async () => {
     $("#fzBilgi").innerHTML = `<span class="spinner"></span> yeniden okunuyor…`;
     try { await fetch("api/fiziksel/yenile", { method: "POST" }); } catch { }
-    fz.ozet = null; fz.eksik = null; fz.disi = null; fzOzetYukle(true);
+    fz.ozet = null; fz.eksik = null; fz.disi = null; fz.esl = null; fzOzetYukle(true);
   });
   $("#fzEksik").addEventListener("toggle", e => { if (e.target.open && !fz.eksik) fzEksikYukle(); });
+  $("#fzEsl").addEventListener("toggle", e => { if (e.target.open && !fz.esl) fzEslYukle(); });
   $("#fzDisi").addEventListener("toggle", e => { if (e.target.open && !fz.disi) fzDisiYukle(); });
   fzOzetYukle();
 }
@@ -361,6 +363,46 @@ async function fzEksikYukle() {
     if (oda !== fz.oda && fz.ozet?.odalar.some(o => o.ad === oda)) { $("#fzOda").value = oda; await fzOdaAc(oda); }
     fzKabinAc(k); $("#fzShell").scrollIntoView({ behavior: "smooth" });
   }));
+}
+
+// Kabine yerleşmeyen MSY / ÇSY VM'leri (VM başına satır + host bilgisi): kaynak / kapsam / neden süzgeci, arama, CSV
+const fzEslF = { kaynak: "", kapsam: "", neden: "", q: "" };
+async function fzEslYukle() {
+  const el = $("#fzEslIc");
+  el.innerHTML = `<div class="small muted"><span class="spinner"></span> yükleniyor…</div>`;
+  try { fz.esl = await fzGet("api/fiziksel/eslesmeyen"); }
+  catch (e) { el.innerHTML = `<div class="unk" style="color:var(--err)">${esc(e.message)}</div>`; return; }
+  fzEslCiz();
+}
+function fzEslCiz() {
+  const el = $("#fzEslIc"), d = fz.esl;
+  if (!d) return;
+  const say = f => { const m = new Map(); for (const v of d.vmler) { const k = f(v); m.set(k, (m.get(k) ?? 0) + 1); } return [...m].sort((a, b) => b[1] - a[1]); };
+  const kaynaklar = say(v => v.kaynak ?? "(boş)"), kapsamlar = say(v => v.kapsam ?? "(boş)"), nedenler = say(v => v.neden);
+  const l = d.vmler.filter(v => (!fzEslF.kaynak || (v.kaynak ?? "(boş)") === fzEslF.kaynak) && (!fzEslF.kapsam || (v.kapsam ?? "(boş)") === fzEslF.kapsam)
+    && (!fzEslF.neden || v.neden === fzEslF.neden)
+    && (!fzEslF.q || [v.vm, v.ip, v.dns, v.host, v.fqdn, v.cluster, v.seri, ...v.uygulamalar, ...v.adaylar].some(x => (x ?? "").toLowerCase().includes(fzEslF.q))));
+  const sec = (id, ad, opts, deger) => `<label style="flex-direction:row;align-items:center;gap:4px">${ad} <select id="${id}"><option value="">Tümü</option>${opts.map(([k, n]) => `<option value="${esc(k)}"${k === deger ? " selected" : ""}>${esc(k)} (${fmt(n)})</option>`).join("")}</select></label>`;
+  const hostSay = new Set(l.map(v => v.fqdn ?? v.host)).size;
+  el.innerHTML = `<div class="toolbar" style="margin:6px 0;flex-wrap:wrap">
+      ${sec("fzEslKaynak", "Kaynak", kaynaklar, fzEslF.kaynak)} ${sec("fzEslKapsam", "Kapsam", kapsamlar, fzEslF.kapsam)} ${sec("fzEslNeden", "Neden", nedenler, fzEslF.neden)}
+      <input type="search" id="fzEslQ" placeholder="ara: VM, IP, host, cluster, uygulama" value="${esc(fzEslF.q)}" style="min-width:220px">
+      <span class="small muted">${fmt(l.length)} VM · ${fmt(hostSay)} host</span>
+      <a class="mini" data-csv href="api/fiziksel/eslesmeyen?csv=1" style="margin-left:auto">Excel (CSV)</a></div>
+    <div class="tbl-wrap" style="max-height:55vh"><table>
+      <thead><tr><th>VM</th><th>IP</th><th>Uygulamalar</th><th>Kaynak</th><th>Kapsam</th><th>Host</th><th>Cluster</th><th>Host seri / iLO</th><th>Neden</th><th>nlyte adayları</th></tr></thead>
+      <tbody>${l.slice(0, 2000).map(v => `<tr><td class="mono small" title="${esc([v.dns, v.os].filter(Boolean).join(" · "))}">${esc(v.vm ?? "")}</td><td>${fzIpLink(v.ip)}</td>
+        <td class="small">${v.uygulamalar.length ? v.uygulamalar.map(fzAppLink).join(", ") : `<span class="muted">ERT'de yok</span>`}</td>
+        <td class="small">${esc(v.kaynak ?? "")}</td><td class="small">${esc(v.kapsam ?? "")}</td>
+        <td class="mono small" title="${esc([v.fqdn, v.hostModel].filter(Boolean).join(" · "))}">${esc(v.host || "(boş)")} <span class="muted">(${fmt(v.hostVmSayisi)} VM)</span></td>
+        <td class="small">${esc(v.cluster ?? "")}</td><td class="mono small">${esc(v.seri ?? "")}${v.ilo ? `<div class="muted">iLO ${esc(v.ilo)}</div>` : ""}</td>
+        <td class="small">${esc(v.neden)}</td><td class="small">${v.adaylar.map(esc).join("<br>")}</td></tr>`).join("") || `<tr><td colspan="10" class="unk">Kabine yerleşmeyen VM yok.</td></tr>`}</tbody></table></div>
+    ${l.length > 2000 ? `<div class="small muted">ilk 2000 VM gösteriliyor; tamamı CSV'de</div>` : ""}`;
+  const yen = () => fzEslCiz();
+  $("#fzEslKaynak").addEventListener("change", e => { fzEslF.kaynak = e.target.value; yen(); });
+  $("#fzEslKapsam").addEventListener("change", e => { fzEslF.kapsam = e.target.value; yen(); });
+  $("#fzEslNeden").addEventListener("change", e => { fzEslF.neden = e.target.value; yen(); });
+  let t; $("#fzEslQ").addEventListener("input", e => { clearTimeout(t); t = setTimeout(() => { fzEslF.q = e.target.value.trim().toLowerCase(); yen(); const q = $("#fzEslQ"); q.focus(); q.setSelectionRange(q.value.length, q.value.length); }, 300); });
 }
 
 async function fzDisiYukle() {

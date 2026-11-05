@@ -597,7 +597,14 @@ erişim talepleri) — DB → şema → tablo ve kim erişiyor bilgisi buradan b
   VM'lere; kabine bağlanan VM'in Kapsam'ı ana kapsama geçer (`FizTurFarkli.EskiKapsam`). İstatistikte "Tüm VM'ler (MSY + ÇSY)" kartı (kapsam dağılımı,
   "X kapsamından N VM ana DC'ye yerleşti"). Fiziksel host envanterleri birden çok tablo: `Fiziksel:Tablolar:FizikselEnvanterler`
   (liste; boşsa eski `MsyFiziksel`, o da yoksa dbo.MsyFizikselEnvanter + dbo.CsyFizikselEnvanter, olmayan atlanır); kolonlar birkaç olası adla (SerialNumber /
-  SeriNo, DnsName / HostName / Fqdn, DnsIp / Ip / YonetimIp, IloIp / IdracIp …). ÇSY VM'leri KabinHostVm'de zaten var; ÇSY'nin fiziksel tablosu kullanıcıdan bekleniyor. Sahte veriyle (switch, firewall, patch panel, 0U PDU, chassis + 3 blade, AssetID ile farklı adlı host, klima) test edildi.
+  SeriNo, DnsName / HostName / Fqdn, DnsIp / Ip / YonetimIp, IloIp / IdracIp …). ÇSY VM'leri KabinHostVm'de zaten var; ÇSY'nin fiziksel tablosu YOK (kullanıcı). HATA DÜZELTİLDİ: `Norm` IP'li
+  FQDN'i ("10.6.30.99.msy.zb") ilk noktaya kadar kırpıp "10" yapıyordu → tüm IP host'lar aynı anahtar, yanlış kabine bağlanabiliyordu; artık IP başı
+  olduğu gibi kalır (`IpBas`). Ters DNS denendi, kullanıcı vazgeçti (yapılmadı). KABİNE YERLEŞMEYEN VM'LER (kullanıcı: "eşleşmeyen MSY / ÇSY
+  sunucularını basalım; host değil VM'leri, VM'in host bilgisiyle"): `/api/fiziksel/eslesmeyen` (+`?csv=1`, Yetki:Disari) → `FizEslesmeyen` VM başına
+  (VM, IP, DNS, OS, uygulamalar, kaynak, kapsam, host, FQDN, cluster, host modeli / serisi / iLO, host'taki VM sayısı, neden, nlyte adayları); neden host
+  düzeyinde: VM kaydında host yok / nlyte kapsamı dışı / nlyte'ta var ama kabine bağlı değil / kayıt aktif değil / birden çok aday / IP, MSY'de yok /
+  seri nlyte'ta yok / benzer ad var / bulunamadı; adaylar ad, seri ve ≥5 harf parça eşleşmesinden (kabin dışı dahil). Snapshot başına önbellek.
+  Arayüz katlanır "Kabine yerleşmeyen MSY / ÇSY VM'leri" (kaynak / kapsam / neden seçicileri, arama, ilk 2000 satır, CSV). Sahte veriyle (switch, firewall, patch panel, 0U PDU, chassis + 3 blade, AssetID ile farklı adlı host, klima) test edildi.
 - **VIP**: sorgulanan IP VIP ise üyeler + GW'ler aynı sorguya eklenir, üyeler "VIP ÜYESİ" (GW→üye trafiği varsa ✓).
   Gidilen IP VIP ise "VIP → n ÜYE"; gelen IP LB GW ise "LB GW"; sorgulanan sunucu havuz üyesiyse VIP kartı.
 - **Uygulama görünümü** (`/api/apps`, `/api/app`): `[kullanan uygulamalar] → [UYGULAMA: VIP'ler + segment grupları] → [bağımlı olunanlar]`,
