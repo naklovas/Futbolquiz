@@ -205,18 +205,32 @@ sealed class FizikselService(IConfiguration cfg, ILogger<FizikselService> log)
         }
         catch (SqlException ex) when (ex.Number == 208) { log.LogInformation("{T} yok; blade'lerin chassis'i NlyteCihaz'dan bulunur.", chTablo); }
 
+        // Fiziksel host envanterleri (MSY + ÇSY): DNS adı ↔ seri ↔ yönetim / iLO IP. Fiziksel:Tablolar:FizikselEnvanterler (liste) ya da
+        // eski tekil MsyFiziksel; varsayılan dbo.MsyFizikselEnvanter + dbo.CsyFizikselEnvanter (olmayan atlanır). Kolonlar adla, birkaç adla denenir.
         var msy = new List<FizMsy>();
-        string msyTablo = cfg["Fiziksel:Tablolar:MsyFiziksel"] ?? "dbo.MsyFizikselEnvanter";
-        try
+        var fizTablolar = cfg.GetSection("Fiziksel:Tablolar:FizikselEnvanterler").GetChildren().Select(c => c.Value).OfType<string>().ToList();
+        if (fizTablolar.Count == 0)
+            fizTablolar = cfg["Fiziksel:Tablolar:MsyFiziksel"] is string tek ? [tek] : ["dbo.MsyFizikselEnvanter", "dbo.CsyFizikselEnvanter"];
+        foreach (var t in fizTablolar)
         {
-            await using var cmd = new SqlCommand($"SELECT * FROM {msyTablo}", conn) { CommandTimeout = 60 };
-            await using var r = await cmd.ExecuteReaderAsync(ct);
-            var k = Kolonlar(r);
-            while (await r.ReadAsync(ct))
-                msy.Add(new FizMsy(S(r, k, "SerialNumber"), S(r, k, "DnsName"), S(r, k, "DnsIp"), S(r, k, "IloIp"), S(r, k, "Vendor"), S(r, k, "Model"),
-                    S(r, k, "PowerState"), S(r, k, "OsName"), S(r, k, "OsVersion"), D(r, k, "LastReboot")));
+            try
+            {
+                await using var cmd = new SqlCommand($"SELECT * FROM {t}", conn) { CommandTimeout = 60 };
+                await using var r = await cmd.ExecuteReaderAsync(ct);
+                var k = Kolonlar(r);
+                string? Ilk(params string[] adlar) { foreach (var a in adlar) if (S(r, k, a) is string v) return v; return null; }
+                int n = 0;
+                while (await r.ReadAsync(ct))
+                {
+                    msy.Add(new FizMsy(Ilk("SerialNumber", "SeriNo", "Serial", "SeriNumarasi"), Ilk("DnsName", "HostName", "Hostname", "Fqdn", "Ad", "Name"),
+                        Ilk("DnsIp", "Ip", "IpAddress", "YonetimIp", "MgmtIp"), Ilk("IloIp", "IdracIp", "IpmiIp", "OobIp", "ConsoleIp"), Ilk("Vendor", "Uretici"),
+                        Ilk("Model"), Ilk("PowerState", "Guc"), Ilk("OsName", "Os"), Ilk("OsVersion", "OsSurum"), D(r, k, "LastReboot") ?? D(r, k, "SonReboot")));
+                    n++;
+                }
+                log.LogInformation("Fiziksel host envanteri {T}: {N} kayıt", t, n);
+            }
+            catch (SqlException ex) when (ex.Number == 208) { log.LogInformation("{T} yok, atlandı.", t); }
         }
-        catch (SqlException ex) when (ex.Number == 208) { log.LogInformation("{T} yok; seri numarasıyla yedek eşleşme yapılmaz.", msyTablo); }
 
         var snap = Olustur(vmler, eksik, tablodan, kabinler, cihazlar, chassisler, hostAsset, msy, AnaKapsam);
         snap.CihazTablosu = cihazTablo;

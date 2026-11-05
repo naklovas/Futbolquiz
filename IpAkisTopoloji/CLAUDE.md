@@ -595,7 +595,9 @@ erişim talepleri) — DB → şema → tablo ve kim erişiyor bilgisi buradan b
   KKB 803 / Host adı yok (boş / IP) 813 / OpenShift 195 — ODM / KKB nlyte'ta yok. Host alanında IP yazan VM'ler: MSY `DnsIp` / `IloIp` → kaydın DnsName'i
   nlyte'ta (ad) ya da SerialNumber (`MsyIp`; "IP → ad / IP → seri"); `HostAnahtar` IP'yi Norm'la kırpmaz. Yedek eşleşme artık Eslesme'ye bakmadan tüm kabinsiz
   VM'lere; kabine bağlanan VM'in Kapsam'ı ana kapsama geçer (`FizTurFarkli.EskiKapsam`). İstatistikte "Tüm VM'ler (MSY + ÇSY)" kartı (kapsam dağılımı,
-  "X kapsamından N VM ana DC'ye yerleşti"). Sahte veriyle (switch, firewall, patch panel, 0U PDU, chassis + 3 blade, AssetID ile farklı adlı host, klima) test edildi.
+  "X kapsamından N VM ana DC'ye yerleşti"). Fiziksel host envanterleri birden çok tablo: `Fiziksel:Tablolar:FizikselEnvanterler`
+  (liste; boşsa eski `MsyFiziksel`, o da yoksa dbo.MsyFizikselEnvanter + dbo.CsyFizikselEnvanter, olmayan atlanır); kolonlar birkaç olası adla (SerialNumber /
+  SeriNo, DnsName / HostName / Fqdn, DnsIp / Ip / YonetimIp, IloIp / IdracIp …). ÇSY VM'leri KabinHostVm'de zaten var; ÇSY'nin fiziksel tablosu kullanıcıdan bekleniyor. Sahte veriyle (switch, firewall, patch panel, 0U PDU, chassis + 3 blade, AssetID ile farklı adlı host, klima) test edildi.
 - **VIP**: sorgulanan IP VIP ise üyeler + GW'ler aynı sorguya eklenir, üyeler "VIP ÜYESİ" (GW→üye trafiği varsa ✓).
   Gidilen IP VIP ise "VIP → n ÜYE"; gelen IP LB GW ise "LB GW"; sorgulanan sunucu havuz üyesiyse VIP kartı.
 - **Uygulama görünümü** (`/api/apps`, `/api/app`): `[kullanan uygulamalar] → [UYGULAMA: VIP'ler + segment grupları] → [bağımlı olunanlar]`,
