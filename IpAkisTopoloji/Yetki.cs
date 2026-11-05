@@ -7,13 +7,14 @@
 //   Disari   — Excel (CSV) / SVG / PNG dışa aktarma                                             (boşsa Yazma ile aynı)
 //   Toplu    — ERT eksiklerinde tüm boşları tahmin ettirme, 50'den çok sunucu      (boşsa Eksik:TopluYetkililer, varsayılan visikhan)
 //   Tls      — TLS toplu sorgu sekmesi (Excel'den IP listesi, AppResponse)                         (boşsa Topoloji ile aynı)
+//   Fiziksel — Fiziksel envanter sekmesi (nlyte kabin / host / VM; IP kartındaki konum satırı serbest)   (boşsa Topoloji ile aynı)
 // Auth ara katmanı /api isteklerinde gereken siteleri sorar (kullanıcı + site başına Auth:CacheMinutes önbellek; aynı ad tek sorgu),
 // sonuç context.Items["Yetki"]. DokuPanel'e ulaşılamazsa o işlem kapalı. Auth kapalıysa (yerel) yalnız listeler geçerli.
 // ---------------------------------------------------------------------------
 static class Yetki
 {
-    public const string Yazma = "Yazma", Topoloji = "Topoloji", Disari = "Disari", Toplu = "Toplu", Tls = "Tls";
-    public static readonly string[] Turler = [Yazma, Topoloji, Disari, Toplu, Tls];
+    public const string Yazma = "Yazma", Topoloji = "Topoloji", Disari = "Disari", Toplu = "Toplu", Tls = "Tls", Fiziksel = "Fiziksel";
+    public static readonly string[] Turler = [Yazma, Topoloji, Disari, Toplu, Tls, Fiziksel];
 
     // Yetkinin DokuPanel site adı (yoksa null: liste / başka yetkiye bağlı)
     public static string? Site(IConfiguration cfg, string tur)
@@ -21,7 +22,7 @@ static class Yetki
         string? s = cfg[$"Yetki:{tur}"];
         if (string.IsNullOrWhiteSpace(s) && tur == Yazma) s = cfg["Etiket:YazmaSiteAdi"];
         if (string.IsNullOrWhiteSpace(s) && tur is Topoloji or Disari) return Site(cfg, Yazma);
-        if (string.IsNullOrWhiteSpace(s) && tur == Tls) return Site(cfg, Topoloji);
+        if (string.IsNullOrWhiteSpace(s) && tur is Tls or Fiziksel) return Site(cfg, Topoloji);
         return string.IsNullOrWhiteSpace(s) ? null : s.Trim();
     }
 
@@ -31,7 +32,7 @@ static class Yetki
         if (tur == Toplu)   // toplu tahmin için yazma yetkisi de gerekir
             return Var(cfg, ctx, Yazma) && (Site(cfg, Toplu) is { } ts ? Doku(cfg, ctx, ts) : InList(cfg, "Eksik:TopluYetkililer", user, ["visikhan"]));
         if (Site(cfg, tur) is { } site) return Doku(cfg, ctx, site);
-        return tur == Yazma ? InList(cfg, "Etiket:Yazanlar", user, []) : tur == Tls ? Var(cfg, ctx, Topoloji) : Var(cfg, ctx, Yazma);
+        return tur == Yazma ? InList(cfg, "Etiket:Yazanlar", user, []) : tur is Tls or Fiziksel ? Var(cfg, ctx, Topoloji) : Var(cfg, ctx, Yazma);
     }
 
     // Arayüz için tüm yetkiler (/api/me)

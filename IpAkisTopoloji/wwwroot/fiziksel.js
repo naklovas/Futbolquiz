@@ -32,7 +32,12 @@ async function fzGet(url) {
 
 function runFiziksel() {
   setUiMode("fiziksel");
+  if (yetki && yetki.fiziksel === false) { fzYetkiYok(); return; }
   if (!$("#fzShell")) { fzShell(); fzDerinBaglanti(); }
+}
+// Yetki:Fiziksel (DokuPanel) yoksa sekme gizli; adresle (?fiziksel=1) gelinirse açıklama
+function fzYetkiYok() {
+  $("#main").innerHTML = `<div class="panel empty" style="color:var(--err)">Fiziksel envanter yetkiniz yok. Yetki DokuPanel'den verilir.</div>`;
 }
 
 function fzShell() {
@@ -458,7 +463,8 @@ function fizKonumHtml(ip) {
   if (!k.anaDc) return `<div class="fz-konum small"><b>Fiziksel konum:</b> ${esc(k.kapsam ?? "?")} — nlyte kapsamı dışı${k.host ? ` · host ${esc(k.host)}` : ""}${k.cluster ? ` · cluster ${esc(k.cluster)}` : ""}</div>`;
   if (!k.kabin) return `<div class="fz-konum small"><b>Fiziksel konum:</b> kabin bilinmiyor (host nlyte'ta eşleşmedi)${k.host ? ` · host ${esc(k.host)}` : ""}${k.cluster ? ` · cluster ${esc(k.cluster)}` : ""}</div>`;
   const link = `?${new URLSearchParams({ fiziksel: "1", kabin: k.kabin, host: k.host ?? "" })}`;
-  return `<div class="fz-konum small"><b>Fiziksel konum:</b> Kabin <a href="${esc(link)}" target="_blank" rel="noopener" title="Fiziksel envanterde aç"><b>${esc(k.kabin)}</b></a>${k.odaAdi ? " · " + esc(k.odaAdi) : ""}${k.host ? ` · host ${esc(k.host)}` : ""}${k.cluster ? ` · cluster ${esc(k.cluster)}` : ""}${k.uAlt != null ? ` · U${k.uAlt}` : ""}</div>`;
+  const kabinAd = yetki?.fiziksel === false ? `<b>${esc(k.kabin)}</b>` : `<a href="${esc(link)}" target="_blank" rel="noopener" title="Fiziksel envanterde aç"><b>${esc(k.kabin)}</b></a>`;
+  return `<div class="fz-konum small"><b>Fiziksel konum:</b> Kabin ${kabinAd}${k.odaAdi ? " · " + esc(k.odaAdi) : ""}${k.host ? ` · host ${esc(k.host)}` : ""}${k.cluster ? ` · cluster ${esc(k.cluster)}` : ""}${k.uAlt != null ? ` · U${k.uAlt}` : ""}</div>`;
 }
 
 // ?fiziksel=1&kabin=X&host=Y: doğrudan kabin (IP kartındaki bağlantı)

@@ -798,20 +798,23 @@ app.MapGet("/api/nessus/repolar", async (HttpContext ctx, IConfiguration cfg, Ne
     catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested) { return Results.Json(new { error = ex.Message }, statusCode: 502); }
 });
 // ---------- Fiziksel envanter (FizikselEnvanter.cs): oda planı → kabin → host → VM → uygulama; doku DB'deki nlyte tablolarını YALNIZ okur ----------
+// Yetki:Fiziksel (DokuPanel) — sekmenin tüm uçları; IP kartındaki konum satırı (/api/fiziksel/ip) serbest
+static async Task<IResult> FizY(HttpContext ctx, IConfiguration cfg, FizikselService f, CancellationToken ct, Func<FizikselSnapshot, IResult> run) =>
+    !Yetki.Var(cfg, ctx, Yetki.Fiziksel) ? Yetki.Red(ctx, "Fiziksel envanter") : await Fiz(f, ct, run);
 static async Task<IResult> Fiz(FizikselService f, CancellationToken ct, Func<FizikselSnapshot, IResult> run)
 {
     try { return run(await f.GetAsync(false, ct)); }
     catch (OperationCanceledException) when (ct.IsCancellationRequested) { return Results.StatusCode(499); }
     catch (Exception ex) { return Results.Json(new { error = ex.Message }, statusCode: 502); }
 }
-app.MapGet("/api/fiziksel/ozet", (FizikselService f, CancellationToken ct) => Fiz(f, ct, s => Results.Ok(f.Ozet(s))));
-app.MapGet("/api/fiziksel/oda", (string ad, FizikselService f, CancellationToken ct) => Fiz(f, ct, s => Results.Ok(f.Oda(s, ad))));
-app.MapGet("/api/fiziksel/kabin", (string ad, FizikselService f, CancellationToken ct) =>
-    Fiz(f, ct, s => f.Kabin(s, ad) is { } k ? Results.Ok(k) : Results.NotFound(new { error = $"Kabin bulunamadı: {ad}" })));
-app.MapGet("/api/fiziksel/ara", (string q, FizikselService f, CancellationToken ct) => Fiz(f, ct, s => Results.Ok(f.Ara(s, q))));
+app.MapGet("/api/fiziksel/ozet", (HttpContext ctx, IConfiguration cfg, FizikselService f, CancellationToken ct) => FizY(ctx, cfg, f, ct, s => Results.Ok(f.Ozet(s))));
+app.MapGet("/api/fiziksel/oda", (string ad, HttpContext ctx, IConfiguration cfg, FizikselService f, CancellationToken ct) => FizY(ctx, cfg, f, ct, s => Results.Ok(f.Oda(s, ad))));
+app.MapGet("/api/fiziksel/kabin", (string ad, HttpContext ctx, IConfiguration cfg, FizikselService f, CancellationToken ct) =>
+    FizY(ctx, cfg, f, ct, s => f.Kabin(s, ad) is { } k ? Results.Ok(k) : Results.NotFound(new { error = $"Kabin bulunamadı: {ad}" })));
+app.MapGet("/api/fiziksel/ara", (string q, HttpContext ctx, IConfiguration cfg, FizikselService f, CancellationToken ct) => FizY(ctx, cfg, f, ct, s => Results.Ok(f.Ara(s, q))));
 app.MapGet("/api/fiziksel/ip", (string ip, FizikselService f, CancellationToken ct) =>
     Fiz(f, ct, s => Results.Ok(new { bulundu = f.Ip(s, ip.Trim()) is not null, konum = f.Ip(s, ip.Trim()) })));
-app.MapGet("/api/fiziksel/eksik", (string? csv, HttpContext ctx, IConfiguration cfg, FizikselService f, CancellationToken ct) => Fiz(f, ct, s =>
+app.MapGet("/api/fiziksel/eksik", (string? csv, HttpContext ctx, IConfiguration cfg, FizikselService f, CancellationToken ct) => FizY(ctx, cfg, f, ct, s =>
 {
     var l = f.Eksik(s).ToList();
     if (csv is "1" or "true" or "True")
@@ -819,7 +822,7 @@ app.MapGet("/api/fiziksel/eksik", (string? csv, HttpContext ctx, IConfiguration 
             : Results.File(Encoding.UTF8.GetBytes(FizikselService.EksikCsv(l, s.TurFarkli)), "text/csv; charset=utf-8", $"nlyte_eksik_hostlar_{DateTime.Now:yyyyMMdd}.csv");
     return Results.Ok(new { hostlar = l, tablodan = s.EksikTablodan, vm = l.Sum(e => e.VmSayisi), turFarkli = s.TurFarkli });
 }));
-app.MapGet("/api/fiziksel/eslesmeyen", (string? csv, HttpContext ctx, IConfiguration cfg, FizikselService f, CancellationToken ct) => Fiz(f, ct, s =>
+app.MapGet("/api/fiziksel/eslesmeyen", (string? csv, HttpContext ctx, IConfiguration cfg, FizikselService f, CancellationToken ct) => FizY(ctx, cfg, f, ct, s =>
 {
     var l = f.Eslesmeyen(s);
     if (csv is "1" or "true" or "True")
@@ -827,9 +830,10 @@ app.MapGet("/api/fiziksel/eslesmeyen", (string? csv, HttpContext ctx, IConfigura
             : Results.File(Encoding.UTF8.GetBytes(FizikselService.EslesmeyenCsv(l)), "text/csv; charset=utf-8", $"eslesmeyen_hostlar_{DateTime.Now:yyyyMMdd}.csv");
     return Results.Ok(new { vmler = l, anaKapsam = f.AnaKapsam });
 }));
-app.MapGet("/api/fiziksel/kabindisi", (FizikselService f, CancellationToken ct) => Fiz(f, ct, s => Results.Ok(f.KabinDisi(s))));
-app.MapPost("/api/fiziksel/yenile", async (FizikselService f, CancellationToken ct) =>
+app.MapGet("/api/fiziksel/kabindisi", (HttpContext ctx, IConfiguration cfg, FizikselService f, CancellationToken ct) => FizY(ctx, cfg, f, ct, s => Results.Ok(f.KabinDisi(s))));
+app.MapPost("/api/fiziksel/yenile", async (HttpContext ctx, IConfiguration cfg, FizikselService f, CancellationToken ct) =>
 {
+    if (!Yetki.Var(cfg, ctx, Yetki.Fiziksel)) return Yetki.Red(ctx, "Fiziksel envanter");
     try { var s = await f.GetAsync(true, ct); return Results.Ok(new { satir = s.Vmler.Count, kabin = s.KabinVm.Count, yuklendi = s.LoadedAt }); }
     catch (Exception ex) { return Results.Json(new { error = ex.Message }, statusCode: 502); }
 });

@@ -636,9 +636,11 @@ erişim talepleri) — DB → şema → tablo ve kim erişiyor bilgisi buradan b
   tarayıcıdaki CSV/SVG/PNG düğmeleri gizli + fonksiyonda kontrol; boşsa Yazma), `Yetki:Toplu` (ERT eksiklerinde tüm boşlar / 50+ sunucu;
   Yazma da gerekir; boşsa `Eksik:TopluYetkililer`, varsayılan visikhan), `Yetki:Tls` (kullanıcı: "bu ekrana da DokuPanel yetkisi": TLS toplu
   sorgu — `/api/tls/toplu*` 403, sekme `body.no-tls` ile gizli, `?tls=1` ile gelinirse "yetkiniz yok"; boşsa Topoloji ile aynı; tek IP TLS paneli
-  serbest). Auth ara katmanı /api isteklerinde yapılandırılmış siteleri
+  serbest), `Yetki:Fiziksel` (kullanıcı: "fiziksel envanteri de DokuPanel'e kaydedelim": `/api/fiziksel/*` (ozet, oda, kabin, ara, eksik,
+  eslesmeyen, kabindisi, yenile; `FizY`) 403, sekme `body.no-fiziksel` ile gizli, `?fiziksel=1` → "yetkiniz yok" (`fzYetkiYok`); IP kartındaki
+  konum satırı `/api/fiziksel/ip` serbest, yetkisizde kabin adı bağlantısız; boşsa Topoloji ile aynı). Auth ara katmanı /api isteklerinde yapılandırılmış siteleri
   `AuthHelper.YetkiKontrol(ctx, cfg, siteAdi)` ile sorar (kullanıcı + site başına `Auth:CacheMinutes`; aynı ad tek sorgu) →
-  `context.Items["Yetki"]` → `Yetki.Var(cfg, ctx, tür)`. `/api/me` → `yetki {yazma, topoloji, disari, toplu, tls}`; topoloji.html body
+  `context.Items["Yetki"]` → `Yetki.Var(cfg, ctx, tür)`. `/api/me` → `yetki {yazma, topoloji, disari, toplu, tls, fiziksel}`; topoloji.html body
   `no-disari` / `no-topoloji` / `no-tls` sınıfları (yüklenene kadar gizli). DokuPanel'e ulaşılamazsa o işlem kapalı. Görüntüleme (IP / uygulama
   sorgusu, işlev haritası, kayıtlı versiyonlar) yalnız sayfa yetkisiyle açık.
 - Marka: **DeltaFlow** adı ve logosu.
