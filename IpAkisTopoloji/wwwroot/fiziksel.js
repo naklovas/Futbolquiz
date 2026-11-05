@@ -82,7 +82,7 @@ async function fzOzetYukle(yeniden) {
     + (ana ? `<b>${esc(ana.kapsam)}</b>: ${fmt(ana.vm)} VM, kabini bilinen %${ana.vm ? Math.round(ana.kabinli * 100 / ana.vm) : 0}` : "")
     + (diger.length ? ` · <span title="nlyte yalnız ana veri merkezini kapsar">${diger.map(k => `${esc(k.kapsam)} ${fmt(k.vm)}`).join(" · ")}</span>` : "")
     + (o.yenileme ? ` · son yenileme ${new Date(o.yenileme).toLocaleString("tr-TR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}` : "");
-  $("#fzEksikSay").textContent = (o.eksikSayisi ? `(${fmt(o.eksikSayisi)} host)` : "") + (o.turFarkliSayisi ? ` · ${fmt(o.turFarkliSayisi)} host nlyte'ta yanlış türde kayıtlı` : "");
+  $("#fzEksikSay").textContent = (o.eksikSayisi ? `(${fmt(o.eksikSayisi)} host)` : "") + (o.turFarkliSayisi ? ` · ${fmt(o.turFarkliSayisi)} host ek eşleştirmeyle kabine bağlandı` : "");
   $("#fzDisiSay").textContent = o.kabinDisi ? `(${fzTurOzet(o.kabinDisiTurlar, o.kabinDisi)})` : "(yok)";
   $("#fzOda").innerHTML = o.odalar.map(x => `<option value="${esc(x.ad)}">${esc(x.ad)}${x.konum && x.ad !== "Diğer" ? " · " + esc(x.konum) : ""} (${fmt(x.kabin)} kabin)</option>`).join("");
   const ilk = (!yeniden && fz.oda && o.odalar.some(x => x.ad === fz.oda)) ? fz.oda : o.odalar[0]?.ad;
@@ -255,7 +255,8 @@ function fzDetayCiz() {
       ${h.turUyari ? `<div class="small" style="color:var(--warn);margin:0 0 6px">⚠ ${esc(h.turUyari)}</div>` : ""}
       <dl class="fz-dl">
         ${[["Malzeme tipi", h.tip], ["Durum", h.durum], ["Cluster", h.cluster], ["FQDN", h.fqdn], ["Model", h.model], ["Seri", h.seri], ["nlyte AssetID", h.assetId], ["Konum", h.uAlt != null ? `U${h.uAlt}${h.uYukseklik > 1 ? `–${h.uAlt + h.uYukseklik - 1}` : ""} · ${/rear/i.test(h.yuz ?? "") ? "arka" : "ön"} yüz` : "U bilgisi yok"],
-           ["Chassis", h.chassis && `${h.chassis}${h.slot ? " · yuva " + h.slot : ""}${h.blade ? " (U chassis'ten)" : ""}`], ["Eşleşme", h.eslesme], ["Kaynak", h.kaynak]]
+           ["iLO", h.msy?.iloIp], ["Yönetim IP", h.msy?.dnsIp], ["OS", h.msy?.osName && `${h.msy.osName}${h.msy.osVersion ? " " + h.msy.osVersion : ""}`],
+           ["Güç", h.msy?.powerState], ["Son reboot", h.msy?.lastReboot && new Date(h.msy.lastReboot).toLocaleString("tr-TR")], ["Chassis", h.chassis && `${h.chassis}${h.slot ? " · yuva " + h.slot : ""}${h.blade ? " (U chassis'ten)" : ""}`], ["Eşleşme", h.eslesme], ["Kaynak", h.kaynak]]
           .filter(x => x[1]).map(([a, b]) => `<dt>${a}</dt><dd>${esc(b)}</dd>`).join("")}
       </dl>
       ${!srv ? `<div class="small muted" style="margin:8px 0">${esc(fzTurAd(h.tur))} — VM barındırmaz.</div>`
@@ -317,12 +318,13 @@ async function fzEksikYukle() {
   el.innerHTML = `<div class="toolbar" style="margin:6px 0">
       <span class="small muted">${esc(fz.ozet?.anaKapsam ?? "Ana veri merkezi")}: nlyte'ta eşleşmesi olmayan ${fmt(l.length)} ESX host · ${fmt(fz.eksik.vm)} VM — büyük ihtimalle nlyte'a girilmemiş${fz.eksik.tablodan ? "" : " (NlyteHostEslesme tablosu yok, KabinHostVm'den türetildi)"}</span>
       <a class="mini" data-csv href="api/fiziksel/eksik?csv=1" style="margin-left:auto" title="nlyte ekibine gönderilecek liste">Excel (CSV)</a></div>
-    ${fz.eksik.turFarkli?.length ? `<div class="small" style="margin:8px 0 4px;color:var(--warn)"><b>nlyte'ta yanlış türde kayıtlı ESX host'ları (${fmt(fz.eksik.turFarkli.length)})</b>
-      <span class="muted">— sp_KabinZincirYenile yalnız sunucularla eşleştirdiği için bulamadı; DeltaFlow adla eşleyip VM'lerini kabine bağladı (bellekte). nlyte'ta türü Server yapılmalı.</span></div>
-      <div class="tbl-wrap" style="max-height:30vh"><table><thead><tr><th>Host</th><th class="num">VM</th><th>nlyte kaydı</th><th>Tür</th><th>Kabin</th><th>Cluster</th></tr></thead>
+    ${fz.eksik.turFarkli?.length ? `<div class="small" style="margin:8px 0 4px;color:var(--warn)"><b>Ek eşleştirmeyle kabine bağlanan ESX host'ları (${fmt(fz.eksik.turFarkli.length)})</b>
+      <span class="muted">— sp_KabinZincirYenile bulamadı; DeltaFlow adla (nlyte'ta başka türde kayıtlı) ya da seri numarasıyla (MSY fiziksel envanter → nlyte SerialNumber; nlyte'ta farklı adla kayıtlı) eşleyip VM'lerini kabine bağladı (bellekte). nlyte kaydı düzeltilmeli.</span></div>
+      <div class="tbl-wrap" style="max-height:30vh"><table><thead><tr><th>Host</th><th class="num">VM</th><th>nlyte kaydı</th><th>Tür</th><th>Kabin</th><th>Nasıl</th><th>Cluster</th></tr></thead>
       <tbody>${fz.eksik.turFarkli.map(t => `<tr><td class="mono">${esc(t.host)}</td><td class="num">${fmt(t.vmSayisi)}</td><td class="mono small">${esc(t.cihazAd)}</td>
         <td><span class="badge" style="background:${fzTurRenk(t.tur)};color:#fff">${esc(fzTurAd(t.tur))}</span></td>
-        <td><a href="#" data-fzk="${esc(t.kabin)}">${esc(t.kabin)}</a>${t.uAlt != null ? ` <span class="muted">U${t.uAlt}</span>` : ""}</td><td class="small">${esc(t.cluster ?? "")}</td></tr>`).join("")}</tbody></table></div>
+        <td><a href="#" data-fzk="${esc(t.kabin)}">${esc(t.kabin)}</a>${t.uAlt != null ? ` <span class="muted">U${t.uAlt}</span>` : ""}</td>
+        <td class="small">${t.yontem === "ad" ? "ad · tür yanlış" : esc(t.yontem ?? "") + " · ad farklı"}</td><td class="small">${esc(t.cluster ?? "")}</td></tr>`).join("")}</tbody></table></div>
       <div class="small" style="margin:8px 0 4px"><b>nlyte'ta hiç bulunamayanlar</b></div>` : ""}
     <div class="tbl-wrap" style="max-height:40vh"><table>
       <thead><tr><th>Host</th><th>FQDN</th><th class="num">VM</th><th>Cluster</th><th class="num" title="nlyte'ta benzer adlı aday kayıt sayısı">Aday</th></tr></thead>

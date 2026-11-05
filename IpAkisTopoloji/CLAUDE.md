@@ -583,7 +583,11 @@ erişim talepleri) — DB → şema → tablo ve kim erişiyor bilgisi buradan b
   eşleşme — kabinsiz VM'in host adı (Norm) kabindeki TEK aktif cihazın adlarından biriyse VM bellekte o kabine bağlanır (Eslesme "Ad (DeltaFlow; nlyte'ta
   Network)", U / yüz cihazdan), host eksik listesinden çıkar, `TurFarkli` listesine girer (`/api/fiziksel/eksik` turFarkli, CSV'de not satırı, eksik
   bölümünde ayrı tablo + kabin bağlantısı); kabin çiziminde VM'li olduğu için sunucu gibi çizilir, `turUyari` ("türü düzeltilmeli"). Kalıcı çözüm:
-  prosedür NlyteCihaz'la eşleştirsin + nlyte'ta tür Server yapılsın. Sahte veriyle (switch, firewall, patch panel, 0U PDU, chassis + 3 blade, AssetID ile farklı adlı host, klima) test edildi.
+  prosedür NlyteCihaz'la eşleştirsin + nlyte'ta tür Server yapılsın. MSY FİZİKSEL ENVANTER (kullanıcı buldu: `dbo.MsyFizikselEnvanter` Id,
+  SerialNumber, Mac, Vendor, Model, PowerState, DnsName, DnsIp, IloIp, OsName, OsVersion, OnlineHbaWwnn, LastReboot, InsertedAt; `Fiziksel:Tablolar:MsyFiziksel`,
+  yoksa atlanır): yedek eşleşmede adla bulunamayan host için önce KabinHostVm.HostSeri, sonra MSY'deki DnsName → SerialNumber → kabindeki TEK nlyte cihazının
+  SerialNumber'ı ("seri (MSY fiziksel envanter)", nlyte'ta farklı adla kayıtlı); Kabin() VM grubu ↔ cihaz eşleşmesinde de MSY serisi; host satırında `msy`
+  (iLO, yönetim IP, OS, güç, son reboot) detayda. Eksik bölümündeki tablo "Ek eşleştirmeyle kabine bağlanan ESX host'ları" + "Nasıl" (ad · tür yanlış / seri · ad farklı), CSV notu. Sahte veriyle (switch, firewall, patch panel, 0U PDU, chassis + 3 blade, AssetID ile farklı adlı host, klima) test edildi.
 - **VIP**: sorgulanan IP VIP ise üyeler + GW'ler aynı sorguya eklenir, üyeler "VIP ÜYESİ" (GW→üye trafiği varsa ✓).
   Gidilen IP VIP ise "VIP → n ÜYE"; gelen IP LB GW ise "LB GW"; sorgulanan sunucu havuz üyesiyse VIP kartı.
 - **Uygulama görünümü** (`/api/apps`, `/api/app`): `[kullanan uygulamalar] → [UYGULAMA: VIP'ler + segment grupları] → [bağımlı olunanlar]`,
