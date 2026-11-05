@@ -716,7 +716,7 @@ sealed class FizikselService(IConfiguration cfg, ILogger<FizikselService> log)
 
     public static string EslesmeyenCsv(IEnumerable<FizEslesmeyen> l)
     {
-        static string Q(string? v) { v ??= ""; return v.Contains(';') || v.Contains('"') ? "\"" + v.Replace("\"", "\"\"") + "\"" : v; }
+        static string Q(string? v) => CsvAlan(v);
         var sb = new StringBuilder("\uFEFFVM;IP;DNS;OS;UYGULAMALAR;KAYNAK;KAPSAM;HOST;HOST FQDN;CLUSTER;HOST MODEL;HOST SERİ;HOST ILO;HOST VM SAYISI;NEDEN;NLYTE ADAYLARI\r\n");
         foreach (var e in l)
             sb.Append(string.Join(";", Q(e.Vm), Q(e.Ip), Q(e.Dns), Q(e.Os), Q(string.Join(" | ", e.Uygulamalar)), Q(e.Kaynak), Q(e.Kapsam), Q(e.Host), Q(e.Fqdn), Q(e.Cluster),
@@ -726,9 +726,13 @@ sealed class FizikselService(IConfiguration cfg, ILogger<FizikselService> log)
 
     public IEnumerable<FizEksik> Eksik(FizikselSnapshot s) => s.Eksik.Where(e => e.Kapsam == null || e.Kapsam == AnaKapsam);
 
+    // CSV alanı: satır sonu / sekme boşluğa (Excel'de satır ya da kolon kaymasın), her alan tırnak içinde
+    static string CsvAlan(string? v) =>
+        "\"" + Regex.Replace(v ?? "", @"[\r\n\t]+", " ").Trim().Replace("\"", "\"\"") + "\"";
+
     public static string EksikCsv(IEnumerable<FizEksik> l, IEnumerable<FizTurFarkli>? turFarkli = null)
     {
-        static string Q(string? v) { v ??= ""; return v.Contains(';') || v.Contains('"') ? "\"" + v.Replace("\"", "\"\"") + "\"" : v; }
+        static string Q(string? v) => CsvAlan(v);
         var sb = new StringBuilder("﻿HOST;FQDN;VM SAYISI;CLUSTER;KAPSAM;ADAY SAYISI;NOT\r\n");
         foreach (var e in l) sb.Append(string.Join(";", Q(e.Host), Q(e.Fqdn), e.VmSayisi, Q(e.Cluster), Q(e.Kapsam), e.AdaySayisi?.ToString() ?? "", Q(e.Not))).Append("\r\n");
         foreach (var t in turFarkli ?? [])
