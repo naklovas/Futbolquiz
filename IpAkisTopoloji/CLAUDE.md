@@ -591,7 +591,11 @@ erişim talepleri) — DB → şema → tablo ve kim erişiyor bilgisi buradan b
   sunucu ve uygulama sayısı önemli"): `/api/fiziksel/ozet` → `istatistik` (`Istatistik`, ana kapsam): kabine yerleşen sunucu (aktif Server cihazları,
   U'su bilinen, kabin dışı sunucu), ESX host yerleşimi (kabini bilinen / toplam, ek eşleşme, nlyte'ta yok), VM yerleşimi (%), kabine yerleşen uygulama
   (en az bir VM'i kabinde / toplam, tümü yerleşen, hiç yerleşmeyen), tek kabine bağlı uygulama (kabin kapanırsa tamamen durur), kabin sayıları → sayfanın
-  altında kart ızgarası (`fzIstCiz`, `#fzIst`). Sahte veriyle (switch, firewall, patch panel, 0U PDU, chassis + 3 blade, AssetID ile farklı adlı host, klima) test edildi.
+  altında kart ızgarası (`fzIstCiz`, `#fzIst`). GAP (kullanıcı: "MSY + ÇSY 10.000 VM, 6.374 yerleşti"): canlı kapsamlar Ana 6.701 / ODM 2.236 /
+  KKB 803 / Host adı yok (boş / IP) 813 / OpenShift 195 — ODM / KKB nlyte'ta yok. Host alanında IP yazan VM'ler: MSY `DnsIp` / `IloIp` → kaydın DnsName'i
+  nlyte'ta (ad) ya da SerialNumber (`MsyIp`; "IP → ad / IP → seri"); `HostAnahtar` IP'yi Norm'la kırpmaz. Yedek eşleşme artık Eslesme'ye bakmadan tüm kabinsiz
+  VM'lere; kabine bağlanan VM'in Kapsam'ı ana kapsama geçer (`FizTurFarkli.EskiKapsam`). İstatistikte "Tüm VM'ler (MSY + ÇSY)" kartı (kapsam dağılımı,
+  "X kapsamından N VM ana DC'ye yerleşti"). Sahte veriyle (switch, firewall, patch panel, 0U PDU, chassis + 3 blade, AssetID ile farklı adlı host, klima) test edildi.
 - **VIP**: sorgulanan IP VIP ise üyeler + GW'ler aynı sorguya eklenir, üyeler "VIP ÜYESİ" (GW→üye trafiği varsa ✓).
   Gidilen IP VIP ise "VIP → n ÜYE"; gelen IP LB GW ise "LB GW"; sorgulanan sunucu havuz üyesiyse VIP kartı.
 - **Uygulama görünümü** (`/api/apps`, `/api/app`): `[kullanan uygulamalar] → [UYGULAMA: VIP'ler + segment grupları] → [bağımlı olunanlar]`,

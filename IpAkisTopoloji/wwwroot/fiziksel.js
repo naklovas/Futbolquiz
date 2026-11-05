@@ -107,6 +107,10 @@ function fzIstCiz(i) {
       ${kart("VM yerleşimi", `${fmt(i.vmKabinli)} <span class="small muted">/ ${fmt(i.vm)}</span>`, `%${i.vmOran} kabini bilinen · uygulaması yok: ${fmt(i.vmUygulamasiz)}`, "Kabini bilinen VM'ler", "var(--in)")}
       ${kart("Kabine yerleşen uygulama", `${fmt(i.uygulamaYerlesen)} <span class="small muted">/ ${fmt(i.uygulama)}</span>`, `${yuz(i.uygulamaYerlesen, i.uygulama)} · tüm VM'leri yerleşen: ${fmt(i.uygulamaTamami)} · hiç yerleşmeyen: ${fmt(i.uygulamaHicKabin)}`, "En az bir VM'i kabini bilinen host'ta çalışan ERT uygulamaları", "#2e9d5b")}
       ${kart("Tek kabine bağlı uygulama", fmt(i.uygulamaTekKabin), "tüm VM'leri aynı kabinde — kabin kapanırsa tamamen durur", "Kabini bilinen tüm VM'leri tek bir kabinde olan uygulamalar", "var(--err)")}
+      ${i.kapsamlar ? kart("Tüm VM'ler (MSY + ÇSY)", `${fmt(i.tumVmKabinli)} <span class="small muted">/ ${fmt(i.tumVm)}</span>`,
+        i.kapsamlar.map(k => `${esc(k.kapsam)}: ${fmt(k.vm)}${k.ana ? ` (yerleşen ${fmt(k.kabinli)})` : k.kabinli ? ` (yerleşen ${fmt(k.kabinli)})` : ""}`).join(" · ")
+        + (i.ekKapsamdan?.length ? ` · <span style="color:var(--in)">${i.ekKapsamdan.map(x => `${esc(x.kapsam)} kapsamından ${fmt(x.vm)} VM ana DC'ye yerleşti`).join(", ")}</span>` : ""),
+        "nlyte yalnız ana veri merkezini (Esenyurt) kapsar; ODM / KKB VM'leri kabine yerleşemez", "var(--muted)") : ""}
       ${kart("Kabin", fmt(i.kabin), `cihazlı: ${fmt(i.kabinCihazli)} · VM'li: ${fmt(i.kabinVmli)} · ${fmt(i.cihaz)} aktif cihaz`, "nlyte kabinleri", "var(--muted)")}
     </div>`;
 }
@@ -345,7 +349,7 @@ async function fzEksikYukle() {
       <tbody>${fz.eksik.turFarkli.map(t => `<tr><td class="mono">${esc(t.host)}</td><td class="num">${fmt(t.vmSayisi)}</td><td class="mono small">${esc(t.cihazAd)}</td>
         <td><span class="badge" style="background:${fzTurRenk(t.tur)};color:#fff">${esc(fzTurAd(t.tur))}</span></td>
         <td><a href="#" data-fzk="${esc(t.kabin)}">${esc(t.kabin)}</a>${t.uAlt != null ? ` <span class="muted">U${t.uAlt}</span>` : ""}</td>
-        <td class="small">${t.yontem === "ad" ? "ad · tür yanlış" : esc(t.yontem ?? "") + " · ad farklı"}</td><td class="small">${esc(t.cluster ?? "")}</td></tr>`).join("")}</tbody></table></div>
+        <td class="small">${t.yontem === "ad" ? "ad · tür yanlış" : esc(t.yontem ?? "") + " · ad farklı"}${t.eskiKapsam && t.eskiKapsam !== fz.ozet?.anaKapsam ? ` <span class="muted">(${esc(t.eskiKapsam)})</span>` : ""}</td><td class="small">${esc(t.cluster ?? "")}</td></tr>`).join("")}</tbody></table></div>
       <div class="small" style="margin:8px 0 4px"><b>nlyte'ta hiç bulunamayanlar</b></div>` : ""}
     <div class="tbl-wrap" style="max-height:40vh"><table>
       <thead><tr><th>Host</th><th>FQDN</th><th class="num">VM</th><th>Cluster</th><th class="num" title="nlyte'ta benzer adlı aday kayıt sayısı">Aday</th></tr></thead>

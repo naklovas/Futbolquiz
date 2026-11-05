@@ -30,7 +30,7 @@ record FizCihaz(string Ad, List<string> Adlar, string? AssetId, string? Seri, st
 }
 record FizChassis(string Id, string? Ad, string? CabinetAssetId, int? UAlt, int? UYukseklik, string? Yuz, string? Model);
 // sp_KabinZincirYenile'ın eşleştiremediği ama nlyte'ta başka türde (ör. Network) kayıtlı host'lar — DeltaFlow bellekte adla bağlar
-record FizTurFarkli(string Host, string? Fqdn, int VmSayisi, string? Cluster, string CihazAd, string Tur, string Kabin, string? AssetId, int? UAlt, string Yontem = "ad");
+record FizTurFarkli(string Host, string? Fqdn, int VmSayisi, string? Cluster, string CihazAd, string Tur, string Kabin, string? AssetId, int? UAlt, string Yontem = "ad", string? EskiKapsam = null);
 // MSY fiziksel envanteri (dbo.MsyFizikselEnvanter): host DNS adı ↔ seri numarası, iLO, OS (ESX host'larının donanım kaydı)
 record FizMsy(string? Seri, string? DnsName, string? DnsIp, string? IloIp, string? Vendor, string? Model, string? PowerState, string? OsName, string? OsVersion, DateTime? LastReboot);
 record FizEksik(string Host, string? Fqdn, int VmSayisi, string? Kapsam, string? Cluster, string? EslesmeTuru, int? AdaySayisi, string? Not);
@@ -53,6 +53,7 @@ sealed class FizikselSnapshot
     public List<FizTurFarkli> TurFarkli { get; } = [];
     public Dictionary<string, FizMsy> MsyAd { get; } = new(StringComparer.OrdinalIgnoreCase);    // Norm(DnsName) → kayıt
     public Dictionary<string, FizMsy> MsySeri { get; } = new(StringComparer.OrdinalIgnoreCase);  // seri → kayıt
+    public Dictionary<string, FizMsy> MsyIp { get; } = new(StringComparer.OrdinalIgnoreCase);    // yönetim / iLO IP → kayıt (host alanında IP yazan VM'ler)
     public bool MsyVar { get; set; }
     public Dictionary<string, string> HostAsset { get; } = new(StringComparer.OrdinalIgnoreCase);   // host adı (kısa, küçük) → nlyte AssetID
     // Planda gösterilecek tüm kabinler: nlyte kabinleri + KabinHostVm'de geçenler
@@ -217,7 +218,7 @@ sealed class FizikselService(IConfiguration cfg, ILogger<FizikselService> log)
         }
         catch (SqlException ex) when (ex.Number == 208) { log.LogInformation("{T} yok; seri numarasıyla yedek eşleşme yapılmaz.", msyTablo); }
 
-        var snap = Olustur(vmler, eksik, tablodan, kabinler, cihazlar, chassisler, hostAsset, msy);
+        var snap = Olustur(vmler, eksik, tablodan, kabinler, cihazlar, chassisler, hostAsset, msy, AnaKapsam);
         snap.CihazTablosu = cihazTablo;
         return snap;
     }
@@ -237,7 +238,7 @@ sealed class FizikselService(IConfiguration cfg, ILogger<FizikselService> log)
 
     // Anlık görüntü + dizinler (kabin → VM'ler, IP → VM'ler); sahte veriyle test için de kullanılır
     public static FizikselSnapshot Olustur(List<FizVm> vmler, List<FizEksik> eksik, bool tablodan, List<FizKabin>? kabinler = null, List<FizCihaz>? cihazlar = null,
-        List<FizChassis>? chassisler = null, Dictionary<string, string>? hostAsset = null, List<FizMsy>? msy = null)
+        List<FizChassis>? chassisler = null, Dictionary<string, string>? hostAsset = null, List<FizMsy>? msy = null, string anaKapsam = "Ana veri merkezi")
     {
         // Cluster bilgisi eksik listesine KabinHostVm'den eklenir (FQDN ya da kısa ad)
         var clusterOf = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -272,6 +273,7 @@ sealed class FizikselService(IConfiguration cfg, ILogger<FizikselService> log)
         {
             if (m.DnsName != null) s.MsyAd.TryAdd(Norm(m.DnsName), m);
             if (m.Seri != null) s.MsySeri.TryAdd(m.Seri.Trim(), m);
+            foreach (var ip in new[] { m.DnsIp, m.IloIp }.OfType<string>()) s.MsyIp.TryAdd(ip.Trim(), m);
         }
         s.MsyVar = s.MsyAd.Count > 0;
         var adIndeks = new Dictionary<string, List<(FizCihaz C, string Kabin)>>(StringComparer.OrdinalIgnoreCase);
@@ -289,13 +291,22 @@ sealed class FizikselService(IConfiguration cfg, ILogger<FizikselService> log)
             // 1) ad: kabindeki tek cihazın adı; 2) seri: KabinHostVm.HostSeri ya da MSY fiziksel envanterinde host'un seri numarası → nlyte SerialNumber
             (FizCihaz C, string Kabin, string Yontem)? Bul(FizVm v)
             {
-                var hlar = new[] { v.Host, v.HostFqdn }.OfType<string>().Select(Norm).Distinct().ToList();
+                var hlar = new[] { v.Host, v.HostFqdn }.OfType<string>().Select(HostAnahtar).Distinct().ToList();
                 foreach (var h in hlar)
                 {
                     if (bulunan.TryGetValue(h, out var b)) return b;
                     if (adIndeks.TryGetValue(h, out var l) && l.Select(x => x.C).Distinct().Count() == 1) return bulunan[h] = (l[0].C, l[0].Kabin, "ad");
                 }
-                foreach (var (seri, yontem) in new[] { (v.HostSeri, "seri") }.Concat(hlar.Select(h => (s.MsyAd.GetValueOrDefault(h)?.Seri, "seri (MSY fiziksel envanter)"))))
+                // host alanında IP yazıyorsa (Kapsam "Host adı yok"): MSY yönetim / iLO IP → seri; ya da o kaydın DNS adı nlyte'ta
+                var ipKayit = hlar.Select(h => s.MsyIp.GetValueOrDefault(h)).FirstOrDefault(x => x != null);
+                if (ipKayit?.DnsName != null && adIndeks.TryGetValue(Norm(ipKayit.DnsName), out var li) && li.Select(x => x.C).Distinct().Count() == 1)
+                {
+                    var b = (li[0].C, li[0].Kabin, "IP → ad (MSY fiziksel envanter)");
+                    foreach (var h in hlar) bulunan[h] = b;
+                    return b;
+                }
+                foreach (var (seri, yontem) in new[] { (v.HostSeri, "seri"), (ipKayit?.Seri, "IP → seri (MSY fiziksel envanter)") }
+                    .Concat(hlar.Select(h => (s.MsyAd.GetValueOrDefault(h)?.Seri, "seri (MSY fiziksel envanter)"))))
                     if (seri != null && seriIndeks.TryGetValue(seri.Trim(), out var l) && l.Select(x => x.C).Distinct().Count() == 1)
                     {
                         var b = (l[0].C, l[0].Kabin, yontem);
@@ -305,10 +316,10 @@ sealed class FizikselService(IConfiguration cfg, ILogger<FizikselService> log)
                 return null;
             }
             var yeni = new List<FizVm>(vmler.Count);
-            var eslenen = new Dictionary<string, (FizCihaz C, string Kabin, string Yontem, List<FizVm> Vm)>(StringComparer.OrdinalIgnoreCase);
+            var eslenen = new Dictionary<string, (FizCihaz C, string Kabin, string Yontem, string? EskiKapsam, List<FizVm> Vm)>(StringComparer.OrdinalIgnoreCase);
             foreach (var v in vmler)
             {
-                if (v.Kabin == null && v.Eslesme is null or "Yok" && Bul(v) is { } b)
+                if (v.Kabin == null && Bul(v) is { } b)
                 {
                     var kb = s.Kabinler.GetValueOrDefault(b.Kabin);
                     var nv = v with
@@ -316,10 +327,12 @@ sealed class FizikselService(IConfiguration cfg, ILogger<FizikselService> log)
                         Kabin = b.Kabin, KabinU = kb?.UYukseklik, KabinUSirasi = kb?.USirasi, KabinBosU = kb?.BosU, HostUAlt = b.C.UAlt, HostUYukseklik = b.C.UYukseklik,
                         HostYuz = b.C.Yuz, HostModel = v.HostModel ?? b.C.Model, HostSeri = v.HostSeri ?? b.C.Seri, CabinetAssetId = b.C.CabinetAssetId,
                         Eslesme = b.Yontem == "ad" ? $"Ad (DeltaFlow; nlyte'ta {b.C.Tur})" : $"{char.ToUpper(b.Yontem[0])}{b.Yontem[1..]} (DeltaFlow; nlyte adı {b.C.Ad})",
+                        // nlyte yalnız ana veri merkezini kapsar: kabine bağlanan VM ana kapsama geçer (ör. "Host adı yok")
+                        Kapsam = anaKapsam, Konum = v.Konum,
                     };
                     yeni.Add(nv);
                     string key = v.HostFqdn ?? v.Host ?? "?";
-                    (eslenen.TryGetValue(key, out var e) ? e : eslenen[key] = (b.C, b.Kabin, b.Yontem, [])).Vm.Add(nv);
+                    (eslenen.TryGetValue(key, out var e) ? e : eslenen[key] = (b.C, b.Kabin, b.Yontem, v.Kapsam, [])).Vm.Add(nv);
                 }
                 else yeni.Add(v);
             }
@@ -327,7 +340,7 @@ sealed class FizikselService(IConfiguration cfg, ILogger<FizikselService> log)
             {
                 s.Vmler = yeni;
                 foreach (var (key, e) in eslenen.OrderByDescending(x => x.Value.Vm.Count))
-                    s.TurFarkli.Add(new FizTurFarkli(e.Vm[0].Host ?? key, e.Vm[0].HostFqdn, e.Vm.Count, e.Vm[0].Cluster, e.C.Ad, e.C.Tur, e.Kabin, e.C.AssetId, e.C.UAlt, e.Yontem));
+                    s.TurFarkli.Add(new FizTurFarkli(e.Vm[0].Host ?? key, e.Vm[0].HostFqdn, e.Vm.Count, e.Vm[0].Cluster, e.C.Ad, e.C.Tur, e.Kabin, e.C.AssetId, e.C.UAlt, e.Yontem, e.EskiKapsam));
                 var anahtar = eslenen.Values.SelectMany(e => new[] { e.Vm[0].Host, e.Vm[0].HostFqdn }).OfType<string>().Select(Norm).ToHashSet(StringComparer.OrdinalIgnoreCase);
                 s.Eksik = s.Eksik.Where(e => !anahtar.Contains(Norm(e.Host)) && !(e.Fqdn != null && anahtar.Contains(Norm(e.Fqdn)))).ToList();
             }
@@ -429,6 +442,10 @@ sealed class FizikselService(IConfiguration cfg, ILogger<FizikselService> log)
             uygulama = uyg.Count, uygulamaYerlesen = uyg.Count(u => u.Kabinli > 0), uygulamaTamami = uyg.Count(u => u.Kabinli == u.Toplam),
             uygulamaTekKabin = uyg.Count(u => u.Kabinli == u.Toplam && u.Kabin == 1), uygulamaHicKabin = uyg.Count(u => u.Kabinli == 0),
             vmUygulamasiz = vm.Count(v => v.Uygulamalar.Count == 0),
+            tumVm = s.Vmler.Count, tumVmKabinli = s.Vmler.Count(v => v.Kabin != null),
+            kapsamlar = s.Vmler.GroupBy(v => v.Kapsam ?? "(boş)").Select(g => new { kapsam = g.Key, vm = g.Count(), kabinli = g.Count(v => v.Kabin != null), ana = g.Key == AnaKapsam })
+                .OrderByDescending(x => x.ana).ThenByDescending(x => x.vm).ToList(),
+            ekKapsamdan = s.TurFarkli.Where(t => t.EskiKapsam != null && t.EskiKapsam != AnaKapsam).GroupBy(t => t.EskiKapsam!).Select(g => new { kapsam = g.Key, host = g.Count(), vm = g.Sum(t => t.VmSayisi) }).ToList(),
         };
     }
 
@@ -460,6 +477,8 @@ sealed class FizikselService(IConfiguration cfg, ILogger<FizikselService> log)
     }
 
     static string Norm(string x) => x.Trim().ToLowerInvariant().Split('.')[0];
+    // host anahtarı: IP olduğu gibi (Norm "10.6.30.21"i "10"a indirirdi), ad kısa + küçük harf
+    static string HostAnahtar(string x) => System.Net.IPAddress.TryParse(x.Trim(), out _) && x.Contains('.') ? x.Trim() : Norm(x);
 
     // Tür sayımı: [{tur, adet, vmli}] — en kalabalık önce
     static List<object> TurSayim(IEnumerable<FizCihaz> cs, ISet<FizCihaz>? vmli = null) =>
