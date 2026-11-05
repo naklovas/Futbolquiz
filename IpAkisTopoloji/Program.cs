@@ -811,18 +811,18 @@ app.MapGet("/api/fiziksel/kabin", (string ad, FizikselService f, CancellationTok
 app.MapGet("/api/fiziksel/ara", (string q, FizikselService f, CancellationToken ct) => Fiz(f, ct, s => Results.Ok(f.Ara(s, q))));
 app.MapGet("/api/fiziksel/ip", (string ip, FizikselService f, CancellationToken ct) =>
     Fiz(f, ct, s => Results.Ok(new { bulundu = f.Ip(s, ip.Trim()) is not null, konum = f.Ip(s, ip.Trim()) })));
-app.MapGet("/api/fiziksel/eksik", (bool? csv, HttpContext ctx, IConfiguration cfg, FizikselService f, CancellationToken ct) => Fiz(f, ct, s =>
+app.MapGet("/api/fiziksel/eksik", (string? csv, HttpContext ctx, IConfiguration cfg, FizikselService f, CancellationToken ct) => Fiz(f, ct, s =>
 {
     var l = f.Eksik(s).ToList();
-    if (csv == true)
+    if (csv is "1" or "true" or "True")
         return !Yetki.Var(cfg, ctx, Yetki.Disari) ? Yetki.Red(ctx, "Dışa aktarma")
             : Results.File(Encoding.UTF8.GetBytes(FizikselService.EksikCsv(l, s.TurFarkli)), "text/csv; charset=utf-8", $"nlyte_eksik_hostlar_{DateTime.Now:yyyyMMdd}.csv");
     return Results.Ok(new { hostlar = l, tablodan = s.EksikTablodan, vm = l.Sum(e => e.VmSayisi), turFarkli = s.TurFarkli });
 }));
-app.MapGet("/api/fiziksel/eslesmeyen", (bool? csv, HttpContext ctx, IConfiguration cfg, FizikselService f, CancellationToken ct) => Fiz(f, ct, s =>
+app.MapGet("/api/fiziksel/eslesmeyen", (string? csv, HttpContext ctx, IConfiguration cfg, FizikselService f, CancellationToken ct) => Fiz(f, ct, s =>
 {
     var l = f.Eslesmeyen(s);
-    if (csv == true)
+    if (csv is "1" or "true" or "True")
         return !Yetki.Var(cfg, ctx, Yetki.Disari) ? Yetki.Red(ctx, "Dışa aktarma")
             : Results.File(Encoding.UTF8.GetBytes(FizikselService.EslesmeyenCsv(l)), "text/csv; charset=utf-8", $"eslesmeyen_hostlar_{DateTime.Now:yyyyMMdd}.csv");
     return Results.Ok(new { vmler = l, anaKapsam = f.AnaKapsam });

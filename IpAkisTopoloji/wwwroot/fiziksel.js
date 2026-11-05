@@ -344,7 +344,7 @@ async function fzEksikYukle() {
   const l = fz.eksik.hostlar;
   el.innerHTML = `<div class="toolbar" style="margin:6px 0">
       <span class="small muted">${esc(fz.ozet?.anaKapsam ?? "Ana veri merkezi")}: nlyte'ta eşleşmesi olmayan ${fmt(l.length)} ESX host · ${fmt(fz.eksik.vm)} VM — büyük ihtimalle nlyte'a girilmemiş${fz.eksik.tablodan ? "" : " (NlyteHostEslesme tablosu yok, KabinHostVm'den türetildi)"}</span>
-      <a class="mini" data-csv href="api/fiziksel/eksik?csv=1" style="margin-left:auto" title="nlyte ekibine gönderilecek liste">Excel (CSV)</a></div>
+      <a class="mini" data-csv href="api/fiziksel/eksik?csv=true" style="margin-left:auto" title="nlyte ekibine gönderilecek liste">Excel (CSV)</a></div>
     ${fz.eksik.turFarkli?.length ? `<div class="small" style="margin:8px 0 4px;color:var(--warn)"><b>Ek eşleştirmeyle kabine bağlanan ESX host'ları (${fmt(fz.eksik.turFarkli.length)})</b>
       <span class="muted">— sp_KabinZincirYenile bulamadı; DeltaFlow adla (nlyte'ta başka türde kayıtlı) ya da seri numarasıyla (MSY fiziksel envanter → nlyte SerialNumber; nlyte'ta farklı adla kayıtlı) eşleyip VM'lerini kabine bağladı (bellekte). nlyte kaydı düzeltilmeli.</span></div>
       <div class="tbl-wrap" style="max-height:30vh"><table><thead><tr><th>Host</th><th class="num">VM</th><th>nlyte kaydı</th><th>Tür</th><th>Kabin</th><th>Nasıl</th><th>Cluster</th></tr></thead>
@@ -388,7 +388,7 @@ function fzEslCiz() {
       ${sec("fzEslKaynak", "Kaynak", kaynaklar, fzEslF.kaynak)} ${sec("fzEslKapsam", "Kapsam", kapsamlar, fzEslF.kapsam)} ${sec("fzEslNeden", "Neden", nedenler, fzEslF.neden)}
       <input type="search" id="fzEslQ" placeholder="ara: VM, IP, host, cluster, uygulama" value="${esc(fzEslF.q)}" style="min-width:220px">
       <span class="small muted">${fmt(l.length)} VM · ${fmt(hostSay)} host</span>
-      <a class="mini" data-csv href="api/fiziksel/eslesmeyen?csv=1" style="margin-left:auto">Excel (CSV)</a></div>
+      <a class="mini" data-csv href="api/fiziksel/eslesmeyen?csv=true" style="margin-left:auto">Excel (CSV)</a></div>
     <div class="tbl-wrap" style="max-height:55vh"><table>
       <thead><tr><th>VM</th><th>IP</th><th>Uygulamalar</th><th>Kaynak</th><th>Kapsam</th><th>Host</th><th>Cluster</th><th>Host seri / iLO</th><th>Neden</th><th>nlyte adayları</th></tr></thead>
       <tbody>${l.slice(0, 2000).map(v => `<tr><td class="mono small" title="${esc([v.dns, v.os].filter(Boolean).join(" · "))}">${esc(v.vm ?? "")}</td><td>${fzIpLink(v.ip)}</td>
