@@ -577,7 +577,8 @@ erişim talepleri) — DB → şema → tablo ve kim erişiyor bilgisi buradan b
   kabin boyu kayıtlı → tüm cihazları örtüyordu → PDU (≥ max(8, %40 U)) ya da sunucu / storage / chassis dışı çok uzun cihazlar kabinin kenarında dikey
   şerit (`fz-serit`); aynı yüzde U aralığı çakışan kutular yan yana (küme başına şerit) + "⚠ N cihaz çakışıyor" notu. Kabin dışı bölümü: CabinetAssetID
   boş / dolu ama NlyteKabin'de yok ayrımı ve kabin kimliği başına grup (canlıda 1.579 kabin dışı cihaz, 595'i sunucu — Cabinets çekimi eksik olabilir).
-  Kimlik kolonları "123.00" → "123" (`Id`, tip farkı eşleşmeyi bozmasın). Sahte veriyle (switch, firewall, patch panel, 0U PDU, chassis + 3 blade, AssetID ile farklı adlı host, klima) test edildi.
+  Kimlik kolonları "123.00" → "123" (`Id`, tip farkı eşleşmeyi bozmasın). Kabin dışı listede konuma göre (Location oda / depo adı) gruplama +
+  tıkla-süz (canlıda nlyte arayüzünde teyit: kabinsiz bir sunucu "SARIYER DEPO" lokasyonunda, Cabinet Name boş — yani veri doğru, depo stoğu). Sahte veriyle (switch, firewall, patch panel, 0U PDU, chassis + 3 blade, AssetID ile farklı adlı host, klima) test edildi.
 - **VIP**: sorgulanan IP VIP ise üyeler + GW'ler aynı sorguya eklenir, üyeler "VIP ÜYESİ" (GW→üye trafiği varsa ✓).
   Gidilen IP VIP ise "VIP → n ÜYE"; gelen IP LB GW ise "LB GW"; sorgulanan sunucu havuz üyesiyse VIP kartı.
 - **Uygulama görünümü** (`/api/apps`, `/api/app`): `[kullanan uygulamalar] → [UYGULAMA: VIP'ler + segment grupları] → [bağımlı olunanlar]`,

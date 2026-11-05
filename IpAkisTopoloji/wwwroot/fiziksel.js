@@ -327,7 +327,10 @@ async function fzDisiYukle() {
   el.innerHTML = `<div class="small muted"><span class="spinner"></span> yükleniyor…</div>`;
   try { fz.disi = await fzGet("api/fiziksel/kabindisi"); }
   catch (e) { el.innerHTML = `<div class="unk" style="color:var(--err)">${esc(e.message)}</div>`; return; }
-  const d = fz.disi;
+  fzDisiCiz();
+}
+function fzDisiCiz() {
+  const el = $("#fzDisiIc"), d = fz.disi;
   const kg = d.kabinGruplari ?? [];
   el.innerHTML = `<div class="small muted" style="margin:6px 0">Kabine bağlı olmayan ya da kabin kaydı bulunamayan aktif nlyte cihazları (klimalar odada durur): ${esc(fzTurOzet(d.turlar, d.toplam))}${d.kesik ? ` · ilk ${fmt(d.cihazlar.length)}` : ""}
       ${d.kabinsiz != null ? `<div>CabinetAssetID boş: <b>${fmt(d.kabinsiz)}</b> · CabinetAssetID dolu ama NlyteKabin'de yok: <b style="color:${kg.length ? "var(--err)" : "inherit"}">${fmt(d.bilinmeyenKabinCihaz)}</b> cihaz, ${fmt(kg.length)} farklı kabin kimliği</div>` : ""}</div>
@@ -335,12 +338,23 @@ async function fzDisiYukle() {
       <div class="tbl-wrap" style="max-height:30vh"><table><thead><tr><th>CabinetAssetID</th><th class="num">Cihaz</th><th>Türler</th><th>Konum</th><th>Örnek cihazlar</th></tr></thead>
       <tbody>${kg.map(g => `<tr><td class="mono">${esc(g.cabinetAssetId)}</td><td class="num">${fmt(g.adet)}</td><td class="small">${esc(fzTurOzet(g.turlar, g.adet).replace(/^[^:]*: /, ""))}</td>
         <td class="small">${esc(g.konum ?? "")}</td><td class="small mono">${esc(g.ornek.join(", "))}</td></tr>`).join("")}</tbody></table></div></details>` : ""}
+    <div class="small" style="margin:4px 0"><b>Konuma göre</b> <span class="muted">(nlyte Location — depo / stok alanındaki cihazlar kabine bağlı olmaz)</span></div>
+    <div class="fz-diger" id="fzDisiKonum">${fzDisiKonumlar(d).map(([k, n]) => `<button type="button" class="mini${fz.disiKonum === k ? " on" : ""}" data-dk="${esc(k)}"${/depo|stok|storage|warehouse/i.test(k) ? ` style="border-color:var(--warn)"` : ""}>${esc(k)} <span class="muted">${fmt(n)}</span></button>`).join("")}
+      ${fz.disiKonum != null ? `<button type="button" class="mini" data-dk="">× tümü</button>` : ""}</div>
     <div class="tbl-wrap" style="max-height:40vh"><table>
       <thead><tr><th>Cihaz</th><th>Tür</th><th>Model</th><th>Konum</th><th>Seri</th><th>Durum</th></tr></thead>
-      <tbody>${d.cihazlar.map(c => `<tr><td class="mono small">${esc(c.ad)}</td><td><span class="badge" style="background:${fzTurRenk(c.tur)};color:#fff">${esc(fzTurAd(c.tur))}</span></td>
+      <tbody>${d.cihazlar.filter(c => fz.disiKonum == null || fzDisiOda(c) === fz.disiKonum).map(c => `<tr><td class="mono small">${esc(c.ad)}</td><td><span class="badge" style="background:${fzTurRenk(c.tur)};color:#fff">${esc(fzTurAd(c.tur))}</span></td>
         <td class="small">${esc(c.model ?? "")}</td><td class="small">${esc(c.konum ?? "")}${c.cabinetAssetId ? ` <span class="muted" title="CabinetAssetID NlyteKabin'de yok">kabin ${esc(c.cabinetAssetId)}?</span>` : ""}</td>
         <td class="mono small">${esc(c.seri ?? "")}</td><td class="small muted">${esc(c.durum ?? "")}</td></tr>`).join("")
         || `<tr><td colspan="6" class="unk">Kabin dışı cihaz yok.</td></tr>`}</tbody></table></div>`;
+  el.querySelectorAll("[data-dk]").forEach(b => b.addEventListener("click", () => { fz.disiKonum = b.dataset.dk || null; fzDisiCiz(); }));
+}
+// Konum "SARIYER DEPO (ESENYURT,ZDC,1)" / "SISTEM ODASI-2 - 2 - Area (…)" → oda / depo adı
+const fzDisiOda = c => c.konum ? c.konum.split(" - ")[0].replace(/\s*\(.*$/, "").trim() || "(konum yok)" : "(konum yok)";
+function fzDisiKonumlar(d) {
+  const m = new Map();
+  for (const c of d.cihazlar) { const k = fzDisiOda(c); m.set(k, (m.get(k) ?? 0) + 1); }
+  return [...m].sort((a, b) => b[1] - a[1]);
 }
 
 // ---------- IP kartı: "Fiziksel konum" satırı (topoloji.html renderTarget → #fizKonum) ----------
