@@ -40,7 +40,7 @@ record FizEslesmeyen(string? Vm, string? Ip, string? Dns, string? Os, List<strin
 record FizBaglanti(string CableId, string? KabloTuru, string? KabloAdi, string? KaynakId, string? KaynakAdi, string? KaynakTur, string? KaynakPort,
     string? KaynakKabin, string? HedefId, string? HedefAdi, string? HedefTur, string? HedefPort, string? HedefKabin);
 // Uçtan uca iz: yerel port → (patch panel'ler) → karşı cihaz
-record FizIz(string? YerelPort, string? UzakId, string UzakAd, string UzakTur, string? UzakPort, string? UzakKabin, List<string> Paneller, string? Kablo, bool Kesik);
+record FizIz(string? YerelPort, string? UzakId, string UzakAd, string UzakTur, string? UzakPort, string? UzakKabin, List<string> Paneller, string? Kablo, bool Kesik, string Sinif = "veri");
 record FizEksik(string Host, string? Fqdn, int VmSayisi, string? Kapsam, string? Cluster, string? EslesmeTuru, int? AdaySayisi, string? Not);
 
 sealed class FizikselSnapshot
@@ -641,6 +641,14 @@ sealed class FizikselService(IConfiguration cfg, ILogger<FizikselService> log)
         var ma = PortNo.Match(a); var mb = PortNo.Match(b);
         return ma.Success && mb.Success && int.Parse(ma.Groups[1].Value) == int.Parse(mb.Groups[1].Value);
     }
+    static readonly HashSet<string> GucTurleri = new(["PDU", "UPS", "StaticSwitch"], StringComparer.OrdinalIgnoreCase);
+    // kablo sınıfı: güç (PDU / UPS / statik switch ucu), fiber (tür / ad: fiber, F-, LC, SC, MPO, OM, OS), veri (bakır)
+    static string Sinif(FizikselSnapshot s, FizBaglanti c)
+    {
+        if (GucTurleri.Contains(TurOf(s, c.KaynakId, c.KaynakTur)) || GucTurleri.Contains(TurOf(s, c.HedefId, c.HedefTur))) return "güç";
+        string t = ((c.KabloTuru ?? "") + " " + (c.KabloAdi ?? "")).Trim();
+        return Regex.IsMatch(t, @"fib|^F-|\b(LC|SC|MPO|MTP|OM\d|OS\d)\b", RegexOptions.IgnoreCase) ? "fiber" : "veri";
+    }
     static string TurOf(FizikselSnapshot s, string? id, string? tur) => tur ?? (id != null ? s.CihazId.GetValueOrDefault(id)?.Tur : null) ?? "Other";
 
     // Bir cihazın kablolarını patch panel'lerin üzerinden izler: panelde aynı port numarasıyla devam eder (ön ↔ arka / panel ↔ panel).
@@ -653,11 +661,11 @@ sealed class FizikselService(IConfiguration cfg, ILogger<FizikselService> log)
             bool kaynakBen = string.Equals(c.KaynakId, assetId, StringComparison.OrdinalIgnoreCase);
             if (kaynakBen && string.Equals(c.HedefId, assetId, StringComparison.OrdinalIgnoreCase)) continue;
             string? yerel = kaynakBen ? c.KaynakPort : c.HedefPort;
-            Takip(c, kaynakBen, yerel, [], new HashSet<string> { c.CableId }, 0);
+            Takip(c, kaynakBen, yerel, [], new HashSet<string> { c.CableId }, 0, Sinif(s, c));
         }
         return sonuc;
 
-        void Takip(FizBaglanti c, bool kaynakBen, string? yerel, List<string> paneller, HashSet<string> gorulen, int derinlik)
+        void Takip(FizBaglanti c, bool kaynakBen, string? yerel, List<string> paneller, HashSet<string> gorulen, int derinlik, string sinif)
         {
             string? id = kaynakBen ? c.HedefId : c.KaynakId, ad = (kaynakBen ? c.HedefAdi : c.KaynakAdi) ?? id ?? "?";
             string? port = kaynakBen ? c.HedefPort : c.KaynakPort, kabin = kaynakBen ? c.HedefKabin : c.KaynakKabin;
@@ -674,18 +682,18 @@ sealed class FizikselService(IConfiguration cfg, ILogger<FizikselService> log)
                 if (devam.Count > 0)
                 {
                     foreach (var (d, pk) in devam)
-                        Takip(d, pk, yerel, [.. paneller, port != null ? $"{ad}:{port}" : ad], [.. gorulen, d.CableId], derinlik + 1);
+                        Takip(d, pk, yerel, [.. paneller, port != null ? $"{ad}:{port}" : ad], [.. gorulen, d.CableId], derinlik + 1, sinif == "veri" ? Sinif(s, d) : sinif);
                     return;
                 }
-                sonuc.Add(new FizIz(yerel, id, ad, tur, port, kabin, paneller, kablo, true));   // panelde devamı yok / port bilinmiyor
+                sonuc.Add(new FizIz(yerel, id, ad, tur, port, kabin, paneller, kablo, true, sinif));   // panelde devamı yok / port bilinmiyor
                 return;
             }
-            sonuc.Add(new FizIz(yerel, id, ad, tur, port, kabin, paneller, kablo, false));
+            sonuc.Add(new FizIz(yerel, id, ad, tur, port, kabin, paneller, kablo, false, sinif));
         }
     }
 
     static object IzSatir(FizIz z) => new { yerelPort = z.YerelPort, uzakId = z.UzakId, uzakAd = z.UzakAd, uzakTur = z.UzakTur, uzakPort = z.UzakPort,
-        uzakKabin = z.UzakKabin, paneller = z.Paneller, kablo = z.Kablo, kesik = z.Kesik };
+        uzakKabin = z.UzakKabin, paneller = z.Paneller, kablo = z.Kablo, kesik = z.Kesik, sinif = z.Sinif };
 
     // Cihaz detayı: bağlantılar (uçtan uca) + bu cihaz kapanırsa etkilenen sunucular / VM'ler / uygulamalar
     public object? Cihaz(FizikselSnapshot s, string id)
@@ -711,6 +719,10 @@ sealed class FizikselService(IConfiguration cfg, ILogger<FizikselService> log)
         {
             foreach (var z in izler.Where(z => !z.Kesik)) Ekle(z.UzakId, "doğrudan");
             if (c.Tur.Equals("Chassis", StringComparison.OrdinalIgnoreCase)) Ekle(id, "chassis");   // chassis'in kendi blade'leri
+            // UPS / statik switch: bağlı PDU'ların beslediği sunucular (dolaylı)
+            if (c.Tur is "UPS" or "StaticSwitch")
+                foreach (var pdu in izler.Where(z => !z.Kesik && z.UzakId != null && GucTurleri.Contains(z.UzakTur)).Select(z => z.UzakId!).Distinct())
+                    foreach (var z2 in Iz(s, pdu).Where(z => !z.Kesik)) Ekle(z2.UzakId, $"PDU {s.CihazId.GetValueOrDefault(pdu)?.Ad ?? pdu} üzerinden (güç)");
             if (c.Tur.Equals("Storage", StringComparison.OrdinalIgnoreCase))
                 foreach (var sw in izler.Where(z => !z.Kesik && z.UzakId != null && z.UzakTur is "Network" or "StaticSwitch").Select(z => z.UzakId!).Distinct())
                     foreach (var z2 in Iz(s, sw).Where(z => !z.Kesik)) Ekle(z2.UzakId, $"switch {s.CihazId.GetValueOrDefault(sw)?.Ad ?? sw} üzerinden (dolaylı)");
@@ -728,7 +740,7 @@ sealed class FizikselService(IConfiguration cfg, ILogger<FizikselService> log)
             .OrderByDescending(x => x.vm).ThenBy(x => x.ad).ToList();
         return new
         {
-            ad = c.Ad, assetId = c.AssetId, tur = c.Tur, model = c.Model, kablo = s.Baglantilar.Count > 0, chassisten,
+            ad = c.Ad, assetId = c.AssetId, tur = c.Tur, model = c.Model, kablo = s.Baglantilar.Count > 0, chassisten, guc = GucTurleri.Contains(c.Tur),
             baglantilar = izler.OrderBy(z => z.YerelPort).ThenBy(z => z.UzakAd).Select(IzSatir).ToList(),
             etki = sunucuMu ? null : new { sunucu = sunucular.Count, vm = tumVm.Count, sunucular, uygulamalar, deger = Deger(s, tumVm.SelectMany(v => v.Uygulamalar)) },
         };

@@ -624,7 +624,10 @@ erişim talepleri) — DB → şema → tablo ve kim erişiyor bilgisi buradan b
   tür / port / kabin, paneller) + `etki` (sunucu değilse): doğrudan bağlı sunucular + VM'li cihazlar (`AssetVm`: kabin başına `Eslestir` = Kabin()'in VM grubu
   ↔ cihaz eşleşmesi, tek fonksiyona alındı), chassis → blade'ler, storage ise bağlı switch'lerin sunucuları (dolaylı); VM / uygulama / değer. Blade'in kendi kablosu
   yoksa chassis'in kabloları. Kabin(): satırda `bag` (kablo sayısı), başlıkta `disBaglanti` (başka kabinlere giden kablolar). Arayüz: cihaz detayında "🔌 Bağlantılar"
-  tablosu (karşı cihaza tıkla → onun kabini ve detayı), "Bu cihaz kapanırsa" (sunucular, uygulamalar, değer); kabin başlığında "Kabin dışı kablolar". Sahte veriyle (switch, firewall, patch panel, 0U PDU, chassis + 3 blade, AssetID ile farklı adlı host, klima) test edildi.
+  tablosu (karşı cihaza tıkla → onun kabini ve detayı), "Bu cihaz kapanırsa" (sunucular, uygulamalar, değer); kabin başlığında "Kabin dışı kablolar". Sahte veriyle (switch, firewall, patch panel, 0U PDU, chassis + 3 blade, AssetID ile farklı adlı host, klima) test edildi. Panel devamında önce port adı BİREBİR (1A25 ↔ 1A25), yoksa ve ad "1A1" tarzı değilse sondaki sayı. Kablo SINIFI (`Sinif`;
+  canlıda sunucuya PDU güç kabloları BLUE-/GREEN- ve panel kabloları C-/F- geldi): ucu PDU / UPS / StaticSwitch → "güç", kablo türü / adında fiber /
+  F- / LC / SC / MPO / OM / OS → "fiber", kalan "veri"; Bağlantılar tablosunda "Tür" kolonu (⚡ güç, 🔆 fiber). PDU'da başlık "Bu cihazın gücü kesilirse";
+  UPS / statik switch → bağlı PDU'ların beslediği sunucular (dolaylı, "PDU X üzerinden (güç)").
 - **VIP**: sorgulanan IP VIP ise üyeler + GW'ler aynı sorguya eklenir, üyeler "VIP ÜYESİ" (GW→üye trafiği varsa ✓).
   Gidilen IP VIP ise "VIP → n ÜYE"; gelen IP LB GW ise "LB GW"; sorgulanan sunucu havuz üyesiyse VIP kartı.
 - **Uygulama görünümü** (`/api/apps`, `/api/app`): `[kullanan uygulamalar] → [UYGULAMA: VIP'ler + segment grupları] → [bağımlı olunanlar]`,

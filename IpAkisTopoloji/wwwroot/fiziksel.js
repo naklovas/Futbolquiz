@@ -372,12 +372,13 @@ async function fzBagYukle(id) {
   const b = d.baglantilar, e = d.etki;
   const karsi = z => z.uzakKabin ? `<a href="#" data-fzc="${esc(z.uzakKabin)}" data-fzch="${esc(z.uzakAd)}">${esc(z.uzakAd)}</a>` : esc(z.uzakAd);
   el.innerHTML = `<h3 style="margin:0 0 4px;font-size:14px">🔌 Bağlantılar <span class="small muted">(${fmt(b.length)}${d.chassisten ? " · chassis'in kabloları" : ""})</span></h3>
-    ${b.length ? `<div class="tbl-wrap" style="max-height:32vh"><table><thead><tr><th>Port</th><th>Karşı cihaz</th><th>Karşı port</th><th>Kabin</th><th title="Arada geçilen patch panel'ler (panel:port)">Üzerinden</th></tr></thead>
+    ${b.length ? `<div class="tbl-wrap" style="max-height:32vh"><table><thead><tr><th>Port</th><th>Tür</th><th>Karşı cihaz</th><th>Karşı port</th><th>Kabin</th><th title="Arada geçilen patch panel'ler (panel:port)">Üzerinden</th></tr></thead>
       <tbody>${b.map(z => `<tr${z.kesik ? ` title="Patch panel'de devamı bulunamadı (port bilgisi yok ya da karşı kablo girilmemiş)"` : ""}><td class="mono small">${esc(z.yerelPort ?? "—")}</td>
+        <td class="small" title="${esc(z.kablo ?? "")}">${z.sinif === "güç" ? "⚡ güç" : z.sinif === "fiber" ? "🔆 fiber" : "veri"}</td>
         <td><span class="badge" style="background:${fzTurRenk(z.uzakTur)};color:#fff">${esc(fzTurAd(z.uzakTur))}</span> ${karsi(z)}${z.kesik ? ` <span class="small" style="color:var(--warn)">iz kesik</span>` : ""}</td>
         <td class="mono small">${esc(z.uzakPort ?? "")}</td><td class="small">${esc(z.uzakKabin ?? "")}</td><td class="small muted">${esc(z.paneller.join(" → "))}</td></tr>`).join("")}</tbody></table></div>`
       : `<div class="small muted">nlyte'ta bu cihaz için kablo kaydı yok.</div>`}
-    ${e ? `<h3 style="margin:10px 0 4px;font-size:14px">Bu cihaz kapanırsa</h3>
+    ${e ? `<h3 style="margin:10px 0 4px;font-size:14px">${d.guc ? "Bu cihazın gücü kesilirse" : "Bu cihaz kapanırsa"}</h3>
       <div class="small" style="margin-bottom:4px">${fmt(e.sunucu)} sunucu · ${fmt(e.vm)} VM · ${fmt(e.uygulamalar.length)} uygulama ${e.deger ? "· en yüksek " + fzDeger(e.deger, true) : ""}</div>
       ${e.sunucular.length ? `<div class="tbl-wrap" style="max-height:28vh"><table><thead><tr><th>Sunucu</th><th>Kabin</th><th class="num">VM</th><th>Değer</th><th>Bağlantı</th></tr></thead>
         <tbody>${e.sunucular.map(x => `<tr><td class="mono small">${x.kabin ? `<a href="#" data-fzc="${esc(x.kabin)}" data-fzch="${esc(x.ad)}">${esc(x.ad)}</a>` : esc(x.ad)}</td><td class="small">${esc(x.kabin ?? "")}</td>
