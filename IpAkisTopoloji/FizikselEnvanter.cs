@@ -36,6 +36,11 @@ record FizMsy(string? Seri, string? DnsName, string? DnsIp, string? IloIp, strin
 // Kabine yerleşmeyen VM (satır başına bir VM) + host'unun bilgisi, neden ve nlyte adayları
 record FizEslesmeyen(string? Vm, string? Ip, string? Dns, string? Os, List<string> Uygulamalar, string? Kaynak, string? Kapsam,
     string Host, string? Fqdn, string? Cluster, string? HostModel, string? Seri, string? Ilo, int HostVmSayisi, string Neden, List<string> Adaylar);
+// nlyte kablo bağlantısı (dbo.NlyteBaglanti; kablo başına satır)
+record FizBaglanti(string CableId, string? KabloTuru, string? KabloAdi, string? KaynakId, string? KaynakAdi, string? KaynakTur, string? KaynakPort,
+    string? KaynakKabin, string? HedefId, string? HedefAdi, string? HedefTur, string? HedefPort, string? HedefKabin);
+// Uçtan uca iz: yerel port → (patch panel'ler) → karşı cihaz
+record FizIz(string? YerelPort, string? UzakId, string UzakAd, string UzakTur, string? UzakPort, string? UzakKabin, List<string> Paneller, string? Kablo, bool Kesik);
 record FizEksik(string Host, string? Fqdn, int VmSayisi, string? Kapsam, string? Cluster, string? EslesmeTuru, int? AdaySayisi, string? Not);
 
 sealed class FizikselSnapshot
@@ -58,6 +63,10 @@ sealed class FizikselSnapshot
     public Dictionary<string, FizMsy> MsySeri { get; } = new(StringComparer.OrdinalIgnoreCase);  // seri → kayıt
     public Dictionary<string, FizMsy> MsyIp { get; } = new(StringComparer.OrdinalIgnoreCase);    // yönetim / iLO IP → kayıt (host alanında IP yazan VM'ler)
     public bool MsyVar { get; set; }
+    public List<FizBaglanti> Baglantilar { get; } = [];
+    public Dictionary<string, List<FizBaglanti>> BagIdx { get; } = new(StringComparer.OrdinalIgnoreCase);   // AssetID → kabloları
+    public Dictionary<string, FizCihaz> CihazId { get; } = new(StringComparer.OrdinalIgnoreCase);
+    public Dictionary<string, List<FizVm>>? AssetVmOnbellek { get; set; }   // nlyte AssetID → o host'taki VM'ler (Kabin() eşleşmesiyle)
     public List<FizEslesmeyen>? EslesmeyenOnbellek { get; set; }
     // Uygulama → değerler (ERT'de uygulamanın dolu satırlarından en yüksek): [Varlık, İş, Erişilebilirlik, Gizlilik, Bütünlük]
     public Dictionary<string, int?[]> AppDeger { get; } = new(StringComparer.OrdinalIgnoreCase);
@@ -240,8 +249,32 @@ sealed class FizikselService(IConfiguration cfg, ILogger<FizikselService> log)
 
         var snap = Olustur(vmler, eksik, tablodan, kabinler, cihazlar, chassisler, hostAsset, msy, AnaKapsam);
         await DegerleriYukleAsync(conn, snap, ct);
+        await BaglantilariYukleAsync(conn, snap, ct);
         snap.CihazTablosu = cihazTablo;
         return snap;
+    }
+
+    // Kablo bağlantıları (dbo.NlyteBaglanti: nlyte Connections; kablo başına satır). Tablo yoksa bağlantı gösterilmez.
+    async Task BaglantilariYukleAsync(SqlConnection conn, FizikselSnapshot s, CancellationToken ct)
+    {
+        string t = cfg["Fiziksel:Tablolar:NlyteBaglanti"] ?? "dbo.NlyteBaglanti";
+        try
+        {
+            await using var cmd = new SqlCommand($"SELECT * FROM {t}", conn) { CommandTimeout = 120 };
+            await using var r = await cmd.ExecuteReaderAsync(ct);
+            var k = Kolonlar(r);
+            while (await r.ReadAsync(ct))
+            {
+                var b = new FizBaglanti(Id(S(r, k, "CableID")) ?? Guid.NewGuid().ToString("N"), S(r, k, "KabloTuru"), S(r, k, "KabloAdi"),
+                    Id(S(r, k, "KaynakAssetID")), S(r, k, "KaynakAdi"), S(r, k, "KaynakCihazTuru"), S(r, k, "KaynakPort"), S(r, k, "KaynakKabin"),
+                    Id(S(r, k, "HedefAssetID")), S(r, k, "HedefAdi"), S(r, k, "HedefCihazTuru"), S(r, k, "HedefPort"), S(r, k, "HedefKabin"));
+                s.Baglantilar.Add(b);
+                foreach (var id in new[] { b.KaynakId, b.HedefId }.OfType<string>().Distinct())
+                    (s.BagIdx.TryGetValue(id, out var l) ? l : s.BagIdx[id] = []).Add(b);
+            }
+            log.LogInformation("nlyte bağlantıları: {N} kablo", s.Baglantilar.Count);
+        }
+        catch (SqlException ex) when (ex.Number is 207 or 208) { log.LogInformation("{T} okunamadı: {M}", t, ex.Message); }
     }
 
     // Uygulama değerleri (kullanıcı: "VM'deki uygulamaların değerlerinin maksimumu → ESX'in ve kabinin değeri"): ERT'de aynı uygulama
@@ -318,6 +351,7 @@ sealed class FizikselService(IConfiguration cfg, ILogger<FizikselService> log)
         foreach (var c in (cihazlar ?? []).Where(c => c.Tur.Equals("Chassis", StringComparison.OrdinalIgnoreCase) && c.AssetId != null))
             s.Chassisler.TryAdd(c.AssetId!, new FizChassis(c.AssetId!, c.Ad, c.CabinetAssetId, c.UAlt, c.UYukseklik, c.Yuz, c.Model));
         foreach (var kv in hostAsset ?? []) s.HostAsset.TryAdd(kv.Key, kv.Value);
+        foreach (var c in cihazlar ?? []) if (c.AssetId != null) s.CihazId.TryAdd(c.AssetId, c);
         foreach (var c in cihazlar ?? [])
         {
             string? kabinId = c.CabinetAssetId ?? (c.ChassisId != null ? s.Chassisler.GetValueOrDefault(c.ChassisId)?.CabinetAssetId : null);
@@ -574,16 +608,10 @@ sealed class FizikselService(IConfiguration cfg, ILogger<FizikselService> log)
         cs.GroupBy(c => c.Tur, StringComparer.OrdinalIgnoreCase).OrderByDescending(g => g.Count()).ThenBy(g => g.Key)
             .Select(g => (object)new { tur = g.Key, adet = g.Count(), vmli = vmli == null ? 0 : g.Count(vmli.Contains) }).ToList();
 
-    public object? Kabin(FizikselSnapshot s, string ad)
+    // Kabindeki VM'li host grupları ↔ nlyte cihazları: NlyteHostEslesme AssetID, seri, MSY serisi, ad
+    static (List<IGrouping<string, FizVm>> Gruplar, Dictionary<FizCihaz, IGrouping<string, FizVm>> CihazGrup, List<IGrouping<string, FizVm>> Eslesmeyen)
+        Eslestir(FizikselSnapshot s, List<FizVm> vs, List<FizCihaz> cihazlar)
     {
-        var vs = s.KabinVm.GetValueOrDefault(ad) ?? [];
-        var kb = s.Kabinler.GetValueOrDefault(ad);
-        var tumCihaz = s.KabinCihaz.GetValueOrDefault(ad) ?? [];
-        if (kb == null && vs.Count == 0) return null;
-        var cihazlar = tumCihaz.Where(c => c.Aktif).ToList();
-        var ilk = vs.FirstOrDefault();
-
-        // VM'li host grupları; nlyte cihazına seri numarasıyla, olmazsa adla eşlenir
         var gruplar = vs.GroupBy(v => v.Host ?? v.HostFqdn ?? "?", StringComparer.OrdinalIgnoreCase).ToList();
         var cihazGrup = new Dictionary<FizCihaz, IGrouping<string, FizVm>>();
         var eslesmeyen = new List<IGrouping<string, FizVm>>();
@@ -598,6 +626,131 @@ sealed class FizikselService(IConfiguration cfg, ILogger<FizikselService> log)
                 ?? cihazlar.FirstOrDefault(c => !cihazGrup.ContainsKey(c) && c.Adlar.Any(a => Norm(a) == Norm(g.Key) || (h.HostFqdn != null && Norm(a) == Norm(h.HostFqdn))));
             if (c != null) cihazGrup[c] = g; else eslesmeyen.Add(g);
         }
+        return (gruplar, cihazGrup, eslesmeyen);
+    }
+
+    // ---- kablo izi ----
+    static readonly Regex PortNo = new(@"(\d+)\D*$", RegexOptions.Compiled);
+    static bool AyniPort(string? a, string? b)
+    {
+        if (a == null || b == null) return false;
+        if (a.Trim().Equals(b.Trim(), StringComparison.OrdinalIgnoreCase)) return true;
+        var ma = PortNo.Match(a); var mb = PortNo.Match(b);
+        return ma.Success && mb.Success && int.Parse(ma.Groups[1].Value) == int.Parse(mb.Groups[1].Value);
+    }
+    static string TurOf(FizikselSnapshot s, string? id, string? tur) => tur ?? (id != null ? s.CihazId.GetValueOrDefault(id)?.Tur : null) ?? "Other";
+
+    // Bir cihazın kablolarını patch panel'lerin üzerinden izler: panelde aynı port numarasıyla devam eder (ön ↔ arka / panel ↔ panel).
+    // Port bilinmiyorsa ya da devamı yoksa iz panelde "kesik" biter. En çok 6 panel.
+    public static List<FizIz> Iz(FizikselSnapshot s, string assetId)
+    {
+        var sonuc = new List<FizIz>();
+        foreach (var c in s.BagIdx.GetValueOrDefault(assetId) ?? [])
+        {
+            bool kaynakBen = string.Equals(c.KaynakId, assetId, StringComparison.OrdinalIgnoreCase);
+            if (kaynakBen && string.Equals(c.HedefId, assetId, StringComparison.OrdinalIgnoreCase)) continue;
+            string? yerel = kaynakBen ? c.KaynakPort : c.HedefPort;
+            Takip(c, kaynakBen, yerel, [], new HashSet<string> { c.CableId }, 0);
+        }
+        return sonuc;
+
+        void Takip(FizBaglanti c, bool kaynakBen, string? yerel, List<string> paneller, HashSet<string> gorulen, int derinlik)
+        {
+            string? id = kaynakBen ? c.HedefId : c.KaynakId, ad = (kaynakBen ? c.HedefAdi : c.KaynakAdi) ?? id ?? "?";
+            string? port = kaynakBen ? c.HedefPort : c.KaynakPort, kabin = kaynakBen ? c.HedefKabin : c.KaynakKabin;
+            string tur = TurOf(s, id, kaynakBen ? c.HedefTur : c.KaynakTur);
+            string? kablo = c.KabloTuru ?? c.KabloAdi;
+            if (tur.Equals("PatchPanel", StringComparison.OrdinalIgnoreCase) && id != null && derinlik < 6)
+            {
+                var devam = (s.BagIdx.GetValueOrDefault(id) ?? []).Where(d => !gorulen.Contains(d.CableId))
+                    .Select(d => (d, panelKaynak: string.Equals(d.KaynakId, id, StringComparison.OrdinalIgnoreCase)))
+                    .Where(x => AyniPort(x.panelKaynak ? x.d.KaynakPort : x.d.HedefPort, port)).ToList();
+                if (devam.Count > 0)
+                {
+                    foreach (var (d, pk) in devam)
+                        Takip(d, pk, yerel, [.. paneller, port != null ? $"{ad}:{port}" : ad], [.. gorulen, d.CableId], derinlik + 1);
+                    return;
+                }
+                sonuc.Add(new FizIz(yerel, id, ad, tur, port, kabin, paneller, kablo, true));   // panelde devamı yok / port bilinmiyor
+                return;
+            }
+            sonuc.Add(new FizIz(yerel, id, ad, tur, port, kabin, paneller, kablo, false));
+        }
+    }
+
+    static object IzSatir(FizIz z) => new { yerelPort = z.YerelPort, uzakId = z.UzakId, uzakAd = z.UzakAd, uzakTur = z.UzakTur, uzakPort = z.UzakPort,
+        uzakKabin = z.UzakKabin, paneller = z.Paneller, kablo = z.Kablo, kesik = z.Kesik };
+
+    // Cihaz detayı: bağlantılar (uçtan uca) + bu cihaz kapanırsa etkilenen sunucular / VM'ler / uygulamalar
+    public object? Cihaz(FizikselSnapshot s, string id)
+    {
+        if (!s.CihazId.TryGetValue(id, out var c)) return null;
+        var izler = Iz(s, id);
+        // blade'in kendi kablosu yoksa chassis'inin kabloları
+        bool chassisten = false;
+        if (izler.Count == 0 && c.ChassisId != null) { izler = Iz(s, c.ChassisId); chassisten = izler.Count > 0; }
+        var avm = AssetVm(s);
+        // etkilenen sunucular: doğrudan (panel üzerinden) bağlı sunucular / chassis'lerin blade'leri; storage ise bağlı switch'lerin sunucuları da (SAN, dolaylı)
+        var sunucu = new Dictionary<string, (FizCihaz C, string Yol)>(StringComparer.OrdinalIgnoreCase);
+        void Ekle(string? sid, string yol)
+        {
+            if (sid == null || sid.Equals(id, StringComparison.OrdinalIgnoreCase) || !s.CihazId.TryGetValue(sid, out var t)) return;
+            if (t.Tur.Equals("Server", StringComparison.OrdinalIgnoreCase) || avm.ContainsKey(sid)) sunucu.TryAdd(sid, (t, yol));   // VM'li cihaz türü yanlış olsa da sunucu
+            else if (t.Tur.Equals("Chassis", StringComparison.OrdinalIgnoreCase))
+                foreach (var b in s.CihazId.Values.Where(b => b.Aktif && string.Equals(b.ChassisId, sid, StringComparison.OrdinalIgnoreCase)))
+                    if (b.AssetId != null) sunucu.TryAdd(b.AssetId, (b, $"{yol} · chassis {t.Ad}"));
+        }
+        bool sunucuMu = c.Tur.Equals("Server", StringComparison.OrdinalIgnoreCase);
+        if (!sunucuMu)
+        {
+            foreach (var z in izler.Where(z => !z.Kesik)) Ekle(z.UzakId, "doğrudan");
+            if (c.Tur.Equals("Chassis", StringComparison.OrdinalIgnoreCase)) Ekle(id, "chassis");   // chassis'in kendi blade'leri
+            if (c.Tur.Equals("Storage", StringComparison.OrdinalIgnoreCase))
+                foreach (var sw in izler.Where(z => !z.Kesik && z.UzakId != null && z.UzakTur is "Network" or "StaticSwitch").Select(z => z.UzakId!).Distinct())
+                    foreach (var z2 in Iz(s, sw).Where(z => !z.Kesik)) Ekle(z2.UzakId, $"switch {s.CihazId.GetValueOrDefault(sw)?.Ad ?? sw} üzerinden (dolaylı)");
+        }
+        var sunucular = sunucu.Values.Select(x =>
+        {
+            var vs = x.C.AssetId != null ? avm.GetValueOrDefault(x.C.AssetId) ?? [] : [];
+            var kabin = s.KabinCihaz.FirstOrDefault(kv => kv.Value.Contains(x.C)).Key;
+            return new { ad = x.C.Ad, assetId = x.C.AssetId, kabin, yol = x.Yol, vm = vs.Count,
+                uygulamalar = vs.SelectMany(v => v.Uygulamalar).Distinct(StringComparer.OrdinalIgnoreCase).ToList(), deger = Deger(s, vs.SelectMany(v => v.Uygulamalar)) };
+        }).OrderByDescending(x => x.vm).ThenBy(x => x.ad).ToList();
+        var tumVm = sunucu.Values.SelectMany(x => x.C.AssetId != null ? avm.GetValueOrDefault(x.C.AssetId) ?? [] : []).ToList();
+        var uygulamalar = tumVm.SelectMany(v => v.Uygulamalar.Select(a => (a, v))).GroupBy(x => x.a, StringComparer.OrdinalIgnoreCase)
+            .Select(g => new { ad = g.Key, vm = g.Select(x => x.v.Vm ?? x.v.Ip).Distinct(StringComparer.OrdinalIgnoreCase).Count(), deger = Deger(s, [g.Key]) })
+            .OrderByDescending(x => x.vm).ThenBy(x => x.ad).ToList();
+        return new
+        {
+            ad = c.Ad, assetId = c.AssetId, tur = c.Tur, model = c.Model, kablo = s.Baglantilar.Count > 0, chassisten,
+            baglantilar = izler.OrderBy(z => z.YerelPort).ThenBy(z => z.UzakAd).Select(IzSatir).ToList(),
+            etki = sunucuMu ? null : new { sunucu = sunucular.Count, vm = tumVm.Count, sunucular, uygulamalar, deger = Deger(s, tumVm.SelectMany(v => v.Uygulamalar)) },
+        };
+    }
+
+    // nlyte AssetID → o cihazdaki (host'taki) VM'ler, tüm kabinler için (bağlantı etkisinde kullanılır)
+    static Dictionary<string, List<FizVm>> AssetVm(FizikselSnapshot s)
+    {
+        if (s.AssetVmOnbellek != null) return s.AssetVmOnbellek;
+        var d = new Dictionary<string, List<FizVm>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (kabin, vs) in s.KabinVm)
+        {
+            var (_, cg, _) = Eslestir(s, vs, (s.KabinCihaz.GetValueOrDefault(kabin) ?? []).Where(c => c.Aktif).ToList());
+            foreach (var (c, g) in cg) if (c.AssetId != null) d[c.AssetId] = g.ToList();
+        }
+        return s.AssetVmOnbellek = d;
+    }
+
+    public object? Kabin(FizikselSnapshot s, string ad)
+    {
+        var vs = s.KabinVm.GetValueOrDefault(ad) ?? [];
+        var kb = s.Kabinler.GetValueOrDefault(ad);
+        var tumCihaz = s.KabinCihaz.GetValueOrDefault(ad) ?? [];
+        if (kb == null && vs.Count == 0) return null;
+        var cihazlar = tumCihaz.Where(c => c.Aktif).ToList();
+        var ilk = vs.FirstOrDefault();
+
+        var (gruplar, cihazGrup, eslesmeyen) = Eslestir(s, vs, cihazlar);
         FizMsy? MsyBul(FizCihaz? c, FizVm? h) =>
             (c?.Seri != null ? s.MsySeri.GetValueOrDefault(c.Seri.Trim()) : null)
             ?? new[] { h?.HostFqdn, h?.Host }.Concat(c?.Adlar ?? []).OfType<string>().Select(x => s.MsyAd.GetValueOrDefault(Norm(x))).FirstOrDefault(x => x != null);
@@ -616,7 +769,7 @@ sealed class FizikselService(IConfiguration cfg, ILogger<FizikselService> log)
                 vm = g?.Count(v => v.Vm != null) ?? 0, uygulama = g?.SelectMany(v => v.Uygulamalar).Distinct(StringComparer.OrdinalIgnoreCase).Count() ?? 0,
                 deger = g != null ? Deger(s, g.SelectMany(v => v.Uygulamalar)) : null,
                 nlyte = c != null, vmBilgisi = g != null, tur = c?.Tur ?? "Server", chassisId = blade ? c!.ChassisId : null, blade,
-                kaynakTablo = c?.Kaynak,
+                kaynakTablo = c?.Kaynak, bag = c?.AssetId != null ? s.BagIdx.GetValueOrDefault(c.AssetId)?.Count ?? 0 : 0,
                 msy = MsyBul(c, h) is { } m ? new { m.DnsName, m.DnsIp, m.IloIp, m.Vendor, m.Model, m.PowerState, m.OsName, m.OsVersion, m.LastReboot } : null,
                 turUyari = g != null && c != null && !c.Tur.Equals("Server", StringComparison.OrdinalIgnoreCase) ? $"nlyte'ta {c.Tur} olarak kayıtlı (VM'li ESX host'u — türü düzeltilmeli)"
                     : h?.Eslesme?.Contains("nlyte adı") == true ? $"nlyte'ta farklı adla kayıtlı ({h.Eslesme}) — VM envanterindeki adı {g!.Key}" : null,
@@ -637,7 +790,11 @@ sealed class FizikselService(IConfiguration cfg, ILogger<FizikselService> log)
             ad, oda = Parcala(ad).Oda ?? "Diğer", konum = KabinKonum(s, ad), cabinetAssetId = kb?.CabinetAssetId ?? ilk?.CabinetAssetId, uKapasite = uKap, uSirasi = usira, u1Ustte = U1Ustte(usira),
             bosU = kb?.BosU ?? vs.Select(v => v.KabinBosU).FirstOrDefault(x => x != null), bitisikBosU = kb?.BitisikBosU,
             cihazSayisi = cihazlar.Count, vmHostSayisi = gruplar.Count, turlar = TurSayim(cihazlar, cihazGrup.Keys.ToHashSet()), nlyteEslesmeyen = eslesmeyen.Select(g => g.Key).ToList(),
-            deger = Deger(s, vs.SelectMany(v => v.Uygulamalar)), degerAdlari = DegerAdlari,
+            deger = Deger(s, vs.SelectMany(v => v.Uygulamalar)), degerAdlari = DegerAdlari, kabloVar = s.Baglantilar.Count > 0,
+            disBaglanti = tumCihaz.Where(c => c.AssetId != null).SelectMany(c => s.BagIdx.GetValueOrDefault(c.AssetId!) ?? []).DistinctBy(b => b.CableId)
+                .Select(b => tumCihaz.Any(c => string.Equals(c.AssetId, b.KaynakId, StringComparison.OrdinalIgnoreCase)) ? b.HedefKabin : b.KaynakKabin)
+                .Where(k => k != null && !k.Equals(ad, StringComparison.OrdinalIgnoreCase)).GroupBy(k => k!, StringComparer.OrdinalIgnoreCase)
+                .OrderByDescending(g => g.Count()).Select(g => new { kabin = g.Key, kablo = g.Count() }).ToList(),
             hostlar, vmler = vmler.Select(v => new { host = v.host != null && hostAd.TryGetValue(v.host, out var n) ? n : v.host, v.Vm, v.Ip, v.dns, v.Os, v.uygulamalar, v.muhafizlar, v.Kaynak,
                 deger = Deger(s, v.uygulamalar) }).ToList(),
             uygulamalar = Uygulamalar(s, vs, ad, hostAd), pasif,

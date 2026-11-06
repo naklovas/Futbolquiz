@@ -76,7 +76,7 @@ function fzShell() {
   $("#fzYenile").addEventListener("click", async () => {
     $("#fzBilgi").innerHTML = `<span class="spinner"></span> yeniden okunuyor…`;
     try { await fetch("api/fiziksel/yenile", { method: "POST" }); } catch { }
-    fz.ozet = null; fz.eksik = null; fz.disi = null; fz.esl = null; fzOzetYukle(true);
+    fz.ozet = null; fz.eksik = null; fz.disi = null; fz.esl = null; fz.cihaz = {}; fzOzetYukle(true);
   });
   $("#fzEksik").addEventListener("toggle", e => { if (e.target.open && !fz.eksik) fzEksikYukle(); });
   $("#fzEsl").addEventListener("toggle", e => { if (e.target.open && !fz.esl) fzEslYukle(); });
@@ -259,7 +259,7 @@ function fzKabinCiz() {
   // sunucu: VM'li mavi, VM'siz gri çizgili; diğer türler kendi rengiyle
   const sinif = h => sunucu(h) ? (h.vmBilgisi === false ? " vmsiz" : " vmli") : " tur";
   const hostBtn = (h, cls, stil) => `<button type="button" class="${cls}${sinif(h)}${fz.host === h.ad ? " on" : ""}" data-host="${esc(h.ad)}" style="--tc:${fzTurRenk(h.tur)};${stil}"
-      title="${esc(h.ad)} · ${esc(fzTurAd(h.tur))}${h.deger ? " · değer " + esc(fzDegerMetin(h.deger)) : ""}${h.turUyari ? " ⚠ " + esc(h.turUyari) : ""}${h.tip ? " · " + esc(h.tip) : ""}${h.model ? " · " + esc(h.model) : ""} · ${h.vmBilgisi === false ? "VM bilgisi yok" : fmt(h.vm) + " VM"} · U${h.uAlt ?? "?"}${h.uYukseklik ? `–${h.uAlt + h.uYukseklik - 1}` : ""}${h.cluster ? " · " + esc(h.cluster) : ""}${h.slot ? " · yuva " + esc(h.slot) : ""}">`;
+      title="${esc(h.ad)} · ${esc(fzTurAd(h.tur))}${h.deger ? " · değer " + esc(fzDegerMetin(h.deger)) : ""}${h.bag ? ` · ${h.bag} kablo` : ""}${h.turUyari ? " ⚠ " + esc(h.turUyari) : ""}${h.tip ? " · " + esc(h.tip) : ""}${h.model ? " · " + esc(h.model) : ""} · ${h.vmBilgisi === false ? "VM bilgisi yok" : fmt(h.vm) + " VM"} · U${h.uAlt ?? "?"}${h.uYukseklik ? `–${h.uAlt + h.uYukseklik - 1}` : ""}${h.cluster ? " · " + esc(h.cluster) : ""}${h.slot ? " · yuva " + esc(h.slot) : ""}">`;
   const kutuHtml = c => {
     const t = top(c.uAlt, c.yuk), y = c.yuk * FZ_UH - 2;
     if (c.host) {
@@ -282,7 +282,7 @@ function fzKabinCiz() {
     ${k.hostlar.some(h => sunucu(h) && h.vmBilgisi === false) ? `<span><i class="vmsiz"></i>sunucu, VM yok</span>` : ""}
     ${turler.filter(t => t !== "Server").map(t => `<span><i style="background:color-mix(in srgb, ${fzTurRenk(t)} 25%, var(--panel));border-left:3px solid ${fzTurRenk(t)}"></i>${esc(fzTurAd(t))}</span>`).join("")}</div>`;
   el.innerHTML = `<div class="fz-kabin-bas"><b>${esc(k.ad)}</b> · ${ozet}${k.konum ? ` <div class="small muted">${esc(k.konum)}</div>` : ""}
-      <div class="small muted">${U}U${k.bosU != null ? ` · ${k.bosU} boş U` : ""} · U1 ${k.u1Ustte ? "üstte" : "altta"}</div>${k.deger ? `<div class="small" style="margin:2px 0" title="Kabindeki uygulamaların en yüksek değerleri (ERT)">Kabin değeri: ${fzDeger(k.deger, true)}</div>` : ""}${lejant}</div>
+      <div class="small muted">${U}U${k.bosU != null ? ` · ${k.bosU} boş U` : ""} · U1 ${k.u1Ustte ? "üstte" : "altta"}</div>${k.deger ? `<div class="small" style="margin:2px 0" title="Kabindeki uygulamaların en yüksek değerleri (ERT)">Kabin değeri: ${fzDeger(k.deger, true)}</div>` : ""}${k.disBaglanti?.length ? `<div class="small" style="margin:2px 0" title="Bu kabindeki cihazlardan başka kabinlere giden nlyte kabloları">Kabin dışı kablolar: ${k.disBaglanti.slice(0, 8).map(x => `<a href="#" data-fzk2="${esc(x.kabin)}">${esc(x.kabin)}</a> (${fmt(x.kablo)})`).join(", ")}${k.disBaglanti.length > 8 ? ` <span class="muted">+${k.disBaglanti.length - 8}</span>` : ""}</div>` : ""}${lejant}</div>
     <div class="toolbar" style="margin:6px 0">
       <div class="seg"><button type="button" data-fzyuz="Front" class="${fz.yuz === "Front" ? "on" : ""}">Ön (${nOn})</button><button type="button" data-fzyuz="Rear" class="${fz.yuz === "Rear" ? "on" : ""}">Arka (${nArka})</button></div>
     </div>
@@ -303,6 +303,7 @@ function fzKabinCiz() {
     ${k.pasif?.length ? `<details class="small" style="margin-top:6px"><summary>Aktif olmayan nlyte kayıtları (${k.pasif.length})</summary>
       ${k.pasif.map(p => `<div>${esc(p.ad)} <span class="muted">· ${esc([fzTurAd(p.tur), p.durum, p.operasyon, p.model, p.uAlt != null ? "U" + p.uAlt : null].filter(Boolean).join(" · "))}</span></div>`).join("")}</details>` : ""}`;
   el.querySelectorAll("[data-host]").forEach(b => b.addEventListener("click", () => { fz.host = b.dataset.host; fz.mod = "host"; fzKabinCiz(); fzDetayCiz(); }));
+  el.querySelectorAll("[data-fzk2]").forEach(a => a.addEventListener("click", ev => { ev.preventDefault(); fzKabinAc(a.dataset.fzk2); }));
   el.querySelectorAll("[data-fzyuz]").forEach(b => b.addEventListener("click", () => { fz.yuz = b.dataset.fzyuz; fzKabinCiz(); }));
   el.querySelectorAll("[data-fzmod]").forEach(b => b.addEventListener("click", () => { fz.mod = b.dataset.fzmod; fz.host = null; fzKabinCiz(); fzDetayCiz(); }));
 }
@@ -334,7 +335,9 @@ function fzDetayCiz() {
         <thead><tr><th>VM</th><th>IP</th><th>Uygulamalar</th><th title="VM'deki uygulamaların en yüksek değerleri">Değer</th><th>OS</th></tr></thead>
         <tbody>${vmler.map(v => `<tr><td class="mono small" title="${esc(v.dns ?? "")}">${esc(v.vm ?? "")}</td><td>${fzIpLink(v.ip)}</td>
           <td class="small">${v.uygulamalar.length ? v.uygulamalar.map(fzAppLink).join(", ") : `<span class="muted">ERT'de yok</span>`}</td><td>${fzDeger(v.deger)}</td><td class="small muted">${esc(v.os ?? "")}</td></tr>`).join("")
-          || `<tr><td colspan="5" class="unk">VM yok</td></tr>`}</tbody></table></div>`}`;
+          || `<tr><td colspan="5" class="unk">VM yok</td></tr>`}</tbody></table></div>`}
+      ${h.assetId && k.kabloVar ? `<div id="fzBag" style="margin-top:10px"><span class="small muted"><span class="spinner"></span> bağlantılar…</span></div>` : ""}`;
+    if (h.assetId && k.kabloVar) fzBagYukle(h.assetId);
     return;
   }
   const etki = fz.mod === "etki";
@@ -352,6 +355,35 @@ function fzDetayCiz() {
         ${etki ? `<td>${rozet(u)}</td>` : ""}<td class="small">${u.hostlar.map(h => `<a href="#" data-fzh="${esc(h)}">${esc(h)}</a>`).join(", ")}</td><td class="small muted">${esc(u.muhafizlar.join(", "))}</td></tr>`).join("")
         || `<tr><td colspan="6" class="unk">Bu kabindeki VM'lerin ERT'de uygulaması yok.</td></tr>`}</tbody></table></div>`;
   el.querySelectorAll("[data-fzh]").forEach(a => a.addEventListener("click", e => { e.preventDefault(); fz.host = a.dataset.fzh; fz.mod = "host"; fzKabinCiz(); fzDetayCiz(); }));
+}
+
+// Cihazın nlyte kablo bağlantıları (patch panel'ler üzerinden uçtan uca) + bu cihaz kapanırsa etkilenen sunucu / VM / uygulama
+fz.cihaz = {};
+async function fzBagYukle(id) {
+  let d = fz.cihaz[id];
+  if (!d) {
+    try { d = fz.cihaz[id] = await fzGet("api/fiziksel/cihaz?" + new URLSearchParams({ id })); }
+    catch (e) { const el = $("#fzBag"); if (el) el.innerHTML = `<div class="small" style="color:var(--err)">${esc(e.message)}</div>`; return; }
+  }
+  const el = $("#fzBag");
+  if (!el) return;
+  const b = d.baglantilar, e = d.etki;
+  const karsi = z => z.uzakKabin ? `<a href="#" data-fzc="${esc(z.uzakKabin)}" data-fzch="${esc(z.uzakAd)}">${esc(z.uzakAd)}</a>` : esc(z.uzakAd);
+  el.innerHTML = `<h3 style="margin:0 0 4px;font-size:14px">🔌 Bağlantılar <span class="small muted">(${fmt(b.length)}${d.chassisten ? " · chassis'in kabloları" : ""})</span></h3>
+    ${b.length ? `<div class="tbl-wrap" style="max-height:32vh"><table><thead><tr><th>Port</th><th>Karşı cihaz</th><th>Karşı port</th><th>Kabin</th><th title="Arada geçilen patch panel'ler (panel:port)">Üzerinden</th></tr></thead>
+      <tbody>${b.map(z => `<tr${z.kesik ? ` title="Patch panel'de devamı bulunamadı (port bilgisi yok ya da karşı kablo girilmemiş)"` : ""}><td class="mono small">${esc(z.yerelPort ?? "—")}</td>
+        <td><span class="badge" style="background:${fzTurRenk(z.uzakTur)};color:#fff">${esc(fzTurAd(z.uzakTur))}</span> ${karsi(z)}${z.kesik ? ` <span class="small" style="color:var(--warn)">iz kesik</span>` : ""}</td>
+        <td class="mono small">${esc(z.uzakPort ?? "")}</td><td class="small">${esc(z.uzakKabin ?? "")}</td><td class="small muted">${esc(z.paneller.join(" → "))}</td></tr>`).join("")}</tbody></table></div>`
+      : `<div class="small muted">nlyte'ta bu cihaz için kablo kaydı yok.</div>`}
+    ${e ? `<h3 style="margin:10px 0 4px;font-size:14px">Bu cihaz kapanırsa</h3>
+      <div class="small" style="margin-bottom:4px">${fmt(e.sunucu)} sunucu · ${fmt(e.vm)} VM · ${fmt(e.uygulamalar.length)} uygulama ${e.deger ? "· en yüksek " + fzDeger(e.deger, true) : ""}</div>
+      ${e.sunucular.length ? `<div class="tbl-wrap" style="max-height:28vh"><table><thead><tr><th>Sunucu</th><th>Kabin</th><th class="num">VM</th><th>Değer</th><th>Bağlantı</th></tr></thead>
+        <tbody>${e.sunucular.map(x => `<tr><td class="mono small">${x.kabin ? `<a href="#" data-fzc="${esc(x.kabin)}" data-fzch="${esc(x.ad)}">${esc(x.ad)}</a>` : esc(x.ad)}</td><td class="small">${esc(x.kabin ?? "")}</td>
+          <td class="num">${fmt(x.vm)}</td><td>${fzDeger(x.deger)}</td><td class="small muted">${esc(x.yol)}</td></tr>`).join("")}</tbody></table></div>`
+        : `<div class="small muted">Kablolarla bu cihaza bağlı sunucu bulunamadı${d.tur === "Firewall" ? " (firewall'lar genelde switch'lere bağlıdır)" : ""}.</div>`}
+      ${e.uygulamalar.length ? `<div class="tbl-wrap" style="max-height:28vh;margin-top:6px"><table><thead><tr><th>Uygulama</th><th class="num">VM</th><th>Değer</th></tr></thead>
+        <tbody>${e.uygulamalar.map(u => `<tr><td>${fzAppLink(u.ad)}</td><td class="num">${fmt(u.vm)}</td><td>${fzDeger(u.deger)}</td></tr>`).join("")}</tbody></table></div>` : ""}` : ""}`;
+  el.querySelectorAll("[data-fzc]").forEach(a => a.addEventListener("click", ev => { ev.preventDefault(); fzKabinAc(a.dataset.fzc, a.dataset.fzch); }));
 }
 
 async function fzAra(q) {

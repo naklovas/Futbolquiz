@@ -830,6 +830,8 @@ app.MapGet("/api/fiziksel/eslesmeyen", (string? csv, HttpContext ctx, IConfigura
             : Results.File(Encoding.UTF8.GetBytes(FizikselService.EslesmeyenCsv(l)), "text/csv; charset=utf-8", $"eslesmeyen_hostlar_{DateTime.Now:yyyyMMdd}.csv");
     return Results.Ok(new { vmler = l, anaKapsam = f.AnaKapsam });
 }));
+app.MapGet("/api/fiziksel/cihaz", (string id, HttpContext ctx, IConfiguration cfg, FizikselService f, CancellationToken ct) =>
+    FizY(ctx, cfg, f, ct, s => f.Cihaz(s, id) is { } c ? Results.Ok(c) : Results.NotFound(new { error = $"Cihaz bulunamadı: {id}" })));
 app.MapGet("/api/fiziksel/kabindisi", (HttpContext ctx, IConfiguration cfg, FizikselService f, CancellationToken ct) => FizY(ctx, cfg, f, ct, s => Results.Ok(f.KabinDisi(s))));
 app.MapPost("/api/fiziksel/yenile", async (HttpContext ctx, IConfiguration cfg, FizikselService f, CancellationToken ct) =>
 {

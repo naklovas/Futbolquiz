@@ -617,7 +617,14 @@ erişim talepleri) — DB → şema → tablo ve kim erişiyor bilgisi buradan b
   ZB.DR3.C.NS6.45_46U, TR-B-EMC-1) → odada "Sıra X" listesi; yalnız oda (CO2-ORACLE-1) → odanın diğer kabinleri; kalanlar "Diğer" (Asset_… katlanır
   "Adsız kabin kayıtları"). Odalar: DR'ler numara sırasıyla, sonra diğerleri, en sonda Diğer. Aynı (sıra, no)'ya düşen birden çok kayıt: VM / cihazı
   en çok (ZB. öneksiz önce) ızgarada, diğerleri `ek` (karoda "+N", katlanır "Aynı konumda ek kabin kayıtları"). `/api/fiziksel/kabin` `oda` döner;
-  `fzKabinAc` kabin başka odadaysa o odayı açar (derin bağlantı / eksik listesi regex'i kaldırıldı). Sahte veriyle (switch, firewall, patch panel, 0U PDU, chassis + 3 blade, AssetID ile farklı adlı host, klima) test edildi.
+  `fzKabinAc` kabin başka odadaysa o odayı açar (derin bağlantı / eksik listesi regex'i kaldırıldı). KABLO BAĞLANTILARI (veri tarafı: nlyte `Connections`
+  → `dbo.NlyteBaglanti`, kablo başına satır: CableID, KabloTuru / KabloAdi, Kaynak/Hedef AssetID, Adi, CihazTuru, Port, Kabin…; `Fiziksel:Tablolar:NlyteBaglanti`,
+  yoksa bağlantı gösterilmez): `BagIdx` (AssetID → kablolar). `Iz(s, id)` uçtan uca: karşı uç PatchPanel ise panelde AYNI PORT NUMARASIYLA (`AyniPort`, sondaki
+  sayı) devam eden kablodan sürer (≤6 panel), devamı yoksa / port yoksa `Kesik`. `/api/fiziksel/cihaz?id=` (FizY) → cihaz + bağlantılar (yerel port, karşı cihaz /
+  tür / port / kabin, paneller) + `etki` (sunucu değilse): doğrudan bağlı sunucular + VM'li cihazlar (`AssetVm`: kabin başına `Eslestir` = Kabin()'in VM grubu
+  ↔ cihaz eşleşmesi, tek fonksiyona alındı), chassis → blade'ler, storage ise bağlı switch'lerin sunucuları (dolaylı); VM / uygulama / değer. Blade'in kendi kablosu
+  yoksa chassis'in kabloları. Kabin(): satırda `bag` (kablo sayısı), başlıkta `disBaglanti` (başka kabinlere giden kablolar). Arayüz: cihaz detayında "🔌 Bağlantılar"
+  tablosu (karşı cihaza tıkla → onun kabini ve detayı), "Bu cihaz kapanırsa" (sunucular, uygulamalar, değer); kabin başlığında "Kabin dışı kablolar". Sahte veriyle (switch, firewall, patch panel, 0U PDU, chassis + 3 blade, AssetID ile farklı adlı host, klima) test edildi.
 - **VIP**: sorgulanan IP VIP ise üyeler + GW'ler aynı sorguya eklenir, üyeler "VIP ÜYESİ" (GW→üye trafiği varsa ✓).
   Gidilen IP VIP ise "VIP → n ÜYE"; gelen IP LB GW ise "LB GW"; sorgulanan sunucu havuz üyesiyse VIP kartı.
 - **Uygulama görünümü** (`/api/apps`, `/api/app`): `[kullanan uygulamalar] → [UYGULAMA: VIP'ler + segment grupları] → [bağımlı olunanlar]`,
