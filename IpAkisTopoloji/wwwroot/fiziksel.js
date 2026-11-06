@@ -338,7 +338,7 @@ function fzDetayCiz() {
           || `<tr><td colspan="5" class="unk">VM yok</td></tr>`}</tbody></table></div>`}
       ${h.assetId && k.kabloVar ? `<div id="fzBag" style="margin-top:10px"><span class="small muted"><span class="spinner"></span> bağlantılar…</span></div>`
         : `<div class="small" style="margin-top:10px;color:var(--warn)">🔌 Kablo bağlantıları gösterilemiyor: ${k.kabloVar === undefined ? "sunucudaki DeltaFlow sürümü eski (FizikselEnvanter.cs kopyalanıp derlenmeli)"
-          : !h.assetId ? "bu cihazın nlyte AssetID'si yok" : "dbo.NlyteBaglanti okunamadı ya da boş (tablo adı Fiziksel:Tablolar:NlyteBaglanti)"}</div>`}`;
+          : !h.assetId ? "bu cihazın nlyte AssetID'si yok" : esc(k.kabloDurum ?? "dbo.NlyteBaglanti okunamadı ya da boş (tablo adı Fiziksel:Tablolar:NlyteBaglanti)")}</div>`}`;
     if (h.assetId && k.kabloVar) fzBagYukle(h.assetId);
     return;
   }

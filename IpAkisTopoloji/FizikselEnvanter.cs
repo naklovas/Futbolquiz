@@ -64,6 +64,7 @@ sealed class FizikselSnapshot
     public Dictionary<string, FizMsy> MsyIp { get; } = new(StringComparer.OrdinalIgnoreCase);    // yönetim / iLO IP → kayıt (host alanında IP yazan VM'ler)
     public bool MsyVar { get; set; }
     public List<FizBaglanti> Baglantilar { get; } = [];
+    public string? BaglantiDurum { get; set; }   // okunamadıysa / boşsa nedeni (arayüzde gösterilir)
     public Dictionary<string, List<FizBaglanti>> BagIdx { get; } = new(StringComparer.OrdinalIgnoreCase);   // AssetID → kabloları
     public Dictionary<string, FizCihaz> CihazId { get; } = new(StringComparer.OrdinalIgnoreCase);
     public Dictionary<string, List<FizVm>>? AssetVmOnbellek { get; set; }   // nlyte AssetID → o host'taki VM'ler (Kabin() eşleşmesiyle)
@@ -273,8 +274,10 @@ sealed class FizikselService(IConfiguration cfg, ILogger<FizikselService> log)
                     (s.BagIdx.TryGetValue(id, out var l) ? l : s.BagIdx[id] = []).Add(b);
             }
             log.LogInformation("nlyte bağlantıları: {N} kablo", s.Baglantilar.Count);
+            if (s.Baglantilar.Count == 0) s.BaglantiDurum = $"{t} boş (0 satır)";
         }
-        catch (SqlException ex) when (ex.Number is 207 or 208) { log.LogInformation("{T} okunamadı: {M}", t, ex.Message); }
+        // isteğe bağlı tablo: yoksa, yetki yoksa (229) ya da kolon farklıysa sayfa yine açılır, neden arayüzde yazılır
+        catch (SqlException ex) { s.BaglantiDurum = $"{t} okunamadı: {ex.Message}"; log.LogWarning("{T} okunamadı: {M}", t, ex.Message); }
     }
 
     // Uygulama değerleri (kullanıcı: "VM'deki uygulamaların değerlerinin maksimumu → ESX'in ve kabinin değeri"): ERT'de aynı uygulama
@@ -790,7 +793,7 @@ sealed class FizikselService(IConfiguration cfg, ILogger<FizikselService> log)
             ad, oda = Parcala(ad).Oda ?? "Diğer", konum = KabinKonum(s, ad), cabinetAssetId = kb?.CabinetAssetId ?? ilk?.CabinetAssetId, uKapasite = uKap, uSirasi = usira, u1Ustte = U1Ustte(usira),
             bosU = kb?.BosU ?? vs.Select(v => v.KabinBosU).FirstOrDefault(x => x != null), bitisikBosU = kb?.BitisikBosU,
             cihazSayisi = cihazlar.Count, vmHostSayisi = gruplar.Count, turlar = TurSayim(cihazlar, cihazGrup.Keys.ToHashSet()), nlyteEslesmeyen = eslesmeyen.Select(g => g.Key).ToList(),
-            deger = Deger(s, vs.SelectMany(v => v.Uygulamalar)), degerAdlari = DegerAdlari, kabloVar = s.Baglantilar.Count > 0,
+            deger = Deger(s, vs.SelectMany(v => v.Uygulamalar)), degerAdlari = DegerAdlari, kabloVar = s.Baglantilar.Count > 0, kabloDurum = s.BaglantiDurum,
             disBaglanti = tumCihaz.Where(c => c.AssetId != null).SelectMany(c => s.BagIdx.GetValueOrDefault(c.AssetId!) ?? []).DistinctBy(b => b.CableId)
                 .Select(b => tumCihaz.Any(c => string.Equals(c.AssetId, b.KaynakId, StringComparison.OrdinalIgnoreCase)) ? b.HedefKabin : b.KaynakKabin)
                 .Where(k => k != null && !k.Equals(ad, StringComparison.OrdinalIgnoreCase)).GroupBy(k => k!, StringComparer.OrdinalIgnoreCase)
