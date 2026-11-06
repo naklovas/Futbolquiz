@@ -68,6 +68,7 @@ function fzShell() {
     </div>
     <details id="fzDisi" class="fz-eksik"><summary><b>Kabin dışı cihazlar</b> <span class="small muted" id="fzDisiSay"></span></summary><div id="fzDisiIc"></div></details>
     <details id="fzEsl" class="fz-eksik"><summary><b>Kabine yerleşmeyen MSY / ÇSY VM'leri</b> <span class="small muted">— VM başına satır; host'u, neden ve nlyte adaylarıyla</span></summary><div id="fzEslIc"></div></details>
+    <details id="fzKural" class="fz-eksik"><summary><b>Değer kuralları</b> <span class="small muted">— VM'i olmayan cihazların (ağ, firewall, storage, PDU, Exadata…) değeri nasıl bulunuyor</span></summary><div id="fzKuralIc"></div></details>
     <details id="fzEksik" class="fz-eksik"><summary><b>nlyte'ta eksik host'lar</b> <span class="small muted" id="fzEksikSay"></span></summary><div id="fzEksikIc"></div></details>
     <div id="fzIst" class="fz-ist"></div>
   </section>`;
@@ -77,11 +78,12 @@ function fzShell() {
   $("#fzYenile").addEventListener("click", async () => {
     $("#fzBilgi").innerHTML = `<span class="spinner"></span> yeniden okunuyor…`;
     try { await fetch("api/fiziksel/yenile", { method: "POST" }); } catch { }
-    fz.ozet = null; fz.eksik = null; fz.disi = null; fz.esl = null; fz.cihaz = {}; fzOzetYukle(true);
+    fz.ozet = null; fz.eksik = null; fz.disi = null; fz.esl = null; fz.kural = null; fz.cihaz = {}; fzOzetYukle(true);
   });
   $("#fzEksik").addEventListener("toggle", e => { if (e.target.open && !fz.eksik) fzEksikYukle(); });
   $("#fzEsl").addEventListener("toggle", e => { if (e.target.open && !fz.esl) fzEslYukle(); });
   $("#fzDisi").addEventListener("toggle", e => { if (e.target.open && !fz.disi) fzDisiYukle(); });
+  $("#fzKural").addEventListener("toggle", e => { if (e.target.open && !fz.kural) fzKuralYukle(); });
   fzOzetYukle();
 }
 
@@ -129,9 +131,9 @@ function fzIstCiz(i) {
         i.kapsamlar.map(k => `${esc(k.kapsam)}: ${fmt(k.vm)}${k.ana ? ` (yerleşen ${fmt(k.kabinli)})` : k.kabinli ? ` (yerleşen ${fmt(k.kabinli)})` : ""}`).join(" · ")
         + (i.ekKapsamdan?.length ? ` · <span style="color:var(--in)">${i.ekKapsamdan.map(x => `${esc(x.kapsam)} kapsamından ${fmt(x.vm)} VM ana DC'ye yerleşti`).join(", ")}</span>` : ""),
         "nlyte yalnız ana veri merkezini (Esenyurt) kapsar; ODM / KKB VM'leri kabine yerleşemez", "var(--muted)") : ""}
-      ${i.degerVar && i.kabinDeger ? kart("Kabin değerleri", `${fmt(i.kabinDeger[2]?.["3"] ?? 0)} <span class="small muted">kabin erişilebilirlik 3</span>`,
+      ${i.degerVar && i.kabinDeger ? kart("Kabin değerleri", (() => { const m = Math.max(...Object.keys(i.kabinDeger[2] ?? {}).filter(x => x !== "yok").map(Number), 0); return `${fmt(i.kabinDeger[2]?.[m] ?? 0)} <span class="small muted">kabin erişilebilirlik ${m}</span>`; })(),
         FZ_DEGER.map(([, , ad], j) => `${ad}: ${Object.entries(i.kabinDeger[j] ?? {}).map(([d, n]) => `${d === "yok" ? "değer yok" : d} → ${fmt(n)}`).join(", ")}`).join("<br>"),
-        "Kabin değeri = kabindeki VM'lerin uygulamalarının en yüksek değeri (ERT); VM'li kabinler", "#c0392b") : ""}
+        "Kabin değeri = kabindeki uygulamaların (ERT) ve cihazların (tür kuralları) en yüksek değeri; tüm kabinler", "#c0392b") : ""}
       ${i.kabloVar ? kart("Kablo kaydı", `${fmt(i.kabinKablolu)} / ${fmt(i.kabin)} kabin`,
         `sunucu: ${fmt(i.sunucuKablolu)} / ${fmt(i.sunucu)} (veri / fiber: ${fmt(i.sunucuVeri)})<br>VM'li host: ${fmt(i.hostVmliVeri)} / ${fmt(i.hostVmli)} veri / fiber kablolu<br>${fmt(i.kablo)} kablo`,
         "nlyte Connections: en az bir cihazında kablo kaydı olan kabin; oda planında Renk → Kablo kaydı", "#2e9d5b") : ""}
@@ -183,7 +185,7 @@ function fzPlanCiz() {
   }
   const vmli = v.kabinler.filter(k => k.vm > 0).length, cihazli = v.kabinler.filter(k => !k.vm && k.cihaz > 0).length, bos = v.kabinler.length - vmli - cihazli;
   el.innerHTML = `<div class="small muted" style="margin-bottom:6px">${esc(v.ad)} · ${fmt(v.kabinler.length)} kabin · ${fmt(v.kabinler.reduce((a, k) => a + k.vm, 0))} VM
-      <div class="fz-lejant"><label style="flex-direction:row;align-items:center;gap:4px" title="Kabin değeri = kabindeki VM'lerin uygulamalarının en yüksek değeri (ERT)">Renk
+      <div class="fz-lejant"><label style="flex-direction:row;align-items:center;gap:4px" title="Kabin değeri = kabindeki uygulamaların (ERT) ve cihazların (tür kuralları) en yüksek değeri">Renk
         <select id="fzRenk"><option value="vm">VM sayısı</option><option value="kablo"${kb ? " selected" : ""}>Kablo kaydı</option>${FZ_DEGER.map(([k, , ad]) => `<option value="${k}"${fz.renk === k ? " selected" : ""}>${ad} değeri</option>`).join("")}</select></label>
       ${kb ? `<span><i style="background:color-mix(in srgb, #2e9d5b 80%, var(--panel))"></i>cihazların çoğu kablolu (${v.kabinler.filter(k => k.cihaz && k.kablo / k.cihaz > 0.5).length})</span><span><i style="background:color-mix(in srgb, #2e9d5b 30%, var(--panel))"></i>bir kısmı (${v.kabinler.filter(k => k.kablo > 0 && k.kablo / k.cihaz <= 0.5).length})</span><span><i class="bosk"></i>kablo kaydı yok (${v.kabinler.filter(k => !k.kablo).length})</span>`
         : dg ? [...new Set(v.kabinler.map(k => k.deger?.[dg]).filter(n => n != null))].sort((a, b) => b - a).map(n => `<span><i style="background:${fzDegerRenk(n)}"></i>${n} (${v.kabinler.filter(k => k.deger?.[dg] === n).length})</span>`).join("")
@@ -289,7 +291,7 @@ function fzKabinCiz() {
     ${k.hostlar.some(h => sunucu(h) && h.vmBilgisi === false) ? `<span><i class="vmsiz"></i>sunucu, VM yok</span>` : ""}
     ${turler.filter(t => t !== "Server").map(t => `<span><i style="background:color-mix(in srgb, ${fzTurRenk(t)} 25%, var(--panel));border-left:3px solid ${fzTurRenk(t)}"></i>${esc(fzTurAd(t))}</span>`).join("")}</div>`;
   el.innerHTML = `<div class="fz-kabin-bas"><b>${esc(k.ad)}</b> · ${ozet}${k.konum ? ` <div class="small muted">${esc(k.konum)}</div>` : ""}
-      <div class="small muted">${U}U${k.bosU != null ? ` · ${k.bosU} boş U` : ""} · U1 ${k.u1Ustte ? "üstte" : "altta"}</div>${k.deger ? `<div class="small" style="margin:2px 0" title="Kabindeki uygulamaların en yüksek değerleri (ERT)">Kabin değeri: ${fzDeger(k.deger, true)}</div>` : ""}${k.disBaglanti?.length ? `<div class="small" style="margin:2px 0" title="Bu kabindeki cihazlardan başka kabinlere giden nlyte kabloları">Kabin dışı kablolar: ${k.disBaglanti.slice(0, 8).map(x => `<a href="#" data-fzk2="${esc(x.kabin)}">${esc(x.kabin)}</a> (${fmt(x.kablo)})`).join(", ")}${k.disBaglanti.length > 8 ? ` <span class="muted">+${k.disBaglanti.length - 8}</span>` : ""}</div>` : ""}${lejant}</div>
+      <div class="small muted">${U}U${k.bosU != null ? ` · ${k.bosU} boş U` : ""} · U1 ${k.u1Ustte ? "üstte" : "altta"}</div>${k.deger ? `<div class="small" style="margin:2px 0" title="Kabindeki uygulamaların ve cihazların (tür kuralları dahil) en yüksek değerleri; rozetin üstüne gelince kaynağı">Kabin değeri: ${fzDeger(k.deger, true)}</div>` : ""}${k.disBaglanti?.length ? `<div class="small" style="margin:2px 0" title="Bu kabindeki cihazlardan başka kabinlere giden nlyte kabloları">Kabin dışı kablolar: ${k.disBaglanti.slice(0, 8).map(x => `<a href="#" data-fzk2="${esc(x.kabin)}">${esc(x.kabin)}</a> (${fmt(x.kablo)})`).join(", ")}${k.disBaglanti.length > 8 ? ` <span class="muted">+${k.disBaglanti.length - 8}</span>` : ""}</div>` : ""}${lejant}</div>
     <div class="toolbar" style="margin:6px 0">
       <div class="seg"><button type="button" data-fzyuz="Front" class="${fz.yuz === "Front" ? "on" : ""}">Ön (${nOn})</button><button type="button" data-fzyuz="Rear" class="${fz.yuz === "Rear" ? "on" : ""}">Arka (${nArka})</button></div>
     </div>
@@ -328,7 +330,8 @@ function fzDetayCiz() {
     const srv = !h.tur || h.tur === "Server" || (h.vmBilgisi && h.vm > 0);
     el.innerHTML = `<h2 style="margin:0 0 6px">${esc(h.ad)} <span class="badge" style="background:${fzTurRenk(h.tur)};color:#fff">${esc(fzTurAd(h.tur))}</span></h2>
       ${h.turUyari ? `<div class="small" style="color:var(--warn);margin:0 0 6px">⚠ ${esc(h.turUyari)}</div>` : ""}
-      ${h.deger ? `<div class="small" style="margin:0 0 6px" title="Bu host'taki VM'lerin uygulamalarının en yüksek değerleri">Değer: ${fzDeger(h.deger, true)}</div>` : ""}
+      ${h.deger ? `<div class="small" style="margin:0 0 6px" title="Boyut başına en yüksek değer; rozetin üstüne gelince değeri veren uygulama / kural">Değer: ${fzDeger(h.deger, true)}${h.deger.yontem ? `<div class="muted">nasıl: ${esc(h.deger.yontem)}</div>` : ""}</div>`
+        : `<div class="small muted" style="margin:0 0 6px">Değer bulunamadı: VM'i yok, ERT'de adı / IP'si eşleşmedi, tür kuralı yok (alttaki "Değer kuralları").</div>`}
       <dl class="fz-dl">
         ${[["Malzeme tipi", h.tip], ["Durum", h.durum], ["Cluster", h.cluster], ["FQDN", h.fqdn], ["Model", h.model], ["Seri", h.seri], ["nlyte AssetID", h.assetId], ["Konum", h.uAlt != null ? `U${h.uAlt}${h.uYukseklik > 1 ? `–${h.uAlt + h.uYukseklik - 1}` : ""} · ${/rear/i.test(h.yuz ?? "") ? "arka" : "ön"} yüz` : "U bilgisi yok"],
            ["iLO", h.msy?.iloIp], ["Yönetim IP", h.msy?.dnsIp], ["OS", h.msy?.osName && `${h.msy.osName}${h.msy.osVersion ? " " + h.msy.osVersion : ""}`],
@@ -419,6 +422,28 @@ async function fzAra(q) {
     if (r.oda && r.oda !== fz.oda) { $("#fzOda").value = r.oda; await fzOdaAc(r.oda); }
     fzKabinAc(r.kabin, r.tur === "Kabin" || r.tur === "Uygulama" || r.tur === "Cluster" ? null : r.host);
   }));
+}
+
+// Değer kuralları: tür / model / kabin adına göre değer, miras (PDU, panel, KVM, UPS, klima), değeri bulunamayan cihazlar
+async function fzKuralYukle() {
+  const el = $("#fzKuralIc");
+  el.innerHTML = `<div class="small muted"><span class="spinner"></span> yükleniyor…</div>`;
+  try { fz.kural = await fzGet("api/fiziksel/kurallar"); }
+  catch (e) { el.innerHTML = `<div class="unk" style="color:var(--err)">${esc(e.message)}</div>`; return; }
+  const k = fz.kural, kosul = r => [r.turler?.length ? "tür: " + r.turler.map(fzTurAd).join(", ") : "", r.model ? `model ~ /${r.model}/` : "", r.isim ? `ad ~ /${r.isim}/` : "", r.kabin ? `kabin adı ~ /${r.kabin}/` : ""].filter(Boolean).join(" · ");
+  const deger = r => r.degerler ? fzDeger({ v: r.degerler[0], i: r.degerler[1], e: r.degerler[2], g: r.degerler[3], b: r.degerler[4] })
+    : r.miras ? `<span class="small">${r.miras === "oda" ? "odanın" : "kabinin"} değeri: ${esc([...(r.boyutlar ?? "E")].map(h => ({ E: "erişilebilirlik", G: "gizlilik", B: "bütünlük" })[h] ?? h).join(", "))} + İş</span>` : "";
+  el.innerHTML = `<div class="small" style="margin:6px 0">
+      ${fmt(k.cihaz)} aktif kabin cihazından <b>${fmt(k.degerli)}</b>'inin değeri var: ${fmt(k.vmden)} VM'lerinin uygulamalarından, ${fmt(k.ertEslesen)} VM'siz fiziksel sunucu ERT'deki adı / IP'siyle, kalanı aşağıdaki kurallarla.
+      ${fmt(k.kabinDegerli)} / ${fmt(k.kabin)} kabinin değeri var. İlk uyan kural uygulanır; hesaplanan değer ile kural değerinin boyut başına en yükseği alınır.
+      <div class="muted" style="margin-top:4px">Türetme (ERT analizi): Varlık = en yüksek(Gizlilik, Bütünlük, Erişilebilirlik); İş 0 / boşsa Erişilebilirlik — ${fmt(k.turetilenIs)} / ${fmt(k.uygulama)} uygulamada tamamlandı.
+      Kabin dışı ${fmt(k.kabinDisi)} cihaz (depo / stok) değerlendirme dışı.${k.ayarli ? " Kurallar appsettings'ten (Fiziksel:DegerKurallari)." : " Varsayılan kurallar (appsettings Fiziksel:DegerKurallari ile değiştirilebilir)."}</div></div>
+    <div class="toolbar" style="margin:4px 0"><a class="mini" data-csv href="api/fiziksel/kurallar?csv=true" style="margin-left:auto" title="Tüm kabin cihazları: değer, yöntem, kaynak">Cihaz değerleri (CSV)</a></div>
+    <div class="tbl-wrap" style="max-height:40vh"><table><thead><tr><th>Kural</th><th>Koşul</th><th>Değer</th><th class="num">Cihaz</th><th>Gerekçe</th></tr></thead>
+      <tbody>${k.kurallar.map(r => `<tr><td><b>${esc(r.ad)}</b></td><td class="small mono">${esc(kosul(r))}</td><td>${deger(r)}</td><td class="num">${fmt(r.cihaz)}</td><td class="small muted">${esc(r.aciklama ?? "")}</td></tr>`).join("")}</tbody></table></div>
+    ${k.degersiz.length ? `<div class="small" style="margin:10px 0 4px"><b>Değeri bulunamayan cihazlar</b> <span class="muted">— VM'i yok, ERT'de eşleşmedi, kuralı yok (sunucularda büyük ihtimalle ERT'de adı farklı)</span></div>
+      <div class="tbl-wrap" style="max-height:30vh"><table><thead><tr><th>Tür</th><th class="num">Cihaz</th><th>Örnek</th></tr></thead>
+      <tbody>${k.degersiz.map(x => `<tr><td>${esc(fzTurAd(x.tur))}</td><td class="num">${fmt(x.adet)}</td><td class="small mono">${esc(x.ornek.join(", "))}</td></tr>`).join("")}</tbody></table></div>` : ""}`;
 }
 
 async function fzEksikYukle() {

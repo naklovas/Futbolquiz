@@ -43,6 +43,7 @@ topoloji çizer ve şirket içi AI'a etki analizi yaptırır. Canlıda IIS'te, W
 | `ExeAgi.cs` | Exe ilişki ağı: segment / etiket taramasının exe → exe bağları, küme topolojisi çiziminde (topoloji.html `?exeag=1`) |
 | `TlsAkis.cs` | TLS bağlantıları: AppResponse tls_handshakes, IP'nin gelen / giden el sıkışmalarında kullanılan TLS sürümleri |
 | `FizikselEnvanter.cs` | Fiziksel envanter: nlyte kabin → host → VM → uygulama (doku DB'deki KabinHostVm vb., yalnız okur; `wwwroot/fiziksel.js`) |
+| `FizikselDeger.cs` | Fiziksel cihaz değerleri (V / İ / E / G / B): tür / model / kabin kuralları, miras, ERT ad eşleşmesi (`partial FizikselService`) |
 | `Nessus.cs` | Nessus / Tenable.sc: repository'deki tarama sonuçlarından teknoloji, sertifika, OS, kurulu yazılım |
 | `Yetki.cs` | İşlem yetkileri (yazma, topoloji, dışa aktarma, toplu tahmin) — DokuPanel site kayıtları |
 | `AuthHelper.cs` | Kullanıcının verdiği DokuPanel yetki helper'ı (namespace `AppRel`), anahtar config'den |
@@ -631,7 +632,21 @@ erişim talepleri) — DB → şema → tablo ve kim erişiyor bilgisi buradan b
   etkideki doğrudan bağlı sunucunun bu cihaz dışında aynı sınıftan (güç ↔ güç; veri / fiber ↔ panel / sunucu olmayan uç) başka cihaza izi varsa `yedek`,
   yoksa "tek yol"; özet "N sunucu (M VM) yalnız bu cihaza bağlı". Değerler canlıda 0–5 (renk ölçeği 5 koyu kırmızı … 0 gri, lejant veriden). KABLO
   KAPSAMASI (kullanıcı: "çok sayıda bağlantısı hiç olmayan kabin var"): Oda() satırında `kablo` (kablolu aktif cihaz), planda "Renk: Kablo kaydı";
-  istatistikte "Kablo kaydı" kartı (kabinKablolu, sunucuKablolu / sunucuVeri, hostVmli / hostVmliVeri).
+  istatistikte "Kablo kaydı" kartı (kabinKablolu, sunucuKablolu / sunucuVeri, hostVmli / hostVmliVeri). Canlı sorgular: sunucuların ~%12'sinde kablo var
+  (ESX 53 / 330, diğer 90 / 903), 595 panelin hepsi panel ↔ panel trunk'lı, yalnız 70 panelde switch kablosu → port düzeyinde host → switch izi kurulamıyor
+  (kullanıcı: "bize bir şey vermiyor"); kesin host → switch için APIC (ACI endpoint) / MDS flogi / vCenter CDP önerildi.
+  DEĞER KURALLARI (`FizikselDeger.cs`; kullanıcı: "FW, veri merkezi switch'leri, LB full 5 gibi genel kurallar; Exadata (model Server X9-2 / X9-2L) 5"):
+  `Degerler(s)` (snapshot başına önbellek `DegerOnbellek`): cihaz değeri = hesaplanan (VM'lerin uygulamaları; VM'siz fiziksel sunucuda cihaz adı ↔ ERT
+  UNIXNAME, MSY seri → DnsName / DnsIp ↔ ERT — `ErtAd` / `ErtIp`, DegerleriYukleAsync'te `SELECT DISTINCT UNIXNAME, IPADDRESS, APPNAME`; chassis →
+  blade'leri) ile İLK UYAN kuralın boyut başına en yükseği. VM'i olan cihaza türe bağlı kural uygulanmaz (yanlış türde ESX). Varsayılan kurallar
+  (`VarsayilanKurallar`; appsettings `Fiziksel:DegerKurallari` [{Ad, Turler, Model, Isim, Kabin (regex), Degerler [5], Miras kabin|oda, Boyutlar "E"/"GB", Aciklama}]
+  doluysa onlar): Exadata modeli (`exadata|zdlra|exalogic|\bx\d+m?-\d+[a-z]*\b`) 5, kabin adında EXA 5, SAN switch (MDS / Brocade) 5, Firewall / LoadBalancer /
+  Network / Storage 5, KVM → kabinin G / B, PDU / PatchPanel → kabinin E, UPS / StaticSwitch / Cooling → odanın E (Diğer odada kabinin); mirasta İş de gelir,
+  Varlık = en yüksek(G, B, E). Kabin değeri = kabindeki VM uygulamaları + cihaz değerleri (kaynak "cihaz (kural: …)"). Kabin dışı (depo) değerlendirme dışı.
+  ERT analizi (canlı): Varlık hiçbir uygulamada en yüksek(G, B, E)'yi geçmiyor (%71 eşit, kalanı 1–3 düşük), İş ya E ya 0 → `DegerTamamla`: İş 0 / boş →
+  E, Varlık boş → en yüksek(G, B, E) (`AppTuretilen`). Uçlar `/api/fiziksel/kurallar` (KuralOzet: kural başına cihaz, değersiz cihazlar türe göre) ve `?csv=1`
+  (tüm kabin cihazları değer / yöntem / kaynak, Yetki:Disari). Kabin() host satırı, Oda(), Istatistik.kabinDeger (tüm kabinler), Ip().kabinDeger, Cihaz()
+  `deger` artık bundan; değer nesnesinde `yontem`. Arayüz: host detayında "nasıl: …", katlanır "Değer kuralları" bölümü (tablo, değersizler, CSV).
 - **VIP**: sorgulanan IP VIP ise üyeler + GW'ler aynı sorguya eklenir, üyeler "VIP ÜYESİ" (GW→üye trafiği varsa ✓).
   Gidilen IP VIP ise "VIP → n ÜYE"; gelen IP LB GW ise "LB GW"; sorgulanan sunucu havuz üyesiyse VIP kartı.
 - **Uygulama görünümü** (`/api/apps`, `/api/app`): `[kullanan uygulamalar] → [UYGULAMA: VIP'ler + segment grupları] → [bağımlı olunanlar]`,
