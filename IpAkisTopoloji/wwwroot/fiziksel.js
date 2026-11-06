@@ -46,12 +46,22 @@ function runFiziksel() {
   if (yetki && yetki.fiziksel === false) { fzYetkiYok(); return; }
   if (!$("#fzShell")) { fzShell(); fzDerinBaglanti(); }
 }
-// Yetki:Fiziksel (DokuPanel) yoksa sekme gizli; adresle (?fiziksel=1) gelinirse açıklama
+// Yetki:Fiziksel (DokuPanel) yoksa sayfa açılır ama hiçbir şey çalışmaz: veri yüklenmez, arama / oda seçici / düğmeler / bölümler pasif
 function fzYetkiYok() {
-  $("#main").innerHTML = `<div class="panel empty" style="color:var(--err)">Fiziksel envanter yetkiniz yok. Yetki DokuPanel'den verilir.</div>`;
+  if (uiMode !== "fiziksel") return;
+  if (!$("#fzShell")) fzShell(true);
+  const sh = $("#fzShell");
+  sh.classList.add("fz-kapali");
+  sh.querySelectorAll("input, select, button, textarea").forEach(x => { x.disabled = true; x.title = "Fiziksel envanter yetkiniz yok"; });
+  sh.querySelectorAll("details").forEach(d => { d.open = false; d.querySelector("summary")?.addEventListener("click", e => e.preventDefault()); });
+  sh.querySelectorAll("a").forEach(a => { a.removeAttribute("href"); a.tabIndex = -1; });
+  fz.ozet = null; fz.kabinVeri = null; fz.odaVeri = null;
+  $("#fzBilgi").textContent = "";
+  $("#fzPlan").innerHTML = `<div class="unk" style="color:var(--err)">🔒 Fiziksel envanter yetkiniz yok — sayfa görüntülenemez. Yetki DokuPanel'den verilir.</div>`;
+  $("#fzKabin").innerHTML = ""; $("#fzDetay").innerHTML = ""; $("#fzAra").innerHTML = ""; $("#fzIst").innerHTML = "";
 }
 
-function fzShell() {
+function fzShell(kapali) {
   $("#main").innerHTML = `<section class="panel" id="fzShell">
     <div class="toolbar">
       <h2 style="margin:0">🏢 Fiziksel envanter</h2>
@@ -84,7 +94,7 @@ function fzShell() {
   $("#fzEsl").addEventListener("toggle", e => { if (e.target.open && !fz.esl) fzEslYukle(); });
   $("#fzDisi").addEventListener("toggle", e => { if (e.target.open && !fz.disi) fzDisiYukle(); });
   $("#fzKural").addEventListener("toggle", e => { if (e.target.open && !fz.kural) fzKuralYukle(); });
-  fzOzetYukle();
+  if (!kapali) fzOzetYukle();
 }
 
 async function fzOzetYukle(yeniden) {
@@ -330,8 +340,9 @@ function fzDetayCiz() {
     const srv = !h.tur || h.tur === "Server" || (h.vmBilgisi && h.vm > 0);
     el.innerHTML = `<h2 style="margin:0 0 6px">${esc(h.ad)} <span class="badge" style="background:${fzTurRenk(h.tur)};color:#fff">${esc(fzTurAd(h.tur))}</span></h2>
       ${h.turUyari ? `<div class="small" style="color:var(--warn);margin:0 0 6px">⚠ ${esc(h.turUyari)}</div>` : ""}
-      ${h.deger ? `<div class="small" style="margin:0 0 6px" title="Boyut başına en yüksek değer; rozetin üstüne gelince değeri veren uygulama / kural">Değer: ${fzDeger(h.deger, true)}${h.deger.yontem ? `<div class="muted">nasıl: ${esc(h.deger.yontem)}</div>` : ""}</div>`
+      ${h.deger ? `<div class="small" style="margin:0 0 6px" title="Boyut başına en yüksek değer; rozetin üstüne gelince değeri veren uygulama / kural">Değer: ${fzDeger(h.deger, true)}${h.deger.elle ? ` <span class="badge" style="background:#8e44ad;color:#fff">elle</span>` : ""}${h.deger.yontem ? `<div class="muted">nasıl: ${esc(h.deger.yontem)}</div>` : ""}</div>`
         : `<div class="small muted" style="margin:0 0 6px">Değer bulunamadı: VM'i yok, ERT'de adı / IP'si eşleşmedi, tür kuralı yok (alttaki "Değer kuralları").</div>`}
+      ${h.assetId ? `<div style="margin:0 0 8px"><button type="button" class="mini" id="fzElleAc"${yetki?.fizikseldeger ? "" : ` disabled title="Elle değer yetkiniz yok (DokuPanel: Yetki:FizikselDeger)"`}>✎ Elle değer${h.deger?.elle ? " (düzenle / kaldır)" : ""}</button><div id="fzElle"></div></div>` : ""}
       <dl class="fz-dl">
         ${[["Malzeme tipi", h.tip], ["Durum", h.durum], ["Cluster", h.cluster], ["FQDN", h.fqdn], ["Model", h.model], ["Seri", h.seri], ["nlyte AssetID", h.assetId], ["Konum", h.uAlt != null ? `U${h.uAlt}${h.uYukseklik > 1 ? `–${h.uAlt + h.uYukseklik - 1}` : ""} · ${/rear/i.test(h.yuz ?? "") ? "arka" : "ön"} yüz` : "U bilgisi yok"],
            ["iLO", h.msy?.iloIp], ["Yönetim IP", h.msy?.dnsIp], ["OS", h.msy?.osName && `${h.msy.osName}${h.msy.osVersion ? " " + h.msy.osVersion : ""}`],
@@ -350,6 +361,7 @@ function fzDetayCiz() {
         : `<div class="small" style="margin-top:10px;color:var(--warn)">🔌 Kablo bağlantıları gösterilemiyor: ${k.kabloVar === undefined ? "sunucudaki DeltaFlow sürümü eski (FizikselEnvanter.cs kopyalanıp derlenmeli)"
           : !h.assetId ? "bu cihazın nlyte AssetID'si yok" : esc(k.kabloDurum ?? "dbo.NlyteBaglanti okunamadı ya da boş (tablo adı Fiziksel:Tablolar:NlyteBaglanti)")}</div>`}`;
     if (h.assetId && k.kabloVar) fzBagYukle(h.assetId);
+    $("#fzElleAc")?.addEventListener("click", () => fzElleForm(h));
     return;
   }
   const etki = fz.mod === "etki";
@@ -438,12 +450,84 @@ async function fzKuralYukle() {
       ${fmt(k.kabinDegerli)} / ${fmt(k.kabin)} kabinin değeri var. İlk uyan kural uygulanır; hesaplanan değer ile kural değerinin boyut başına en yükseği alınır.
       <div class="muted" style="margin-top:4px">Türetme (ERT analizi): Varlık = en yüksek(Gizlilik, Bütünlük, Erişilebilirlik); İş 0 / boşsa Erişilebilirlik — ${fmt(k.turetilenIs)} / ${fmt(k.uygulama)} uygulamada tamamlandı.
       Kabin dışı ${fmt(k.kabinDisi)} cihaz (depo / stok) değerlendirme dışı.${k.ayarli ? " Kurallar appsettings'ten (Fiziksel:DegerKurallari)." : " Varsayılan kurallar (appsettings Fiziksel:DegerKurallari ile değiştirilebilir)."}</div></div>
-    <div class="toolbar" style="margin:4px 0"><a class="mini" data-csv href="api/fiziksel/kurallar?csv=true" style="margin-left:auto" title="Tüm kabin cihazları: değer, yöntem, kaynak">Cihaz değerleri (CSV)</a></div>
+    <div class="toolbar" style="margin:4px 0;gap:6px;justify-content:flex-start">
+      <button type="button" class="mini" id="fzKaydet"${yetki?.fizikseldeger ? "" : ` disabled title="Kaydetme yetkiniz yok (DokuPanel: Yetki:FizikselDeger)"`}>💾 Değerleri kaydet (denetim kaydı)</button>
+      <a class="mini" data-csv href="api/fiziksel/deger/excel" title="Güncel hesap: Cihazlar, Kabinler, Kurallar, Elle değerler, Yöntem sayfaları">📊 Excel (güncel)</a>
+      <a class="mini" data-csv href="api/fiziksel/kurallar?csv=true" title="Tüm kabin cihazları: değer, yöntem, kaynak">CSV</a>
+      <span class="small muted" id="fzKaydetDurum"></span></div>
+    <div id="fzKayitlar" class="small muted">kayıtlar yükleniyor…</div>
+    <div id="fzElleListe"></div>
     <div class="tbl-wrap" style="max-height:40vh"><table><thead><tr><th>Kural</th><th>Koşul</th><th>Değer</th><th class="num">Cihaz</th><th>Gerekçe</th></tr></thead>
       <tbody>${k.kurallar.map(r => `<tr><td><b>${esc(r.ad)}</b></td><td class="small mono">${esc(kosul(r))}</td><td>${deger(r)}</td><td class="num">${fmt(r.cihaz)}</td><td class="small muted">${esc(r.aciklama ?? "")}</td></tr>`).join("")}</tbody></table></div>
     ${k.degersiz.length ? `<div class="small" style="margin:10px 0 4px"><b>Değeri bulunamayan cihazlar</b> <span class="muted">— VM'i yok, ERT'de eşleşmedi, kuralı yok (sunucularda büyük ihtimalle ERT'de adı farklı)</span></div>
       <div class="tbl-wrap" style="max-height:30vh"><table><thead><tr><th>Tür</th><th class="num">Cihaz</th><th>Örnek</th></tr></thead>
       <tbody>${k.degersiz.map(x => `<tr><td>${esc(fzTurAd(x.tur))}</td><td class="num">${fmt(x.adet)}</td><td class="small mono">${esc(x.ornek.join(", "))}</td></tr>`).join("")}</tbody></table></div>` : ""}`;
+  $("#fzKaydet").addEventListener("click", fzDegerKaydet);
+  fzKayitlarYukle(); fzElleListeYukle();
+}
+
+// Denetim kaydı: o anki hesap DF_FIZIKSEL_DEGER_* tablolarına tarihli yazılır; her kaydın Excel'i
+async function fzDegerKaydet() {
+  const ac = prompt("Kayıt açıklaması (ör. 2026 Q4 denetim):", "");
+  if (ac === null) return;
+  const d = $("#fzKaydetDurum"); d.innerHTML = `<span class="spinner"></span> kaydediliyor…`;
+  try {
+    const r = await fetch("api/fiziksel/deger/kaydet", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ aciklama: ac }) });
+    const b = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(b.error || `HTTP ${r.status}`);
+    d.innerHTML = `<span style="color:var(--ok, #2e9d5b)">✓ Kayıt #${b.kayitId}: ${fmt(b.cihaz)} cihaz, ${fmt(b.kabin)} kabin</span>`;
+    fzKayitlarYukle();
+  } catch (e) { d.innerHTML = `<span style="color:var(--err)">${esc(e.message)}</span>`; }
+}
+async function fzKayitlarYukle() {
+  const el = $("#fzKayitlar"); if (!el) return;
+  let b; try { b = await fzGet("api/fiziksel/deger/kayitlar"); } catch (e) { el.innerHTML = `<span style="color:var(--err)">${esc(e.message)}</span>`; return; }
+  el.innerHTML = b.durum ? `<div style="color:var(--warn);margin:6px 0">⚠ ${esc(b.durum)}</div>`
+    : !b.kayitlar.length ? `<div class="muted" style="margin:6px 0">Henüz denetim kaydı yok.</div>`
+    : `<div class="small" style="margin:10px 0 4px"><b>Denetim kayıtları</b> <span class="muted">— veritabanında (DF_FIZIKSEL_DEGER_KAYIT); Excel kayıttaki değerlerle birebir</span></div>
+      <div class="tbl-wrap" style="max-height:24vh"><table><thead><tr><th>#</th><th>Tarih</th><th>Kaydeden</th><th>Açıklama</th><th class="num">Cihaz</th><th class="num">Kabin</th><th>nlyte verisi</th><th></th></tr></thead>
+      <tbody>${b.kayitlar.map(x => `<tr><td class="num">${x.kayitId}</td><td class="small">${new Date(x.tarih).toLocaleString("tr-TR")}</td><td class="small">${esc(x.kaydeden ?? "")}</td>
+        <td class="small">${esc(x.aciklama ?? "")}</td><td class="num">${fmt(x.cihaz)}</td><td class="num">${fmt(x.kabin)}</td><td class="small muted">${x.veriTarihi ? new Date(x.veriTarihi).toLocaleString("tr-TR") : ""}</td>
+        <td><a class="mini" data-csv href="api/fiziksel/deger/excel?kayit=${x.kayitId}">📊 Excel</a></td></tr>`).join("")}</tbody></table></div>`;
+}
+async function fzElleListeYukle() {
+  const el = $("#fzElleListe"); if (!el) return;
+  let b; try { b = await fzGet("api/fiziksel/deger/elle"); } catch (e) { el.innerHTML = `<span class="small" style="color:var(--err)">${esc(e.message)}</span>`; return; }
+  const dv = x => fzDeger({ v: x.v, i: x.i, e: x.e, g: x.g, b: x.b });
+  el.innerHTML = b.durum ? `<div class="small" style="color:var(--warn);margin:6px 0">⚠ Elle değerler: ${esc(b.durum)}</div>`
+    : !b.elle.length ? "" : `<div class="small" style="margin:10px 0 4px"><b>Elle değerler (${fmt(b.elle.length)})</b> <span class="muted">— hesaplanan değerin yerine geçer; cihazın detayından değiştirilir</span></div>
+      <div class="tbl-wrap" style="max-height:24vh"><table><thead><tr><th>Cihaz</th><th>Kabin</th><th>Değer</th><th>Gerekçe</th><th>Kaydeden</th><th>Tarih</th></tr></thead>
+      <tbody>${b.elle.map(x => `<tr><td class="mono small">${x.var && x.kabin ? `<a href="#" data-fzc="${esc(x.kabin)}" data-fzch="${esc(x.cihaz ?? "")}">${esc(x.cihaz ?? x.assetId)}</a>` : esc(x.cihaz ?? x.assetId) + (x.var ? "" : ` <span class="muted">(nlyte'ta yok)</span>`)}</td>
+        <td class="small">${esc(x.kabin ?? "")}</td><td>${dv(x)}</td><td class="small">${esc(x.gerekce)}</td><td class="small">${esc(x.kaydeden ?? "")}</td><td class="small muted">${new Date(x.tarih).toLocaleString("tr-TR")}</td></tr>`).join("")}</tbody></table></div>`;
+  el.querySelectorAll("[data-fzc]").forEach(a => a.addEventListener("click", ev => { ev.preventDefault(); fzKabinAc(a.dataset.fzc, a.dataset.fzch); }));
+}
+// Elle değer formu (cihaz detayı): boş bırakılan boyut hesaplanandan gelir; Varlık / İş boşsa elle değerlerden türetilir
+function fzElleForm(h) {
+  const el = $("#fzElle"), d = h.deger ?? {};
+  const sec = (k, ad) => `<label style="flex-direction:column;align-items:flex-start;gap:2px" class="small">${ad}<select data-ek="${k}"><option value="">—</option>${[5, 4, 3, 2, 1, 0].map(n => `<option${d.elle && d[k] === n && String(d.kaynak?.[k] ?? "").startsWith("elle") ? " selected" : ""}>${n}</option>`).join("")}</select></label>`;
+  el.innerHTML = `<div class="panel" style="margin-top:6px;padding:8px">
+    <div class="small muted" style="margin-bottom:6px">Boş (—) bırakılan boyut hesaplanan değerden gelir; Varlık boşsa en yüksek(G, B, E), İş boşsa Erişilebilirlik olur. Gerekçe denetim kaydına girer.</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">${FZ_DEGER.map(([k, , ad]) => sec(k, ad)).join("")}</div>
+    <textarea id="fzElleGer" rows="2" style="width:100%;margin-top:6px" placeholder="Gerekçe (zorunlu): ör. test ortamı cihazı, üretim trafiği yok"></textarea>
+    <div style="display:flex;gap:6px;margin-top:6px"><button type="button" class="mini" id="fzElleKaydet">Kaydet</button>
+      ${d.elle ? `<button type="button" class="mini" id="fzElleSil">Elle değeri kaldır</button>` : ""}<button type="button" class="mini" id="fzElleKapat">Vazgeç</button>
+      <span class="small" id="fzElleDurum"></span></div></div>`;
+  const gonder = async sil => {
+    const q = { assetId: h.assetId, gerekce: $("#fzElleGer").value, sil };
+    el.querySelectorAll("[data-ek]").forEach(s => q[s.dataset.ek] = s.value === "" ? null : Number(s.value));
+    $("#fzElleDurum").innerHTML = `<span class="spinner"></span>`;
+    try {
+      const r = await fetch("api/fiziksel/deger/elle", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(q) });
+      const b = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(b.error || `HTTP ${r.status}`);
+      fz.kural = null; fz.odaVeri = null;
+      if (fz.oda) await fzOdaAc(fz.oda);
+      await fzKabinAc(fz.kabin, h.ad);
+    } catch (e) { $("#fzElleDurum").innerHTML = `<span style="color:var(--err)">${esc(e.message)}</span>`; }
+  };
+  $("#fzElleKaydet").addEventListener("click", () => gonder(false));
+  $("#fzElleSil")?.addEventListener("click", () => { if (confirm("Elle değer kaldırılsın mı? Hesaplanan değere dönülür.")) gonder(true); });
+  $("#fzElleKapat").addEventListener("click", () => el.innerHTML = "");
 }
 
 async function fzEksikYukle() {

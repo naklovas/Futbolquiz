@@ -286,7 +286,8 @@
 /* İşlem yetkileri (/api/me → yetki; DokuPanel, Yetki.cs): yüklenene kadar ve yetki yoksa dışa aktarma / topoloji çizme düğmeleri gizli */
 body.no-disari #dlSvg, body.no-disari #dlPng, body.no-disari [data-csv] { display:none !important; }
 body.no-tls [data-ui="tls"] { display:none !important; }
-body.no-fiziksel [data-ui="fiziksel"] { display:none !important; }
+/* Fiziksel envanter: sekme görünür, yetki yoksa sayfa açılır ama tüm denetimler pasif (fiziksel.js fzYetkiYok) */
+#fzShell.fz-kapali .toolbar, #fzShell.fz-kapali details { opacity: .5; pointer-events: none; }
 body.no-topoloji .need-topo, body.no-topoloji #ivDep, body.no-topoloji #ktAgain { display:none !important; }
 </style>
 </head>

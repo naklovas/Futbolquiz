@@ -77,6 +77,8 @@ sealed class FizikselSnapshot
     public Dictionary<string, HashSet<string>> ErtIp { get; } = new(StringComparer.OrdinalIgnoreCase);
     public Dictionary<string, string> AppTuretilen { get; } = new(StringComparer.OrdinalIgnoreCase);   // İş değeri E'den tamamlanan uygulamalar
     public FizDegerSonuc? DegerOnbellek { get; set; }
+    public Dictionary<string, FizElle> Elle { get; } = new(StringComparer.OrdinalIgnoreCase);   // AssetID → elle değer (DF_FIZIKSEL_DEGER_ELLE)
+    public string? ElleDurum { get; set; }
     // Planda gösterilecek tüm kabinler: nlyte kabinleri + KabinHostVm'de geçenler
     public IEnumerable<string> TumKabinler => Kabinler.Keys.Union(KabinVm.Keys, StringComparer.OrdinalIgnoreCase);
 }
@@ -255,6 +257,7 @@ sealed partial class FizikselService(IConfiguration cfg, ILogger<FizikselService
 
         var snap = Olustur(vmler, eksik, tablodan, kabinler, cihazlar, chassisler, hostAsset, msy, AnaKapsam);
         await DegerleriYukleAsync(conn, snap, ct);
+        await ElleYukleAsync(conn, snap, ct);
         await BaglantilariYukleAsync(conn, snap, ct);
         snap.CihazTablosu = cihazTablo;
         return snap;

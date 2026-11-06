@@ -44,6 +44,7 @@ topoloji çizer ve şirket içi AI'a etki analizi yaptırır. Canlıda IIS'te, W
 | `TlsAkis.cs` | TLS bağlantıları: AppResponse tls_handshakes, IP'nin gelen / giden el sıkışmalarında kullanılan TLS sürümleri |
 | `FizikselEnvanter.cs` | Fiziksel envanter: nlyte kabin → host → VM → uygulama (doku DB'deki KabinHostVm vb., yalnız okur; `wwwroot/fiziksel.js`) |
 | `FizikselDeger.cs` | Fiziksel cihaz değerleri (V / İ / E / G / B): tür / model / kabin kuralları, miras, ERT ad eşleşmesi (`partial FizikselService`) |
+| `FizikselKayit.cs` | Fiziksel değer denetim kaydı (DF_FIZIKSEL_DEGER_*), elle değer, çok sayfalı Excel (`Xlsx` yazıcı, dış kütüphanesiz) |
 | `Nessus.cs` | Nessus / Tenable.sc: repository'deki tarama sonuçlarından teknoloji, sertifika, OS, kurulu yazılım |
 | `Yetki.cs` | İşlem yetkileri (yazma, topoloji, dışa aktarma, toplu tahmin) — DokuPanel site kayıtları |
 | `AuthHelper.cs` | Kullanıcının verdiği DokuPanel yetki helper'ı (namespace `AppRel`), anahtar config'den |
@@ -647,6 +648,18 @@ erişim talepleri) — DB → şema → tablo ve kim erişiyor bilgisi buradan b
   E, Varlık boş → en yüksek(G, B, E) (`AppTuretilen`). Uçlar `/api/fiziksel/kurallar` (KuralOzet: kural başına cihaz, değersiz cihazlar türe göre) ve `?csv=1`
   (tüm kabin cihazları değer / yöntem / kaynak, Yetki:Disari). Kabin() host satırı, Oda(), Istatistik.kabinDeger (tüm kabinler), Ip().kabinDeger, Cihaz()
   `deger` artık bundan; değer nesnesinde `yontem`. Arayüz: host detayında "nasıl: …", katlanır "Değer kuralları" bölümü (tablo, değersizler, CSV).
+  DENETİM KAYDI + ELLE DEĞER + EXCEL (`FizikselKayit.cs`, betik `sql/fiziksel_deger.sql`; kullanıcı: "denetçi rapor isterse; DB'ye alalım, gerekirse elle
+  değiştirelim, Excel de olsun, yetki DokuPanel'den"): tablolar `Fiziksel:DegerTablolari` (Kayit dbo.DF_FIZIKSEL_DEGER_KAYIT başlık: tarih, kaydeden, açıklama,
+  sayılar, VERI_TARIHI, KURALLAR JSON; Cihaz dbo.DF_FIZIKSEL_DEGER; Kabin dbo.DF_FIZIKSEL_DEGER_KABIN; Elle dbo.DF_FIZIKSEL_DEGER_ELLE AssetID PK, gerekçe zorunlu).
+  DeltaFlow yalnız bu DF_ tablolarına yazar. ELLE: snapshot yüklenirken okunur (`s.Elle`, tablo yoksa `ElleDurum`); `ElleUygula` dolu boyutları hesaplananın
+  YERİNE koyar (düşürebilir), girilmeyen Varlık = en yüksek(G, B, E), İş = E; kabin değerine de yansır; yazınca önbellek (`DegerOnbellek`) sıfırlanır.
+  Uçlar: GET `/api/fiziksel/deger/kayitlar`, POST `/deger/kaydet {aciklama}` (transaction + SqlBulkCopy), GET/POST `/deger/elle {assetId, v,i,e,g,b, gerekce, sil}`,
+  GET `/deger/excel?kayit=` (kayıt yoksa güncel hesap; sayfalar Cihazlar, Kabinler, Kurallar, Elle değerler, Yöntem; `Xlsx.Yaz` inlineStr, ilk satır kalın +
+  dondurulmuş + filtre). YETKİ: yeni `Yetki:FizikselDeger` (kaydet + elle; Fiziksel de gerekir; boşsa Yazma), Excel = Fiziksel + Disari. Kullanıcı: "yetkisi
+  olmayan görüntüleme de yapamasın, combobox / hiçbir şey aktif olmasın" → sekme artık GİZLENMİYOR; Yetki:Fiziksel yoksa `fzYetkiYok` sayfa kabuğunu veri
+  yüklemeden çizer, tüm input / select / button pasif, bölümler açılmaz, kilit mesajı (`#fzShell.fz-kapali`). Arayüz: cihaz detayında "✎ Elle değer" formu
+  (boyut başına — / 0–5, gerekçe, kaldır; yetkisizse pasif), "elle" rozeti; "Değer kuralları"nda "💾 Değerleri kaydet", "📊 Excel (güncel)", CSV, denetim
+  kayıtları tablosu (kayıt başına Excel), elle değerler listesi. Sahte veriyle Excel (openpyxl ile açıldı) ve Playwright'la yetkisiz / yetkili akış test edildi.
 - **VIP**: sorgulanan IP VIP ise üyeler + GW'ler aynı sorguya eklenir, üyeler "VIP ÜYESİ" (GW→üye trafiği varsa ✓).
   Gidilen IP VIP ise "VIP → n ÜYE"; gelen IP LB GW ise "LB GW"; sorgulanan sunucu havuz üyesiyse VIP kartı.
 - **Uygulama görünümü** (`/api/apps`, `/api/app`): `[kullanan uygulamalar] → [UYGULAMA: VIP'ler + segment grupları] → [bağımlı olunanlar]`,
@@ -682,7 +695,7 @@ erişim talepleri) — DB → şema → tablo ve kim erişiyor bilgisi buradan b
   eslesmeyen, kabindisi, yenile; `FizY`) 403, sekme `body.no-fiziksel` ile gizli, `?fiziksel=1` → "yetkiniz yok" (`fzYetkiYok`); IP kartındaki
   konum satırı `/api/fiziksel/ip` serbest, yetkisizde kabin adı bağlantısız; boşsa Topoloji ile aynı). Auth ara katmanı /api isteklerinde yapılandırılmış siteleri
   `AuthHelper.YetkiKontrol(ctx, cfg, siteAdi)` ile sorar (kullanıcı + site başına `Auth:CacheMinutes`; aynı ad tek sorgu) →
-  `context.Items["Yetki"]` → `Yetki.Var(cfg, ctx, tür)`. `/api/me` → `yetki {yazma, topoloji, disari, toplu, tls, fiziksel}`; topoloji.html body
+  `context.Items["Yetki"]` → `Yetki.Var(cfg, ctx, tür)`. `/api/me` → `yetki {yazma, topoloji, disari, toplu, tls, fiziksel, fizikseldeger}`; topoloji.html body
   `no-disari` / `no-topoloji` / `no-tls` sınıfları (yüklenene kadar gizli). DokuPanel'e ulaşılamazsa o işlem kapalı. Görüntüleme (IP / uygulama
   sorgusu, işlev haritası, kayıtlı versiyonlar) yalnız sayfa yetkisiyle açık.
 - Marka: **DeltaFlow** adı ve logosu.

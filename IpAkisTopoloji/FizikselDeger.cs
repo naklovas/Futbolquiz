@@ -126,6 +126,9 @@ sealed partial class FizikselService
                 var bl = cs.Where(b => string.Equals(b.ChassisId, ch.AssetId, StringComparison.OrdinalIgnoreCase) && r.Cihaz.ContainsKey(b)).Select(b => r.Cihaz[b] with { Yontem = "blade'lerinden" });
                 if (bl.Aggregate((FizDv?)null, EnYuksek) is { } bd) r.Cihaz[ch] = EnYuksek(r.Cihaz.GetValueOrDefault(ch), bd)! with { Yontem = "blade'lerinden" };
             }
+            // elle değerler (DF_FIZIKSEL_DEGER_ELLE) hesaplananın yerine geçer; mirasla değer alanlara mirastan sonra uygulanır
+            foreach (var c in cs)
+                if (!miras.Any(m => ReferenceEquals(m.C, c)) && ElleUygula(s, c, r.Cihaz.GetValueOrDefault(c)) is { } el) r.Cihaz[c] = el;
             // kabinin değeri: cihazları + kabindeki tüm VM'ler (nlyte cihazıyla eşleşmeyen host'lar dahil)
             FizDv? kv = Dv(s, (s.KabinVm.GetValueOrDefault(kabin) ?? []).SelectMany(v => v.Uygulamalar), "VM'lerin uygulamalarından");
             foreach (var c in cs) if (r.Cihaz.TryGetValue(c, out var cd)) kv = EnYuksek(kv, cd with { Kaynak = cd.Kaynak.Select(x => x == null ? null : $"{c.Ad} ({x})").ToArray() });
@@ -139,7 +142,7 @@ sealed partial class FizikselService
             string odaAd = Parcala(kabin).Oda ?? "Diğer";
             bool odadan = k.Miras!.Equals("oda", StringComparison.OrdinalIgnoreCase) && odaAd != "Diğer";
             var src = odadan ? oda.GetValueOrDefault(odaAd) : r.Kabin.GetValueOrDefault(kabin);
-            if (src == null) continue;
+            if (src == null) continue;   // kabinin / odanın değeri yok (elle değer aşağıda yine uygulanır)
             string bas = odadan ? $"{odaAd} odasından" : $"{kabin} kabininden";
             var d = new int?[5]; var kay = new string?[5];
             var boy = (k.Boyutlar ?? "E").ToUpperInvariant();
@@ -149,6 +152,7 @@ sealed partial class FizikselService
             var md = new FizDv(d, kay, $"kural: {k.Ad} ({bas} miras: {string.Join(", ", boy.Select(h => h switch { 'E' => "erişilebilirlik", 'G' => "gizlilik", 'B' => "bütünlük", _ => h.ToString() }))})");
             if (EnYuksek(r.Cihaz.GetValueOrDefault(c), md) is { } son) r.Cihaz[c] = son;
         }
+        foreach (var (c, _, _) in miras) if (ElleUygula(s, c, r.Cihaz.GetValueOrDefault(c)) is { } el) r.Cihaz[c] = el;
         return s.DegerOnbellek = r;
     }
 
@@ -156,7 +160,7 @@ sealed partial class FizikselService
     static object? DvObj(FizDv? x) => x == null ? null : new
     {
         v = x.D[0], i = x.D[1], e = x.D[2], g = x.D[3], b = x.D[4],
-        kaynak = new { v = x.Kaynak[0], i = x.Kaynak[1], e = x.Kaynak[2], g = x.Kaynak[3], b = x.Kaynak[4] }, yontem = x.Yontem,
+        kaynak = new { v = x.Kaynak[0], i = x.Kaynak[1], e = x.Kaynak[2], g = x.Kaynak[3], b = x.Kaynak[4] }, yontem = x.Yontem, elle = x.Yontem.StartsWith("elle"),
     };
     object? CihazDeger(FizikselSnapshot s, FizCihaz? c) => c != null && Degerler(s).Cihaz.TryGetValue(c, out var d) ? DvObj(d) : null;
     object? KabinDeger(FizikselSnapshot s, string? kabin) => kabin != null && Degerler(s).Kabin.TryGetValue(kabin, out var d) ? DvObj(d) : null;
@@ -179,6 +183,7 @@ sealed partial class FizikselService
             degersiz = aktif.Where(c => !r.Cihaz.ContainsKey(c)).GroupBy(c => c.Tur, StringComparer.OrdinalIgnoreCase)
                 .Select(g => new { tur = g.Key, adet = g.Count(), ornek = g.Select(c => c.Ad).Take(5).ToList() }).OrderByDescending(x => x.adet).ToList(),
             kabin = s.TumKabinler.Count(), kabinDegerli = r.Kabin.Count,
+            elleSayisi = s.Elle.Count, elleDurum = s.ElleDurum,
             turetilenIs = s.AppTuretilen.Count, uygulama = s.AppDeger.Count, kabinDisi = s.KabinDisi.Count(c => c.Aktif),
         };
     }

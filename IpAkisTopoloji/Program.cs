@@ -832,6 +832,25 @@ app.MapGet("/api/fiziksel/eslesmeyen", (string? csv, HttpContext ctx, IConfigura
 }));
 app.MapGet("/api/fiziksel/cihaz", (string id, HttpContext ctx, IConfiguration cfg, FizikselService f, CancellationToken ct) =>
     FizY(ctx, cfg, f, ct, s => f.Cihaz(s, id) is { } c ? Results.Ok(c) : Results.NotFound(new { error = $"Cihaz bulunamadı: {id}" })));
+// Değer kaydı / elle değer (Yetki:FizikselDeger) ve Excel (Yetki:Fiziksel + Disari); FizikselKayit.cs
+static async Task<IResult> FizA(HttpContext ctx, IConfiguration cfg, FizikselService f, CancellationToken ct, string tur, string ne, Func<FizikselSnapshot, Task<IResult>> run)
+{
+    if (!Yetki.Var(cfg, ctx, Yetki.Fiziksel)) return Yetki.Red(ctx, "Fiziksel envanter");
+    if (tur != Yetki.Fiziksel && !Yetki.Var(cfg, ctx, tur)) return Yetki.Red(ctx, ne);
+    try { return await run(await f.GetAsync(false, ct)); }
+    catch (OperationCanceledException) when (ct.IsCancellationRequested) { return Results.StatusCode(499); }
+    catch (Exception ex) { return Results.Json(new { error = ex.Message }, statusCode: 502); }
+}
+app.MapGet("/api/fiziksel/deger/kayitlar", (HttpContext ctx, IConfiguration cfg, FizikselService f, CancellationToken ct) =>
+    FizA(ctx, cfg, f, ct, Yetki.Fiziksel, "", s => f.KayitlarAsync(ct)));
+app.MapPost("/api/fiziksel/deger/kaydet", (FizKayitIstek q, HttpContext ctx, IConfiguration cfg, FizikselService f, CancellationToken ct) =>
+    FizA(ctx, cfg, f, ct, Yetki.FizikselDeger, "Fiziksel değer kaydetme", s => f.KaydetAsync(s, q.Aciklama, ctx.User?.Identity?.Name, ct)));
+app.MapGet("/api/fiziksel/deger/elle", (HttpContext ctx, IConfiguration cfg, FizikselService f, CancellationToken ct) =>
+    FizA(ctx, cfg, f, ct, Yetki.Fiziksel, "", s => Task.FromResult(Results.Ok(f.ElleListe(s)))));
+app.MapPost("/api/fiziksel/deger/elle", (FizElleIstek q, HttpContext ctx, IConfiguration cfg, FizikselService f, CancellationToken ct) =>
+    FizA(ctx, cfg, f, ct, Yetki.FizikselDeger, "Elle değer girme", s => f.ElleYazAsync(s, q, ctx.User?.Identity?.Name, ct)));
+app.MapGet("/api/fiziksel/deger/excel", (int? kayit, HttpContext ctx, IConfiguration cfg, FizikselService f, CancellationToken ct) =>
+    FizA(ctx, cfg, f, ct, Yetki.Disari, "Dışa aktarma", s => f.ExcelAsync(s, kayit, ctx.User?.Identity?.Name, ct)));
 app.MapGet("/api/fiziksel/kurallar", (string? csv, HttpContext ctx, IConfiguration cfg, FizikselService f, CancellationToken ct) => FizY(ctx, cfg, f, ct, s =>
     csv is "1" or "true" or "True"
         ? !Yetki.Var(cfg, ctx, Yetki.Disari) ? Yetki.Red(ctx, "Dışa aktarma")
