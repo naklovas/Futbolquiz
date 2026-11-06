@@ -15,7 +15,8 @@ const FZ_TUR = {
 };
 // Uygulama değerleri (ERT VARLIKDEGERI…): VM = uygulamalarının en yükseği, host / kabin = içindekilerin en yükseği
 const FZ_DEGER = [["v", "V", "Varlık"], ["i", "İ", "İş"], ["e", "E", "Erişilebilirlik"], ["g", "G", "Gizlilik"], ["b", "B", "Bütünlük"]];
-const fzDegerRenk = n => n == null ? "var(--line)" : n >= 3 ? "#c0392b" : n === 2 ? "#e67e22" : n === 1 ? "#2e9d5b" : "#95a5a6";
+// değerler 0–5 (canlıda 5'e kadar görüldü): 5 koyu kırmızı, 4 kırmızı, 3 turuncu-kırmızı, 2 turuncu, 1 yeşil, 0 gri
+const fzDegerRenk = n => n == null ? "var(--line)" : n >= 5 ? "#8e1b10" : n === 4 ? "#c0392b" : n === 3 ? "#d35400" : n === 2 ? "#e69a22" : n === 1 ? "#2e9d5b" : "#95a5a6";
 function fzDeger(d, uzun) {
   if (!d) return "";
   return `<span class="fz-dg">${FZ_DEGER.filter(([k]) => d[k] != null).map(([k, kisa, ad]) =>
@@ -131,6 +132,9 @@ function fzIstCiz(i) {
       ${i.degerVar && i.kabinDeger ? kart("Kabin değerleri", `${fmt(i.kabinDeger[2]?.["3"] ?? 0)} <span class="small muted">kabin erişilebilirlik 3</span>`,
         FZ_DEGER.map(([, , ad], j) => `${ad}: ${Object.entries(i.kabinDeger[j] ?? {}).map(([d, n]) => `${d === "yok" ? "değer yok" : d} → ${fmt(n)}`).join(", ")}`).join("<br>"),
         "Kabin değeri = kabindeki VM'lerin uygulamalarının en yüksek değeri (ERT); VM'li kabinler", "#c0392b") : ""}
+      ${i.kabloVar ? kart("Kablo kaydı", `${fmt(i.kabinKablolu)} / ${fmt(i.kabin)} kabin`,
+        `sunucu: ${fmt(i.sunucuKablolu)} / ${fmt(i.sunucu)} (veri / fiber: ${fmt(i.sunucuVeri)})<br>VM'li host: ${fmt(i.hostVmliVeri)} / ${fmt(i.hostVmli)} veri / fiber kablolu<br>${fmt(i.kablo)} kablo`,
+        "nlyte Connections: en az bir cihazında kablo kaydı olan kabin; oda planında Renk → Kablo kaydı", "#2e9d5b") : ""}
       ${kart("Kabin", fmt(i.kabin), `cihazlı: ${fmt(i.kabinCihazli)} · VM'li: ${fmt(i.kabinVmli)} · ${fmt(i.cihaz)} aktif cihaz`, "nlyte kabinleri", "var(--muted)")}
     </div>`;
 }
@@ -154,15 +158,17 @@ function fzPlanCiz() {
   const ekSay = new Map(); for (const k of ekler) ekSay.set(k.ek, [...(ekSay.get(k.ek) ?? []), k.ad]);
   const maxVm = Math.max(1, ...v.kabinler.map(k => k.vm));
   // renk VM sayısına göre; VM'i olmayan ama cihazı olan kabin gri, hiç cihazı olmayan kesikli çerçeve
-  const dg = fz.renk && fz.renk !== "vm" ? fz.renk : null;
+  const kb = fz.renk === "kablo", dg = fz.renk && fz.renk !== "vm" && !kb ? fz.renk : null;
   const tile = k => {
     const p = 12 + Math.round(78 * k.vm / maxVm), koyu = p > 55;
     const tur = k.vm > 0 ? "" : (k.cihaz ?? 0) > 0 ? " vmsiz" : " bosk";
     const dv = dg ? k.deger?.[dg] : null;
-    const stil = dg ? (dv != null ? ` style="background:${fzDegerRenk(dv)};color:#fff"` : "")
+    const kp = k.cihaz ? k.kablo / k.cihaz : 0;
+    const stil = kb ? (k.kablo > 0 ? ` style="background:color-mix(in srgb, #2e9d5b ${20 + Math.round(70 * kp)}%, var(--panel));color:${kp > 0.5 ? "#fff" : "var(--text)"}"` : "")
+      : dg ? (dv != null ? ` style="background:${fzDegerRenk(dv)};color:#fff"` : "")
       : k.vm > 0 ? ` style="background:color-mix(in srgb, var(--in) ${p}%, var(--panel));color:${koyu ? "#fff" : "var(--text)"}"` : "";
     return `<button type="button" class="fz-tile${tur}${fz.kabin === k.ad ? " on" : ""}${fz.vurgu.has(k.ad) ? " vurgu" : ""}" data-kabin="${esc(k.ad)}"${stil}
-      title="${esc(k.ad)} · ${k.turlar?.length ? esc(fzTurOzet(k.turlar, k.cihaz)) : fmt(k.cihaz ?? k.host) + " nlyte cihazı"} · ${fmt(k.vmHost ?? k.host)} VM'li host · ${fmt(k.vm)} VM · ${fmt(k.uygulama)} uygulama${k.bosU != null ? ` · ${k.bosU} boş U` : ""}${k.vm ? "" : (k.cihaz ? " — VM bilgisi olan host yok" : " — nlyte'ta cihaz yok")}${k.deger ? " · değer " + esc(fzDegerMetin(k.deger)) : ""}${ekSay.has(k.ad) ? " · aynı konumda ek kayıt: " + esc(ekSay.get(k.ad).join(", ")) : ""}">${esc(k.sira ? k.sira + k.no : k.ad)}${ekSay.has(k.ad) ? `<sup class="fz-ek">+${ekSay.get(k.ad).length}</sup>` : ""}</button>`;
+      title="${esc(k.ad)} · ${k.turlar?.length ? esc(fzTurOzet(k.turlar, k.cihaz)) : fmt(k.cihaz ?? k.host) + " nlyte cihazı"} · ${fmt(k.vmHost ?? k.host)} VM'li host · ${fmt(k.vm)} VM · ${fmt(k.uygulama)} uygulama${k.kablo != null ? ` · kablolu cihaz ${fmt(k.kablo)} / ${fmt(k.cihaz ?? 0)}` : ""}${k.bosU != null ? ` · ${k.bosU} boş U` : ""}${k.vm ? "" : (k.cihaz ? " — VM bilgisi olan host yok" : " — nlyte'ta cihaz yok")}${k.deger ? " · değer " + esc(fzDegerMetin(k.deger)) : ""}${ekSay.has(k.ad) ? " · aynı konumda ek kayıt: " + esc(ekSay.get(k.ad).join(", ")) : ""}">${esc(k.sira ? k.sira + k.no : k.ad)}${ekSay.has(k.ad) ? `<sup class="fz-ek">+${ekSay.get(k.ad).length}</sup>` : ""}</button>`;
   };
   const btn = (k, not) => `<button type="button" class="mini${fz.kabin === k.ad ? " on" : ""}${fz.vurgu.has(k.ad) ? " vurgu" : ""}" data-kabin="${esc(k.ad)}" title="${fmt(k.cihaz ?? 0)} cihaz · ${fmt(k.vm)} VM${k.deger ? " · değer " + esc(fzDegerMetin(k.deger)) : ""}">${esc(k.ad)} <span class="muted">${not ? esc(not) + " · " : ""}${fmt(k.cihaz ?? 0)}c${k.vm ? " · " + fmt(k.vm) + " VM" : ""}</span></button>`;
   let plan = "";
@@ -178,8 +184,9 @@ function fzPlanCiz() {
   const vmli = v.kabinler.filter(k => k.vm > 0).length, cihazli = v.kabinler.filter(k => !k.vm && k.cihaz > 0).length, bos = v.kabinler.length - vmli - cihazli;
   el.innerHTML = `<div class="small muted" style="margin-bottom:6px">${esc(v.ad)} · ${fmt(v.kabinler.length)} kabin · ${fmt(v.kabinler.reduce((a, k) => a + k.vm, 0))} VM
       <div class="fz-lejant"><label style="flex-direction:row;align-items:center;gap:4px" title="Kabin değeri = kabindeki VM'lerin uygulamalarının en yüksek değeri (ERT)">Renk
-        <select id="fzRenk"><option value="vm">VM sayısı</option>${FZ_DEGER.map(([k, , ad]) => `<option value="${k}"${fz.renk === k ? " selected" : ""}>${ad} değeri</option>`).join("")}</select></label>
-      ${dg ? [3, 2, 1, 0].map(n => `<span><i style="background:${fzDegerRenk(n)}"></i>${n} (${v.kabinler.filter(k => k.deger?.[dg] === n).length})</span>`).join("")
+        <select id="fzRenk"><option value="vm">VM sayısı</option><option value="kablo"${kb ? " selected" : ""}>Kablo kaydı</option>${FZ_DEGER.map(([k, , ad]) => `<option value="${k}"${fz.renk === k ? " selected" : ""}>${ad} değeri</option>`).join("")}</select></label>
+      ${kb ? `<span><i style="background:color-mix(in srgb, #2e9d5b 80%, var(--panel))"></i>cihazların çoğu kablolu (${v.kabinler.filter(k => k.cihaz && k.kablo / k.cihaz > 0.5).length})</span><span><i style="background:color-mix(in srgb, #2e9d5b 30%, var(--panel))"></i>bir kısmı (${v.kabinler.filter(k => k.kablo > 0 && k.kablo / k.cihaz <= 0.5).length})</span><span><i class="bosk"></i>kablo kaydı yok (${v.kabinler.filter(k => !k.kablo).length})</span>`
+        : dg ? [...new Set(v.kabinler.map(k => k.deger?.[dg]).filter(n => n != null))].sort((a, b) => b - a).map(n => `<span><i style="background:${fzDegerRenk(n)}"></i>${n} (${v.kabinler.filter(k => k.deger?.[dg] === n).length})</span>`).join("")
           + `<span><i class="bosk"></i>değer yok (${v.kabinler.filter(k => k.deger?.[dg] == null).length})</span>`
         : `<span><i style="background:color-mix(in srgb, var(--in) 55%, var(--panel))"></i>VM'li (${vmli})</span><span><i class="vmsiz"></i>cihaz var, VM yok (${cihazli})</span><span><i class="bosk"></i>cihaz yok (${bos})</span>`}</div></div>
     <div class="fz-plan-wrap">${plan}</div>
@@ -380,9 +387,11 @@ async function fzBagYukle(id) {
       : `<div class="small muted">nlyte'ta bu cihaz için kablo kaydı yok.</div>`}
     ${e ? `<h3 style="margin:10px 0 4px;font-size:14px">${d.guc ? "Bu cihazın gücü kesilirse" : "Bu cihaz kapanırsa"}</h3>
       <div class="small" style="margin-bottom:4px">${fmt(e.sunucu)} sunucu · ${fmt(e.vm)} VM · ${fmt(e.uygulamalar.length)} uygulama ${e.deger ? "· en yüksek " + fzDeger(e.deger, true) : ""}</div>
-      ${e.sunucular.length ? `<div class="tbl-wrap" style="max-height:28vh"><table><thead><tr><th>Sunucu</th><th>Kabin</th><th class="num">VM</th><th>Değer</th><th>Bağlantı</th></tr></thead>
+      ${e.sunucu ? `<div class="small" style="margin-bottom:4px">${e.tekYol ? `<b style="color:#c0392b">${fmt(e.tekYol)} sunucu (${fmt(e.tekYolVm)} VM) yalnız bu cihaza bağlı</b> — kapanırsa gerçekten durur; diğerlerinin` : "Tüm sunucuların"} kablo kaydına göre başka bir ${d.guc ? "güç kaynağı" : "ağ / SAN cihazı"} üzerinden yedek yolu var.</div>` : ""}
+      ${e.sunucular.length ? `<div class="tbl-wrap" style="max-height:28vh"><table><thead><tr><th>Sunucu</th><th>Kabin</th><th class="num">VM</th><th>Değer</th><th>Bağlantı</th><th title="Sunucunun bu cihaz dışında aynı türden başka bir cihaza da kablosu var mı (ör. iki PDU, iki SAN / ağ switch'i)">Yedek yol</th></tr></thead>
         <tbody>${e.sunucular.map(x => `<tr><td class="mono small">${x.kabin ? `<a href="#" data-fzc="${esc(x.kabin)}" data-fzch="${esc(x.ad)}">${esc(x.ad)}</a>` : esc(x.ad)}</td><td class="small">${esc(x.kabin ?? "")}</td>
-          <td class="num">${fmt(x.vm)}</td><td>${fzDeger(x.deger)}</td><td class="small muted">${esc(x.yol)}</td></tr>`).join("")}</tbody></table></div>`
+          <td class="num">${fmt(x.vm)}</td><td>${fzDeger(x.deger)}</td><td class="small muted">${esc(x.yol)}</td>
+          <td class="small">${x.yedek == null ? "" : x.yedek.length ? `<span class="muted" title="${esc(x.yedek.join(", "))}">✓ ${esc(x.yedek.slice(0, 2).join(", "))}${x.yedek.length > 2 ? " +" + (x.yedek.length - 2) : ""}</span>` : `<b style="color:#c0392b">tek yol</b>`}</td></tr>`).join("")}</tbody></table></div>`
         : `<div class="small muted">Kablolarla bu cihaza bağlı sunucu bulunamadı${d.tur === "Firewall" ? " (firewall'lar genelde switch'lere bağlıdır)" : ""}.</div>`}
       ${e.uygulamalar.length ? `<div class="tbl-wrap" style="max-height:28vh;margin-top:6px"><table><thead><tr><th>Uygulama</th><th class="num">VM</th><th>Değer</th></tr></thead>
         <tbody>${e.uygulamalar.map(u => `<tr><td>${fzAppLink(u.ad)}</td><td class="num">${fmt(u.vm)}</td><td>${fzDeger(u.deger)}</td></tr>`).join("")}</tbody></table></div>` : ""}` : ""}`;

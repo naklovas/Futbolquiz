@@ -542,8 +542,17 @@ sealed class FizikselService(IConfiguration cfg, ILogger<FizikselService> log)
             .Select(g => (Ad: g.Key, Toplam: g.Count(), Kabinli: g.Count(x => x.v.Kabin != null),
                 Kabin: g.Select(x => x.v.Kabin).OfType<string>().Distinct(StringComparer.OrdinalIgnoreCase).Count())).ToList();
         int vmKabinli = vm.Count(v => v.Kabin != null);
+        // kablo kapsaması (nlyte Connections): kablosu olan kabin / sunucu, güç dışı (veri / fiber) kablosu olan sunucu ve VM'li host
+        bool Kablolu(FizCihaz c) => c.AssetId != null && s.BagIdx.ContainsKey(c.AssetId);
+        bool Veri(FizCihaz c) => c.AssetId != null && (s.BagIdx.GetValueOrDefault(c.AssetId) ?? []).Any(b => Sinif(s, b) != "güç");
+        var sunucuC = aktifCihaz.Where(c => c.Tur.Equals("Server", StringComparison.OrdinalIgnoreCase)).ToList();
+        var avm = s.Baglantilar.Count > 0 ? AssetVm(s) : [];
+        var vmliC = aktifCihaz.Where(c => c.AssetId != null && avm.ContainsKey(c.AssetId)).ToList();
         return new
         {
+            kabloVar = s.Baglantilar.Count > 0, kablo = s.Baglantilar.Count,
+            kabinKablolu = s.TumKabinler.Count(k => s.KabinCihaz.GetValueOrDefault(k)?.Any(c => c.Aktif && Kablolu(c)) == true),
+            sunucuKablolu = sunucuC.Count(Kablolu), sunucuVeri = sunucuC.Count(Veri), hostVmli = vmliC.Count, hostVmliVeri = vmliC.Count(Veri),
             kabin = s.TumKabinler.Count(), kabinCihazli = s.TumKabinler.Count(k => s.KabinCihaz.GetValueOrDefault(k)?.Any(c => c.Aktif) == true), kabinVmli = s.KabinVm.Count,
             cihaz = aktifCihaz.Count, sunucu, sunucuU, kabinDisiSunucu = s.KabinDisi.Count(c => c.Aktif && c.Tur.Equals("Server", StringComparison.OrdinalIgnoreCase)),
             esxHost = hostlar.Count, esxYerlesen = hostYerlesen, esxEkEslesme = s.TurFarkli.Count, esxEksik = s.Eksik.Count(e => e.Kapsam == null || e.Kapsam == AnaKapsam),
@@ -571,8 +580,10 @@ sealed class FizikselService(IConfiguration cfg, ILogger<FizikselService> log)
             var vs = s.KabinVm.GetValueOrDefault(k) ?? [];
             var cs = (s.KabinCihaz.GetValueOrDefault(k) ?? []).Where(c => c.Aktif).ToList();
             int vmHost = vs.Select(v => v.Host ?? v.HostFqdn).Where(x => x != null).Distinct(StringComparer.OrdinalIgnoreCase).Count();
+            int kablo = cs.Count(c => c.AssetId != null && s.BagIdx.ContainsKey(c.AssetId));
             return new
             {
+                kablo,
                 ad = k, sira = p.Sira, no = p.No, vm = vs.Count, cihaz = cs.Count, vmHost, host = Math.Max(cs.Count, vmHost), turlar = TurSayim(cs),
                 uygulama = vs.SelectMany(v => v.Uygulamalar).Distinct(StringComparer.OrdinalIgnoreCase).Count(),
                 deger = Deger(s, vs.SelectMany(v => v.Uygulamalar)),
@@ -585,7 +596,7 @@ sealed class FizikselService(IConfiguration cfg, ILogger<FizikselService> log)
         {
             string? ek = null;
             if (k.sira != null && k.no != null) { string key = k.sira + "|" + k.no; if (!asil.TryAdd(key, k.ad)) ek = asil[key]; }
-            return new { k.ad, k.sira, k.no, k.vm, k.cihaz, k.vmHost, k.host, k.turlar, k.uygulama, k.deger, k.bosU, k.konum, ek };
+            return new { k.ad, k.sira, k.no, k.vm, k.cihaz, k.vmHost, k.host, k.turlar, k.uygulama, k.deger, k.bosU, k.konum, k.kablo, ek };
         }).ToList();
         return new { ad, kabinler = sonuc };
     }
@@ -727,11 +738,20 @@ sealed class FizikselService(IConfiguration cfg, ILogger<FizikselService> log)
                 foreach (var sw in izler.Where(z => !z.Kesik && z.UzakId != null && z.UzakTur is "Network" or "StaticSwitch").Select(z => z.UzakId!).Distinct())
                     foreach (var z2 in Iz(s, sw).Where(z => !z.Kesik)) Ekle(z2.UzakId, $"switch {s.CihazId.GetValueOrDefault(sw)?.Ad ?? sw} üzerinden (dolaylı)");
         }
+        // yedek yol: sunucunun bu cihaz dışında aynı sınıftan (güç ↔ güç, veri / fiber ↔ ağ / SAN) başka bir cihaza da kablosu var mı (ör. BLUE + GREEN PDU, fabric A + B)
+        bool gucCihaz = GucTurleri.Contains(c.Tur);
+        List<string>? Yedek(FizCihaz sc, string yol)
+        {
+            if (sc.AssetId == null || yol != "doğrudan") return null;
+            return Iz(s, sc.AssetId).Where(z => !z.Kesik && z.UzakId != null && !z.UzakId.Equals(id, StringComparison.OrdinalIgnoreCase)
+                    && (z.Sinif == "güç") == gucCihaz && !z.UzakTur.Equals("Server", StringComparison.OrdinalIgnoreCase) && !z.UzakTur.Equals("PatchPanel", StringComparison.OrdinalIgnoreCase))
+                .Select(z => z.UzakAd).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(x => x).ToList();
+        }
         var sunucular = sunucu.Values.Select(x =>
         {
             var vs = x.C.AssetId != null ? avm.GetValueOrDefault(x.C.AssetId) ?? [] : [];
             var kabin = s.KabinCihaz.FirstOrDefault(kv => kv.Value.Contains(x.C)).Key;
-            return new { ad = x.C.Ad, assetId = x.C.AssetId, kabin, yol = x.Yol, vm = vs.Count,
+            return new { ad = x.C.Ad, assetId = x.C.AssetId, kabin, yol = x.Yol, vm = vs.Count, yedek = Yedek(x.C, x.Yol),
                 uygulamalar = vs.SelectMany(v => v.Uygulamalar).Distinct(StringComparer.OrdinalIgnoreCase).ToList(), deger = Deger(s, vs.SelectMany(v => v.Uygulamalar)) };
         }).OrderByDescending(x => x.vm).ThenBy(x => x.ad).ToList();
         var tumVm = sunucu.Values.SelectMany(x => x.C.AssetId != null ? avm.GetValueOrDefault(x.C.AssetId) ?? [] : []).ToList();
@@ -742,7 +762,8 @@ sealed class FizikselService(IConfiguration cfg, ILogger<FizikselService> log)
         {
             ad = c.Ad, assetId = c.AssetId, tur = c.Tur, model = c.Model, kablo = s.Baglantilar.Count > 0, chassisten, guc = GucTurleri.Contains(c.Tur),
             baglantilar = izler.OrderBy(z => z.YerelPort).ThenBy(z => z.UzakAd).Select(IzSatir).ToList(),
-            etki = sunucuMu ? null : new { sunucu = sunucular.Count, vm = tumVm.Count, sunucular, uygulamalar, deger = Deger(s, tumVm.SelectMany(v => v.Uygulamalar)) },
+            etki = sunucuMu ? null : new { sunucu = sunucular.Count, vm = tumVm.Count, sunucular, uygulamalar,
+                tekYol = sunucular.Count(x => x.yedek is { Count: 0 }), tekYolVm = sunucular.Where(x => x.yedek is { Count: 0 }).Sum(x => x.vm), deger = Deger(s, tumVm.SelectMany(v => v.Uygulamalar)) },
         };
     }
 

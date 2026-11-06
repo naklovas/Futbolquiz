@@ -627,7 +627,11 @@ erişim talepleri) — DB → şema → tablo ve kim erişiyor bilgisi buradan b
   tablosu (karşı cihaza tıkla → onun kabini ve detayı), "Bu cihaz kapanırsa" (sunucular, uygulamalar, değer); kabin başlığında "Kabin dışı kablolar". Sahte veriyle (switch, firewall, patch panel, 0U PDU, chassis + 3 blade, AssetID ile farklı adlı host, klima) test edildi. Panel devamında önce port adı BİREBİR (1A25 ↔ 1A25), yoksa ve ad "1A1" tarzı değilse sondaki sayı. Kablo SINIFI (`Sinif`;
   canlıda sunucuya PDU güç kabloları BLUE-/GREEN- ve panel kabloları C-/F- geldi): ucu PDU / UPS / StaticSwitch → "güç", kablo türü / adında fiber /
   F- / LC / SC / MPO / OM / OS → "fiber", kalan "veri"; Bağlantılar tablosunda "Tür" kolonu (⚡ güç, 🔆 fiber). PDU'da başlık "Bu cihazın gücü kesilirse";
-  UPS / statik switch → bağlı PDU'ların beslediği sunucular (dolaylı, "PDU X üzerinden (güç)").
+  UPS / statik switch → bağlı PDU'ların beslediği sunucular (dolaylı, "PDU X üzerinden (güç)"). YEDEK YOL (canlı örnek: Cisco MDS 9710 → 9 ESX):
+  etkideki doğrudan bağlı sunucunun bu cihaz dışında aynı sınıftan (güç ↔ güç; veri / fiber ↔ panel / sunucu olmayan uç) başka cihaza izi varsa `yedek`,
+  yoksa "tek yol"; özet "N sunucu (M VM) yalnız bu cihaza bağlı". Değerler canlıda 0–5 (renk ölçeği 5 koyu kırmızı … 0 gri, lejant veriden). KABLO
+  KAPSAMASI (kullanıcı: "çok sayıda bağlantısı hiç olmayan kabin var"): Oda() satırında `kablo` (kablolu aktif cihaz), planda "Renk: Kablo kaydı";
+  istatistikte "Kablo kaydı" kartı (kabinKablolu, sunucuKablolu / sunucuVeri, hostVmli / hostVmliVeri).
 - **VIP**: sorgulanan IP VIP ise üyeler + GW'ler aynı sorguya eklenir, üyeler "VIP ÜYESİ" (GW→üye trafiği varsa ✓).
   Gidilen IP VIP ise "VIP → n ÜYE"; gelen IP LB GW ise "LB GW"; sorgulanan sunucu havuz üyesiyse VIP kartı.
 - **Uygulama görünümü** (`/api/apps`, `/api/app`): `[kullanan uygulamalar] → [UYGULAMA: VIP'ler + segment grupları] → [bağımlı olunanlar]`,
