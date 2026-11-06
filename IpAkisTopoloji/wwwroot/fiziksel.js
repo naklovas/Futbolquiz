@@ -336,7 +336,9 @@ function fzDetayCiz() {
         <tbody>${vmler.map(v => `<tr><td class="mono small" title="${esc(v.dns ?? "")}">${esc(v.vm ?? "")}</td><td>${fzIpLink(v.ip)}</td>
           <td class="small">${v.uygulamalar.length ? v.uygulamalar.map(fzAppLink).join(", ") : `<span class="muted">ERT'de yok</span>`}</td><td>${fzDeger(v.deger)}</td><td class="small muted">${esc(v.os ?? "")}</td></tr>`).join("")
           || `<tr><td colspan="5" class="unk">VM yok</td></tr>`}</tbody></table></div>`}
-      ${h.assetId && k.kabloVar ? `<div id="fzBag" style="margin-top:10px"><span class="small muted"><span class="spinner"></span> bağlantılar…</span></div>` : ""}`;
+      ${h.assetId && k.kabloVar ? `<div id="fzBag" style="margin-top:10px"><span class="small muted"><span class="spinner"></span> bağlantılar…</span></div>`
+        : `<div class="small" style="margin-top:10px;color:var(--warn)">🔌 Kablo bağlantıları gösterilemiyor: ${k.kabloVar === undefined ? "sunucudaki DeltaFlow sürümü eski (FizikselEnvanter.cs kopyalanıp derlenmeli)"
+          : !h.assetId ? "bu cihazın nlyte AssetID'si yok" : "dbo.NlyteBaglanti okunamadı ya da boş (tablo adı Fiziksel:Tablolar:NlyteBaglanti)"}</div>`}`;
     if (h.assetId && k.kabloVar) fzBagYukle(h.assetId);
     return;
   }
