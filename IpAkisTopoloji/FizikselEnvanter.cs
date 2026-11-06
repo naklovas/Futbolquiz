@@ -665,9 +665,12 @@ sealed class FizikselService(IConfiguration cfg, ILogger<FizikselService> log)
             string? kablo = c.KabloTuru ?? c.KabloAdi;
             if (tur.Equals("PatchPanel", StringComparison.OrdinalIgnoreCase) && id != null && derinlik < 6)
             {
-                var devam = (s.BagIdx.GetValueOrDefault(id) ?? []).Where(d => !gorulen.Contains(d.CableId))
-                    .Select(d => (d, panelKaynak: string.Equals(d.KaynakId, id, StringComparison.OrdinalIgnoreCase)))
-                    .Where(x => AyniPort(x.panelKaynak ? x.d.KaynakPort : x.d.HedefPort, port)).ToList();
+                var adaylar = (s.BagIdx.GetValueOrDefault(id) ?? []).Where(d => !gorulen.Contains(d.CableId))
+                    .Select(d => (d, panelKaynak: string.Equals(d.KaynakId, id, StringComparison.OrdinalIgnoreCase))).ToList();
+                string? PanelPort((FizBaglanti d, bool panelKaynak) x) => x.panelKaynak ? x.d.KaynakPort : x.d.HedefPort;
+                // önce birebir aynı port adı (1A1 ↔ 1A1); yoksa sondaki numara (5 ↔ Port 5) — 1A1 / 2A1 gibi adlar karışmasın
+                var devam = port == null ? [] : adaylar.Where(x => PanelPort(x)?.Trim().Equals(port.Trim(), StringComparison.OrdinalIgnoreCase) == true).ToList();
+                if (devam.Count == 0 && port != null && !Regex.IsMatch(port, @"\d+[A-Za-z]+\d+")) devam = adaylar.Where(x => AyniPort(PanelPort(x), port)).ToList();
                 if (devam.Count > 0)
                 {
                     foreach (var (d, pk) in devam)
