@@ -514,6 +514,8 @@ sealed partial class FizikselService(IConfiguration cfg, ILogger<FizikselService
     //  3) yalnız oda: CO2-ORACLE-1, ZB.DR1.DZON.42
     // Oda kodu büyük harf, 2–3 harf + isteğe bağlı numara (CO-1 → CO1). Asset_… gibi adlar "Diğer".
     static readonly Regex Kalip1 = new(@"^(?:ZB\.)?([A-Z]{2,3}(?:-?\d+)?)[-.]([A-Z])(\d+)(?=$|[_.\-\s(])", RegexOptions.Compiled);
+    // oda + sıra + ara kelime + no (kullanıcı: DR1-E-EMC-12 = DR1 E12, DR1-E-ORACLE-1(FAH11) = DR1 E1); "ZB.DR4.C.PP.45_46U" gibi U aralığı no sayılmaz
+    static readonly Regex KalipAra = new(@"^(?:ZB\.)?([A-Z]{2,3}(?:-?\d+)?)[-.]([A-Z])[-.][A-Z]+[-.](\d+)(?![_\d]*\d*U\b)(?=$|[_.\-\s(])", RegexOptions.Compiled);
     static readonly Regex Kalip2 = new(@"^(?:ZB\.)?([A-Z]{2,3}(?:-?\d+)?)[-.]([A-Z])[-.]", RegexOptions.Compiled);
     static readonly Regex Kalip3 = new(@"^(?:ZB\.)?([A-Z]{2,3}(?:-?\d+)?)[-.][A-Z0-9]", RegexOptions.Compiled);
     public static (string? Oda, string? Sira, int? No) Parcala(string kabin)
@@ -521,6 +523,7 @@ sealed partial class FizikselService(IConfiguration cfg, ILogger<FizikselService
         string k = Regex.Replace(kabin.Trim(), @"^Eski\s+", "", RegexOptions.IgnoreCase);
         static string O(string x) => x.Replace("-", "");
         if (Kalip1.Match(k) is { Success: true } m1) return (O(m1.Groups[1].Value), m1.Groups[2].Value, int.Parse(m1.Groups[3].Value));
+        if (KalipAra.Match(k) is { Success: true } ma) return (O(ma.Groups[1].Value), ma.Groups[2].Value, int.Parse(ma.Groups[3].Value));
         if (Kalip2.Match(k) is { Success: true } m2) return (O(m2.Groups[1].Value), m2.Groups[2].Value, null);
         if (Kalip3.Match(k) is { Success: true } m3) return (O(m3.Groups[1].Value), null, null);
         return (null, null, null);

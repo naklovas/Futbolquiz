@@ -615,8 +615,8 @@ erişim talepleri) — DB → şema → tablo ve kim erişiyor bilgisi buradan b
   "Renk: VM sayısı | <boyut> değeri" seçicisi (localStorage `df.fzRenk`), kabin başlığında "Kabin değeri", host detayı, VM ve uygulama tablolarında "Değer" kolonu,
   "Kabin değerleri" istatistik kartı. KABİN ADI → ODA (kullanıcı: "Diğer'de DR1 / DR2 yazan net isimler var, yerleştir; EF odası
   da oluşsun; Asset_ ile başlayanların içi boş"): `Parcala` üç kalıp ("Eski " / "ZB." öneki atılır, oda kodu büyük harf 2–3 harf + numara, CO-1 → CO1):
-  oda+sıra+no (DR4-D3, ZB.DR1.B10, ZB.DR2.A12-1, ZB.DR3.A1_A2.45_46U → A1, ZB.DR4.F8.46U, EF1-A1, ZB.TR1.B2, YZ-A1) → ızgara; oda+sıra (DR1-B-EMC-1,
-  ZB.DR3.C.NS6.45_46U, TR-B-EMC-1) → odada "Sıra X" listesi; yalnız oda (CO2-ORACLE-1) → odanın diğer kabinleri; kalanlar "Diğer" (Asset_… katlanır
+  oda+sıra+no (DR4-D3, ZB.DR1.B10, ZB.DR2.A12-1, ZB.DR3.A1_A2.45_46U → A1, ZB.DR4.F8.46U, EF1-A1, ZB.TR1.B2, YZ-A1) → ızgara; oda+sıra+kelime+no (kullanıcı: DR1-E-EMC-12 → E12,
+  DR1-E-ORACLE-1(FAH11) → E1, DR1-B-EMC-1 → B1; `KalipAra`, U aralığı "…PP.45_46U" no sayılmaz) → ızgara; oda+sıra (ZB.DR3.C.NS6.45_46U) → odada "Sıra X" listesi; yalnız oda (CO2-ORACLE-1) → odanın diğer kabinleri; kalanlar "Diğer" (Asset_… katlanır
   "Adsız kabin kayıtları"). Odalar: DR'ler numara sırasıyla, sonra diğerleri, en sonda Diğer. Aynı (sıra, no)'ya düşen birden çok kayıt: VM / cihazı
   en çok (ZB. öneksiz önce) ızgarada, diğerleri `ek` (karoda "+N", katlanır "Aynı konumda ek kabin kayıtları"). `/api/fiziksel/kabin` `oda` döner;
   `fzKabinAc` kabin başka odadaysa o odayı açar (derin bağlantı / eksik listesi regex'i kaldırıldı). KABLO BAĞLANTILARI (veri tarafı: nlyte `Connections`
