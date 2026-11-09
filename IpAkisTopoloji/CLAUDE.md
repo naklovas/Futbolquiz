@@ -243,10 +243,14 @@ Açık soru: ERT Entropi'den truncate ile yeniden yükleniyorsa TAG / AI_KUME / 
 3. faz için ipucu: doku.dbo.REQUESTM1'de ZT_DWHORTAM, ZT_DWH_DBNAME, ZT_DWH_SCHEMANAME, ZT_DWH_TABLENAME kolonları var (DWH tablo
 erişim talepleri) — DB → şema → tablo ve kim erişiyor bilgisi buradan başlanabilir.
 
-## PARK EDİLDİ — AI uygulama tahmini (ERT eksikleri / segment AI)
-ERT_APPLICATIONDETAIL bağlandı ve canlıda tablo dolu (kullanıcı: "tablo tamam, AI tarafını park edelim"). Bekleyen fikir: ERT eksikleri sayfasına
-"Katalogda bulunamayan önerileri yeniden sor" düğmesi (durumu AI + gerekçesinde "ERT kataloğunda yok" geçen portlar, yeniden:true); eski serbest
-öneriler yeni katalogla kendiliğinden değişmez. GUVENLIKDEGERI'nin anlamı sorulacak. Kullanıcı açınca buradan devam.
+## AI uygulama tahmini — sunucusu olmayan uygulamalar (ERT eksikleri / segment AI)
+ERT_APPLICATIONDETAIL canlıda dolu. Kullanıcı: "sunucusu olmayan uygulamalar da sorunun bir parçası, envanterdeki eksik anlamında" → yapıldı:
+aday listesine sunucuya atanmamış uygulamalar ADI KANITTA GEÇMESE DE girer: ad + ACIKLAMA'nın ayırt edici kelimeleri (`_atanTok`, ≥4 harf kök, GenelKelime
+değil, ana kayıtların > max(3, %2)'sinde geçen kelime atılır) kanıtta en az 2 tane geçerse (en çok 5, aday listesinin ilk 25'inden sonra yer ayrılır).
+`EksikSatir.AtanmamisUyg` (öneri — " Veritabanı" eki atılarak — `env.Atanmamis`), `EksikListe.Atanmamis / KatalogDisi / KatalogDisiIp`; `/api/eksik?durum=atanmamis |
+katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA ATANMAMIŞ". "Katalogda bulunamayanları yeniden sor" düğmesi:
+`/calistir {katalogDisi:true}` → `KatalogDisiPortlarAsync` IP → port (Portlar yolu, yeniden:true; toplu yetkisi yoksa ilk 50 sunucu). Arayüzde mor
+"sunucuya atanmamış" rozeti, istatistik kartı. GUVENLIKDEGERI'nin anlamı hâlâ sorulacak.
 
 ## Özellikler (hepsi canlıda istenip yapıldı)
 - **IP görünümü**: 5 sütun `[segment] → [gelen sunucu] → [SORGULANAN IP] → [gidilen sunucu] → [segment]`.

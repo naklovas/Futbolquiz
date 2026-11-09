@@ -727,13 +727,21 @@ app.MapGet("/api/eksik/kanit", async (string ip, bool? yeni, EksikService eksik,
     try { return Results.Ok(new { ip = v, metin = await eksik.EvidenceAsync(v, ct, yeni ?? false), yeni = yeni ?? false }); }
     catch (Exception ex) { return Results.Json(new { error = ex.Message }, statusCode: 502); }
 });
-app.MapPost("/api/eksik/calistir", (EksikCalistir req, HttpContext ctx, IConfiguration cfg, EksikService eksik) =>
+app.MapPost("/api/eksik/calistir", async (EksikCalistir req, HttpContext ctx, IConfiguration cfg, EksikService eksik, CancellationToken ct) =>
 {
     string user = ctx.User?.Identity?.Name ?? "?";
     if (!EtiketService.CanWrite(cfg, ctx)) return Results.Json(new { error = $"Yetkiniz yok ({user})." }, statusCode: 403);
-    if (req.Portlar is { Count: > 0 }) req = req with { Ips = req.Portlar.Keys.ToList() };   // segment tarama: verilen IP → portlar
     // Tüm boşları tahmin ettirme (IP listesi olmadan) yalnız toplu yetkisi olanlar (Yetki:Toplu); seçili / tek sunucu yenilemesi yazma yetkisi olan herkese
     bool toplu = Yetki.Var(cfg, ctx, Yetki.Toplu);
+    if (req.KatalogDisi)
+    {
+        // Katalogda bulunamayan AI önerilerini yeni katalogla (ERT_APPLICATIONDETAIL dahil) yeniden sor; toplu yetkisi yoksa ilk 50 sunucu
+        var kd = await eksik.KatalogDisiPortlarAsync(ct);
+        if (kd.Count == 0) return Results.Json(new { error = "Katalogda bulunamayan AI önerisi yok." }, statusCode: 400);
+        if (!toplu && kd.Count > 50) kd = kd.Take(50).ToDictionary(kv => kv.Key, kv => kv.Value);
+        req = req with { Portlar = kd, Yeniden = true };
+    }
+    if (req.Portlar is { Count: > 0 }) req = req with { Ips = req.Portlar.Keys.ToList() };   // segment tarama: verilen IP → portlar
     if (req.Ips is not { Count: > 0 } && !toplu)
         return Results.Json(new { error = $"Tüm boşları tahmin ettirme yetkiniz yok ({user}); seçili sunucular için önerebilirsiniz." }, statusCode: 403);
     if (req.Ips is { Count: > 50 } && !toplu)

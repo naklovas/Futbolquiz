@@ -13,12 +13,15 @@ using Microsoft.Data.SqlClient;
 // ---------------------------------------------------------------------------
 record EksikOneri(string? Uygulama, bool Yeni, int Guven, string? Gerekce, string Durum, string? Kaynak, DateTime Tarih);
 record EksikSatir(string Ip, string Port, string? Hostname, string? Segment, string? Website, string? Servis, string? Muhafiz,
-    string? Birim, List<string> Diger, bool Altyapi, EksikOneri? Oneri, bool Test = false);
+    string? Birim, List<string> Diger, bool Altyapi, EksikOneri? Oneri, bool Test = false, bool AtanmamisUyg = false);
+// AtanmamisUyg: öneri ERT ana kaydında olup hiçbir sunucuya atanmamış uygulama (envanterde sunucu ataması eksik)
 record EksikListe(List<EksikSatir> Satirlar, int Toplam, int TumSatir, int TumIp, int Onerili, int Onayli, IslevDurum Durum,
-    bool Yazabilir, string? Uyari, bool TopluYetki = false, string? Bilgi = null, string? Surum = null);
+    bool Yazabilir, string? Uyari, bool TopluYetki = false, string? Bilgi = null, string? Surum = null,
+    int Atanmamis = 0, int KatalogDisi = 0, int KatalogDisiIp = 0);
 // Max: bu çalıştırmada en çok kaç sunucu (boş = Eksik:MaxIp; 0 = sınırsız)
 record EksikCalistir(List<string>? Ips, bool Hepsi, bool Yeniden, int? Saat, bool Test = false, int? Max = null,
-    Dictionary<string, List<string>>? Portlar = null);   // Portlar: IP → port (segment tarama; ERT'de adı boş ya da hiç kaydı olmayan portlar)
+    Dictionary<string, List<string>>? Portlar = null,    // Portlar: IP → port (segment tarama; ERT'de adı boş ya da hiç kaydı olmayan portlar)
+    bool KatalogDisi = false);   // KatalogDisi: durumu AI olup önerisi ERT kataloğunda bulunamayan (yeni ad) portları yeniden sor
 record EksikKarar(string? Ip, string? Port, string? Karar, string? Uygulama);
 
 sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, EnvanterService envanter, IslevService islev,
@@ -85,7 +88,7 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
             oneri.TryGetValue((m.Ip, m.Port), out var o);
             return new EksikSatir(m.Ip, m.Port, hosts.Select(h => h.UnixName).OfType<string>().FirstOrDefault(), env.FindSegment(m.Ip)?.Label,
                 m.Row.Website, m.Row.ServiceName, m.Row.VarlikMuhafizi ?? hosts.Select(h => h.VarlikMuhafizi).OfType<string>().FirstOrDefault(),
-                m.Row.SunucuIsletenBirim, env.AppNamesOnIp(m.Ip).Take(4).ToList(), infra.Contains(m.Port), o, IsTest(env, m.Ip));
+                m.Row.SunucuIsletenBirim, env.AppNamesOnIp(m.Ip).Take(4).ToList(), infra.Contains(m.Port), o, IsTest(env, m.Ip), AtanmamisOneri(env, o));
         }).ToList();
         string? q = ara?.Trim();
         bool Has(string? v) => v != null && v.Contains(q!, StringComparison.CurrentCultureIgnoreCase);
@@ -98,6 +101,8 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
                 "ai" => r.Oneri?.Durum == Ai,
                 "onay" => r.Oneri?.Durum is Onay or Elle,
                 "red" => r.Oneri?.Durum == Red,
+                "atanmamis" => r.AtanmamisUyg,
+                "katalogdisi" => KatalogDisi(r.Oneri),
                 _ => true
             })
             .ToList();
@@ -122,8 +127,26 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
         string bilgi;
         try { bilgi = Bilgi().Durum; } catch (Exception ex) { bilgi = "genel bilgi dosyası okunamadı: " + ex.Message; }
         return new EksikListe(f.Skip((page - 1) * size).Take(size).ToList(), f.Count, rows.Count, rows.Select(r => r.Ip).Distinct().Count(),
-            rows.Count(r => r.Oneri != null), rows.Count(r => r.Oneri?.Durum is Onay or Elle), Durum, yazabilir, _uyari, false, bilgi, Surum);
+            rows.Count(r => r.Oneri != null), rows.Count(r => r.Oneri?.Durum is Onay or Elle), Durum, yazabilir, _uyari, false, bilgi, Surum,
+            rows.Count(r => r.AtanmamisUyg), rows.Count(r => KatalogDisi(r.Oneri)), rows.Where(r => KatalogDisi(r.Oneri)).Select(r => r.Ip).Distinct().Count());
     }
+
+    // Öneri sunucuya atanmamış bir katalog uygulaması mı (" Veritabanı" eki atılarak)
+    static bool AtanmamisOneri(EnvanterSnapshot env, EksikOneri? o)
+    {
+        if (o?.Uygulama is not { Length: > 0 } u || o.Durum == Red) return false;
+        if (env.Atanmamis(u)) return true;
+        return u.EndsWith(" Veritabanı", StringComparison.OrdinalIgnoreCase) && env.Atanmamis(u[..^" Veritabanı".Length].TrimEnd());
+    }
+    // AI'ın ERT kataloğunda bulamadığı (serbest / yeni ad) öneriler: yeni katalogla (ERT_APPLICATIONDETAIL) yeniden sorulabilir
+    static bool KatalogDisi(EksikOneri? o) => o is { Durum: Ai, Yeni: true, Uygulama.Length: > 0 }
+        && !o.Uygulama.StartsWith("Altyapı:", StringComparison.OrdinalIgnoreCase);
+
+    // "Katalogda bulunamayanları yeniden sor": IP → port (yalnız durumu AI olanlar; onaylı / elle / reddedilen dokunulmaz)
+    public async Task<Dictionary<string, List<string>>> KatalogDisiPortlarAsync(CancellationToken ct) =>
+        (await LoadAsync(false, ct)).Where(kv => KatalogDisi(kv.Value))
+            .GroupBy(kv => kv.Key.Item1).OrderByDescending(g => g.Count())
+            .ToDictionary(g => g.Key, g => g.Select(kv => kv.Key.Item2).ToList());
 
     static string IpKey(string ip) => string.Join(".", ip.Split('.').Select(p => p.PadLeft(3, '0')));
 
@@ -856,6 +879,8 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
     // adı kanıt metniyle (exe yolu, WEBSITE, sunucu adı…) kelime düzeyinde örtüşen ERT uygulamaları
     Dictionary<string, List<string>>? _byMuhafiz;
     List<(string App, HashSet<string> Tok)>? _catTok;
+    // sunucuya atanmamış uygulamaların ayırt edici kelimeleri (ad + ERT_APPLICATIONDETAIL.ACIKLAMA; çok uygulamada geçen kelimeler atılır)
+    List<(string App, HashSet<string> Tok)>? _atanTok;
     EnvanterSnapshot? _candEnv;
     void PrepCatalog(EnvanterSnapshot env)
     {
@@ -869,6 +894,13 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
             foreach (var g in env.Detay.Values.Where(d => d.Muhafiz != null && env.Atanmamis(d.Ad) && !env.IsSystemApp(d.Ad)).GroupBy(d => d.Muhafiz!, StringComparer.OrdinalIgnoreCase))
                 _byMuhafiz[g.Key] = (_byMuhafiz.GetValueOrDefault(g.Key) ?? []).Concat(g.Select(d => d.Ad).Take(8)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
             _catTok = env.KatalogAdlari.Select(a => (a, IslevService.Tokens(a))).Where(x => x.Item2.Count > 0).ToList();
+            var at = env.Detay.Values.Where(d => env.Atanmamis(d.Ad) && !env.IsSystemApp(d.Ad))
+                .Select(d => (App: d.Ad, Tok: IslevService.Tokens(d.Ad + " " + d.Aciklama).Where(t => t.Length >= 4 && !GenelKelime.Contains(t) && !t.All(char.IsDigit)).ToHashSet()))
+                .Where(x => x.Tok.Count > 0).ToList();
+            // belge sıklığı: tüm ana kayıtların açıklamalarında (genel kelimeler: "müşteri", "işlem"… çok uygulamada geçer)
+            var df = env.Detay.Values.SelectMany(d => IslevService.Tokens(d.Ad + " " + d.Aciklama)).GroupBy(t => t).ToDictionary(g => g.Key, g => g.Count());
+            int esik = Math.Max(3, env.Detay.Count / 50);
+            _atanTok = at.Select(x => (x.App, x.Tok.Where(t => df.GetValueOrDefault(t) <= esik).ToHashSet())).Where(x => x.Item2.Count > 0).ToList();
             _candEnv = env;
         }
     }
@@ -893,7 +925,14 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
         var tok = IslevService.Tokens(evidence);
         Add(_catTok!.Select(c => (c.App, n: c.Tok.Count(t => t.Length >= 3 && tok.Contains(t)), r: (double)c.Tok.Count(tok.Contains) / c.Tok.Count))
             .Where(x => x.n >= 1 && x.r >= 0.5).OrderByDescending(x => x.r).ThenByDescending(x => x.n).Take(12).Select(x => (string?)x.App));
-        return list.Take(30).ToList();
+        // sunucuya atanmamış uygulamalar: adı birebir geçmese de açıklamasının (ACIKLAMA) ayırt edici kelimelerinden en az 2'si kanıtta
+        // (kullanıcı: "sunucusu olmayan uygulamalar da sorunun bir parçası, envanterdeki eksik anlamında")
+        var aciklamali = _atanTok!.Select(c => (c.App, n: c.Tok.Count(tok.Contains)))
+            .Where(x => x.n >= 2).OrderByDescending(x => x.n).Take(5).Select(x => (string?)x.App).ToList();
+        var bas = list.Take(25).ToList();
+        foreach (var x in aciklamali) if (x != null && !bas.Contains(x, StringComparer.OrdinalIgnoreCase)) bas.Add(x);
+        foreach (var x in list.Skip(25)) if (bas.Count < 30 && !bas.Contains(x, StringComparer.OrdinalIgnoreCase)) bas.Add(x);
+        return bas.Take(30).ToList();
     }
 
     // ---------------- Carbon Black ----------------
@@ -1025,7 +1064,7 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
                     .Where(p => !have.TryGetValue((kv.Key, p), out var o) || (o.Durum is not (Onay or Elle) && req.Yeniden)).ToList())
                 .Where(kv => kv.Value.Count > 0).ToDictionary(kv => kv.Key, kv => kv.Value);
             if (pt.Count == 0) throw new InvalidOperationException("Sorulacak port yok (hepsinin önerisi var ya da onaylanmış).");
-            Set(d => d with { Asama = "Kanıtlar toplanıyor", Toplam = pt.Values.Sum(v => v.Count), Etiket = $"segment taraması: {pt.Count} sunucu" });
+            Set(d => d with { Asama = "Kanıtlar toplanıyor", Toplam = pt.Values.Sum(v => v.Count), Etiket = req.KatalogDisi ? $"katalogda bulunamayanlar yeniden: {pt.Count} sunucu" : $"segment taraması: {pt.Count} sunucu" });
             await RunTodoAsync(pt, env, Hours(req.Saat), ct);
             return;
         }
@@ -1353,11 +1392,11 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
             ? (await Task.WhenAll(Enumerable.Range(1, (first.Toplam + 999) / 1000)
                 .Select(p => ListAsync(null, hepsi ? null : "onay", true, p, 1000, false, ct, true)))).SelectMany(l => l.Satirlar).ToList()
             : first.Satirlar;
-        var sb = new StringBuilder("\uFEFFIP;PORT;SUNUCU;SEGMENT;WEBSITE;SERVICENAME;MUHAFIZ;AYNI SUNUCUDAKİ UYGULAMALAR;ÖNERİLEN UYGULAMA;YENİ AD;GÜVEN;DURUM;KARAR VEREN;GEREKÇE\r\n");
+        var sb = new StringBuilder("\uFEFFIP;PORT;SUNUCU;SEGMENT;WEBSITE;SERVICENAME;MUHAFIZ;AYNI SUNUCUDAKİ UYGULAMALAR;ÖNERİLEN UYGULAMA;YENİ AD;SUNUCUYA ATANMAMIŞ;GÜVEN;DURUM;KARAR VEREN;GEREKÇE\r\n");
         static string C(string? s) => "\"" + (s ?? "").Replace("\"", "\"\"") + "\"";
         foreach (var r in rows.Where(r => r.Oneri != null))
             sb.Append(string.Join(";", C(r.Ip), C(r.Port), C(r.Hostname), C(r.Segment), C(r.Website), C(r.Servis), C(r.Muhafiz),
-                C(string.Join(", ", r.Diger)), C(r.Oneri!.Uygulama), C(r.Oneri.Yeni ? "evet" : ""), C(r.Oneri.Guven.ToString()),
+                C(string.Join(", ", r.Diger)), C(r.Oneri!.Uygulama), C(r.Oneri.Yeni ? "evet" : ""), C(r.AtanmamisUyg ? "evet" : ""), C(r.Oneri.Guven.ToString()),
                 C(r.Oneri.Durum), C(r.Oneri.Kaynak), C(r.Oneri.Gerekce))).Append("\r\n");
         return sb.ToString();
     }

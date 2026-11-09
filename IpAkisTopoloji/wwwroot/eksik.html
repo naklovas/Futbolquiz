@@ -79,6 +79,7 @@
   .st.ok { color: var(--ok); border-color: var(--ok); }
   .st.red { color: var(--err); border-color: var(--err); }
   .st.new { color: var(--warn); border-color: var(--warn); }
+  .st.una { color: #8250df; border-color: #8250df; }
   .acts { white-space: nowrap; }
   .acts button { padding: 2px 8px; font-size: 12px; }
   .foot { display: flex; justify-content: space-between; align-items: center; margin-top: 10px; color: var(--muted); font-size: 12.5px; gap: 10px; flex-wrap: wrap; }
@@ -111,6 +112,7 @@
       <select id="durum">
         <option value="">Tümü</option><option value="yok">Önerisi yok</option><option value="ai">AI önerdi (karar bekliyor)</option>
         <option value="onay">Onaylanan / elle</option><option value="red">Reddedilen</option>
+        <option value="atanmamis" title="Öneri ERT ana kaydında olup hiçbir sunucuya atanmamış uygulama">Sunucuya atanmamış</option><option value="katalogdisi" title="AI'ın önerisi ERT kataloğunda yok (yeni ad)">Katalogda yok (AI)</option>
       </select>
       <label title="RDP, SMB, DNS gibi altyapı portları (AI'a gönderilmez)"><input type="checkbox" id="alt"> Altyapı portları</label>
       <label title="Segment Domain'inde 'test' geçen sunucular (varsayılan gizli; işaretliyken 'AI ile öner' onları da gönderir)"><input type="checkbox" id="test"> Test segmentleri</label>
@@ -119,6 +121,7 @@
       <label title="Bir çalıştırmada en çok kaç sunucu işlensin (en çok boş portu olanlardan başlanır). Kalanlar için yeniden basılır.">Sunucu <select id="max"><option value="100">100</option><option value="200" selected>200</option><option value="500">500</option><option value="1000">1000</option><option value="0">Tümü</option></select></label>
       <button id="runSel" disabled title="Seçili satırların sunucularını AI'a gönderir (önceki AI önerisi yenilenir; onaylananlara dokunulmaz)">Seçilenlere öner</button>
       <button id="runAll" class="primary" title="Önerisi olmayan tüm satırlar (altyapı portları hariç; en çok boş portu olan sunuculardan başlayarak)">AI ile öner (önerisi olmayanlar)</button>
+      <button id="runKat" hidden title="Durumu AI olup önerisi ERT kataloğunda bulunamayan (yeni ad) portlar, sunucuya atanmamış uygulamalar dahil güncel katalogla yeniden sorulur (onaylanan / elle / reddedilene dokunulmaz)">Katalogda bulunamayanları yeniden sor</button>
       <a id="csv" href="api/eksik/csv" hidden><button type="button" title="Onaylanan ve elle girilen öneriler (Excel'de açılır)">Excel'e aktar</button></a>
     </div>
     <div id="run"></div>
@@ -163,7 +166,7 @@ async function load() {
 
 function render() {
   const d = st.data, w = d.yazabilir;
-  $("#stats").innerHTML = [["Boş uygulama adlı satır", d.tumSatir], ["Sunucu", d.tumIp], ["Önerisi olan", d.onerili], ["Onaylanan", d.onayli], ["Filtre sonucu", d.toplam]]
+  $("#stats").innerHTML = [["Boş uygulama adlı satır", d.tumSatir], ["Sunucu", d.tumIp], ["Önerisi olan", d.onerili], ["Onaylanan", d.onayli], ...(d.atanmamis ? [["Öneri sunucuya atanmamış uygulama", d.atanmamis]] : []), ["Filtre sonucu", d.toplam]]
     .map(([l, n]) => `<div class="stat"><b>${fmt(n)}</b><span>${l}</span></div>`).join("");
   $("#bilgi").textContent = [d.bilgi ? "AI'a her istekte giden " + d.bilgi : "", d.surum || "eski sunucu sürümü (Eksik.cs yayınlanmamış)"].filter(Boolean).join(" · ");
   $("#warn").innerHTML = d.uyari ? `<div class="warn">${esc(d.uyari)}</div>` : w ? "" : `<div class="warn">Yalnız görüntüleme yetkiniz var.</div>`;
@@ -172,6 +175,10 @@ function render() {
   $("#runAll").title = d.topluYetki ? "Önerisi olmayan satırlar (altyapı portları hariç; en çok boş portu olan sunuculardan başlayarak)"
     : "Tüm boşları tahmin ettirme yetkisi yalnız yetkili kullanıcıda; satır seçip 'Seçilenlere öner' kullanabilirsiniz";
   $("#runSel").disabled = !w || run || !st.sel.size;
+  const kd = d.katalogDisi || 0;
+  $("#runKat").hidden = !kd;
+  $("#runKat").disabled = !w || run;
+  $("#runKat").textContent = `Katalogda bulunamayanları yeniden sor (${fmt(kd)} port · ${fmt(d.katalogDisiIp || 0)} sunucu)`;
   document.querySelectorAll("[data-sort]").forEach(th => {
     const on = th.dataset.sort === (st.sort || "ip");   // varsayılan sıra IP + port
     th.classList.toggle("on", on);
@@ -194,7 +201,7 @@ function render() {
       <td class="small">${info.map(esc).join("<br>") || `<span class="muted">—</span>`}</td>
       <td class="chips">${r.diger.map(a => `<span>${esc(a)}</span>`).join("") || `<span class="muted small" style="border:0;background:none">—</span>`}</td>
       <td class="sug">${o ? `<div>${o.uygulama ? `<b>${esc(o.uygulama)}</b>` : `<span class="muted">öneri yok</span>`}${o.uygulama && o.durum !== "Elle" ? `<span class="conf" title="güven %${g}"><i style="width:${g}%;background:${col}"></i></span><span class="small muted">%${g}</span>` : ""}
-          <span class="st ${stc}">${esc(o.durum)}</span>${o.yeni ? ` <span class="st new" title="ERT'deki uygulama listesinde yok">yeni ad</span>` : ""}</div>
+          <span class="st ${stc}">${esc(o.durum)}</span>${o.yeni ? ` <span class="st new" title="ERT'deki uygulama listesinde yok">yeni ad</span>` : ""}${r.atanmamisUyg ? ` <span class="st una" title="ERT ana kaydında (ERT_APPLICATIONDETAIL) var ama hiçbir sunucuya atanmamış: envanterde sunucu ataması eksik">sunucuya atanmamış</span>` : ""}</div>
           ${o.gerekce ? `<div class="why">${esc(o.gerekce)}</div>` : ""}${o.durum !== "AI" && o.kaynak ? `<div class="why">${esc(o.kaynak)}</div>` : ""}`
         : `<span class="muted small">—</span>`}</td>
       <td class="acts">${w ? `${o?.uygulama && o.durum === "AI" ? `<button data-k="onay" data-ip="${esc(r.ip)}" data-port="${esc(r.port)}" title="Öneriyi onayla">✓</button> ` : ""}${o && o.durum !== "Reddedildi" ? `<button data-k="red" data-ip="${esc(r.ip)}" data-port="${esc(r.port)}" title="Reddet">✗</button> ` : ""}<button data-k="elle" data-ip="${esc(r.ip)}" data-port="${esc(r.port)}" data-cur="${esc(o?.uygulama || "")}" title="Uygulama adını elle yaz">✎</button>${o ? ` <button data-k="sil" data-ip="${esc(r.ip)}" data-port="${esc(r.port)}" title="Öneriyi ve kararı sil">⟲</button>` : ""}` : ""}</td>
@@ -286,6 +293,12 @@ $("#runAll").addEventListener("click", () => {
   if (confirm(msg)) start({ hepsi: true, test: st.test, max });
 });
 $("#runSel").addEventListener("click", () => start({ ips: [...new Set([...st.sel].map(k => k.split("|")[0]))], yeniden: true }));
+$("#runKat").addEventListener("click", () => {
+  const d = st.data, n = d.katalogDisiIp || 0;
+  const lim = !d.topluYetki && n > 50 ? "\n(Toplu yetkiniz olmadığı için ilk 50 sunucu sorulur.)" : "";
+  if (confirm(`ERT kataloğunda bulunamayan ${fmt(d.katalogDisi)} AI önerisi (${fmt(n)} sunucu), sunucuya atanmamış uygulamalar dahil güncel katalogla yeniden sorulsun mu?${lim}`))
+    start({ katalogDisi: true, yeniden: true });
+});
 $("#all").addEventListener("change", e => { st.data.satirlar.forEach(r => e.target.checked ? st.sel.add(key(r)) : st.sel.delete(key(r))); render(); });
 $("#body").addEventListener("change", e => { const c = e.target.closest("[data-sel]"); if (!c) return; c.checked ? st.sel.add(c.dataset.sel) : st.sel.delete(c.dataset.sel); render(); });
 $("#body").addEventListener("click", e => {
