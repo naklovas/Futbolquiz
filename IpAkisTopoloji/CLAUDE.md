@@ -242,6 +242,11 @@ Açık soru: ERT Entropi'den truncate ile yeniden yükleniyorsa TAG / AI_KUME / 
 3. faz için ipucu: doku.dbo.REQUESTM1'de ZT_DWHORTAM, ZT_DWH_DBNAME, ZT_DWH_SCHEMANAME, ZT_DWH_TABLENAME kolonları var (DWH tablo
 erişim talepleri) — DB → şema → tablo ve kim erişiyor bilgisi buradan başlanabilir.
 
+## PARK EDİLDİ — AI uygulama tahmini (ERT eksikleri / segment AI)
+ERT_APPLICATIONDETAIL bağlandı ve canlıda tablo dolu (kullanıcı: "tablo tamam, AI tarafını park edelim"). Bekleyen fikir: ERT eksikleri sayfasına
+"Katalogda bulunamayan önerileri yeniden sor" düğmesi (durumu AI + gerekçesinde "ERT kataloğunda yok" geçen portlar, yeniden:true); eski serbest
+öneriler yeni katalogla kendiliğinden değişmez. GUVENLIKDEGERI'nin anlamı sorulacak. Kullanıcı açınca buradan devam.
+
 ## Özellikler (hepsi canlıda istenip yapıldı)
 - **IP görünümü**: 5 sütun `[segment] → [gelen sunucu] → [SORGULANAN IP] → [gidilen sunucu] → [segment]`.
   2. seviye (`/api/hop2`) sunucuların kendi trafiği tek sorguda. Sunucu/segment sayısı seçilebilir, hover vurgusu,
