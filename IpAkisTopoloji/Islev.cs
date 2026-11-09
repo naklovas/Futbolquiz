@@ -577,7 +577,7 @@ sealed class IslevService(IConfiguration cfg, IHttpClientFactory factory, Envant
     {
         var bags = ips.Distinct().ToDictionary(ip => ip, _ => new Bag());
         foreach (var (ip, b) in bags)
-            b.Hosts.AddRange(env.AppsOnIp(ip).Select(h => h.UnixName).OfType<string>());
+            foreach (var h in env.AppsOnIp(ip).Select(h => h.UnixName).OfType<string>()) AddHost(b, h);
         var errors = new List<string>();
         await using var conn = new SqlConnection(ConnStr);
         await conn.OpenAsync(ct);
@@ -682,16 +682,28 @@ sealed class IslevService(IConfiguration cfg, IHttpClientFactory factory, Envant
                 await using var r = await cmd.ExecuteReaderAsync(ct);
                 while (await r.ReadAsync(ct))
                 {
-                    string kaynak = Join(" ", ("", S(r, 5)), ("", S(r, 6)), ("", S(r, 7)), ("", Cut(ParseHexOrBinary(r.GetValue(13)), 300)));
-                    string hedef = Join(" ", ("", S(r, 8)), ("", S(r, 9)), ("", S(r, 10)), ("", Cut(ParseHexOrBinary(r.GetValue(14)), 300)));
+                    string? blobK = ParseHexOrBinary(r.GetValue(13)), blobH = ParseHexOrBinary(r.GetValue(14));
+                    string kaynak = Join(" ", ("", S(r, 5)), ("", S(r, 6)), ("", S(r, 7)), ("", Cut(blobK, 300)));
+                    string hedef = Join(" ", ("", S(r, 8)), ("", S(r, 9)), ("", S(r, 10)), ("", Cut(blobH, 300)));
                     foreach (var ip in chunk)
                     {
                         var b = bags[ip];
-                        bool k = HasIp(kaynak, ip) || b.Hosts.Any(h => HasWord(kaynak, h)), h2 = HasIp(hedef, ip) || b.Hosts.Any(h => HasWord(hedef, h));
+                        // Kullanıcı: "talepte ne kaynak ne hedef aranan IP değil" → eşleşme yalnız IP alanında (ZT_KAYNAK / ZT_HEDEF), hostname alanında
+                        // ve çoklu erişim formunda (ZT_ERISIM_*); açıklama metinlerinde arama YOK. Hangi alanda eşleştiği kanıta yazılır.
+                        string? Neden(string? ipAlan, string? hostAlan, string? blobAlan, string ad)
+                        {
+                            if (HasIp(ipAlan, ip)) return $"ZT_{ad}'te {ip}";
+                            if (HasIp(blobAlan, ip)) return $"ZT_ERISIM_{ad} formunda {ip}";
+                            if (b.Hosts.FirstOrDefault(h => HasWord(hostAlan, h)) is { } h1) return $"ZT_{ad}HOSTNAME '{h1}'";
+                            if (b.Hosts.FirstOrDefault(h => HasWord(blobAlan, h)) is { } h3) return $"ZT_ERISIM_{ad} formunda '{h3}'";
+                            return null;
+                        }
+                        string? nk = Neden(S(r, 5), S(r, 6), blobK, "KAYNAK"), nh = Neden(S(r, 8), S(r, 9), blobH, "HEDEF");
+                        bool k = nk != null, h2 = nh != null;
                         if ((!k && !h2) || b.Talepler.Count >= maxKayit) continue;
                         string no = S(r, 0) ?? "";
                         b.Talepler.Add(new SmKayit(no, Date(r, 4), S(r, 1), S(r, 2), Cut(Squash(S(r, 3)), 400), Cut(kaynak, 250), Cut(hedef, 250),
-                            S(r, 11) ?? S(r, 12), k && h2 ? "kaynak+hedef" : k ? "kaynak" : "hedef",
+                            S(r, 11) ?? S(r, 12), (k && h2 ? "kaynak+hedef" : k ? "kaynak" : "hedef") + " — eşleşme: " + string.Join(", ", new[] { nk, nh }.OfType<string>()),
                             talepLink is { Length: > 0 } ? talepLink.Replace("{NUMBER}", Uri.EscapeDataString(no)) : null));
                     }
                 }
@@ -773,13 +785,13 @@ sealed class IslevService(IConfiguration cfg, IHttpClientFactory factory, Envant
         if (string.IsNullOrWhiteSpace(h)) return;
         h = h.Trim();
         foreach (var x in new[] { h, h.Split('.')[0] })
-            if (x.Length >= 4 && !LookupQuery.TryParseIpv4(x, out _) && !b.Hosts.Contains(x, StringComparer.OrdinalIgnoreCase)) b.Hosts.Add(x);
+            if (x.Length >= 4 && !LookupQuery.TryParseIpv4(x, out _) && !x.All(c => char.IsDigit(c) || c == '.') && !b.Hosts.Contains(x, StringComparer.OrdinalIgnoreCase)) b.Hosts.Add(x);
     }
 
     static bool HasIp(string? text, string ip) =>
         text != null && text.Contains(ip) && Regex.IsMatch(text, $@"(?<![\d.]){Regex.Escape(ip)}(?!\.?\d)");
-    static bool HasWord(string text, string word) =>
-        text.Contains(word, StringComparison.OrdinalIgnoreCase) && Regex.IsMatch(text, $@"(?<![\w-]){Regex.Escape(word)}(?![\w-])", RegexOptions.IgnoreCase);
+    static bool HasWord(string? text, string word) =>
+        text != null && text.Contains(word, StringComparison.OrdinalIgnoreCase) && Regex.IsMatch(text, $@"(?<![\w-]){Regex.Escape(word)}(?![\w-])", RegexOptions.IgnoreCase);
 
     static string? S(SqlDataReader r, int i) => r.IsDBNull(i) ? null : EnvanterSnapshot.Clean(r.GetValue(i) is byte[] ? null : Convert.ToString(r.GetValue(i)));
     static string? Date(SqlDataReader r, int i) => r.IsDBNull(i) ? null : r.GetValue(i) is DateTime d ? d.ToString("yyyy-MM-dd") : S(r, i);
