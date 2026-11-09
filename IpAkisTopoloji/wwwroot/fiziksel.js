@@ -182,7 +182,7 @@ function fzPlanCiz() {
     return `<button type="button" class="fz-tile${tur}${fz.kabin === k.ad ? " on" : ""}${fz.vurgu.has(k.ad) ? " vurgu" : ""}" data-kabin="${esc(k.ad)}"${stil}
       title="${esc(k.ad)} · ${k.turlar?.length ? esc(fzTurOzet(k.turlar, k.cihaz)) : fmt(k.cihaz ?? k.host) + " nlyte cihazı"} · ${fmt(k.vmHost ?? k.host)} VM'li host · ${fmt(k.vm)} VM · ${fmt(k.uygulama)} uygulama${k.kablo != null ? ` · kablolu cihaz ${fmt(k.kablo)} / ${fmt(k.cihaz ?? 0)}` : ""}${k.bosU != null ? ` · ${k.bosU} boş U` : ""}${k.vm ? "" : (k.cihaz ? " — VM bilgisi olan host yok" : " — nlyte'ta cihaz yok")}${k.deger ? " · değer " + esc(fzDegerMetin(k.deger)) : ""}${ekSay.has(k.ad) ? " · aynı konumda ek kayıt: " + esc(ekSay.get(k.ad).join(", ")) : ""}">${esc(k.sira ? k.sira + k.no : k.ad)}${ekSay.has(k.ad) ? `<sup class="fz-ek">+${ekSay.get(k.ad).length}</sup>` : ""}</button>`;
   };
-  const btn = (k, not) => `<button type="button" class="mini${fz.kabin === k.ad ? " on" : ""}${fz.vurgu.has(k.ad) ? " vurgu" : ""}" data-kabin="${esc(k.ad)}" title="${fmt(k.cihaz ?? 0)} cihaz · ${fmt(k.vm)} VM${k.deger ? " · değer " + esc(fzDegerMetin(k.deger)) : ""}">${esc(k.ad)} <span class="muted">${not ? esc(not) + " · " : ""}${fmt(k.cihaz ?? 0)}c${k.vm ? " · " + fmt(k.vm) + " VM" : ""}</span></button>`;
+  const btn = (k, not) => `<button type="button" class="mini${fz.kabin === k.ad ? " on" : ""}${fz.vurgu.has(k.ad) ? " vurgu" : ""}" data-kabin="${esc(k.ad)}" title="${fmt(k.cihaz ?? 0)} cihaz · ${fmt(k.vm)} VM${k.deger ? " · değer " + esc(fzDegerMetin(k.deger)) : ""}">${esc(k.ad)} <span class="muted">${not ? esc(not) + " · " : ""}${fmt(k.cihaz ?? 0)} cihaz${k.vm ? " · " + fmt(k.vm) + " VM" : ""}</span></button>`;
   let plan = "";
   if (izgara.length) {
     const siralar = [...new Set(izgara.map(k => k.sira))].sort((a, b) => a.length - b.length || a.localeCompare(b));
@@ -203,7 +203,7 @@ function fzPlanCiz() {
         : `<span><i style="background:color-mix(in srgb, var(--in) 55%, var(--panel))"></i>VM'li (${vmli})</span><span><i class="vmsiz"></i>cihaz var, VM yok (${cihazli})</span><span><i class="bosk"></i>cihaz yok (${bos})</span>`}</div></div>
     <div class="fz-plan-wrap">${plan}</div>
     ${siraliDiger.length ? `<div class="small" style="margin-top:8px"><b>Sırası belli, numarası adında yok</b> <span class="muted">(ör. DR1-B-EMC-1, ZB.DR3.C.NS6)</span></div>
-      ${[...new Set(siraliDiger.map(k => k.sira))].sort().map(s => `<div class="fz-diger"><span class="fz-ax" style="min-width:42px;text-align:left">Sıra ${esc(s)}</span>${siraliDiger.filter(k => k.sira === s).map(btn).join("")}</div>`).join("")}` : ""}
+      ${[...new Set(siraliDiger.map(k => k.sira))].sort().map(s => `<div class="fz-diger"><span class="fz-ax" style="min-width:42px;text-align:left">Sıra ${esc(s)}</span>${siraliDiger.filter(k => k.sira === s).map(k => btn(k)).join("")}</div>`).join("")}` : ""}
     ${ekler.length ? `<details class="small" style="margin-top:8px"><summary><b>Aynı konumda ek kabin kayıtları</b> (${fmt(ekler.length)}) <span class="muted">— ızgaradaki kabinin yerine düşen ikinci kayıtlar (ör. ZB.… raf üstü)</span></summary>
       <div class="fz-diger">${ekler.map(k => btn(k, `→ ${k.sira}${k.no}`)).join("")}</div></details>` : ""}
     ${kalan.length ? `<div class="small" style="margin-top:8px"><b>${izgara.length || siraliDiger.length ? "Diğer kabinler" : "Kabinler"}</b> <span class="muted">(adından oda / sıra çıkmayan)</span></div>
