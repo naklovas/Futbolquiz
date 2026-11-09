@@ -119,7 +119,41 @@ sealed class EnvanterService(IConfiguration cfg, ILogger<EnvanterService> log)
         }
 
         var tags = await LoadTagsAsync(conn, hostTable, ct);
-        return new EnvanterSnapshot(segments, hosts, vips, vipGws, marker, tags);
+        var detay = await LoadDetayAsync(conn, ct);
+        return new EnvanterSnapshot(segments, hosts, vips, vipGws, marker, tags) { Detay = detay };
+    }
+
+    // Uygulama ana kaydı (kullanıcı: "sunucuya atanmamış uygulamalar ERT_HOSTIPADDRESS'te yok"; Konfigürasyon ve Değişiklik Yönetimi'nden
+    // dbo.ERT_APPLICATIONDETAIL: APPNAME, VARLIKMUHAFIZI, SUNUCUISLETENBIRIM, UYGULAMAVARLIKSAHIBI, ACIKLAMA, VARLIKDEGERI, GUVENLIKDEGERI,
+    // ISDEGERI, ASUERISILEBILIRLIKDEGERI, GIZLILIKDEGERI, BUTUNLUKDEGERI). SELECT *, kolonlar adla (yoksa boş); tablo yoksa sessizce atlanır.
+    async Task<Dictionary<string, UygulamaDetay>> LoadDetayAsync(SqlConnection conn, CancellationToken ct)
+    {
+        var map = new Dictionary<string, UygulamaDetay>(StringComparer.OrdinalIgnoreCase);
+        string t = cfg["Envanter:UygulamaDetayTablosu"] ?? "dbo.ERT_APPLICATIONDETAIL";
+        if (t.Trim() == "" || !System.Text.RegularExpressions.Regex.IsMatch(t, @"^[\w\.\[\]]+$")) return map;
+        try
+        {
+            await using var cmd = new SqlCommand($"SELECT * FROM {t} WITH (NOLOCK)", conn) { CommandTimeout = 120 };
+            await using var r = await cmd.ExecuteReaderAsync(ct);
+            var k = Enumerable.Range(0, r.FieldCount).ToDictionary(i => r.GetName(i), i => i, StringComparer.OrdinalIgnoreCase);
+            string? S(params string[] adlar) { foreach (var a in adlar) if (k.TryGetValue(a, out int i) && !r.IsDBNull(i)) return EnvanterSnapshot.Clean(Convert.ToString(r.GetValue(i))); return null; }
+            int? N(params string[] adlar) => S(adlar) is { } x && decimal.TryParse(x.Replace(',', '.'), System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var d) ? (int)Math.Round(d) : null;
+            static int? Mx(int? a, int? b) => a == null ? b : b == null ? a : Math.Max(a.Value, b.Value);
+            while (await r.ReadAsync(ct))
+            {
+                if (S("APPNAME") is not { } ad) continue;
+                var y = new UygulamaDetay(ad, S("VARLIKMUHAFIZI"), S("SUNUCUISLETENBIRIM"), S("UYGULAMAVARLIKSAHIBI"), S("ACIKLAMA"),
+                    [N("VARLIKDEGERI"), N("ISDEGERI"), N("ASUERISILEBILIRLIKDEGERI", "ERISILEBILIRLIKDEGERI"), N("GIZLILIKDEGERI"), N("BUTUNLUKDEGERI")], N("GUVENLIKDEGERI"));
+                // aynı uygulama birden çok satırdaysa: metinlerde ilk dolu, değerlerde en yüksek
+                map[ad] = map.TryGetValue(ad, out var o)
+                    ? new UygulamaDetay(o.Ad, o.Muhafiz ?? y.Muhafiz, o.Birim ?? y.Birim, o.Sahip ?? y.Sahip, o.Aciklama ?? y.Aciklama,
+                        o.Deger.Zip(y.Deger, Mx).ToArray(), Mx(o.Guvenlik, y.Guvenlik))
+                    : y;
+            }
+            log.LogInformation("Uygulama ana kaydı {T}: {N} uygulama", t, map.Count);
+        }
+        catch (SqlException ex) { log.LogInformation("Uygulama ana kaydı okunamadı ({T}): {M}", t, ex.Message); }
+        return map;
     }
 
     // Sunucu etiketleri (ör. VERIAMBARI): yalnızca ERT tablosunun etiket kolonu (Envanter:EtiketKolonu, varsayılan TAG).
@@ -173,6 +207,8 @@ record VipMember(string? Hostname, string Ip, string? Port, string? Type, string
 }
 
 record AppCatalogItem(string Name, int Servers, int Vips, string? Owner);
+// ERT_APPLICATIONDETAIL satırı; Deger = [Varlık, İş, Erişilebilirlik, Gizlilik, Bütünlük]
+record UygulamaDetay(string Ad, string? Muhafiz, string? Birim, string? Sahip, string? Aciklama, int?[] Deger, int? Guvenlik);
 
 // Kind: "ip-port" (birebir), "vip" (VIP_IP+VIP_PORT), "ip" (sadece IP), "vip-ip" (sadece VIP_IP), "yok"
 record AppMatch(string Kind, List<HostApp> Apps);
@@ -204,6 +240,12 @@ sealed class EnvanterSnapshot
     public IEnumerable<SegmentInfo> Segments => _segByPrefix.Where(m => m != null).SelectMany(m => m!.Values);
     // ERT'deki uygulama adları (sistem portu kayıtları hariç)
     public IEnumerable<string> AppNames => _byApp.Keys;
+    // Uygulama ana kaydı (ERT_APPLICATIONDETAIL) — sunucuya atanmamış uygulamalar da burada
+    public Dictionary<string, UygulamaDetay> Detay { get; init; } = new(StringComparer.OrdinalIgnoreCase);
+    List<string>? _katalog;
+    // Tam katalog: sunucuya atanmış (ERT_HOSTIPADDRESS) ∪ ana kayıttaki uygulamalar
+    public List<string> KatalogAdlari => _katalog ??= _byApp.Keys.Union(Detay.Keys.Where(a => !IsSystemApp(a)), StringComparer.OrdinalIgnoreCase).ToList();
+    public bool Atanmamis(string ad) => Detay.ContainsKey(ad) && !_byApp.ContainsKey(ad);
     readonly Dictionary<string, List<string>> _ipsByTag = new(StringComparer.OrdinalIgnoreCase);
 
     // Sunucu etiketleri (VERIAMBARI vb.)

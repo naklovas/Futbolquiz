@@ -312,6 +312,7 @@ sealed partial class FizikselService(IConfiguration cfg, ILogger<FizikselService
             log.LogInformation("Uygulama değerleri: {N} uygulama", s.AppDeger.Count);
         }
         catch (SqlException ex) when (ex.Number is 207 or 208) { log.LogInformation("Uygulama değer kolonları okunamadı: {M}", ex.Message); }
+        await DetayDegerleriAsync(conn, s, ct);
         DegerTamamla(s);
         // VM'siz fiziksel sunucular için ERT'deki sunucu adı / IP → uygulamalar
         try
@@ -328,6 +329,41 @@ sealed partial class FizikselService(IConfiguration cfg, ILogger<FizikselService
             log.LogInformation("ERT sunucu adları: {N} ad, {M} IP", s.ErtAd.Count, s.ErtIp.Count);
         }
         catch (SqlException ex) when (ex.Number is 207 or 208) { log.LogInformation("ERT sunucu adları okunamadı: {M}", ex.Message); }
+    }
+
+    // Uygulama ana kaydı (ERT_APPLICATIONDETAIL; kullanıcı: "sunucuya atanmamış uygulamalar ERT_HOSTIPADDRESS'te yok"): uygulamanın asıl
+    // değerleri — dolu boyutlar ERT_HOSTIPADDRESS'ten gelenin YERİNE geçer, atanmamış uygulamalar da eklenir. Erişilebilirlik kolonu burada
+    // ASUERISILEBILIRLIKDEGERI. Tablo / kolon yoksa sessizce atlanır.
+    async Task DetayDegerleriAsync(SqlConnection conn, FizikselSnapshot s, CancellationToken ct)
+    {
+        string t = cfg["Envanter:UygulamaDetayTablosu"] ?? "dbo.ERT_APPLICATIONDETAIL";
+        if (t.Trim() == "" || !Regex.IsMatch(t, @"^[\w\.\[\]]+$")) return;
+        try
+        {
+            await using var cmd = new SqlCommand($"SELECT * FROM {t} WITH (NOLOCK)", conn) { CommandTimeout = 120 };
+            await using var r = await cmd.ExecuteReaderAsync(ct);
+            var k = Enumerable.Range(0, r.FieldCount).ToDictionary(i => r.GetName(i), i => i, StringComparer.OrdinalIgnoreCase);
+            int? N(params string[] adlar)
+            {
+                foreach (var a in adlar)
+                    if (k.TryGetValue(a, out int i) && !r.IsDBNull(i) && decimal.TryParse(Convert.ToString(r.GetValue(i), CultureInfo.InvariantCulture)?.Replace(',', '.'),
+                            NumberStyles.Any, CultureInfo.InvariantCulture, out var d)) return (int)Math.Round(d);
+                return null;
+            }
+            if (!k.ContainsKey("APPNAME")) return;
+            int n = 0;
+            while (await r.ReadAsync(ct))
+            {
+                if (r.IsDBNull(k["APPNAME"]) || Convert.ToString(r.GetValue(k["APPNAME"]))?.Trim() is not { Length: > 0 } ad) continue;
+                int?[] d = [N("VARLIKDEGERI"), N("ISDEGERI"), N("ASUERISILEBILIRLIKDEGERI", "ERISILEBILIRLIKDEGERI"), N("GIZLILIKDEGERI"), N("BUTUNLUKDEGERI")];
+                if (d.All(x => x == null)) continue;
+                var o = s.AppDeger.GetValueOrDefault(ad) ?? new int?[5];
+                for (int i = 0; i < 5; i++) if (d[i] != null) o[i] = d[i];
+                s.AppDeger[ad] = o; n++;
+            }
+            log.LogInformation("Uygulama değerleri ana kayıttan ({T}): {N} uygulama", t, n);
+        }
+        catch (SqlException ex) when (ex.Number is 207 or 208 or 229) { log.LogInformation("Uygulama ana kaydı okunamadı ({T}): {M}", t, ex.Message); }
     }
 
     // ERT analizi (canlı): İş ya E'ye eşit ya 0 (girilmemiş) → İş 0 / boşsa E; Varlık boşsa en yüksek(G, B, E) (hiçbir uygulamada bunu geçmiyor)

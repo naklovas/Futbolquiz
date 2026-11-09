@@ -223,8 +223,8 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
     // Ad ERT kataloğunda varsa kataloğun yazımı; yoksa olduğu gibi (yeni)
     static string Snap(EnvanterSnapshot env, string name, out bool yeni)
     {
-        var hit = env.AppNames.FirstOrDefault(a => string.Equals(a, name, StringComparison.OrdinalIgnoreCase))
-                  ?? env.AppNames.FirstOrDefault(a => Norm(a) == Norm(name));
+        var hit = env.KatalogAdlari.FirstOrDefault(a => string.Equals(a, name, StringComparison.OrdinalIgnoreCase))
+                  ?? env.KatalogAdlari.FirstOrDefault(a => Norm(a) == Norm(name));
         yeni = hit == null;
         return hit ?? name;
     }
@@ -242,7 +242,15 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
     public List<string> Adaylar(EnvanterSnapshot env, string ip, string evidence) =>
         Candidates(env, ip, evidence).Where(c => AjanOf(c) is not { } a || AjanSunucusu(env, ip, a, evidence)).ToList();
 
+    // Katalog adı sunucuya atanmamış bir uygulamaysa (yalnız ERT_APPLICATIONDETAIL'de) gerekçeye not düşülür: ERT'de sunucu ataması eksik
     string CatalogMatch(EnvanterSnapshot env, string name, out bool yeni, out string? not, string? ip = null, string? evidence = null)
+    {
+        string ad = CatalogMatch0(env, name, out yeni, out not, ip, evidence);
+        if (!yeni && env.Atanmamis(ad))
+            not = (not != null ? not + "; " : "") + "ERT'de hiçbir sunucuya atanmamış uygulama (ERT_APPLICATIONDETAIL) — sunucu ataması eksik";
+        return ad;
+    }
+    string CatalogMatch0(EnvanterSnapshot env, string name, out bool yeni, out string? not, string? ip = null, string? evidence = null)
     {
         not = null;
         string exact = Snap(env, name, out yeni);
@@ -563,6 +571,14 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
             var cands = Candidates(env, ip, sofar)
                 .Where(c => AjanOf(c) is not { } a || AjanSunucusu(env, ip, a, sofar) || miss.Any(p => PortExeHas(sofar, p, a))).ToList();   // ajan adları aday değil (ürünün kendi sunucusu hariç)
             if (cands.Count > 0) sb.AppendLine("ADAY UYGULAMALAR (ERT'deki adlar): " + string.Join(" | ", cands));
+            // sunucuya atanmamış adaylar: ERT ana kaydındaki açıklamalarıyla (AI hangi işi yaptığını görsün)
+            var atan = cands.Where(env.Atanmamis).Select(c => env.Detay[c]).ToList();
+            if (atan.Count > 0)
+            {
+                sb.AppendLine("SUNUCUYA ATANMAMIŞ ADAYLAR (ERT'de kayıtlı ama hiçbir sunucuya bağlı değil; kanıt uyuyorsa bu sunucu onların sunucusu olabilir):");
+                foreach (var d in atan.Take(8))
+                    sb.AppendLine($"- {d.Ad}{(d.Muhafiz != null ? " · muhafız " + d.Muhafiz : "")}{(d.Aciklama is { } ac ? " · " + (ac.Length > 160 ? ac[..160] + "…" : ac) : "")}");
+            }
             sb.Append(nb);
             if (profil.Length > 0) sb.AppendLine("SUNUCU PROFİLİ (ERT, segment, VIP, sanal sunucu, SM kurulum — ek bilgi):").AppendLine(profil);
             if (p?.Kahin is { Count: > 0 } kh) { sb.AppendLine(KahinBas); foreach (var k in kh) sb.AppendLine("- " + k); }
@@ -583,7 +599,7 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
                 _ekipEnv = env;
             }
         string n = Norm(System.Text.RegularExpressions.Regex.Replace(app, @"\s*(veritaban[ıi]|database|db)\s*$", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase));
-        if (n.Length < 4 || env.AppNames.Any(a => Norm(a) == n)) return null;
+        if (n.Length < 4 || env.KatalogAdlari.Any(a => Norm(a) == n)) return null;
         var h = env.AppsOnIp(ip);
         if (h.Any(x => x.SunucuIsletenBirim is { } b && Norm(b) == n)) return "işleten birim";
         if (h.Any(x => x.VarlikMuhafizi is { } m && Norm(m) == n)) return "varlık muhafızı";
@@ -849,7 +865,10 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
             _byMuhafiz = env.HostIps.SelectMany(i => env.AppsOnIp(i)).Where(h => h.VarlikMuhafizi != null && h.AppName != null && !env.IsSystemApp(h.AppName))
                 .GroupBy(h => h.VarlikMuhafizi!, StringComparer.OrdinalIgnoreCase)
                 .ToDictionary(g => g.Key, g => g.GroupBy(h => h.AppName!).OrderByDescending(x => x.Count()).Select(x => x.Key).Take(8).ToList(), StringComparer.OrdinalIgnoreCase);
-            _catTok = env.AppNames.Select(a => (a, IslevService.Tokens(a))).Where(x => x.Item2.Count > 0).ToList();
+            // sunucuya atanmamış uygulamalar (ERT_APPLICATIONDETAIL) muhafızlarıyla: aynı muhafızın sunucusunda aday olurlar
+            foreach (var g in env.Detay.Values.Where(d => d.Muhafiz != null && env.Atanmamis(d.Ad) && !env.IsSystemApp(d.Ad)).GroupBy(d => d.Muhafiz!, StringComparer.OrdinalIgnoreCase))
+                _byMuhafiz[g.Key] = (_byMuhafiz.GetValueOrDefault(g.Key) ?? []).Concat(g.Select(d => d.Ad).Take(8)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            _catTok = env.KatalogAdlari.Select(a => (a, IslevService.Tokens(a))).Where(x => x.Item2.Count > 0).ToList();
             _candEnv = env;
         }
     }

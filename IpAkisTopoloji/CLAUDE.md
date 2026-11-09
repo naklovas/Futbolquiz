@@ -141,6 +141,14 @@ topoloji çizer ve şirket içi AI'a etki analizi yaptırır. Canlıda IIS'te, W
   - `dbo.ERT_HOSTIPADDRESS` (IPADDRESS, PORT, VIP_IP, VIP_PORT, APPNAME, WEBSITE, UNIXNAME, SERVICENAME, VARLIKMUHAFIZI,
     SUNUCUISLETENBIRIM, UYGULAMAVARLIKSAHIBI): uygulama eşleşmesi sırası IP+PORT → VIP_IP+VIP_PORT → IP → VIP_IP.
     APPNAME "Sistem Portudur" → "Sistem Portudur: RDP" gibi (SystemPorts; `Envanter:SistemPortlari` ile ek/override).
+  - `dbo.ERT_APPLICATIONDETAIL` (`Envanter:UygulamaDetayTablosu`; uygulama ANA KAYDI, Konfigürasyon ve Değişiklik Yönetimi'nden: APPNAME, VARLIKMUHAFIZI,
+    SUNUCUISLETENBIRIM, UYGULAMAVARLIKSAHIBI, ACIKLAMA, VARLIKDEGERI, GUVENLIKDEGERI, ISDEGERI, ASUERISILEBILIRLIKDEGERI, GIZLILIKDEGERI, BUTUNLUKDEGERI;
+    kullanıcı: "sunucuya atanmamış uygulamalar ERT_HOSTIPADDRESS'te yok"): `EnvanterService.LoadDetayAsync` (SELECT *, kolon adla; yoksa atlanır) →
+    `EnvanterSnapshot.Detay`, `KatalogAdlari` (= atanmış ∪ ana kayıt), `Atanmamis(ad)`. ERT eksikleri / segment AI'ı: katalog eşleşmesi (`Snap`,
+    `_catTok`, `EkipAdi`) KatalogAdlari'yla; aynı muhafızın atanmamış uygulamaları `_byMuhafiz` adayına girer; kanıta "SUNUCUYA ATANMAMIŞ ADAYLAR"
+    satırı (muhafız + ACIKLAMA ilk 160); öneri atanmamış uygulamaya eşlenirse gerekçeye "ERT'de hiçbir sunucuya atanmamış uygulama — sunucu ataması
+    eksik" (`CatalogMatch` sarmalayıcı, asıl iş `CatalogMatch0`). Fiziksel envanter `DetayDegerleriAsync`: ana kayıttaki dolu değerler ERT_HOSTIPADDRESS
+    MAX'ının YERİNE geçer (Erişilebilirlik = ASUERISILEBILIRLIKDEGERI), sonra `DegerTamamla`. GUVENLIKDEGERI okunuyor (`Guvenlik`) ama kullanılmıyor.
   - **Etiket** (veri ambarı işi için; kullanıcı kararı: etiketler ERT tablosunda, etiket için ayrı tablo YOK — yalnız açıklama ve versiyonlar için küçük DF_ tabloları): `ERT_HOSTIPADDRESS.TAG NVARCHAR(200)`
     (`Envanter:EtiketKolonu`, varsayılan TAG; virgülle birden çok, büyük harfe çevrilir; kolon yoksa sessizce etiketsiz). İleride
     Entropi'den dolacak. `Etiket.cs` (EtiketService): liste (`/api/etiket/sunucular?ip=&sunucu=&uygulama=&muhafiz=&segment=&etiket=&sirala=&yon=&sayfa=&boyut=`; etiket: "" tümü, "-" etiketsiz, "*" etiketli; filtre/sıralama/sayfalama sunucuda, liste envanter anlık görüntüsü başına önbellekli) ve yazma
