@@ -63,10 +63,10 @@ function fzYetkiYok() {
 
 function fzShell(kapali) {
   $("#main").innerHTML = `<section class="panel" id="fzShell">
-    <div class="toolbar">
+    <div class="toolbar" style="justify-content:flex-start">
       <h2 style="margin:0">🏢 Fiziksel envanter</h2>
       <input type="search" id="fzQ" placeholder="ara: IP, VM, host, uygulama, kabin" style="min-width:260px">
-      <label style="flex-direction:row;align-items:center;gap:6px">Oda <select id="fzOda"></select></label>
+      <label style="display:flex;flex-direction:row;align-items:center;gap:6px">Oda <select id="fzOda"></select></label>
       <span class="small muted" id="fzBilgi"></span>
       <button type="button" class="mini" id="fzYenile" style="margin-left:auto" title="nlyte tablolarını veritabanından yeniden okur (tablolar sp_KabinZincirYenile ile dolar; DeltaFlow yazmaz)">↻ Yeniden oku</button>
     </div>
@@ -195,14 +195,14 @@ function fzPlanCiz() {
   }
   const vmli = v.kabinler.filter(k => k.vm > 0).length, cihazli = v.kabinler.filter(k => !k.vm && k.cihaz > 0).length, bos = v.kabinler.length - vmli - cihazli;
   el.innerHTML = `<div class="small muted" style="margin-bottom:6px">${esc(v.ad)} · ${fmt(v.kabinler.length)} kabin · ${fmt(v.kabinler.reduce((a, k) => a + k.vm, 0))} VM
-      <div class="fz-lejant"><label style="flex-direction:row;align-items:center;gap:4px" title="Kabin değeri = kabindeki uygulamaların (ERT) ve cihazların (tür kuralları) en yüksek değeri">Renk
+      <div class="fz-lejant"><label style="display:flex;flex-direction:row;align-items:center;gap:4px" title="Kabin değeri = kabindeki uygulamaların (ERT) ve cihazların (tür kuralları) en yüksek değeri">Renk
         <select id="fzRenk"><option value="vm">VM sayısı</option><option value="kablo"${kb ? " selected" : ""}>Kablo kaydı</option>${FZ_DEGER.map(([k, , ad]) => `<option value="${k}"${fz.renk === k ? " selected" : ""}>${ad} değeri</option>`).join("")}</select></label>
       ${kb ? `<span><i style="background:color-mix(in srgb, #2e9d5b 80%, var(--panel))"></i>cihazların çoğu kablolu (${v.kabinler.filter(k => k.cihaz && k.kablo / k.cihaz > 0.5).length})</span><span><i style="background:color-mix(in srgb, #2e9d5b 30%, var(--panel))"></i>bir kısmı (${v.kabinler.filter(k => k.kablo > 0 && k.kablo / k.cihaz <= 0.5).length})</span><span><i class="bosk"></i>kablo kaydı yok (${v.kabinler.filter(k => !k.kablo).length})</span>`
         : dg ? [...new Set(v.kabinler.map(k => k.deger?.[dg]).filter(n => n != null))].sort((a, b) => b - a).map(n => `<span><i style="background:${fzDegerRenk(n)}"></i>${n} (${v.kabinler.filter(k => k.deger?.[dg] === n).length})</span>`).join("")
           + `<span><i class="bosk"></i>değer yok (${v.kabinler.filter(k => k.deger?.[dg] == null).length})</span>`
         : `<span><i style="background:color-mix(in srgb, var(--in) 55%, var(--panel))"></i>VM'li (${vmli})</span><span><i class="vmsiz"></i>cihaz var, VM yok (${cihazli})</span><span><i class="bosk"></i>cihaz yok (${bos})</span>`}</div></div>
     <div class="fz-plan-wrap">${plan}</div>
-    ${siraliDiger.length ? `<div class="small" style="margin-top:8px"><b>Sırası belli, numarası adında yok</b> <span class="muted">(ör. DR1-B-EMC-1, ZB.DR3.C.NS6)</span></div>
+    ${siraliDiger.length ? `<div class="small" style="margin-top:8px"><b>Sırası belli, numarası adında yok</b> <span class="muted">(ör. ZB.DR3.C.NS6.45_46U)</span></div>
       ${[...new Set(siraliDiger.map(k => k.sira))].sort().map(s => `<div class="fz-diger"><span class="fz-ax" style="min-width:42px;text-align:left">Sıra ${esc(s)}</span>${siraliDiger.filter(k => k.sira === s).map(k => btn(k)).join("")}</div>`).join("")}` : ""}
     ${ekler.length ? `<details class="small" style="margin-top:8px"><summary><b>Aynı konumda ek kabin kayıtları</b> (${fmt(ekler.length)}) <span class="muted">— ızgaradaki kabinin yerine düşen ikinci kayıtlar (ör. ZB.… raf üstü)</span></summary>
       <div class="fz-diger">${ekler.map(k => btn(k, `→ ${k.sira}${k.no}`)).join("")}</div></details>` : ""}
@@ -574,7 +574,7 @@ function fzEslCiz() {
   const l = d.vmler.filter(v => (!fzEslF.kaynak || (v.kaynak ?? "(boş)") === fzEslF.kaynak) && (!fzEslF.kapsam || (v.kapsam ?? "(boş)") === fzEslF.kapsam)
     && (!fzEslF.neden || v.neden === fzEslF.neden)
     && (!fzEslF.q || [v.vm, v.ip, v.dns, v.host, v.fqdn, v.cluster, v.seri, ...v.uygulamalar, ...v.adaylar].some(x => (x ?? "").toLowerCase().includes(fzEslF.q))));
-  const sec = (id, ad, opts, deger) => `<label style="flex-direction:row;align-items:center;gap:4px">${ad} <select id="${id}"><option value="">Tümü</option>${opts.map(([k, n]) => `<option value="${esc(k)}"${k === deger ? " selected" : ""}>${esc(k)} (${fmt(n)})</option>`).join("")}</select></label>`;
+  const sec = (id, ad, opts, deger) => `<label style="display:flex;flex-direction:row;align-items:center;gap:4px">${ad} <select id="${id}"><option value="">Tümü</option>${opts.map(([k, n]) => `<option value="${esc(k)}"${k === deger ? " selected" : ""}>${esc(k)} (${fmt(n)})</option>`).join("")}</select></label>`;
   const hostSay = new Set(l.map(v => v.fqdn ?? v.host)).size;
   el.innerHTML = `<div class="toolbar" style="margin:6px 0;flex-wrap:wrap">
       ${sec("fzEslKaynak", "Kaynak", kaynaklar, fzEslF.kaynak)} ${sec("fzEslKapsam", "Kapsam", kapsamlar, fzEslF.kapsam)} ${sec("fzEslNeden", "Neden", nedenler, fzEslF.neden)}

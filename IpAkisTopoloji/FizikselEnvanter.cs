@@ -514,8 +514,8 @@ sealed partial class FizikselService(IConfiguration cfg, ILogger<FizikselService
     //  3) yalnız oda: CO2-ORACLE-1, ZB.DR1.DZON.42
     // Oda kodu büyük harf, 2–3 harf + isteğe bağlı numara (CO-1 → CO1). Asset_… gibi adlar "Diğer".
     static readonly Regex Kalip1 = new(@"^(?:ZB\.)?([A-Z]{2,3}(?:-?\d+)?)[-.]([A-Z])(\d+)(?=$|[_.\-\s(])", RegexOptions.Compiled);
-    // oda + sıra + ara kelime + no (kullanıcı: DR1-E-EMC-12 = DR1 E12, DR1-E-ORACLE-1(FAH11) = DR1 E1); "ZB.DR4.C.PP.45_46U" gibi U aralığı no sayılmaz
-    static readonly Regex KalipAra = new(@"^(?:ZB\.)?([A-Z]{2,3}(?:-?\d+)?)[-.]([A-Z])[-.][A-Z]+[-.](\d+)(?![_\d]*\d*U\b)(?=$|[_.\-\s(])", RegexOptions.Compiled);
+    // oda + sıra + ara kelime(ler) + no (kullanıcı: DR1-E-EMC-12 = DR1 E12, DR1-E-ORACLE-1(FAH11) = DR1 E1, DR1-B-HUAWEI POC-2 = DR1 B2); "ZB.DR4.C.PP.45_46U" gibi U aralığı no sayılmaz
+    static readonly Regex KalipAra = new(@"^(?:ZB\.)?([A-Z]{2,3}(?:-?\d+)?)[-.]([A-Z])[-.][A-Z]+(?:[\s\-][A-Z]+)*[-.\s](\d+)(?![_\d]*\d*U\b)(?=$|[_.\-\s(])", RegexOptions.Compiled);
     static readonly Regex Kalip2 = new(@"^(?:ZB\.)?([A-Z]{2,3}(?:-?\d+)?)[-.]([A-Z])[-.]", RegexOptions.Compiled);
     static readonly Regex Kalip3 = new(@"^(?:ZB\.)?([A-Z]{2,3}(?:-?\d+)?)[-.][A-Z0-9]", RegexOptions.Compiled);
     public static (string? Oda, string? Sira, int? No) Parcala(string kabin)
