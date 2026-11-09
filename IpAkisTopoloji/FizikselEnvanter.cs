@@ -331,9 +331,10 @@ sealed partial class FizikselService(IConfiguration cfg, ILogger<FizikselService
         catch (SqlException ex) when (ex.Number is 207 or 208) { log.LogInformation("ERT sunucu adları okunamadı: {M}", ex.Message); }
     }
 
-    // Uygulama ana kaydı (ERT_APPLICATIONDETAIL; kullanıcı: "sunucuya atanmamış uygulamalar ERT_HOSTIPADDRESS'te yok"): uygulamanın asıl
-    // değerleri — dolu boyutlar ERT_HOSTIPADDRESS'ten gelenin YERİNE geçer, atanmamış uygulamalar da eklenir. Erişilebilirlik kolonu burada
-    // ASUERISILEBILIRLIKDEGERI. Tablo / kolon yoksa sessizce atlanır.
+    // Uygulama ana kaydı (ERT_APPLICATIONDETAIL; kullanıcı: "uygulamadan gelen varlık değerleri ile sunucudan gelen mevcut değerlerin
+    // ortalamasını alalım, oradan kabinin değerini belirleyelim"): boyut başına ana kayıt ile ERT_HOSTIPADDRESS (sunucu satırlarının en yükseği)
+    // ikisi de doluysa ORTALAMA, yukarı yuvarlanır (4,5 → 5; risk açısından temkinli); yalnız biri doluysa o. İş değerinde 0 = girilmemiş, ortalamaya
+    // girmez. Erişilebilirlik kolonu burada ASUERISILEBILIRLIKDEGERI. Tablo / kolon yoksa sessizce atlanır.
     async Task DetayDegerleriAsync(SqlConnection conn, FizikselSnapshot s, CancellationToken ct)
     {
         string t = cfg["Envanter:UygulamaDetayTablosu"] ?? "dbo.ERT_APPLICATIONDETAIL";
@@ -357,8 +358,13 @@ sealed partial class FizikselService(IConfiguration cfg, ILogger<FizikselService
                 if (r.IsDBNull(k["APPNAME"]) || Convert.ToString(r.GetValue(k["APPNAME"]))?.Trim() is not { Length: > 0 } ad) continue;
                 int?[] d = [N("VARLIKDEGERI"), N("ISDEGERI"), N("ASUERISILEBILIRLIKDEGERI", "ERISILEBILIRLIKDEGERI"), N("GIZLILIKDEGERI"), N("BUTUNLUKDEGERI")];
                 if (d.All(x => x == null)) continue;
-                var o = s.AppDeger.GetValueOrDefault(ad) ?? new int?[5];
-                for (int i = 0; i < 5; i++) if (d[i] != null) o[i] = d[i];
+                var h = s.AppDeger.GetValueOrDefault(ad) ?? new int?[5];
+                var o = new int?[5];
+                for (int i = 0; i < 5; i++)
+                {
+                    int? a = i == 1 && h[i] == 0 ? null : h[i], b = i == 1 && d[i] == 0 ? null : d[i];   // İş 0 = girilmemiş
+                    o[i] = a != null && b != null ? (int)Math.Ceiling((a.Value + b.Value) / 2.0) : a ?? b ?? h[i] ?? d[i];
+                }
                 s.AppDeger[ad] = o; n++;
             }
             log.LogInformation("Uygulama değerleri ana kayıttan ({T}): {N} uygulama", t, n);

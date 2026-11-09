@@ -276,7 +276,7 @@ sealed partial class FizikselService
             ("Yöntem", [["Konu", "Açıklama"],
                 ["Rapor", baslik],
                 ["Ölçek", "0–5. Boş hücre: o boyut için değer yok ya da cihaz için anlamsız (ör. PDU'nun gizlilik değeri)."],
-                ["Uygulama değerleri", "ERT_HOSTIPADDRESS: uygulama (APPNAME) başına dolu satırların en yüksek VARLIKDEGERI / ISDEGERI / ERISILEBILIRLIKDEGERI / GIZLILIKDEGERI / BUTUNLUKDEGERI."],
+                ["Uygulama değerleri", "Boyut başına iki kaynağın ortalaması, yukarı yuvarlanır (4,5 → 5): uygulama ana kaydı (ERT_APPLICATIONDETAIL) ve sunucu kayıtları (ERT_HOSTIPADDRESS, uygulamanın dolu satırlarının en yükseği). Yalnız biri doluysa o kullanılır; İş değerinde 0 girilmemiş sayılır."],
                 ["Türetme", "İş değeri 0 / boşsa = Erişilebilirlik; Varlık boşsa = en yüksek(Gizlilik, Bütünlük, Erişilebilirlik). ERT analizi: Varlık hiçbir uygulamada en yüksek(G, B, E)'yi geçmiyor, İş ya E'ye eşit ya 0."],
                 ["ESX / sunucu", "Üzerindeki VM'lerin uygulamalarının boyut başına en yüksek değeri (MSY / ÇSY envanteri → ERT)."],
                 ["VM'siz fiziksel sunucu", "Cihaz adı ERT UNIXNAME ile; MSY fiziksel envanterindeki DNS adı / IP ERT ile eşleşen uygulamaların en yüksek değeri."],

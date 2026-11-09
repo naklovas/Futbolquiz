@@ -147,8 +147,9 @@ topoloji çizer ve şirket içi AI'a etki analizi yaptırır. Canlıda IIS'te, W
     `EnvanterSnapshot.Detay`, `KatalogAdlari` (= atanmış ∪ ana kayıt), `Atanmamis(ad)`. ERT eksikleri / segment AI'ı: katalog eşleşmesi (`Snap`,
     `_catTok`, `EkipAdi`) KatalogAdlari'yla; aynı muhafızın atanmamış uygulamaları `_byMuhafiz` adayına girer; kanıta "SUNUCUYA ATANMAMIŞ ADAYLAR"
     satırı (muhafız + ACIKLAMA ilk 160); öneri atanmamış uygulamaya eşlenirse gerekçeye "ERT'de hiçbir sunucuya atanmamış uygulama — sunucu ataması
-    eksik" (`CatalogMatch` sarmalayıcı, asıl iş `CatalogMatch0`). Fiziksel envanter `DetayDegerleriAsync`: ana kayıttaki dolu değerler ERT_HOSTIPADDRESS
-    MAX'ının YERİNE geçer (Erişilebilirlik = ASUERISILEBILIRLIKDEGERI), sonra `DegerTamamla`. GUVENLIKDEGERI okunuyor (`Guvenlik`) ama kullanılmıyor.
+    eksik" (`CatalogMatch` sarmalayıcı, asıl iş `CatalogMatch0`). Fiziksel envanter `DetayDegerleriAsync` (kullanıcı: "uygulamadan gelen ile sunucudan gelen değerlerin ortalaması, oradan kabin"):
+    boyut başına ana kayıt ile ERT_HOSTIPADDRESS MAX'ı ikisi de doluysa ORTALAMA, yukarı yuvarlanır (4,5 → 5); biri doluysa o; İş 0 = girilmemiş ortalamaya girmez
+    (Erişilebilirlik = ASUERISILEBILIRLIKDEGERI), sonra `DegerTamamla`; Excel Yöntem sayfası da böyle yazar. GUVENLIKDEGERI okunuyor (`Guvenlik`) ama kullanılmıyor.
   - **Etiket** (veri ambarı işi için; kullanıcı kararı: etiketler ERT tablosunda, etiket için ayrı tablo YOK — yalnız açıklama ve versiyonlar için küçük DF_ tabloları): `ERT_HOSTIPADDRESS.TAG NVARCHAR(200)`
     (`Envanter:EtiketKolonu`, varsayılan TAG; virgülle birden çok, büyük harfe çevrilir; kolon yoksa sessizce etiketsiz). İleride
     Entropi'den dolacak. `Etiket.cs` (EtiketService): liste (`/api/etiket/sunucular?ip=&sunucu=&uygulama=&muhafiz=&segment=&etiket=&sirala=&yon=&sayfa=&boyut=`; etiket: "" tümü, "-" etiketsiz, "*" etiketli; filtre/sıralama/sayfalama sunucuda, liste envanter anlık görüntüsü başına önbellekli) ve yazma
