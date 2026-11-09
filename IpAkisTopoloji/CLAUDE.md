@@ -312,7 +312,9 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
   SM TALEPLERİ (`SmFieldsAsync`, kullanıcının son tarifi): ARAMA sunucu IP'si ZT_HEDEF / ZT_KAYNAK'ta (LIKE + C#'ta tam IP), UNIXNAME
   ZT_HEDEFHOSTNAME / ZT_KAYNAKHOSTNAME'de; AI'A GİDEN bulunan talebin DESCRIPTION (ilk 400), BRIEF_DESCRIPTION, ZT_HEDEFACIKLAMA,
   ZT_KAYNAKACIKLAMA — sunucunun rolüne göre etiketli ("Hedef açıklaması (BU SUNUCU)" / "Kaynak açıklaması (karşı taraf)" ya da tersi).
-  Hedef + boş port (YALNIZ ZT_HEDEFPORT, kullanıcı) önce, sonra hedef, sonra kaynak; en yeni 10. Talepte doluysa
+  Hedef + boş port (YALNIZ ZT_HEDEFPORT, kullanıcı) önce, sonra hedef, sonra kaynak; en yeni 10. AD EŞLEŞMESİ HATASI (kullanıcı: "alakasız talepler geldi,
+  aranan IP talepte yok"): UNIXNAME IP biçimliyse ilk nokta öncesi "10" ile her "10.…" hostname'i eşleşiyordu → `Kisa`: IP biçimli ad ad sayılmaz, kısa ad ≥4
+  ve yalnız rakam değil; talep satırında "eşleşme: ZT_HEDEF'te IP / ZT_HEDEFHOSTNAME 'ad'" yazılır. Talepte doluysa
   ZT_HEDEFUYGULAMA / ZT_KAYNAKUYGULAMA ek satır. Tek sorgu / sunucu, SUBMIT_DATE (`Eksik:SmTarihKolonu`; canlıda OPEN_TIME YOK) ≥ SmYil,
   TOP 300. Bölüm başında her boş port için ayrı özet (kullanıcı): "PORT 5000'E ERİŞİM TALEBİ VAR: N talep (son tarih; talep no'ları;
   talepteki en sık hedef uygulama)" ya da "… YOK" — tüm eşleşen talepler üzerinden. Bulunamazsa / okunamazsa açık satır. (Ara sürümlerde açıklama kolonlarında LIKE araması denendi; kullanıcı düzeltti.)

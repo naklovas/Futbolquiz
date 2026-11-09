@@ -744,19 +744,28 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
         static bool HasPort(string? text, string port) => text != null && port.Length > 0 && System.Text.RegularExpressions.Regex.IsMatch(text, $@"(?<!\d){port}(?!\d)");
         foreach (var (ip, host) in want)
         {
-            bool Same(string? h) => host is { Length: >= 4 } && h != null && h.Split(',', ';', ' ').Any(x => string.Equals(x.Trim().Split('.')[0], host.Split('.')[0], StringComparison.OrdinalIgnoreCase));
+            // Ad eşleşmesi (kullanıcı: "alakasız talepler geldi, aranan IP talepte yok"): UNIXNAME IP biçimindeyse (10.6.30.99) ilk nokta öncesi "10"
+            // oluyordu ve "10." ile başlayan her hostname eşleşiyordu → IP biçimli adlar ad olarak karşılaştırılmaz; kısa ad ≥ 4 harf ve yalnız rakam değil
+            static string? Kisa(string? x) => x == null || LookupQuery.TryParseIpv4(x.Trim(), out _) || x.Trim().Split('.')[0] is not { Length: >= 4 } k || k.All(char.IsDigit) ? null : k;
+            string? hk = Kisa(host);
+            string? Same(string? h) => hk == null || h == null ? null
+                : h.Split(',', ';', ' ', '\n', '/').Select(x => x.Trim()).FirstOrDefault(x => string.Equals(Kisa(x), hk, StringComparison.OrdinalIgnoreCase));
             var miss = (ports.GetValueOrDefault(ip) ?? []).Where(p => p.Length > 0).ToList();
             var all = rows.Select(r =>
                 {
-                    bool hedef = HasIp(G(r, "ZT_HEDEF"), ip) || Same(G(r, "ZT_HEDEFHOSTNAME"));
-                    bool kaynak = HasIp(G(r, "ZT_KAYNAK"), ip) || Same(G(r, "ZT_KAYNAKHOSTNAME"));
+                    string? hAd = Same(G(r, "ZT_HEDEFHOSTNAME")), kAd = Same(G(r, "ZT_KAYNAKHOSTNAME"));
+                    bool hIp = HasIp(G(r, "ZT_HEDEF"), ip), kIp = HasIp(G(r, "ZT_KAYNAK"), ip);
+                    bool hedef = hIp || hAd != null, kaynak = kIp || kAd != null;
+                    // talepte neden eşleşti (kanıtta görünsün)
+                    string neden = string.Join(", ", new[] { hIp ? $"ZT_HEDEF'te {ip}" : null, hAd != null ? $"ZT_HEDEFHOSTNAME '{hAd}'" : null,
+                        kIp ? $"ZT_KAYNAK'ta {ip}" : null, kAd != null ? $"ZT_KAYNAKHOSTNAME '{kAd}'" : null }.OfType<string>());
                     // port eşleşmesi yalnız ZT_HEDEFPORT'ta (kullanıcı)
                     var ps = hedef ? miss.Where(p => HasPort(G(r, "ZT_HEDEFPORT"), p)).ToList() : [];
                     string? aj = AjanOf(string.Join(" ", new[] { "BRIEF_DESCRIPTION", "DESCRIPTION", "ZT_HEDEFACIKLAMA", "ZT_KAYNAKACIKLAMA",
                         "ZT_HEDEFUYGULAMA", "ZT_HEDEFUGULAMA", "ZT_KAYNAKUYGULAMA" }.Select(k => G(r, k))));
                     if (aj != null && (AjanSunucusu(env, ip, aj) || UrunSunucusuMetni(G(r, hedef ? "ZT_HEDEFACIKLAMA" : "ZT_KAYNAKACIKLAMA"), aj)
                         || (hedef && (UrunSunucusuMetni(G(r, "BRIEF_DESCRIPTION"), aj) || UrunSunucusuMetni(Cut(G(r, "DESCRIPTION"), 400), aj))))) aj = null;   // ürünün kendi sunucusunda bu talepler gerçek uygulama kanıtı
-                    return (r, hedef, kaynak, ps, aj);
+                    return (r, hedef, kaynak, ps, aj, neden);
                 })
                 .Where(x => x.hedef || x.kaynak).DistinctBy(x => G(x.r, "NUMBER")).ToList();
             var mine = all
@@ -816,13 +825,13 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
                 .GroupBy(Norm).OrderByDescending(g => g.Count()).Take(5).Select(g => $"\"{Cut(g.First(), 120)}\" ({g.Count()})").ToList();
             if (karsi.Count > 0) sb.AppendLine("Bu sunucuya erişen taraflar (kaynak açıklaması; İSTEMCİLER, bu sunucunun uygulaması değil): " + string.Join("; ", karsi));
             sb.AppendLine($"SM TALEPLERİ (bu sunucunun hedef ya da kaynak olduğu erişim talepleri, en yeni; {mine.Count(x => x.hedef)} hedef, {mine.Count(x => x.kaynak && !x.hedef)} kaynak):");
-            foreach (var (r, hedef, kaynak, ps, aj) in mine)
+            foreach (var (r, hedef, kaynak, ps, aj, neden) in mine)
             {
                 string rol = hedef && kaynak ? "bu sunucu HEM HEDEF HEM KAYNAK" : hedef ? $"bu sunucu HEDEF (kaynak: {Cut(G(r, "ZT_KAYNAK", "ZT_KAYNAKHOSTNAME"), 60)})"
                     : $"bu sunucu KAYNAK (hedef: {Cut(G(r, "ZT_HEDEF", "ZT_HEDEFHOSTNAME"), 60)})";
                 string port = G(r, "ZT_HEDEFPORT") ?? "";
                 if (aj != null) sb.AppendLine($"- [AJAN / ARAÇ TALEBİ: {aj} — sunucunun uygulaması DEĞİL, uygulama kanıtı olarak kullanma]");
-                sb.AppendLine($"- {G(r, "NUMBER")} {G(r, "TARIH")} · {rol}{(port.Length > 0 ? $" · hedef port {Cut(port, 40)}" : "")}{(ps.Count > 0 ? $" · BOŞ PORT {string.Join(",", ps)}" : "")}");
+                sb.AppendLine($"- {G(r, "NUMBER")} {G(r, "TARIH")} · {rol}{(port.Length > 0 ? $" · hedef port {Cut(port, 40)}" : "")}{(ps.Count > 0 ? $" · BOŞ PORT {string.Join(",", ps)}" : "")} · eşleşme: {neden}");
                 if (G(r, "BRIEF_DESCRIPTION") is { } bd) sb.AppendLine($"    Kısa açıklama: {Cut(bd, 200)}");
                 // açıklamaları sunucunun rolüne göre etiketle
                 if (G(r, hedef ? "ZT_HEDEFACIKLAMA" : "ZT_KAYNAKACIKLAMA") is { } own) sb.AppendLine($"    {(hedef ? "Hedef" : "Kaynak")} açıklaması (BU SUNUCU): {Cut(own, 250)}");
