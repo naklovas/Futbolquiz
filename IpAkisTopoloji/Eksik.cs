@@ -741,10 +741,11 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
         }
         static string? G(Dictionary<string, string> r, params string[] keys) => keys.Select(k => r.GetValueOrDefault(k)).FirstOrDefault(v => !string.IsNullOrWhiteSpace(v));
         static bool HasIp(string? text, string ip) => text != null && System.Text.RegularExpressions.Regex.IsMatch(text, $@"(?<![\d.]){System.Text.RegularExpressions.Regex.Escape(ip)}(?![\d])");
+        static bool AnyIp(string? text) => text != null && System.Text.RegularExpressions.Regex.IsMatch(text, @"(?<![\d.])\d{1,3}(\.\d{1,3}){3}(?![\d])");
         static bool HasPort(string? text, string port) => text != null && port.Length > 0 && System.Text.RegularExpressions.Regex.IsMatch(text, $@"(?<!\d){port}(?!\d)");
         foreach (var (ip, host) in want)
         {
-            // Ad eşleşmesi (kullanıcı: "alakasız talepler geldi, aranan IP talepte yok"): UNIXNAME IP biçimindeyse (10.6.30.99) ilk nokta öncesi "10"
+            // Ad eşleşmesi (kullanıcı: "alakasız talepler geldi, aranan IP talepte yok"): UNIXNAME IP biçimindeyse ilk nokta öncesi (ör. "10")
             // oluyordu ve "10." ile başlayan her hostname eşleşiyordu → IP biçimli adlar ad olarak karşılaştırılmaz; kısa ad ≥ 4 harf ve yalnız rakam değil
             static string? Kisa(string? x) => x == null || LookupQuery.TryParseIpv4(x.Trim(), out _) || x.Trim().Split('.')[0] is not { Length: >= 4 } k || k.All(char.IsDigit) ? null : k;
             string? hk = Kisa(host);
@@ -753,7 +754,9 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
             var miss = (ports.GetValueOrDefault(ip) ?? []).Where(p => p.Length > 0).ToList();
             var all = rows.Select(r =>
                 {
-                    string? hAd = Same(G(r, "ZT_HEDEFHOSTNAME")), kAd = Same(G(r, "ZT_KAYNAKHOSTNAME"));
+                    // Ad yalnız talepte o taraf için IP YAZILMAMIŞSA geçerli (kullanıcı örneği: aranan sunucunun adı, hedef IP'si farklı olan ve
+                    // KKB karşılığı sunuculara ait taleplerde de hostname olarak yazılıydı): IP yazılı ve bizimki değilse talep başka sunucunundur
+                    string? hAd = AnyIp(G(r, "ZT_HEDEF")) ? null : Same(G(r, "ZT_HEDEFHOSTNAME")), kAd = AnyIp(G(r, "ZT_KAYNAK")) ? null : Same(G(r, "ZT_KAYNAKHOSTNAME"));
                     bool hIp = HasIp(G(r, "ZT_HEDEF"), ip), kIp = HasIp(G(r, "ZT_KAYNAK"), ip);
                     bool hedef = hIp || hAd != null, kaynak = kIp || kAd != null;
                     // talepte neden eşleşti (kanıtta görünsün)

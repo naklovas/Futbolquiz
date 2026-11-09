@@ -694,8 +694,9 @@ sealed class IslevService(IConfiguration cfg, IHttpClientFactory factory, Envant
                         {
                             if (HasIp(ipAlan, ip)) return $"ZT_{ad}'te {ip}";
                             if (HasIp(blobAlan, ip)) return $"ZT_ERISIM_{ad} formunda {ip}";
-                            if (b.Hosts.FirstOrDefault(h => HasWord(hostAlan, h)) is { } h1) return $"ZT_{ad}HOSTNAME '{h1}'";
-                            if (b.Hosts.FirstOrDefault(h => HasWord(blobAlan, h)) is { } h3) return $"ZT_ERISIM_{ad} formunda '{h3}'";
+                            // ad yalnız o yerde IP yazılmamışsa (IP yazılı ve bizimki değilse talep aynı adlı başka sunucunun: KKB karşılığı, listener…)
+                            if (!AnyIp(ipAlan) && b.Hosts.FirstOrDefault(h => HasWord(hostAlan, h)) is { } h1) return $"ZT_{ad}HOSTNAME '{h1}'";
+                            if (!AnyIp(blobAlan) && b.Hosts.FirstOrDefault(h => HasWord(blobAlan, h)) is { } h3) return $"ZT_ERISIM_{ad} formunda '{h3}'";
                             return null;
                         }
                         string? nk = Neden(S(r, 5), S(r, 6), blobK, "KAYNAK"), nh = Neden(S(r, 8), S(r, 9), blobH, "HEDEF");
@@ -790,6 +791,7 @@ sealed class IslevService(IConfiguration cfg, IHttpClientFactory factory, Envant
 
     static bool HasIp(string? text, string ip) =>
         text != null && text.Contains(ip) && Regex.IsMatch(text, $@"(?<![\d.]){Regex.Escape(ip)}(?!\.?\d)");
+    static bool AnyIp(string? text) => text != null && Regex.IsMatch(text, @"(?<![\d.])\d{1,3}(\.\d{1,3}){3}(?![\d])");
     static bool HasWord(string? text, string word) =>
         text != null && text.Contains(word, StringComparison.OrdinalIgnoreCase) && Regex.IsMatch(text, $@"(?<![\w-]){Regex.Escape(word)}(?![\w-])", RegexOptions.IgnoreCase);
 
