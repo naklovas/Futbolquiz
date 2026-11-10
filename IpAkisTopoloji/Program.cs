@@ -248,8 +248,13 @@ app.MapGet("/api/surec/httpsys", async (string? ip, string? start, string? end, 
 app.MapGet("/api/surec/havuz", async (string? ip, string? start, string? end, IConfiguration cfg, IHttpClientFactory factory, CancellationToken ct) =>
 {
     if (!LookupQuery.TryParse(ip, start, end, cfg.GetValue("MaxRangeHours", 24), out var q, out var error)) return Results.BadRequest(new { error });
-    try { return Results.Ok(new { surecler = await HttpSysEslesme.SureclerAsync(q!.Ip, q.Start, q.End, cfg, factory.CreateClient("splunk"), ct) }); }
-    catch (Exception ex) when (ex is not OperationCanceledException) { return Results.Ok(new { surecler = Array.Empty<object>(), hata = ex.Message }); }
+    var hvTask = Task.Run(async () => { try { return (await HttpSysEslesme.HavuzlarAsync(q!.Ip, cfg, factory.CreateClient("splunk"), ct), (string?)null); }
+        catch (Exception ex) when (ex is not OperationCanceledException) { return (new List<HttpSysHavuz>(), ex.Message); } }, ct);
+    List<HttpSysSurec> sl; string? hata = null;
+    try { sl = await HttpSysEslesme.SureclerAsync(q!.Ip, q.Start, q.End, cfg, factory.CreateClient("splunk"), ct); }
+    catch (Exception ex) when (ex is not OperationCanceledException) { sl = []; hata = ex.Message; }
+    var (hv, hvHata) = await hvTask;
+    return Results.Ok(new { surecler = sl, havuzlar = hv, hata = hata ?? hvHata });
 });
 // Korelasyon tanısı (düz metin; kullanıcı kopyalayıp gönderebilsin)
 app.MapGet("/api/surec/httpsys/tani", async (string? ip, IConfiguration cfg, IHttpClientFactory factory, CancellationToken ct) =>

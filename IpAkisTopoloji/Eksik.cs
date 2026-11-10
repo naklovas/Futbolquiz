@@ -681,7 +681,12 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
                 if (cfg.GetValue("HttpSys:HavuzEksikte", true) && c.Rows.Any(r => (r.Yol ?? "").Contains("w3wp", StringComparison.OrdinalIgnoreCase)
                     || (r.Yol ?? "").Contains(@"\inetpub\", StringComparison.OrdinalIgnoreCase)))
                 {
-                    try { sb.Append(HttpSysEslesme.SurecMetin(await HttpSysEslesme.SureclerAsync(ip, DateTimeOffset.Now.AddHours(-hours), DateTimeOffset.Now, cfg, factory.CreateClient("splunk"), ct))); }
+                    try
+                    {
+                        var hvT = HttpSysEslesme.HavuzlarAsync(ip, cfg, factory.CreateClient("splunk"), ct);
+                        var sl = await HttpSysEslesme.SureclerAsync(ip, DateTimeOffset.Now.AddHours(-hours), DateTimeOffset.Now, cfg, factory.CreateClient("splunk"), ct);
+                        sb.Append(HttpSysEslesme.SurecMetin(sl, await hvT));
+                    }
                     catch (Exception ex) when (ex is not OperationCanceledException) { log.LogWarning("IIS havuzları {Ip}: {Hata}", ip, ex.Message); }
                 }
             }

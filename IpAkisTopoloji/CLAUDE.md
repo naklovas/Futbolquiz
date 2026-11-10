@@ -321,7 +321,13 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
   bağlandığı: … · CB ↗" (`loadHavuz` / `havuzNot`, anahtar exe|pid). ERT eksiklerinde w3wp / \inetpub\ varsa `SurecMetin` kanıta ("IIS UYGULAMA HAVUZLARI",
   `HttpSys:HavuzEksikte`=true). procstart alanları (canlıda görüldü): command_line (w3wp -ap "BankSoftDebitCardWS" … -h "C:\inetpub\temp\apppools\X\X.config"),
   username ("IIS APPPOOL\X" → `HavuzKullanici`, havuz kimliğiyle çalışan her süreçte), parent_path, parent_pid, parent_guid SAYISAL (guid değil!) → üst guid
-  link_parent'tan (…/#analyze/<guid>/<segment>); üstü w3wp olup ağ olayı olmayan w3wp'nin procstart'ı ayrıca okunur. Sonraki: çekirdek portu → havuz (ERT WEBSITE ↔ havuz adı).
+  link_parent'tan (…/#analyze/<guid>/<segment>); üstü w3wp olup ağ olayı olmayan w3wp'nin procstart'ı ayrıca okunur. TÜM HAVUZLAR (kullanıcı: "havuz isimlerini arattığımız yerde getir"):
+  `HavuzlarAsync` — IP'nin computer_name'i (netconn, son 24 saat / 7 gün) → o bilgisayarın w3wp procstart'ları (son SurecGun gün) → havuz başına en son başlayan
+  (`HttpSysHavuz` Ad, Pid, Bit32 (syswow64), Baslangic, Guid, Link, Baslatma = kaç kez başladı). `/api/surec/havuz` → `{surecler, havuzlar, hata}`; ERT eksikleri
+  `SurecMetin`'de "Sunucudaki havuzlar" satırı. Arayüz: Gelen portlar tablosunun üstünde "IIS uygulama havuzları" kutusu (`havuzOzet`: havuz, PID, 32 bit, son
+  başlangıç, ad eşleşmesi, CB ↗) ve ntoskrnl satırında "→ IIS havuzu (ad eşleşmesi): X" (`havuzEsleri`: havuz adı ↔ VIP havuz adı (memberOf.pool) / ERT
+  APPNAME / WEBSITE / SERVICENAME; `hvKelime` camelCase böler + bitişik ikililer (Bank Soft ~ Banksoft), ≥4 harf, genel kelimeler hariç; puan = ortak kelime
+  (tam ad içerme 10), yalnız en yüksek puanlılar). Örnek: BankSoftDebitCardWS ↔ /Common/BS_DebitCard_Grp → port 80.
 - **"Bu sunucuda hangi uygulama çalışıyor?"** (IP kartı, Gelen portlar tablosunun üstündeki düğme; `SurecAi` Surec.cs, `POST /api/surec/ai`):
   arayüzdeki /api/surec sonucu exe başına toplanıp (PID'ler, portlar, giden, bağlanan / bağlandığı uygulamalar) AI'a gider (yeniden
   sorgulanmaz) + ERT kayıtları + segment + genel bilgiler dosyası. Kesin genel süreçler kodda ayıklanır (`GenelAd` / `GenelYol`: svchost,
