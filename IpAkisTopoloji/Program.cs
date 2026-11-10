@@ -228,22 +228,18 @@ app.MapPost("/api/surec/ai", async (SurecAiIstek req, EnvanterService envanter, 
     catch (Exception ex) when (ex is not OperationCanceledException) { return Results.Json(new { error = ex.Message }, statusCode: 502); }
 });
 
-// HTTP.sys port → asıl exe tahmini (Carbon Black zaman korelasyonu; HttpSys.cs). IP kartı "Gelen portlar" tablosundaki ntoskrnl satırları için
-// Önce sunuculardan toplanan kesin kayıt (DF_HTTPSYS_URL), yanında korelasyon (kayıtsız portlar için)
-// Kayıt yoksa / eskiyse sunucudan ŞİMDİ toplanır (WinRM + netsh; yalnız Yetki:Topoloji olanlar tetikler, yenile=true süreye bakmaz)
-app.MapGet("/api/surec/httpsys", async (string? ip, string? start, string? end, bool? yenile, HttpContext ctx, IConfiguration cfg, IHttpClientFactory factory,
-    HttpSysKayitService kayit, EnvanterService envanter, CancellationToken ct) =>
+// IP kartı "Gelen portlar" tablosundaki ntoskrnl satırları için (HttpSys.cs)
+// HTTP.sys port → exe: önce kayıt (DF_HTTPSYS_KORELASYON; isteğe bağlı kesin kayıt DF_HTTPSYS_URL), yoksa / eskiyse Carbon Black'ten hesaplanıp yazılır.
+// Sunucuya BAĞLANILMAZ. yenile=true → yeniden hesapla.
+app.MapGet("/api/surec/httpsys", async (string? ip, string? start, string? end, bool? yenile, IConfiguration cfg, IHttpClientFactory factory,
+    HttpSysKayitService kayit, CancellationToken ct) =>
 {
     if (!LookupQuery.TryParse(ip, start, end, cfg.GetValue("MaxRangeHours", 24), out var q, out var error)) return Results.BadRequest(new { error });
-    bool topla = Yetki.Var(cfg, ctx, Yetki.Topoloji);
-    var env = await envanter.GetAsync(false, ct);
-    string? host = env.AppsOnIp(q!.Ip).Select(h => h.UnixName).OfType<string>().FirstOrDefault();
-    var kayitTask = kayit.GetirAsync(q.Ip, host, topla, ct, yenile == true && topla);
-    var res = await HttpSysEslesme.HesaplaAsync(q.Ip, q.Start, q.End, cfg, factory.CreateClient("splunk"), ct);
-    var k = await kayitTask;
-    return Results.Ok(new { res.Ip, res.ToplamDakika, res.Portlar, korelasyonHata = res.Hata,
-        kayit = k.Kayitlar.Select(x => new { x.Port, x.Url, x.Kuyruk, x.Pid, x.ExeYol, x.Exe, x.Hostname, x.Tarih }),
-        kayitDurum = kayit.Durum, kayitTarih = k.Toplama, kayitKaynak = k.Kaynak, kayitHata = k.Hata, toplayabilir = topla });
+    var urlTask = kayit.IpAsync(q!.Ip, ct);
+    var k = await kayit.KorelasyonAsync(q.Ip, q.Start, q.End, factory.CreateClient("splunk"), ct, null, yenile == true);
+    var kesin = await urlTask;
+    return Results.Ok(new { k.Sonuc.Ip, k.Sonuc.ToplamDakika, k.Sonuc.Portlar, korelasyonHata = k.Sonuc.Hata, korelasyonTarih = k.Tarih, korelasyonKaynak = k.Kaynak,
+        kayit = kesin.Select(x => new { x.Port, x.Url, x.Kuyruk, x.Pid, x.ExeYol, x.Exe, x.Hostname, x.Tarih }), kayitDurum = kayit.Durum });
 });
 app.MapGet("/api/surec", async (string? ip, string? start, string? end,
     IConfiguration cfg, IHttpClientFactory factory, EnvanterService envanter, CancellationToken ct) =>

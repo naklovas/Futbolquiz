@@ -657,13 +657,9 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
             // Kahin…) başta olunca SM / CB kesiliyordu. Güçlü kanıtlar önce, komşular ve profil sonda.
             if (smf.TryGetValue(ip, out var smfText)) sb.Append(smfText);
             // HTTP.sys KAYDI (kullanıcı: "gerçek portları bir yere yazsak, önce oraya baksak"): sunuculardan netsh ile toplanan kesin port → exe
-            // (kullanıcı: "AI'a göndermeden önce kanıt olarak toplayalım, liste yok"): boş port çekirdekte (ntoskrnl) ise kayıt yoksa / eskiyse sunucudan şimdi toplanır
-            bool cekirdekPort = cb.TryGetValue(ip, out var cb0) && cb0.Rows.Any(r => r.Yon == "in" && miss.Contains(r.Port) && HttpSysEslesme.Cekirdek(r.Yol));
-            var hsk = httpSysKayit == null ? null : await httpSysKayit.GetirAsync(ip, env.AppsOnIp(ip).Select(h => h.UnixName).OfType<string>().FirstOrDefault(),
-                cekirdekPort && cfg.GetValue("HttpSys:EksikteTopla", true), ct);
-            var kesin = hsk == null ? [] : hsk.Kayitlar.Where(k => miss.Contains(k.Port.ToString())).ToList();
+            // Kesin kayıt (isteğe bağlı DF_HTTPSYS_URL; DeltaFlow sunucuya bağlanmaz, yalnız okur)
+            var kesin = httpSysKayit == null ? [] : (await httpSysKayit.IpAsync(ip, ct)).Where(k => miss.Contains(k.Port.ToString())).ToList();
             if (kesin.Count > 0) sb.Append(HttpSysKayitService.Metin(kesin));
-            else if (hsk?.Hata != null && cekirdekPort) log.LogWarning("HTTP.sys canlı toplama {Ip}: {Hata}", ip, hsk.Hata);
             if (cb.TryGetValue(ip, out var c))
             {
                 sb.Append(c.Text(env, ip, miss));
@@ -673,8 +669,11 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
                     .Where(p => !kesin.Any(k => k.Port.ToString() == p)).ToHashSet();
                 if (hsPort.Count > 0 && cfg.GetValue("HttpSys:Eksikte", true))
                 {
-                    var hs = await HttpSysEslesme.HesaplaAsync(ip, DateTimeOffset.Now.AddHours(-hours), DateTimeOffset.Now, cfg, factory.CreateClient("splunk"), ct, hsPort);
-                    if (hs.Hata == null) sb.Append(HttpSysEslesme.Metin(hs));
+                    // önce kayıtlı korelasyon (DF_HTTPSYS_KORELASYON), yoksa / eskiyse hesaplanıp yazılır (kullanıcı: "bulunanı bir yere yazalım, önce oraya bakalım")
+                    var hs = httpSysKayit != null
+                        ? (await httpSysKayit.KorelasyonAsync(ip, DateTimeOffset.Now.AddHours(-hours), DateTimeOffset.Now, factory.CreateClient("splunk"), ct, hsPort)).Sonuc
+                        : await HttpSysEslesme.HesaplaAsync(ip, DateTimeOffset.Now.AddHours(-hours), DateTimeOffset.Now, cfg, factory.CreateClient("splunk"), ct, hsPort);
+                    if (hs.Hata == null) sb.Append(HttpSysEslesme.Metin(hs with { Portlar = hs.Portlar.Where(p => hsPort.Contains(p.Port)).ToList() }));
                     else log.LogWarning("HTTP.sys korelasyonu {Ip}: {Hata}", ip, hs.Hata);
                 }
             }

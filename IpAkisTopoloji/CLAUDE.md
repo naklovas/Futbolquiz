@@ -45,8 +45,8 @@ topoloji çizer ve şirket içi AI'a etki analizi yaptırır. Canlıda IIS'te, W
 | `FizikselEnvanter.cs` | Fiziksel envanter: nlyte kabin → host → VM → uygulama (doku DB'deki KabinHostVm vb., yalnız okur; `wwwroot/fiziksel.js`) |
 | `FizikselDeger.cs` | Fiziksel cihaz değerleri (V / İ / E / G / B): tür / model / kabin kuralları, miras, ERT ad eşleşmesi (`partial FizikselService`) |
 | `FizikselKayit.cs` | Fiziksel değer denetim kaydı (DF_FIZIKSEL_DEGER_*), elle değer, çok sayfalı Excel (`Xlsx` yazıcı, dış kütüphanesiz) |
-| `HttpSys.cs` | HTTP.sys (ntoskrnl) port → asıl exe: sunuculardan toplanan kesin kayıt (`HttpSysKayitService`, DF_HTTPSYS_URL) + Carbon Black zaman korelasyonu (`HttpSysEslesme`) |
-| `araclar/HttpSysTopla.ps1` | Sunucularda `netsh http show servicestate` → DF_HTTPSYS_URL (kullanıcı çalıştırır) |
+| `HttpSys.cs` | HTTP.sys (ntoskrnl) port → asıl exe: Carbon Black zaman korelasyonu (`HttpSysEslesme`), sonucun kaydı (`HttpSysKayitService`, DF_HTTPSYS_KORELASYON) |
+| `araclar/HttpSysTopla.ps1` | İSTEĞE BAĞLI: sunucularda elle `netsh http show servicestate` → DF_HTTPSYS_URL (DeltaFlow bağlanmaz) |
 | `Nessus.cs` | Nessus / Tenable.sc: repository'deki tarama sonuçlarından teknoloji, sertifika, OS, kurulu yazılım |
 | `Yetki.cs` | İşlem yetkileri (yazma, topoloji, dışa aktarma, toplu tahmin) — DokuPanel site kayıtları |
 | `AuthHelper.cs` | Kullanıcının verdiği DokuPanel yetki helper'ı (namespace `AppRel`), anahtar config'den |
@@ -290,15 +290,14 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
   `/api/surec/httpsys` artık `{portlar (korelasyon), korelasyonHata, kayit, kayitDurum}`; IP kartında kayıt varsa yeşil "✔ HTTP.sys kaydı: exe · kuyruk / IIS havuzu ·
   URL", yoksa korelasyon. ERT eksikleri: boş portun kaydı varsa kanıta "HTTP.SYS KAYDI (… KESİN)" + prompt'ta en güçlü kanıt, korelasyon yalnız kayıtsız portlara;
   `ProgramKontrol` kayıttaki exe yolundan da bilinen ürünü bulur. Ayrıştırma Python'a çevrilmiş aynı kurallarla örnek netsh çıktısında denendi (ortamda PowerShell yok).
-  CANLI TOPLAMA (kullanıcı: "AI'a göndermeden önce kanıt olarak toplayalım, IP arattığımda processlerde gösterelim, liste yok, kendi çalışmalı"):
-  `HttpSysKayitService.GetirAsync(ip, host, topla, ct, yenile)` — tablodaki kayıt yoksa / `HttpSys:YenilemeSaat`(24)'ten eskiyse DeltaFlow sunucuya bağlanır:
-  `powershell.exe -EncodedCommand` (SABİT betik) → `Invoke-Command -ComputerName <ERT UNIXNAME; IP biçimliyse IP, `HttpSys:AlanAdi` eki>` → netsh servicestate +
-  Win32_Process (PID → exe) JSON; sunucu adı / `HttpSys:Kullanici` / `HttpSys:Sifre` (appsettings.Production.json; yoksa uygulama havuzu hesabı) ortam değişkeniyle,
-  komut satırına girmez; `ToplaSaniye`=60; Windows değilse / `HttpSys:CanliTopla`=false kapalı. C# `Ayristir` (ps1 ile aynı kurallar; başka IP'ye bağlı URL atlanır;
-  örnek netsh çıktısıyla test edildi). Sonuç DF_HTTPSYS_URL'e yazılır (IP'nin satırları silinip; kayıt yoksa PORT 0 işaret satırı = "toplandı, kayıt yok";
-  TOPLAYAN "DeltaFlow"; tablo yoksa bellekte), IP başına SemaphoreSlim. Tetikleyiciler: IP kartı (runProc → ntoskrnl portu varsa `/api/surec/httpsys`, yalnız
-  Yetki:Topoloji olan toplar; "↻ sunucudan yeniden al" `yenile=true`; durum satırı "HTTP.sys kaydı: şimdi sunucudan alındı / tarih" ya da "alınamadı (WinRM / yetki)")
-  ve ERT eksikleri BuildAsync (boş port çekirdekteyse, `HttpSys:EksikteTopla`=true). GEREKSİNİM: hesap hedeflerde WinRM + yerel yönetici.
+  SUNUCUYA BAĞLANMA YOK (kullanıcı: "sunucuya bağlanma falan yok, zaman farkıyla dedin" — bir ara DeltaFlow'dan WinRM ile canlı netsh toplama yapıldı,
+  KULLANICI İSTEMEDİ, kaldırıldı; geri ekleme). "Bulunan gerçek portları bir yere yazalım, önce oraya bakalım" = korelasyon sonucunu KAYDETMEK:
+  `HttpSysKayitService.KorelasyonAsync(ip, aralık, http, ct, portlar, yenile)` → önce `dbo.DF_HTTPSYS_KORELASYON` (IP, PORT, SIRA, EXE, EXE_YOL, R, ESLIK,
+  ORTAK_DAKIKA, DAKIKA, BAGLANTI, TARIH; SIRA 0 / EXE NULL = aday yok, PORT '0' = ntoskrnl portu yok; `HttpSys:KorelasyonTablosu`), `HttpSys:YenilemeSaat`=24'ten
+  taze ve istenen portlar kayıtlıysa "kayıt"; değilse `HttpSysEslesme.HesaplaAsync` + IP×port satırları silinip yazılır ("şimdi hesaplandı"); tablo / bağlantı
+  yoksa bellekte. IP kartı (`/api/surec/httpsys?yenile=`; ntoskrnl satırında "kayıtlı sonuç · tarih · ↻ yeniden hesapla" / "şimdi hesaplandı ve kaydedildi") ve
+  ERT eksikleri (AI'dan önce, yalnız boş ve çekirdekteki portlar) aynı kaydı kullanır. DF_HTTPSYS_URL yalnız İSTEĞE BAĞLI (ps1 elle çalıştırılırsa) okunur.
+  Sahte Splunk'la: 1. istek hesapladı, 2. kayıttan, yenile yeniden hesapladı.
 - **"Bu sunucuda hangi uygulama çalışıyor?"** (IP kartı, Gelen portlar tablosunun üstündeki düğme; `SurecAi` Surec.cs, `POST /api/surec/ai`):
   arayüzdeki /api/surec sonucu exe başına toplanıp (PID'ler, portlar, giden, bağlanan / bağlandığı uygulamalar) AI'a gider (yeniden
   sorgulanmaz) + ERT kayıtları + segment + genel bilgiler dosyası. Kesin genel süreçler kodda ayıklanır (`GenelAd` / `GenelYol`: svchost,

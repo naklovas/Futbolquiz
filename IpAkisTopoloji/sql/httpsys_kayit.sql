@@ -1,8 +1,26 @@
--- DeltaFlow · HTTP.sys URL kayıtları: hangi port / URL hangi süreçte (exe) çalışıyor.
--- Carbon Black HTTP.sys portlarının sahibini ntoskrnl.exe / System görür; asıl uygulama bu tablodan bulunur.
--- Tabloyu araclar/HttpSysTopla.ps1 doldurur (sunucularda `netsh http show servicestate view=requestq verbose=yes`).
--- DeltaFlow yalnız OKUR (HttpSys:Tablo ile ad değiştirilebilir). Betik her sunucu için önce o sunucunun satırlarını siler, sonra yazar.
+-- DeltaFlow · HTTP.sys portu (ntoskrnl / System) → asıl exe kayıtları. DeltaFlow SUNUCULARA BAĞLANMAZ.
+-- 1) DF_HTTPSYS_KORELASYON: Carbon Black zaman korelasyonu sonuçları — DeltaFlow yazar ve önce buna bakar (HttpSys:YenilemeSaat = 24 saatten eskiyse yeniden hesaplar).
+IF OBJECT_ID('dbo.DF_HTTPSYS_KORELASYON', 'U') IS NULL
+CREATE TABLE dbo.DF_HTTPSYS_KORELASYON (
+    IP            VARCHAR(45)     NOT NULL,
+    PORT          VARCHAR(10)     NOT NULL,   -- '0' = sunucuda ntoskrnl portu görülmedi işaret satırı
+    SIRA          INT             NOT NULL,   -- 1 = en olası aday; 0 = aday yok
+    EXE           NVARCHAR(260)   NULL,
+    EXE_YOL       NVARCHAR(1000)  NULL,
+    R             FLOAT           NULL,       -- korelasyon (Pearson, dakika dakika)
+    ESLIK         INT             NULL,       -- gelen trafiğin olduğu dakikaların yüzde kaçında exe de dışarı bağlanıyor
+    ORTAK_DAKIKA  INT             NULL,
+    DAKIKA        INT             NULL,       -- portun gelen trafik gördüğü dakika
+    BAGLANTI      BIGINT          NULL,
+    TARIH         DATETIME2       NOT NULL CONSTRAINT DF_DF_HTTPSYS_KORELASYON_TARIH DEFAULT SYSDATETIME()
+);
+GO
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_DF_HTTPSYS_KORELASYON_IP' AND object_id = OBJECT_ID('dbo.DF_HTTPSYS_KORELASYON'))
+    CREATE INDEX IX_DF_HTTPSYS_KORELASYON_IP ON dbo.DF_HTTPSYS_KORELASYON (IP, PORT);
+GO
+-- GRANT SELECT, INSERT, DELETE ON dbo.DF_HTTPSYS_KORELASYON TO [DOMAIN\deltaflow_hesabi];
 
+-- 2) DF_HTTPSYS_URL (İSTEĞE BAĞLI): birisi araclar/HttpSysTopla.ps1 ile sunucularda netsh çalıştırıp kesin kayıt toplarsa; DeltaFlow yalnız OKUR.
 IF OBJECT_ID('dbo.DF_HTTPSYS_URL', 'U') IS NULL
 CREATE TABLE dbo.DF_HTTPSYS_URL (
     IP             VARCHAR(45)     NOT NULL,   -- sunucunun IPv4'ü (URL tüm IP'lerdeyse (+ / *) her IP için bir satır)

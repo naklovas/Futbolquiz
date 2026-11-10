@@ -1475,7 +1475,7 @@ async function loadHttpSys(ip, yenile) {
     const kayit = {};
     for (const k of b.kayit ?? []) (kayit[String(k.port)] ??= []).push(k);
     state.httpsys = { ip, status: "ok", map: Object.fromEntries((b.portlar ?? []).map(p => [String(p.port), p])), kayit, korelasyonHata: b.korelasyonHata, kayitDurum: b.kayitDurum,
-      kayitTarih: b.kayitTarih, kayitKaynak: b.kayitKaynak, kayitHata: b.kayitHata, toplayabilir: b.toplayabilir };
+      korTarih: b.korelasyonTarih, korKaynak: b.korelasyonKaynak };
   } catch (e) { if (e.name !== "AbortError") state.httpsys = { ip, status: "error", error: e.message }; }
   renderProc(); updateTargetApps();
 }
@@ -1483,12 +1483,11 @@ async function loadHttpSys(ip, yenile) {
 function httpSysTahmin(port) {
   const h = state.httpsys;
   if (!h) return "";
-  if (h.status === "loading") return `<div class="small muted"><span class="spinner"></span> asıl exe aranıyor (sunucudan HTTP.sys kaydı${h.yenile ? " yeniden" : ""} alınıyor + zaman korelasyonu)…</div>`;
-  const yen = h.toplayabilir ? ` <a href="#" class="small" data-hsyenile="${esc(h.ip)}" title="Sunucuya bağlanıp netsh http show servicestate'i şimdi yeniden al">↻ sunucudan yeniden al</a>` : "";
-  const kayitNot = h.kayitHata ? `<div class="small muted" title="${esc(h.kayitHata)}">sunucudan HTTP.sys kaydı alınamadı (WinRM / yetki)${yen}</div>`
-    : h.kayitTarih ? `<div class="small muted">HTTP.sys kaydı: ${h.kayitKaynak === "şimdi toplandı" ? "şimdi sunucudan alındı" : esc(String(h.kayitTarih).slice(0, 16).replace("T", " "))}${yen}</div>` : "";
+  if (h.status === "loading") return `<div class="small muted"><span class="spinner"></span> asıl exe ${h.yenile ? "yeniden hesaplanıyor" : "aranıyor (önce kayıtlı sonuç, yoksa Carbon Black zaman korelasyonu)"}…</div>`;
+  const yen = ` <a href="#" class="small" data-hsyenile="${esc(h.ip)}" title="Kayıtlı sonucu kullanmadan Carbon Black'ten yeniden hesapla ve kaydet">↻ yeniden hesapla</a>`;
+  const kayitNot = h.korTarih ? `<div class="small muted">${h.korKaynak === "kayıt" ? `kayıtlı sonuç · ${esc(String(h.korTarih).slice(0, 16).replace("T", " "))}` : "şimdi hesaplandı ve kaydedildi"}${yen}</div>` : "";
   if (h.status === "error") return `<div class="small muted" title="${esc(h.error)}">zaman korelasyonu alınamadı</div>`;
-  // Önce sunucudan toplanan kesin kayıt (netsh http show servicestate → DF_HTTPSYS_URL)
+  // İsteğe bağlı kesin kayıt (araclar/HttpSysTopla.ps1 ile netsh'ten toplanmışsa DF_HTTPSYS_URL); DeltaFlow sunucuya bağlanmaz
   const ks = h.kayit?.[String(port)];
   if (ks?.length) {
     const grup = [...new Map(ks.map(k => [(k.exeYol || "") + "|" + (k.kuyruk || ""), k])).values()];
@@ -1496,7 +1495,7 @@ function httpSysTahmin(port) {
     const tarih = ks.map(k => k.tarih).sort().pop();
     return `<div class="small" style="color:var(--ok)" title="Sunucudan 'netsh http show servicestate' ile toplanan HTTP.sys kaydı (${esc(String(tarih || "").slice(0, 10))}).\nURL: ${esc(urls.join(", "))}${grup.some(k => k.exeYol) ? "\nExe: " + esc(grup.map(k => k.exeYol).filter(Boolean).join(" · ")) : ""}">✔ HTTP.sys kaydı: ${grup.map(k =>
       `${k.exe ? `<b class="mono">${esc(k.exe)}</b>` : `<span class="muted">çalışan süreç yok</span>`}${k.kuyruk ? ` <span class="muted">· ${/w3wp/i.test(k.exe || "") || !k.exe ? "IIS havuzu" : "kuyruk"} ${esc(k.kuyruk)}</span>` : ""}`).join("; ")}
-      <span class="muted">· ${esc(urls[0])}${urls.length > 1 ? ` +${urls.length - 1}` : ""}</span></div>${kayitNot}`;
+      <span class="muted">· ${esc(urls[0])}${urls.length > 1 ? ` +${urls.length - 1}` : ""}</span></div>`;
   }
   const p = h.map?.[String(port)];
   if (!p) return kayitNot;
