@@ -40,6 +40,7 @@ builder.Services.AddHttpClient("ai", c => c.Timeout = TimeSpan.FromMinutes(build
 builder.Services.AddSingleton<EnvanterService>();
 builder.Services.AddSingleton<IslevService>();
 builder.Services.AddSingleton<EksikService>();
+builder.Services.AddSingleton<HttpSysKayitService>();
 builder.Services.AddSingleton<SegmentTaramaService>();
 builder.Services.AddSingleton<NessusService>();
 builder.Services.AddSingleton<FizikselService>();
@@ -228,11 +229,16 @@ app.MapPost("/api/surec/ai", async (SurecAiIstek req, EnvanterService envanter, 
 });
 
 // HTTP.sys port → asıl exe tahmini (Carbon Black zaman korelasyonu; HttpSys.cs). IP kartı "Gelen portlar" tablosundaki ntoskrnl satırları için
-app.MapGet("/api/surec/httpsys", async (string? ip, string? start, string? end, IConfiguration cfg, IHttpClientFactory factory, CancellationToken ct) =>
+// Önce sunuculardan toplanan kesin kayıt (DF_HTTPSYS_URL), yanında korelasyon (kayıtsız portlar için)
+app.MapGet("/api/surec/httpsys", async (string? ip, string? start, string? end, IConfiguration cfg, IHttpClientFactory factory,
+    HttpSysKayitService kayit, CancellationToken ct) =>
 {
     if (!LookupQuery.TryParse(ip, start, end, cfg.GetValue("MaxRangeHours", 24), out var q, out var error)) return Results.BadRequest(new { error });
-    var res = await HttpSysEslesme.HesaplaAsync(q!.Ip, q.Start, q.End, cfg, factory.CreateClient("splunk"), ct);
-    return res.Hata != null ? Results.Json(new { error = res.Hata }, statusCode: 502) : Results.Ok(res);
+    var kayitTask = kayit.IpAsync(q!.Ip, ct);
+    var res = await HttpSysEslesme.HesaplaAsync(q.Ip, q.Start, q.End, cfg, factory.CreateClient("splunk"), ct);
+    var kayitlar = await kayitTask;
+    return Results.Ok(new { res.Ip, res.ToplamDakika, res.Portlar, korelasyonHata = res.Hata,
+        kayit = kayitlar.Select(k => new { k.Port, k.Url, k.Kuyruk, k.Pid, k.ExeYol, k.Exe, k.Hostname, k.Tarih }), kayitDurum = kayit.Durum });
 });
 app.MapGet("/api/surec", async (string? ip, string? start, string? end,
     IConfiguration cfg, IHttpClientFactory factory, EnvanterService envanter, CancellationToken ct) =>

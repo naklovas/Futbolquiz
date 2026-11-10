@@ -1470,7 +1470,9 @@ async function loadHttpSys(ip) {
     const b = await r.json().catch(() => ({ error: `HTTP ${r.status}` }));
     if (!r.ok) throw new Error(b.error || `HTTP ${r.status}`);
     if (state.httpsys?.ip !== ip) return;
-    state.httpsys = { ip, status: "ok", map: Object.fromEntries((b.portlar ?? []).map(p => [String(p.port), p])) };
+    const kayit = {};
+    for (const k of b.kayit ?? []) (kayit[String(k.port)] ??= []).push(k);
+    state.httpsys = { ip, status: "ok", map: Object.fromEntries((b.portlar ?? []).map(p => [String(p.port), p])), kayit, korelasyonHata: b.korelasyonHata, kayitDurum: b.kayitDurum };
   } catch (e) { if (e.name !== "AbortError") state.httpsys = { ip, status: "error", error: e.message }; }
   renderProc(); updateTargetApps();
 }
@@ -1480,6 +1482,16 @@ function httpSysTahmin(port) {
   if (!h) return "";
   if (h.status === "loading") return `<div class="small muted"><span class="spinner"></span> asıl exe zaman korelasyonuyla aranıyor…</div>`;
   if (h.status === "error") return `<div class="small muted" title="${esc(h.error)}">zaman korelasyonu alınamadı</div>`;
+  // Önce sunucudan toplanan kesin kayıt (netsh http show servicestate → DF_HTTPSYS_URL)
+  const ks = h.kayit?.[String(port)];
+  if (ks?.length) {
+    const grup = [...new Map(ks.map(k => [(k.exeYol || "") + "|" + (k.kuyruk || ""), k])).values()];
+    const urls = [...new Set(ks.map(k => k.url))];
+    const tarih = ks.map(k => k.tarih).sort().pop();
+    return `<div class="small" style="color:var(--ok)" title="Sunucudan 'netsh http show servicestate' ile toplanan HTTP.sys kaydı (${esc(String(tarih || "").slice(0, 10))}).\nURL: ${esc(urls.join(", "))}${grup.some(k => k.exeYol) ? "\nExe: " + esc(grup.map(k => k.exeYol).filter(Boolean).join(" · ")) : ""}">✔ HTTP.sys kaydı: ${grup.map(k =>
+      `${k.exe ? `<b class="mono">${esc(k.exe)}</b>` : `<span class="muted">çalışan süreç yok</span>`}${k.kuyruk ? ` <span class="muted">· ${/w3wp/i.test(k.exe || "") || !k.exe ? "IIS havuzu" : "kuyruk"} ${esc(k.kuyruk)}</span>` : ""}`).join("; ")}
+      <span class="muted">· ${esc(urls[0])}${urls.length > 1 ? ` +${urls.length - 1}` : ""}</span></div>`;
+  }
   const p = h.map?.[String(port)];
   if (!p) return "";
   if (!p.adaylar?.length) return `<div class="small muted" title="Bu portun gelen trafiğiyle aynı dakikalarda dışarı bağlanan bir iş exe'si bulunamadı (uygulama dışarı bağlanmıyor olabilir)">↔ zaman korelasyonu: aday yok (${fmt(p.dakika)} dk trafik)</div>`;

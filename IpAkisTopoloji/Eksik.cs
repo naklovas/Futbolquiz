@@ -25,7 +25,7 @@ record EksikCalistir(List<string>? Ips, bool Hepsi, bool Yeniden, int? Saat, boo
 record EksikKarar(string? Ip, string? Port, string? Karar, string? Uygulama);
 
 sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, EnvanterService envanter, IslevService islev,
-    NessusService nessus, ILogger<EksikService> log)
+    NessusService nessus, ILogger<EksikService> log, HttpSysKayitService? httpSysKayit = null)
 {
     public const string Onay = "Onaylandı", Red = "Reddedildi", Ai = "AI", Elle = "Elle";
     readonly object _gate = new();
@@ -656,12 +656,16 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
             // Sıra önemli (kullanıcı: SM açıklamaları önemsenmiyordu): metin Eksik:MaxKarakter'de kesilir ve uzun profil (ERT, MSY, ÇSY,
             // Kahin…) başta olunca SM / CB kesiliyordu. Güçlü kanıtlar önce, komşular ve profil sonda.
             if (smf.TryGetValue(ip, out var smfText)) sb.Append(smfText);
+            // HTTP.sys KAYDI (kullanıcı: "gerçek portları bir yere yazsak, önce oraya baksak"): sunuculardan netsh ile toplanan kesin port → exe
+            var kesin = httpSysKayit == null ? [] : (await httpSysKayit.IpAsync(ip, ct)).Where(k => miss.Contains(k.Port.ToString())).ToList();
+            if (kesin.Count > 0) sb.Append(HttpSysKayitService.Metin(kesin));
             if (cb.TryGetValue(ip, out var c))
             {
                 sb.Append(c.Text(env, ip, miss));
                 // HTTP.sys portları (kullanıcı: "ntoskrnl olayı: exe gerçekte hangi portta bilinmiyor"): boş portu çekirdek kabul ediyorsa
-                // zaman korelasyonuyla asıl exe tahmini (HttpSys.cs; Carbon Black dakika dakika, ek sorgu yalnız böyle port varsa)
-                var hsPort = c.Rows.Where(r => r.Yon == "in" && miss.Contains(r.Port) && HttpSysEslesme.Cekirdek(r.Yol)).Select(r => r.Port).ToHashSet();
+                // zaman korelasyonuyla asıl exe tahmini (HttpSys.cs; Carbon Black dakika dakika, ek sorgu yalnız böyle port varsa); kesin kaydı olan port hariç
+                var hsPort = c.Rows.Where(r => r.Yon == "in" && miss.Contains(r.Port) && HttpSysEslesme.Cekirdek(r.Yol)).Select(r => r.Port)
+                    .Where(p => !kesin.Any(k => k.Port.ToString() == p)).ToHashSet();
                 if (hsPort.Count > 0 && cfg.GetValue("HttpSys:Eksikte", true))
                 {
                     var hs = await HttpSysEslesme.HesaplaAsync(ip, DateTimeOffset.Now.AddHours(-hours), DateTimeOffset.Now, cfg, factory.CreateClient("splunk"), ct, hsPort);
@@ -1292,7 +1296,8 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
             yazılmış uygulama alanı varsa çok güçlü; aynı satırdaki WEBSITE (IIS site adı) ve SERVICENAME; aynı sunucunun diğer portlarındaki uygulamalar; VIP ve havuz
             komşuları; BENZER ADLI SUNUCULARIN (aynı ad, farklı numara) uygulamaları; aynı segmentte aynı portu kullanan
             sunucuların uygulamaları; bu porta bağlanan istemci uygulamalar ve exe'nin bağlandığı yerler; sanal sunucu notları;
-            iş istekleri; sunucu adındaki kısaltmalar (ör. "atm", "sql", "web"). ntoskrnl.exe görünüyorsa port HTTP.sys üzerindendir ("HTTP.SYS PORT → EXE TAHMİNİ" satırı varsa oradaki EN OLASI exe o portun asıl uygulamasıdır — orta güçte kanıt); asıl uygulama aynı sunucudaki ve adı WEBSITE ile
+            iş istekleri; sunucu adındaki kısaltmalar (ör. "atm", "sql", "web"). ntoskrnl.exe görünüyorsa port HTTP.sys üzerindendir ("HTTP.SYS KAYDI" satırı varsa o portu dinleyen süreç KESİN odur — exe yolu / IIS havuzu adı uygulamayı gösterir, en güçlü kanıtlardan say;
+            "HTTP.SYS PORT → EXE TAHMİNİ" satırındaki EN OLASI exe orta güçte kanıttır); asıl uygulama aynı sunucudaki ve adı WEBSITE ile
             örtüşen exe'dir.
 
             Kurallar:
@@ -1407,6 +1412,9 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
                     var o = outp.GetValueOrDefault((ip, port));
                     if (o?.Uygulama != null && o.Gerekce?.StartsWith("Kahin tahmini") != true) continue;
                     string? portUrun = PortLine(ev, port) is { } line ? line.Split('[').Skip(1).Select(x => BilinenUrun(x.Split(']')[0])).OfType<string>().FirstOrDefault() : null;
+                    // HTTP.sys kaydındaki (kesin) exe yolu da
+                    portUrun ??= ev?.Split('\n').FirstOrDefault(l => l.StartsWith($"- port {port} → ")) is { } hl
+                        ? hl.Split('[').Skip(1).Select(x => BilinenUrun(x.Split(']')[0])).OfType<string>().FirstOrDefault() : null;
                     string? urun = portUrun ?? (sunucuUrun.Count == 1 ? sunucuUrun[0] : null);
                     if (urun == null) continue;
                     string ad = CatalogMatch(env, urun, out bool yeni, out var katNot, ip, ev);
