@@ -733,6 +733,8 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
 ## Kullanıcının tercihleri / kurallar
 - Arayüzde ve metinlerde **"bizim" ifadesi kullanılmaz**: "Sorgulanan IP", "Gelen/Gidilen sunucular", "Karşılayan uygulama", "Aynı segment".
 - Ayarların tamamı **yalnızca `appsettings.json`**'dan okunur (eski DeltaFlow `config.json` desteği kaldırıldı).
+- **Repodaki `appsettings.json` DEĞİŞTİRİLMEZ / commit'lenmez** (kullanıcı: kendi appsettings'i var, pull çakışıyor — "appsettings'i hiç yollama,
+  ekleme varsa buradan ver"). Yeni ayar gerekirse kodda varsayılan değer olur ve kullanıcıya yalnız eklenecek JSON parçası sohbette verilir.
 - **Sır/şifre repoya girmez**: DokuPanelKey, AppResponse/Splunk şifreleri, AI ApiKey → `appsettings.Production.json`
   (`.gitignore`'da `appsettings.*.json`). AuthHelper'daki sabit anahtar koddan çıkarıldı.
 - Görseller sade ve iyi gruplanmış olmalı, karmaşık olmamalı. Önce basit yap, sonra kullanıcı geri bildirimiyle geliştir.
