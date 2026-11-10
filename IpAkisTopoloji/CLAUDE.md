@@ -298,6 +298,9 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
   yoksa bellekte. IP kartı (`/api/surec/httpsys?yenile=`; ntoskrnl satırında "kayıtlı sonuç · tarih · ↻ yeniden hesapla" / "şimdi hesaplandı ve kaydedildi") ve
   ERT eksikleri (AI'dan önce, yalnız boş ve çekirdekteki portlar) aynı kaydı kullanır. DF_HTTPSYS_URL yalnız İSTEĞE BAĞLI (ps1 elle çalıştırılırsa) okunur.
   Sahte Splunk'la: 1. istek hesapladı, 2. kayıttan, yenile yeniden hesapladı.
+  PENCERE + ZAYIF ADAY (kullanıcı: "aday yok (2 dk trafik)", "5 dk de çok az"): korelasyon IP kartının 3 saatlik süreç penceresini DEĞİL son
+  `HttpSys:Saat`=72 saati kullanır (`HttpSysEslesme.Aralik`; IP kartı ve ERT eksikleri). `MinDakika`'dan az trafikte de aday aranır (ortak ≥ min(2, dakika)),
+  `HttpSysPort.Zayif` → arayüzde "· zayıf (N dk trafik)", AI metninde "AZ TRAFİK — ZAYIF İPUCU"; kayıttan okurken Zayif = DAKIKA < MinDakika.
 - **"Bu sunucuda hangi uygulama çalışıyor?"** (IP kartı, Gelen portlar tablosunun üstündeki düğme; `SurecAi` Surec.cs, `POST /api/surec/ai`):
   arayüzdeki /api/surec sonucu exe başına toplanıp (PID'ler, portlar, giden, bağlanan / bağlandığı uygulamalar) AI'a gider (yeniden
   sorgulanmaz) + ERT kayıtları + segment + genel bilgiler dosyası. Kesin genel süreçler kodda ayıklanır (`GenelAd` / `GenelYol`: svchost,

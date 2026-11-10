@@ -1475,7 +1475,7 @@ async function loadHttpSys(ip, yenile) {
     const kayit = {};
     for (const k of b.kayit ?? []) (kayit[String(k.port)] ??= []).push(k);
     state.httpsys = { ip, status: "ok", map: Object.fromEntries((b.portlar ?? []).map(p => [String(p.port), p])), kayit, korelasyonHata: b.korelasyonHata, kayitDurum: b.kayitDurum,
-      korTarih: b.korelasyonTarih, korKaynak: b.korelasyonKaynak };
+      korTarih: b.korelasyonTarih, korKaynak: b.korelasyonKaynak, korSaat: b.korelasyonSaat, minDakika: b.minDakika };
   } catch (e) { if (e.name !== "AbortError") state.httpsys = { ip, status: "error", error: e.message }; }
   renderProc(); updateTargetApps();
 }
@@ -1499,9 +1499,11 @@ function httpSysTahmin(port) {
   }
   const p = h.map?.[String(port)];
   if (!p) return kayitNot;
-  if (!p.adaylar?.length) return kayitNot + `<div class="small muted" title="Bu portun gelen trafiğiyle aynı dakikalarda dışarı bağlanan bir iş exe'si bulunamadı (uygulama dışarı bağlanmıyor olabilir)">↔ zaman korelasyonu: aday yok (${fmt(p.dakika)} dk trafik)</div>`;
+  const pen = h.korSaat ? `son ${h.korSaat} saatte ` : "";
+  if (!p.adaylar?.length) return kayitNot + `<div class="small muted" title="Bu portun gelen trafiğiyle aynı dakikalarda dışarı bağlanan bir iş exe'si bulunamadı (uygulama dışarı bağlanmıyor olabilir)">↔ zaman korelasyonu: aday yok (${pen}${fmt(p.dakika)} dk trafik)</div>`;
   const a = p.adaylar[0], diger = p.adaylar.slice(1);
-  return kayitNot + `<div class="small" style="color:var(--in)" title="Carbon Black: bu porta ntoskrnl'nin aldığı gelen bağlantılar ile exe'lerin giden bağlantıları dakika dakika karşılaştırıldı. Korelasyon ${a.r} · gelen trafiğin olduğu dakikaların %${a.eslik}'inde bu exe de dışarı bağlanıyor. Kesin değildir; kesin eşleme sunucuda 'netsh http show servicestate'.${diger.length ? "\nDiğer adaylar: " + diger.map(d => `${d.exe} (${d.r})`).join(", ") : ""}">↔ zaman korelasyonu: muhtemelen <b class="mono">${esc(a.exe)}</b> <span class="muted">(r ${a.r} · %${a.eslik} eşlik${diger.length ? ` · +${diger.length} aday` : ""})</span></div>`;
+  const zayif = p.zayif ? ` <span class="muted" title="Bu porta ${pen}yalnız ${fmt(p.dakika)} dakikada trafik geldi (güvenilir eşleşme için en az ${h.minDakika ?? 5} dk) — zayıf ipucu">· zayıf (${fmt(p.dakika)} dk trafik)</span>` : "";
+  return kayitNot + `<div class="small" style="color:var(--in)" title="Carbon Black: bu porta ntoskrnl'nin aldığı gelen bağlantılar ile exe'lerin giden bağlantıları dakika dakika karşılaştırıldı. Korelasyon ${a.r} · gelen trafiğin olduğu dakikaların %${a.eslik}'inde bu exe de dışarı bağlanıyor. Kesin değildir; kesin eşleme sunucuda 'netsh http show servicestate'.${diger.length ? "\nDiğer adaylar: " + diger.map(d => `${d.exe} (${d.r})`).join(", ") : ""}">↔ zaman korelasyonu: muhtemelen <b class="mono">${esc(a.exe)}</b> <span class="muted">(r ${a.r} · %${a.eslik} eşlik${diger.length ? ` · +${diger.length} aday` : ""})</span>${zayif}</div>`;
 }
 
 function procView() {

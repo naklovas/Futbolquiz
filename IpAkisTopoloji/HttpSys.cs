@@ -9,7 +9,7 @@ using System.Text;
 // uygulamayı yakalamaz, aynı anda çalışan uygulamalar karışabilir. Kesin eşleme sunucuda `netsh http show servicestate view=requestq`.
 // ---------------------------------------------------------------------------
 record HttpSysAday(string Exe, string Yol, double R, int Eslik, int OrtakDakika);
-record HttpSysPort(string Port, int Dakika, long Baglanti, List<HttpSysAday> Adaylar);
+record HttpSysPort(string Port, int Dakika, long Baglanti, List<HttpSysAday> Adaylar, bool Zayif = false);   // Zayif: HttpSys:MinDakika'dan az dakikada trafik — aday zayıf ipucu
 record HttpSysSonuc(string Ip, DateTimeOffset Baslangic, DateTimeOffset Bitis, int ToplamDakika, List<HttpSysPort> Portlar, string? Hata);
 
 static class HttpSysEslesme
@@ -18,6 +18,15 @@ static class HttpSysEslesme
     {
         string e = (yol ?? "").Replace('/', '\\').Split('\\').Last().Trim().ToLowerInvariant();
         return e is "ntoskrnl.exe" or "system" or "ntoskrnl";
+    }
+
+    // Korelasyon penceresi (kullanıcı: "2 dk trafik — çok az"): IP kartının 3 saatlik süreç penceresi seyrek portlarda yetmiyor →
+    // istenen aralıktan bağımsız son HttpSys:Saat (varsayılan 72) saat, şimdiye kadar
+    public static (DateTimeOffset Start, DateTimeOffset End) Aralik(IConfiguration cfg)
+    {
+        double saat = Math.Clamp(cfg.GetValue("HttpSys:Saat", 72.0), 1, 24 * 14);
+        var end = DateTimeOffset.Now;
+        return (end.AddHours(-saat), end);
     }
 
     public static async Task<HttpSysSonuc> HesaplaAsync(string ip, DateTimeOffset start, DateTimeOffset end, IConfiguration cfg, HttpClient http,
@@ -67,15 +76,17 @@ static class HttpSysEslesme
         foreach (var (port, x) in gelen.OrderByDescending(kv => kv.Value.Values.Sum()))
         {
             var adaylar = new List<HttpSysAday>();
-            if (x.Count >= minDakika)
-                foreach (var (yol, y) in giden)
+            // az trafikte de aday aranır ama "zayıf" işaretlenir (kullanıcı: "aday yok" yerine en olası exe görünsün)
+            bool zayif = x.Count < minDakika;
+            int minOrtak = Math.Min(2, x.Count);
+            foreach (var (yol, y) in giden)
                 {
                     double r = Pearson(x, y, toplam);
                     int ortak = x.Keys.Count(y.ContainsKey);
-                    if (r < minR || ortak < 2) continue;
+                    if (r < minR || ortak < minOrtak) continue;
                     adaylar.Add(new(yol.Replace('/', '\\').Split('\\').Last(), yol, Math.Round(r, 2), (int)Math.Round(100.0 * ortak / x.Count), ortak));
                 }
-            outp.Add(new(port, x.Count, x.Values.Sum(), adaylar.OrderByDescending(a => a.R).ThenByDescending(a => a.Eslik).Take(3).ToList()));
+            outp.Add(new(port, x.Count, x.Values.Sum(), adaylar.OrderByDescending(a => a.R).ThenByDescending(a => a.Eslik).Take(3).ToList(), zayif));
         }
         return new(ip, start, end, toplam, outp, null);
     }
@@ -101,7 +112,7 @@ static class HttpSysEslesme
         foreach (var p in s.Portlar)
             sb.AppendLine(p.Adaylar.Count == 0
                 ? $"- port {p.Port}: aday yok ({p.Dakika} dakikada gelen trafik; eşlik eden iş exe'si bulunamadı)"
-                : $"- port {p.Port} ({p.Dakika} dakikada gelen trafik) → " + string.Join("; ", p.Adaylar.Select((a, i) =>
+                : $"- port {p.Port} ({p.Dakika} dakikada gelen trafik{(p.Zayif ? "; AZ TRAFİK — ZAYIF İPUCU" : "")}) → " + string.Join("; ", p.Adaylar.Select((a, i) =>
                     $"{(i == 0 ? "EN OLASI " : "")}{a.Exe} [{a.Yol}] (korelasyon {a.R:0.00}, gelen trafiğin olduğu dakikaların %{a.Eslik}'inde bu exe de dışarı bağlanıyor)")));
         return sb.ToString();
     }
@@ -174,8 +185,10 @@ sealed class HttpSysKayitService(IConfiguration cfg, ILogger<HttpSysKayitService
                 p.A.Add(new(r.GetString(2), r.IsDBNull(3) ? "" : r.GetString(3), Convert.ToDouble(r.GetValue(4)), Convert.ToInt32(r.GetValue(5)), Convert.ToInt32(r.GetValue(6))));
             }
             if (tarih == null) return null;
-            var sonuc = new HttpSysSonuc(ip, tarih.Value, tarih.Value, 0, portlar.Where(kv => kv.Key != "0")
-                .Select(kv => new HttpSysPort(kv.Key, kv.Value.Dk, kv.Value.Bag, kv.Value.A)).ToList(), null);
+            int minDk = cfg.GetValue("HttpSys:MinDakika", 5);
+            double pSaat = Math.Clamp(cfg.GetValue("HttpSys:Saat", 72.0), 1, 24 * 14);
+            var sonuc = new HttpSysSonuc(ip, tarih.Value.AddHours(-pSaat), tarih.Value, (int)(pSaat * 60), portlar.Where(kv => kv.Key != "0")
+                .Select(kv => new HttpSysPort(kv.Key, kv.Value.Dk, kv.Value.Bag, kv.Value.A, kv.Value.Dk < minDk)).ToList(), null);
             Durum = null;
             return (sonuc, tarih.Value, bos);
         }

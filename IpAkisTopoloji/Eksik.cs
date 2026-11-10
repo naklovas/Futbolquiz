@@ -670,9 +670,10 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
                 if (hsPort.Count > 0 && cfg.GetValue("HttpSys:Eksikte", true))
                 {
                     // önce kayıtlı korelasyon (DF_HTTPSYS_KORELASYON), yoksa / eskiyse hesaplanıp yazılır (kullanıcı: "bulunanı bir yere yazalım, önce oraya bakalım")
+                    var (hb, he) = HttpSysEslesme.Aralik(cfg);   // seyrek portlar için CB süresinden uzun (HttpSys:Saat)
                     var hs = httpSysKayit != null
-                        ? (await httpSysKayit.KorelasyonAsync(ip, DateTimeOffset.Now.AddHours(-hours), DateTimeOffset.Now, factory.CreateClient("splunk"), ct, hsPort)).Sonuc
-                        : await HttpSysEslesme.HesaplaAsync(ip, DateTimeOffset.Now.AddHours(-hours), DateTimeOffset.Now, cfg, factory.CreateClient("splunk"), ct, hsPort);
+                        ? (await httpSysKayit.KorelasyonAsync(ip, hb, he, factory.CreateClient("splunk"), ct, hsPort)).Sonuc
+                        : await HttpSysEslesme.HesaplaAsync(ip, hb, he, cfg, factory.CreateClient("splunk"), ct, hsPort);
                     if (hs.Hata == null) sb.Append(HttpSysEslesme.Metin(hs with { Portlar = hs.Portlar.Where(p => hsPort.Contains(p.Port)).ToList() }));
                     else log.LogWarning("HTTP.sys korelasyonu {Ip}: {Hata}", ip, hs.Hata);
                 }
