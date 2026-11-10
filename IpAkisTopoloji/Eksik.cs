@@ -706,6 +706,7 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
         return string.Join(' ', w);
     }
     // Kanıttaki SM aday satırını okur: (ad, boş portu anan talep var mı)
+    const string CokSistemBas = "BİRDEN ÇOK SİSTEM ANILIYOR:";
     static List<(string Ad, bool Port)> SmAdaylariOku(string? evidence) => evidence?.Split('\n').FirstOrDefault(l => l.StartsWith(SmAdayBas)) is { } l
         ? l[SmAdayBas.Length..].Split(" | ").Select(x => (Ad: x.Split(" (")[0].Trim(), Port: x.Contains("boş portu anan"))).Where(x => x.Ad.Length > 0).ToList() : [];
 
@@ -797,15 +798,21 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
                         kIp ? $"ZT_KAYNAK'ta {ip}" : null, kAd != null ? $"ZT_KAYNAKHOSTNAME '{kAd}'" : null }.OfType<string>());
                     // port eşleşmesi yalnız ZT_HEDEFPORT'ta (kullanıcı)
                     var ps = hedef ? miss.Where(p => HasPort(G(r, "ZT_HEDEFPORT"), p)).ToList() : [];
+                    // Açıklamada bu sunucunun IP'siyle birlikte geçen boş port (kullanıcı örneği: açıklamada "<IP>:8031 … 8031 portundan istek
+                    // göndermektedir" yazıyordu, kod ZT_HEDEFPORT'a baktığı için "8031'e talep yok" diyordu): "IP:port" ya da IP'nin geçtiği metinde "N portu/portundan"
+                    string acikMetin = string.Join(" ", new[] { "BRIEF_DESCRIPTION", "DESCRIPTION", "ZT_HEDEFACIKLAMA", "ZT_KAYNAKACIKLAMA" }.Select(k => G(r, k)).OfType<string>());
+                    var pa = HasIp(acikMetin, ip) ? miss.Where(p => !ps.Contains(p) && (
+                        System.Text.RegularExpressions.Regex.IsMatch(acikMetin, $@"(?<![\d.]){System.Text.RegularExpressions.Regex.Escape(ip)}\s*:\s*{p}(?!\d)")
+                        || System.Text.RegularExpressions.Regex.IsMatch(acikMetin, $@"(?<!\d){p}\s*(nolu\s*|numaral[ıi]\s*)?port", System.Text.RegularExpressions.RegexOptions.IgnoreCase))).ToList() : [];
                     string? aj = AjanOf(string.Join(" ", new[] { "BRIEF_DESCRIPTION", "DESCRIPTION", "ZT_HEDEFACIKLAMA", "ZT_KAYNAKACIKLAMA",
                         "ZT_HEDEFUYGULAMA", "ZT_HEDEFUGULAMA", "ZT_KAYNAKUYGULAMA" }.Select(k => G(r, k))));
                     if (aj != null && (AjanSunucusu(env, ip, aj) || UrunSunucusuMetni(G(r, hedef ? "ZT_HEDEFACIKLAMA" : "ZT_KAYNAKACIKLAMA"), aj)
                         || (hedef && (UrunSunucusuMetni(G(r, "BRIEF_DESCRIPTION"), aj) || UrunSunucusuMetni(Cut(G(r, "DESCRIPTION"), 400), aj))))) aj = null;   // ürünün kendi sunucusunda bu talepler gerçek uygulama kanıtı
-                    return (r, hedef, kaynak, ps, aj, neden);
+                    return (r, hedef, kaynak, ps, aj, neden, pa);
                 })
                 .Where(x => x.hedef || x.kaynak).DistinctBy(x => G(x.r, "NUMBER")).ToList();
             var mine = all
-                .OrderBy(x => x.aj != null).ThenByDescending(x => x.ps.Count > 0).ThenByDescending(x => x.hedef).ThenByDescending(x => G(x.r, "TARIH")).Take(10).ToList();
+                .OrderBy(x => x.aj != null).ThenByDescending(x => x.ps.Count > 0 || x.pa.Count > 0).ThenByDescending(x => x.hedef).ThenByDescending(x => G(x.r, "TARIH")).Take(10).ToList();
             if (mine.Count == 0)
             {
                 outp[ip] = err != null ? $"SM TALEPLERİ: okunamadı ({Cut(err, 150)})\n"
@@ -813,6 +820,7 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
                 continue;
             }
             var sb = new StringBuilder();
+            string? Own(Dictionary<string, string> r, bool hedef) => G(r, hedef ? "ZT_HEDEFACIKLAMA" : "ZT_KAYNAKACIKLAMA");
             // Aranan (boş) port başına açık özet: bu porta erişim talebi var mı (tüm eşleşen talepler üzerinden, yalnız ilk 10 değil)
             foreach (var p in miss)
             {
@@ -826,21 +834,32 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
                     ? $"PORT {p}'E ERİŞİM TALEBİ VAR: {hit.Count} talepte bu sunucu hedef ve ZT_HEDEFPORT {p} içeriyor (son {G(hit[0].r, "TARIH")}; {string.Join(", ", hit.Take(5).Select(x => G(x.r, "NUMBER")))})"
                       + (hit.Select(x => G(x.r, "ZT_HEDEFUYGULAMA", "ZT_HEDEFUGULAMA")).OfType<string>().GroupBy(a => a, StringComparer.OrdinalIgnoreCase).OrderByDescending(g => g.Count()).FirstOrDefault() is { } ga
                           ? $"; talepteki hedef uygulama: {ga.Key} ({ga.Count()})" : "")
+                    : all.Where(x => x.aj == null && x.pa.Contains(p)).OrderByDescending(x => G(x.r, "TARIH")).ToList() is { Count: > 0 } aHit
+                      ? $"PORT {p}: TALEP AÇIKLAMASINDA BU SUNUCUNUN IP'SİYLE BİRLİKTE GEÇİYOR — {aHit.Count} talep ({string.Join(", ", aHit.Take(5).Select(x => G(x.r, "NUMBER")))}; son {G(aHit[0].r, "TARIH")})"
+                        + (aHit.Select(x => Own(x.r, x.hedef)).OfType<string>().GroupBy(Norm).OrderByDescending(g => g.Count()).FirstOrDefault() is { } ga2
+                            ? $"; o taleplerde BU SUNUCUNUN açıklaması: \"{Cut(ga2.First(), 120)}\" → bu port büyük olasılıkla o sistemin" : "")
                     : ajHit.Count > 0 ? $"PORT {p}'E İŞ UYGULAMASI İÇİN ERİŞİM TALEBİ YOK (yalnız ajan / araç talepleri var)"
                     : $"PORT {p}'E ERİŞİM TALEBİ YOK (son {DateTime.Today.Year - since.Year} yılda bu sunucuya ZT_HEDEFPORT {p} olan talep bulunamadı)");
             }
             // Kullanıcı: kaynak / hedef açıklamaları yeterince önemsenmiyordu → talepler içinde kaybolmasın diye önce TÜM eşleşen taleplerdeki
             // BU SUNUCUYU anlatan açıklama (hedefse ZT_HEDEFACIKLAMA, kaynaksa ZT_KAYNAKACIKLAMA) tekilleştirilip sayısıyla, ayrıca hedef
             // olduğu taleplerde erişen tarafın (ZT_KAYNAKACIKLAMA) açıklaması
-            string? Own(Dictionary<string, string> r, bool hedef) => G(r, hedef ? "ZT_HEDEFACIKLAMA" : "ZT_KAYNAKACIKLAMA");
             var bunu = all.Where(x => x.aj == null).Select(x => (t: Own(x.r, x.hedef), x)).Where(y => y.t != null)
-                .GroupBy(y => Norm(y.t!)).Select(g => (t: g.First().t!, n: g.Count(), son: g.Max(y => G(y.x.r, "TARIH")), port: g.Any(y => y.x.ps.Count > 0)))
+                .GroupBy(y => Norm(y.t!)).Select(g => (t: g.First().t!, n: g.Count(), son: g.Max(y => G(y.x.r, "TARIH")), port: g.Any(y => y.x.ps.Count > 0 || y.x.pa.Count > 0),
+                    portlar: g.SelectMany(y => y.x.ps.Concat(y.x.pa)).Distinct().ToList()))
                 .OrderByDescending(z => z.port).ThenByDescending(z => z.n).ThenByDescending(z => z.son).Take(8).ToList();
             if (bunu.Count > 0)
             {
                 sb.AppendLine("BU SUNUCUYU ANLATAN TALEP AÇIKLAMALARI (talep sahibinin bu sunucu için yazdığı; EN GÜÇLÜ SM KANITI — sunucunun hangi sistem /");
                 sb.AppendLine("uygulama olduğunu doğrudan söyler):");
-                foreach (var z in bunu) sb.AppendLine($"  • \"{Cut(z.t, 250)}\" — {z.n} talep, son {z.son}{(z.port ? " · boş portu anan talepte" : "")}");
+                foreach (var z in bunu) sb.AppendLine($"  • \"{Cut(z.t, 250)}\" — {z.n} talep, son {z.son}{(z.port ? $" · boş port {string.Join(",", z.portlar)} bu taleplerde" : "")}");
+                // Birden çok farklı sistem (kullanıcı örneği: Ziraat pos, Bansoft, 3DSec… aynı sunucuda; AI port kanıtı olmayan HER porta ilkini yazdı)
+                var sistemler = bunu.Select(z => z.t).Where(t => Kelimeler(t).Any(w => w.Length >= 3 && !GenelKelime.Contains(w.Length > 5 ? w[..5] : w) && w is not ("sunucu" or "sunucusu" or "server" or "prod" or "test")))
+                    .DistinctBy(t => string.Join(" ", Kelimeler(t).Where(w => w is not ("sunucu" or "sunucusu" or "server")).Select(w => w.Length > 5 ? w[..5] : w).OrderBy(w => w))).ToList();
+                if (sistemler.Count >= 2)
+                    sb.AppendLine($"{CokSistemBas} {string.Join(" | ", sistemler.Take(6).Select(t => Cut(t, 60)))} — bu sunucuda birden çok sistem çalışıyor. " +
+                        "Bir boş porta sistem atamak için O PORTA ÖZEL kanıt gerekir (ZT_HEDEFPORT eşleşmesi, açıklamada IP:port, portu kabul eden exe). " +
+                        "Port kanıtı yoksa listedeki ilk sistemi YAZMA: uygulama null ya da güven en çok 40, gerekçede olası sistemleri say.");
             }
             // Hedef olduğu taleplerin kısa açıklamaları (kullanıcı: kısa açıklama / açıklama alanları da en kritik SM kanıtı)
             var kisa = all.Where(x => x.hedef && x.aj == null).Select(x => (t: G(x.r, "BRIEF_DESCRIPTION"), x)).Where(y => y.t != null)
@@ -861,13 +880,13 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
                 .GroupBy(Norm).OrderByDescending(g => g.Count()).Take(5).Select(g => $"\"{Cut(g.First(), 120)}\" ({g.Count()})").ToList();
             if (karsi.Count > 0) sb.AppendLine("Bu sunucuya erişen taraflar (kaynak açıklaması; İSTEMCİLER, bu sunucunun uygulaması değil): " + string.Join("; ", karsi));
             sb.AppendLine($"SM TALEPLERİ (bu sunucunun hedef ya da kaynak olduğu erişim talepleri, en yeni; {mine.Count(x => x.hedef)} hedef, {mine.Count(x => x.kaynak && !x.hedef)} kaynak):");
-            foreach (var (r, hedef, kaynak, ps, aj, neden) in mine)
+            foreach (var (r, hedef, kaynak, ps, aj, neden, pa) in mine)
             {
                 string rol = hedef && kaynak ? "bu sunucu HEM HEDEF HEM KAYNAK" : hedef ? $"bu sunucu HEDEF (kaynak: {Cut(G(r, "ZT_KAYNAK", "ZT_KAYNAKHOSTNAME"), 60)})"
                     : $"bu sunucu KAYNAK (hedef: {Cut(G(r, "ZT_HEDEF", "ZT_HEDEFHOSTNAME"), 60)})";
                 string port = G(r, "ZT_HEDEFPORT") ?? "";
                 if (aj != null) sb.AppendLine($"- [AJAN / ARAÇ TALEBİ: {aj} — sunucunun uygulaması DEĞİL, uygulama kanıtı olarak kullanma]");
-                sb.AppendLine($"- {G(r, "NUMBER")} {G(r, "TARIH")} · {rol}{(port.Length > 0 ? $" · hedef port {Cut(port, 40)}" : "")}{(ps.Count > 0 ? $" · BOŞ PORT {string.Join(",", ps)}" : "")} · eşleşme: {neden}");
+                sb.AppendLine($"- {G(r, "NUMBER")} {G(r, "TARIH")} · {rol}{(port.Length > 0 ? $" · hedef port {Cut(port, 40)}" : "")}{(ps.Count > 0 ? $" · BOŞ PORT {string.Join(",", ps)}" : "")}{(pa.Count > 0 ? $" · AÇIKLAMADA BOŞ PORT {string.Join(",", pa)}" : "")} · eşleşme: {neden}");
                 if (G(r, "BRIEF_DESCRIPTION") is { } bd) sb.AppendLine($"    Kısa açıklama: {Cut(bd, 200)}");
                 // açıklamaları sunucunun rolüne göre etiketle
                 if (G(r, hedef ? "ZT_HEDEFACIKLAMA" : "ZT_KAYNAKACIKLAMA") is { } own) sb.AppendLine($"    {(hedef ? "Hedef" : "Kaynak")} açıklaması (BU SUNUCU): {Cut(own, 250)}");
@@ -1245,7 +1264,10 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
               EN GÜÇLÜ kanıt say ve gerekçede o açıklamayı alıntıla. Açıklama sunucunun NE OLDUĞUNU söylüyorsa (ör. "Symantec
               Endpoint Protection ürünü sunucusu", "X uygulama sunucusu", "Y veritabanı") bu SUNUCU DÜZEYİNDE KESİN kanıttır: o boş port
               için ayrıca erişim talebi, exe yolu ya da istemci bulunmasa da öneri o sistemdir (güven 70+); "bu port için kanıt yok"
-              diye null YAZMA. Yalnız portun başka bir sisteme ait olduğunu gösteren daha güçlü kanıt (exe yolu) varsa ondan ayrıl. komşu ve segment ipuçlarını bunun önüne koyma. "Bu
+              diye null YAZMA. Yalnız portun başka bir sisteme ait olduğunu gösteren daha güçlü kanıt (exe yolu) varsa ondan ayrıl.
+              BU KURAL YALNIZ açıklamalar TEK sistem söylüyorsa geçerlidir: "BİRDEN ÇOK SİSTEM ANILIYOR" satırı varsa sunucuda birden çok
+              uygulama vardır; her porta o porta özel kanıtla (ZT_HEDEFPORT, "TALEP AÇIKLAMASINDA BU SUNUCUNUN IP'SİYLE BİRLİKTE GEÇİYOR",
+              portu kabul eden exe) sistem ata, port kanıtı olmayan porta ilk sistemi yazma (null ya da güven ≤ 40). komşu ve segment ipuçlarını bunun önüne koyma. "Bu
               sunucuya erişen taraflar" ise istemcilerdir, onların adını bu sunucuya yazma.
             - Bu sunucunun HEDEF olduğu bir talepte açıklama "<A> için / <A> karşılığı … <B>'nin DB'lerine / sunucularına / servisine
               erişim" diyorsa erişilen sistem <B> BU SUNUCUDUR (A karşı taraftır, isteyen uygulamadır). Ör. "KKB Karşılığı / Ziraat
@@ -1290,8 +1312,9 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
             // Küçük model uzun kanıttan sonra baştaki kuralları unutabiliyor: en önemli kurallar sona tekrar
             q.AppendLine().AppendLine("""
                 HATIRLATMA (kanıtlardan önemli): genel bilgiler dosyasındaki kurallar SM taleplerinden önce gelir. "BU SUNUCUYU ANLATAN
-                TALEP AÇIKLAMALARI" bir sistem adı söylüyorsa öneriyi ona dayandır ve gerekçede alıntıla; port için ayrı kanıt olmaması
-                null yazmak için sebep değildir. Ajan / araç kurulum ya da
+                TALEP AÇIKLAMALARI" TEK bir sistem adı söylüyorsa öneriyi ona dayandır ve gerekçede alıntıla; port için ayrı kanıt olmaması
+                null yazmak için sebep değildir. "BİRDEN ÇOK SİSTEM ANILIYOR" varsa her portu kendi port kanıtına göre ata. "PORT N: TALEP
+                AÇIKLAMASINDA … GEÇİYOR" satırı o port için doğrudan kanıttır. Ajan / araç kurulum ya da
                 erişim talepleri (Dataskope vb.) sunucunun uygulamasını göstermez. Yalnızca JSON dizi döndür.
                 """);
             return q.ToString();
@@ -1356,7 +1379,27 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
             }
         }
         ProgramKontrol();
+        CokSistemKontrol();
         return outp;
+
+        // Birden çok sistem anılan sunucuda port kanıtı olmayan öneri (kullanıcı: "Ziraat pos" 5 porta, kanıtı olan port Bansoft çıktı):
+        // güven en çok 40 ve gerekçeye not; port kanıtı = ZT_HEDEFPORT talebi, açıklamada IP:port, portu kabul eden exe
+        void CokSistemKontrol()
+        {
+            foreach (var (ip, ports) in todo)
+            {
+                string? ev = texts.GetValueOrDefault(ip);
+                if (ev?.Split('\n').FirstOrDefault(l => l.StartsWith(CokSistemBas)) is not { } cl) continue;
+                string liste = cl[CokSistemBas.Length..].Split(" — ")[0].Trim();
+                foreach (var port in ports)
+                {
+                    if (outp.GetValueOrDefault((ip, port)) is not { Uygulama: not null } o || port.Length == 0) continue;
+                    bool kanit = ev.Contains($"PORT {port}'E ERİŞİM TALEBİ VAR") || ev.Contains($"PORT {port}: TALEP AÇIKLAMASINDA") || PortLine(ev, port) != null;
+                    if (kanit || o.Guven <= 40) continue;
+                    outp[(ip, port)] = o with { Guven = 40, Gerekce = $"{o.Gerekce} [sunucuda birden çok sistem anılıyor ({Cut(liste, 160)}); bu port için port düzeyinde kanıt yok — güven 40'a indirildi]" };
+                }
+            }
+        }
 
         Dictionary<(string, string), EksikOneri> Parse(string answer, Dictionary<string, List<string>> want, bool kahinTur)
         {
