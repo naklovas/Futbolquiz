@@ -1444,7 +1444,8 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
                 foreach (var port in ports)
                 {
                     // AI yine boş bıraktıysa (kullanıcı: "tahmin yok, o zaman bu işin anlamı kalmaz"): en sık anılan sistem, güven 30, diğerleri gerekçede
-                    if (port.Length > 0 && olasi.Count > 0 && outp.GetValueOrDefault((ip, port)) is not { Uygulama: not null } bos)
+                    var bos = outp.GetValueOrDefault((ip, port));
+                    if (port.Length > 0 && olasi.Count > 0 && bos?.Uygulama == null)
                     {
                         string sis = UrunAdi(olasi[0]) is { Length: > 0 } ua ? ua : olasi[0];
                         string ad0 = CatalogMatch(env, sis, out bool y0, out var kn0, ip, ev);
