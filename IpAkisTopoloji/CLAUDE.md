@@ -305,6 +305,13 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
   dakika) + `GenelAtilan` (genel diye ayıklananlar) yanıtta / ipucunda; hiç iş exe'si yoksa "bu sunucuda dışarı bağlanan iş exe'si hiç yok". Kayıttan okununca tanı yok. TANI VERİSİ (kullanıcı: "kontrol verisi basarsan gönderebilirim"): `GET /api/surec/httpsys/tani?ip=` düz metin
   (`HttpSysEslesme.TaniAsync`, filtresiz SPL: satır sayısı, ilk satır alanları, yön dağılımı, gelen port × süreç, giden exe × durum (iş / GENEL / çekirdek),
   çekirdek portu başına dakikalar ve exe başına ortak dakika, ±1 dk, r); IP kartında ntoskrnl satırında "tanı verisi ↗".
+  CANLI TANI SONUCU (2.71.x sunucusu): iş exe'leri neredeyse hiç dışarı bağlanmıyor (giden korelasyonu boş), ama Carbon Black çekirdeğin aldığı bağlantıyı
+  asıl exe'ye de "gelen, local_port 0" yazıyor (w3wp, bsissuerkys, qrtaskman, bsqrmanager, estint…); CB olayları ~1/dk (tekilleştirilmiş). Ayrıca w3wp.exe
+  \windows\system32\ yüzünden GENEL sayılıp atılıyordu → `HttpSysEslesme.Genel` w3wp'yi saymaz. YENİ EŞLEŞME "AYNI İSTEMCİ": SPL'de gelen port 0 olayları ve
+  `rip` (remote_ip) da; çekirdek portunun (istemci, dakika) olaylarından kaçını exe'nin port 0 olayı aynı istemciden ±1 dk karşılıyor → `HttpSysAday.Istemci`
+  (Eslik = yüzde); adaylarda önce bunlar, sonra giden korelasyonu. Kayıt: DF_HTTPSYS_KORELASYON.ISTEMCI (sonradan eklenen kolon, sql betiğinde ALTER; okuma
+  SELECT * ad bazında, kolon yoksa yazmada atlanır). Arayüz "↔ aynı istemci eşleşmesi: muhtemelen X (N olay · %E)", AI metninde "güçlü". Tanıda port başına
+  "AYNI İSTEMCİ" bölümü, gelen satırlarında istemci sayısı.
 - **"Bu sunucuda hangi uygulama çalışıyor?"** (IP kartı, Gelen portlar tablosunun üstündeki düğme; `SurecAi` Surec.cs, `POST /api/surec/ai`):
   arayüzdeki /api/surec sonucu exe başına toplanıp (PID'ler, portlar, giden, bağlanan / bağlandığı uygulamalar) AI'a gider (yeniden
   sorgulanmaz) + ERT kayıtları + segment + genel bilgiler dosyası. Kesin genel süreçler kodda ayıklanır (`GenelAd` / `GenelYol`: svchost,
