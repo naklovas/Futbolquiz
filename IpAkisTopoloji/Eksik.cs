@@ -345,6 +345,10 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
                 not = $"AI '{name}' yazdı; yazım farkı düzeltildi ({dz.Not}){(not2 != null ? "; " + not2 : "")}";
                 return ad;
             }
+            // düzeltilmiş adla da tek katalog adı seçilemedi: serbest kalır ama gerekçede düzeltme ve aday aile görünür
+            not = $"AI '{name}' yazdı, katalogdaki yazımı {dz.Not}; {not2 ?? "katalogda tek karşılığı yok"}";
+            yeni = true;
+            return name;
         }
         PrepCatalog(env);
         var a = IslevService.Tokens(name);
@@ -1024,8 +1028,13 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
         foreach (var mu in env.AppsOnIp(ip).Select(h => h.VarlikMuhafizi).OfType<string>().Distinct())
             if (_byMuhafiz!.TryGetValue(mu, out var apps)) Add(apps);
         var tok = IslevService.Tokens(evidence);
-        Add(_catTok!.Select(c => (c.App, n: c.Tok.Count(t => t.Length >= 3 && tok.Contains(t)), r: (double)c.Tok.Count(tok.Contains) / c.Tok.Count))
-            .Where(x => x.n >= 1 && x.r >= 0.5).OrderByDescending(x => x.r).ThenByDescending(x => x.n).Take(12).Select(x => (string?)x.App));
+        // Kullanıcı: "Ziraatliyorum'u tüm sunucuya önerdi" — kanıtta "Ziraat pos" geçiyordu, 5 harf kökü ("ziraa") yüzünden Ziraatliyorum ADAY oluyor,
+        // AI da listeden harfi harfine seçiyordu → ayırt edici (GenelKelime olmayan) en az bir kelime gerekir ve kelimeler kanıtta TAM KELİME olarak geçmeli
+        var evKel = Kelimeler(evidence).Where(w => w.Length >= 3).Distinct().GroupBy(w => w.Length > 5 ? w[..5] : w).ToDictionary(g => g.Key, g => g.ToList());
+        bool Gecer(string app) => Kelimeler(app).Where(w => w.Length >= 3).ToList() is var ws && ws.Any(w => !GenelKelime.Contains(w.Length > 5 ? w[..5] : w))
+            && ws.Count(w => evKel.TryGetValue(w.Length > 5 ? w[..5] : w, out var ev) && ev.Any(e => KelimeEs(w, e))) * 2 >= ws.Count;
+        Add(_catTok!.Select(c => (c.App, n: c.Tok.Count(t => t.Length >= 3 && !GenelKelime.Contains(t) && tok.Contains(t)), r: (double)c.Tok.Count(tok.Contains) / c.Tok.Count))
+            .Where(x => x.n >= 1 && x.r >= 0.5).OrderByDescending(x => x.r).ThenByDescending(x => x.n).Where(x => Gecer(x.App)).Take(12).Select(x => (string?)x.App));
         // sunucuya atanmamış uygulamalar: adı birebir geçmese de açıklamasının (ACIKLAMA) ayırt edici kelimelerinden en az 2'si kanıtta
         // (kullanıcı: "sunucusu olmayan uygulamalar da sorunun bir parçası, envanterdeki eksik anlamında")
         var aciklamali = _atanTok!.Select(c => (c.App, n: c.Tok.Count(tok.Contains)))
