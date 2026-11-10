@@ -300,7 +300,9 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
   Sahte Splunk'la: 1. istek hesapladı, 2. kayıttan, yenile yeniden hesapladı.
   PENCERE + ZAYIF ADAY (kullanıcı: "aday yok (2 dk trafik)", "5 dk de çok az"): korelasyon IP kartının 3 saatlik süreç penceresini DEĞİL son
   `HttpSys:Saat`=72 saati kullanır (`HttpSysEslesme.Aralik`; IP kartı ve ERT eksikleri). `MinDakika`'dan az trafikte de aday aranır (ortak ≥ min(2, dakika)),
-  `HttpSysPort.Zayif` → arayüzde "· zayıf (N dk trafik)", AI metninde "AZ TRAFİK — ZAYIF İPUCU"; kayıttan okurken Zayif = DAKIKA < MinDakika.
+  `HttpSysPort.Zayif` → arayüzde "· zayıf (N dk trafik)", AI metninde "AZ TRAFİK — ZAYIF İPUCU"; kayıttan okurken Zayif = DAKIKA < MinDakika. Kullanıcı: "yine hiçbir şey bulamadı" → eşiği geçen yoksa aynı dakikalarda dışarı bağlanan en yakın 3 exe
+  `HttpSysAday.EsikAlti` ile ("↔ güçlü aday yok · aynı dakikalarda dışarı bağlanan: …", AI'a "ÇOK ZAYIF İPUCU"); tanı: `HttpSysSonuc.Giden` (dışarı bağlanan iş exe'leri,
+  dakika) + `GenelAtilan` (genel diye ayıklananlar) yanıtta / ipucunda; hiç iş exe'si yoksa "bu sunucuda dışarı bağlanan iş exe'si hiç yok". Kayıttan okununca tanı yok.
 - **"Bu sunucuda hangi uygulama çalışıyor?"** (IP kartı, Gelen portlar tablosunun üstündeki düğme; `SurecAi` Surec.cs, `POST /api/surec/ai`):
   arayüzdeki /api/surec sonucu exe başına toplanıp (PID'ler, portlar, giden, bağlanan / bağlandığı uygulamalar) AI'a gider (yeniden
   sorgulanmaz) + ERT kayıtları + segment + genel bilgiler dosyası. Kesin genel süreçler kodda ayıklanır (`GenelAd` / `GenelYol`: svchost,

@@ -8,9 +8,11 @@ using System.Text;
 // DB'ye / başka servise gittiği için gelen trafiğe en çok eşlik eden exe portun sahibi olma adayıdır. KESİN DEĞİL: hiç dışarı çıkmayan
 // uygulamayı yakalamaz, aynı anda çalışan uygulamalar karışabilir. Kesin eşleme sunucuda `netsh http show servicestate view=requestq`.
 // ---------------------------------------------------------------------------
-record HttpSysAday(string Exe, string Yol, double R, int Eslik, int OrtakDakika);
+record HttpSysAday(string Exe, string Yol, double R, int Eslik, int OrtakDakika, bool EsikAlti = false);   // EsikAlti: eşik altı, yalnız en yakın exe (aday yokken)
 record HttpSysPort(string Port, int Dakika, long Baglanti, List<HttpSysAday> Adaylar, bool Zayif = false);   // Zayif: HttpSys:MinDakika'dan az dakikada trafik — aday zayıf ipucu
-record HttpSysSonuc(string Ip, DateTimeOffset Baslangic, DateTimeOffset Bitis, int ToplamDakika, List<HttpSysPort> Portlar, string? Hata);
+record HttpSysSonuc(string Ip, DateTimeOffset Baslangic, DateTimeOffset Bitis, int ToplamDakika, List<HttpSysPort> Portlar, string? Hata,
+    List<HttpSysGiden>? Giden = null, List<string>? GenelAtilan = null);   // tanı: dışarı bağlanan iş exe'leri (dakika), ayıklanan genel süreçler
+record HttpSysGiden(string Exe, string Yol, int Dakika, long Baglanti);
 
 static class HttpSysEslesme
 {
@@ -49,6 +51,7 @@ static class HttpSysEslesme
 
         var gelen = new Dictionary<string, Dictionary<long, long>>();   // port → dakika → bağlantı
         var giden = new Dictionary<string, Dictionary<long, long>>(StringComparer.OrdinalIgnoreCase);   // exe yolu → dakika → bağlantı
+        var genelAtilan = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var r in res.Rows)
         {
             string? V(string k) => r.TryGetValue(k, out var v) && !string.IsNullOrWhiteSpace(v) ? v.Trim() : null;
@@ -64,7 +67,7 @@ static class HttpSysEslesme
             {
                 if (yol == "-" || Cekirdek(yol)) continue;
                 string ad = yol.Replace('/', '\\').Split('\\').Last();
-                if (SurecAi.GenelExe(ad, yol)) continue;   // svchost, ajanlar, izleme… (sürekli çalışır, eşlik sahte çıkar)
+                if (SurecAi.GenelExe(ad, yol)) { genelAtilan.Add(ad); continue; }   // svchost, ajanlar, izleme… (sürekli çalışır, eşlik sahte çıkar)
                 if (!giden.TryGetValue(yol, out var d)) giden[yol] = d = [];
                 d[t] = d.GetValueOrDefault(t) + n;
             }
@@ -86,9 +89,19 @@ static class HttpSysEslesme
                     if (r < minR || ortak < minOrtak) continue;
                     adaylar.Add(new(yol.Replace('/', '\\').Split('\\').Last(), yol, Math.Round(r, 2), (int)Math.Round(100.0 * ortak / x.Count), ortak));
                 }
+            // eşiği geçen yoksa (kullanıcı: "hiçbir şey bulamadı") aynı dakikalarda dışarı bağlanan en yakın exe'ler eşik altı olarak gösterilir
+            if (adaylar.Count == 0)
+                foreach (var (yol, y) in giden)
+                {
+                    int ortak = x.Keys.Count(y.ContainsKey);
+                    if (ortak == 0) continue;
+                    adaylar.Add(new(yol.Replace('/', '\\').Split('\\').Last(), yol, Math.Round(Pearson(x, y, toplam), 2), (int)Math.Round(100.0 * ortak / x.Count), ortak, true));
+                }
             outp.Add(new(port, x.Count, x.Values.Sum(), adaylar.OrderByDescending(a => a.R).ThenByDescending(a => a.Eslik).Take(3).ToList(), zayif));
         }
-        return new(ip, start, end, toplam, outp, null);
+        var gidenOzet = giden.Select(kv => new HttpSysGiden(kv.Key.Replace('/', '\\').Split('\\').Last(), kv.Key, kv.Value.Count, kv.Value.Values.Sum()))
+            .OrderByDescending(g => g.Dakika).Take(15).ToList();
+        return new(ip, start, end, toplam, outp, null, gidenOzet, genelAtilan.Order().Take(30).ToList());
     }
 
     // Dakika dizileri (eksik dakika = 0) üzerinde Pearson korelasyonu
@@ -112,7 +125,10 @@ static class HttpSysEslesme
         foreach (var p in s.Portlar)
             sb.AppendLine(p.Adaylar.Count == 0
                 ? $"- port {p.Port}: aday yok ({p.Dakika} dakikada gelen trafik; eşlik eden iş exe'si bulunamadı)"
-                : $"- port {p.Port} ({p.Dakika} dakikada gelen trafik{(p.Zayif ? "; AZ TRAFİK — ZAYIF İPUCU" : "")}) → " + string.Join("; ", p.Adaylar.Select((a, i) =>
+                : p.Adaylar.All(a => a.EsikAlti)
+                ? $"- port {p.Port}: güçlü aday yok ({p.Dakika} dakikada gelen trafik); aynı dakikalarda dışarı bağlanan exe'ler (ÇOK ZAYIF İPUCU): "
+                    + string.Join("; ", p.Adaylar.Select(a => $"{a.Exe} [{a.Yol}] (korelasyon {a.R:0.00}, %{a.Eslik} eşlik)"))
+                : $"- port {p.Port} ({p.Dakika} dakikada gelen trafik{(p.Zayif ? "; AZ TRAFİK — ZAYIF İPUCU" : "")}) → " + string.Join("; ", p.Adaylar.Where(a => !a.EsikAlti).Select((a, i) =>
                     $"{(i == 0 ? "EN OLASI " : "")}{a.Exe} [{a.Yol}] (korelasyon {a.R:0.00}, gelen trafiğin olduğu dakikaların %{a.Eslik}'inde bu exe de dışarı bağlanıyor)")));
         return sb.ToString();
     }
@@ -182,7 +198,9 @@ sealed class HttpSysKayitService(IConfiguration cfg, ILogger<HttpSysKayitService
                 if (tarih == null || t < tarih) tarih = t;
                 if (!portlar.TryGetValue(port, out var p)) portlar[port] = p = (r.IsDBNull(7) ? 0 : Convert.ToInt32(r.GetValue(7)), r.IsDBNull(8) ? 0 : Convert.ToInt64(r.GetValue(8)), []);
                 if (r.IsDBNull(2)) { bos.Add(port); continue; }   // aday yok satırı
-                p.A.Add(new(r.GetString(2), r.IsDBNull(3) ? "" : r.GetString(3), Convert.ToDouble(r.GetValue(4)), Convert.ToInt32(r.GetValue(5)), Convert.ToInt32(r.GetValue(6))));
+                double rr = Convert.ToDouble(r.GetValue(4)); int od = Convert.ToInt32(r.GetValue(6));
+                p.A.Add(new(r.GetString(2), r.IsDBNull(3) ? "" : r.GetString(3), rr, Convert.ToInt32(r.GetValue(5)), od,
+                    rr < cfg.GetValue("HttpSys:MinKorelasyon", 0.3) || od < Math.Min(2, p.Dk)));
             }
             if (tarih == null) return null;
             int minDk = cfg.GetValue("HttpSys:MinDakika", 5);

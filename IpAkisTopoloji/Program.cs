@@ -241,6 +241,7 @@ app.MapGet("/api/surec/httpsys", async (string? ip, string? start, string? end, 
     var kesin = await urlTask;
     return Results.Ok(new { k.Sonuc.Ip, k.Sonuc.ToplamDakika, k.Sonuc.Portlar, korelasyonHata = k.Sonuc.Hata, korelasyonTarih = k.Tarih, korelasyonKaynak = k.Kaynak,
         korelasyonSaat = Math.Round((ks - kb).TotalHours), minDakika = cfg.GetValue("HttpSys:MinDakika", 5),
+        giden = k.Sonuc.Giden, genelAtilan = k.Sonuc.GenelAtilan,
         kayit = kesin.Select(x => new { x.Port, x.Url, x.Kuyruk, x.Pid, x.ExeYol, x.Exe, x.Hostname, x.Tarih }), kayitDurum = kayit.Durum });
 });
 app.MapGet("/api/surec", async (string? ip, string? start, string? end,
