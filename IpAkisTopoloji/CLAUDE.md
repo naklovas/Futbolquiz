@@ -319,7 +319,9 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
   coalesce(cmdline, command_line, process_cmdline), parent_guid / parent_path / parent_pid → `HavuzAdi` (w3wp `-ap "X"`), üstü w3wp olan alt sürece
   `UstHavuz`. `GET /api/surec/havuz?ip=&start=&end=` (IP kartı süreç penceresi); Gelen portlar tablosunda exe altında "havuz X / w3wp havuzu X başlatmış ·
   bağlandığı: … · CB ↗" (`loadHavuz` / `havuzNot`, anahtar exe|pid). ERT eksiklerinde w3wp / \inetpub\ varsa `SurecMetin` kanıta ("IIS UYGULAMA HAVUZLARI",
-  `HttpSys:HavuzEksikte`=true). procstart alan adları canlıda henüz görülmedi (CB EDR şeması varsayıldı). Sonraki: çekirdek portu → havuz (ERT WEBSITE ↔ havuz adı).
+  `HttpSys:HavuzEksikte`=true). procstart alanları (canlıda görüldü): command_line (w3wp -ap "BankSoftDebitCardWS" … -h "C:\inetpub\temp\apppools\X\X.config"),
+  username ("IIS APPPOOL\X" → `HavuzKullanici`, havuz kimliğiyle çalışan her süreçte), parent_path, parent_pid, parent_guid SAYISAL (guid değil!) → üst guid
+  link_parent'tan (…/#analyze/<guid>/<segment>); üstü w3wp olup ağ olayı olmayan w3wp'nin procstart'ı ayrıca okunur. Sonraki: çekirdek portu → havuz (ERT WEBSITE ↔ havuz adı).
 - **"Bu sunucuda hangi uygulama çalışıyor?"** (IP kartı, Gelen portlar tablosunun üstündeki düğme; `SurecAi` Surec.cs, `POST /api/surec/ai`):
   arayüzdeki /api/surec sonucu exe başına toplanıp (PID'ler, portlar, giden, bağlanan / bağlandığı uygulamalar) AI'a gider (yeniden
   sorgulanmaz) + ERT kayıtları + segment + genel bilgiler dosyası. Kesin genel süreçler kodda ayıklanır (`GenelAd` / `GenelYol`: svchost,

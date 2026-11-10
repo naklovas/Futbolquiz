@@ -161,28 +161,42 @@ static class HttpSysEslesme
         }
         if (liste.Count == 0) return [];
         int gun = cfg.GetValue("HttpSys:SurecGun", 30);
-        var ust = new Dictionary<string, (string? Cmd, string? UstGuid, string? UstYol, int? UstPid)>(StringComparer.OrdinalIgnoreCase);
-        foreach (var parca in liste.Keys.Chunk(40))
+        // Canlı alanlar: command_line, username ("IIS APPPOOL\\Havuz"), parent_path, parent_pid; parent_guid SAYISAL (guid biçiminde değil) →
+        // üst sürecin guid'i link_parent içinden (…/#analyze/<guid>/<segment>)
+        async Task<Dictionary<string, (string? Cmd, string? Kullanici, string? UstGuid, string? UstYol, int? UstPid)>> ProcAsync(IEnumerable<string> guidler)
         {
-            string splB = $"""
-                search index={index} sourcetype="{sourcetype}" type="ingress.event.procstart" ({string.Join(" OR ", parca.Select(g => $"process_guid=\"{g}\""))})
-                | eval cmd=coalesce(cmdline, command_line, process_cmdline, "")
-                | stats latest(cmd) as cmd latest(parent_guid) as ug latest(parent_path) as uy latest(parent_pid) as up by process_guid
-                """;
-            SplunkResult resB;
-            try { resB = await SplunkService.ExportAsync(splB, new LookupQuery(ip, end.AddDays(-gun), end), cfg, http, ct, "Splunk"); }
-            catch (Exception ex) when (ex is not OperationCanceledException) { break; }
-            foreach (var r in resB.Rows)
+            var d = new Dictionary<string, (string?, string?, string?, string?, int?)>(StringComparer.OrdinalIgnoreCase);
+            foreach (var parca in guidler.Distinct(StringComparer.OrdinalIgnoreCase).Chunk(40))
             {
-                string? V(string k) => r.TryGetValue(k, out var v) && !string.IsNullOrWhiteSpace(v) ? v.Trim() : null;
-                if (V("process_guid") is { } g) ust[g] = (V("cmd"), V("ug"), V("uy"), int.TryParse(V("up"), out int up) ? up : null);
+                string splB = $"""
+                    search index={index} sourcetype="{sourcetype}" type="ingress.event.procstart" ({string.Join(" OR ", parca.Select(g => $"process_guid=\"{g}\""))})
+                    | eval cmd=coalesce(command_line, cmdline, process_cmdline, "")
+                    | stats latest(cmd) as cmd latest(username) as un latest(link_parent) as lp latest(parent_path) as uy latest(parent_pid) as up by process_guid
+                    """;
+                SplunkResult resB;
+                try { resB = await SplunkService.ExportAsync(splB, new LookupQuery(ip, end.AddDays(-gun), end), cfg, http, ct, "Splunk"); }
+                catch (Exception ex) when (ex is not OperationCanceledException) { break; }
+                foreach (var r in resB.Rows)
+                {
+                    string? V(string k) => r.TryGetValue(k, out var v) && !string.IsNullOrWhiteSpace(v) ? v.Trim() : null;
+                    var m = System.Text.RegularExpressions.Regex.Match(V("lp") ?? "", @"analyze/([0-9a-fA-F-]{20,})");
+                    if (V("process_guid") is { } g) d[g] = (V("cmd"), V("un"), m.Success ? m.Groups[1].Value : null, V("uy"), int.TryParse(V("up"), out int up) ? up : null);
+                }
             }
+            return d;
         }
-        // ilk geçiş: komut satırı ve havuz; ikinci geçiş: üstü bilinen w3wp olan sürecin havuzu
+        var ust = await ProcAsync(liste.Keys);
         foreach (var g in liste.Keys.ToList())
             if (ust.TryGetValue(g, out var u))
-                liste[g] = liste[g] with { KomutSatiri = u.Cmd, Havuz = HavuzAdi(u.Cmd), UstGuid = u.UstGuid, UstYol = u.UstYol, UstPid = u.UstPid };
-        var havuzByGuid = liste.Values.Where(x => x.Havuz != null).ToDictionary(x => x.Guid, x => x.Havuz!, StringComparer.OrdinalIgnoreCase);
+                liste[g] = liste[g] with { KomutSatiri = u.Cmd, Havuz = HavuzAdi(u.Cmd) ?? HavuzKullanici(u.Kullanici), UstGuid = u.UstGuid, UstYol = u.UstYol, UstPid = u.UstPid };
+        var havuzByGuid = liste.Values.Where(x => x.Havuz != null && x.Exe.Equals("w3wp.exe", StringComparison.OrdinalIgnoreCase))
+            .ToDictionary(x => x.Guid, x => x.Havuz!, StringComparer.OrdinalIgnoreCase);
+        // üstü w3wp olup o w3wp'nin bu aralıkta ağ olayı olmayanlar: üst sürecin procstart'ı ayrıca okunur
+        var eksikUst = liste.Values.Where(x => x.UstGuid != null && (x.UstYol ?? "").Contains("w3wp", StringComparison.OrdinalIgnoreCase) && !havuzByGuid.ContainsKey(x.UstGuid))
+            .Select(x => x.UstGuid!).ToList();
+        if (eksikUst.Count > 0)
+            foreach (var (g, u) in await ProcAsync(eksikUst))
+                if ((HavuzAdi(u.Cmd) ?? HavuzKullanici(u.Kullanici)) is { } h) havuzByGuid[g] = h;
         foreach (var g in liste.Keys.ToList())
         {
             var x = liste[g];
@@ -190,6 +204,10 @@ static class HttpSysEslesme
         }
         return liste.Values.OrderBy(x => x.Exe).ThenBy(x => x.Pid).ToList();
     }
+
+    // username "IIS APPPOOL\Havuz" → Havuz (havuz kimliğiyle çalışan her süreçte)
+    public static string? HavuzKullanici(string? un) =>
+        un != null && un.StartsWith(@"IIS APPPOOL\", StringComparison.OrdinalIgnoreCase) ? un[12..].Trim() : null;
 
     // w3wp.exe -ap "HavuzAdi" -v "v4.0" … → HavuzAdi
     public static string? HavuzAdi(string? cmd)
