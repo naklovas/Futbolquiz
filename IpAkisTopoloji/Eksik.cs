@@ -270,6 +270,32 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
             sb.Append(ch switch { 'ı' => 'i', 'ş' => 's', 'ğ' => 'g', 'ü' => 'u', 'ö' => 'o', 'ç' => 'c', 'â' => 'a', 'î' => 'i', _ => char.IsLetterOrDigit(ch) ? ch : ' ' });
         return sb.ToString().Split(' ', StringSplitOptions.RemoveEmptyEntries).ToList();
     }
+    HashSet<string>? _katKelime; EnvanterSnapshot? _katKelimeEnv;
+    (string Yeni, string Not)? Duzelt(EnvanterSnapshot env, string name)
+    {
+        lock (_gate)
+            if (!ReferenceEquals(_katKelimeEnv, env)) { _katKelime = env.KatalogAdlari.SelectMany(Kelimeler).Where(w => w.Length >= 5).ToHashSet(); _katKelimeEnv = env; }
+        var words = System.Text.RegularExpressions.Regex.Split(name, @"(\s+)");
+        var notlar = new List<string>();
+        for (int i = 0; i < words.Length; i++)
+        {
+            var w = Kelimeler(words[i]);
+            if (w.Count != 1 || w[0].Length < 5 || _katKelime!.Contains(w[0]) || w[0].All(char.IsDigit)) continue;
+            var c = _katKelime!.Where(k => k[0] == w[0][0] && Math.Abs(k.Length - w[0].Length) <= 1 && BirFark(k, w[0])).Take(2).ToList();
+            if (c.Count != 1) continue;
+            notlar.Add($"'{words[i]}' → '{c[0]}'");
+            words[i] = c[0];
+        }
+        return notlar.Count == 0 ? null : (string.Concat(words), string.Join(", ", notlar));
+    }
+    static bool BirFark(string a, string b)
+    {
+        if (a == b) return false;
+        if (a.Length == b.Length) return a.Zip(b).Count(z => z.First != z.Second) == 1;
+        var (k, u) = a.Length < b.Length ? (a, b) : (b, a);
+        for (int i = 0; i < u.Length; i++) if (u.Remove(i, 1) == k) return true;
+        return false;
+    }
     static bool KelimeEs(string x, string y)
     {
         if (x == y) return true;
@@ -309,6 +335,17 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
         not = null;
         string exact = Snap(env, name, out yeni);
         if (!yeni) return exact;
+        // Yazım hatası (kullanıcı: SM'de "Bansoft Sunucusu" yazıyordu, AI "Bansoft" önerdi, katalogda "Banksoft …"): katalogda olmayan ≥5 harfli kelime,
+        // katalog kelimelerinden TEK birine bir harf farkla (ekleme / silme / değişme, ilk harf aynı) uzaksa o kelimeyle değiştirilip eşleme yapılır
+        if (Duzelt(env, name) is { } dz && dz.Yeni != name)
+        {
+            string ad = CatalogMatch0(env, dz.Yeni, out yeni, out var not2, ip, evidence);
+            if (!yeni)
+            {
+                not = $"AI '{name}' yazdı; yazım farkı düzeltildi ({dz.Not}){(not2 != null ? "; " + not2 : "")}";
+                return ad;
+            }
+        }
         PrepCatalog(env);
         var a = IslevService.Tokens(name);
         string na = Norm(name);

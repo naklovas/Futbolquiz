@@ -385,7 +385,9 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
   hepsi tek bir katalog adında, tek bir katalog adının kelimeleri AI'ın adında (anahtar kelimelerin en az yarısı), harf-rakam içerme
   (ZB.Wall.P5 ↔ zbwall; yalnız uzunluklar yakınsa, kısa/uzun ≥ %60). TAM KELİME DOĞRULAMASI (kullanıcı: AI "Ziraat pos" dedi, kod 5 harf kökü "ziraa"
   yüzünden 'Ziraatliyorum'a eşledi — "çok saçma"): esit / ust / alt eşleşmeleri `Kelimeler` + `KelimeEs` ile de doğrulanır (ortak başlangıç ≥ max(4, kısa−1),
-  uzunda kalan ≤ 4 harf); kurum adları (ziraat, katılım, banka, zb/zk/zt) GenelKelime'de — tek başına eşleşme sebebi olmaz. Tek açık eşleşme → katalog yazımı (yeni=false); birden çok → serbest + gerekçede "birden çok benzer ad: …";
+  uzunda kalan ≤ 4 harf); kurum adları (ziraat, katılım, banka, zb/zk/zt) GenelKelime'de — tek başına eşleşme sebebi olmaz. YAZIM HATASI (kullanıcı: SM'deki "Bansoft Sunucusu"ndan AI "Bansoft" dedi, serbest kaldı — "saçma"):
+  `Duzelt` — katalogda olmayan ≥5 harfli kelime, katalog kelimelerinden TEK birine bir harf farkla (ilk harf aynı; `BirFark`) uzaksa düzeltilip eşleme tekrarlanır
+  (Bansoft → Banksoft ailesi → Secim), gerekçede "yazım farkı düzeltildi". Tek açık eşleşme → katalog yazımı (yeni=false); birden çok → serbest + gerekçede "birden çok benzer ad: …";
   hiç yok → serbest (yeni=true) + "ERT kataloğunda yok" (varsa "benzer: …"). Not gerekçenin sonuna [ … ] olarak eklenir.
   KANIT SIRASI (kullanıcı: "kaynak / hedef açıklamasını önemsemiyor"): metin `Eksik:MaxKarakter`=6000'de kesildiği ve uzun profil başta
   olduğu için SM / CB kesiliyordu → sıra: başlık, boş portlar, SM, CB, DB ipuçları, adaylar, komşular, SUNUCU PROFİLİ (sonda). SM bölümünde
