@@ -45,6 +45,7 @@ topoloji çizer ve şirket içi AI'a etki analizi yaptırır. Canlıda IIS'te, W
 | `FizikselEnvanter.cs` | Fiziksel envanter: nlyte kabin → host → VM → uygulama (doku DB'deki KabinHostVm vb., yalnız okur; `wwwroot/fiziksel.js`) |
 | `FizikselDeger.cs` | Fiziksel cihaz değerleri (V / İ / E / G / B): tür / model / kabin kuralları, miras, ERT ad eşleşmesi (`partial FizikselService`) |
 | `FizikselKayit.cs` | Fiziksel değer denetim kaydı (DF_FIZIKSEL_DEGER_*), elle değer, çok sayfalı Excel (`Xlsx` yazıcı, dış kütüphanesiz) |
+| `HttpSys.cs` | HTTP.sys (ntoskrnl) port → asıl exe tahmini: Carbon Black dakika dakika zaman korelasyonu (`HttpSysEslesme`) |
 | `Nessus.cs` | Nessus / Tenable.sc: repository'deki tarama sonuçlarından teknoloji, sertifika, OS, kurulu yazılım |
 | `Yetki.cs` | İşlem yetkileri (yazma, topoloji, dışa aktarma, toplu tahmin) — DokuPanel site kayıtları |
 | `AuthHelper.cs` | Kullanıcının verdiği DokuPanel yetki helper'ı (namespace `AppRel`), anahtar config'den |
@@ -272,6 +273,13 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
   HTTP.sys portunda asıl exe tahmini (`httpSysApp`): ERT'de o port için WEBSITE (IIS site adı; kullanıcı: "IIS adı WEBSITE kolonunda") /
   APPNAME / SERVICENAME, sunucudaki bir exe'nin tam yolunda (harf-rakam sadeleştirilmiş) geçiyorsa → "asıl uygulama büyük ihtimalle X";
   geçmiyorsa kelimelerin ≥2'si ve ≥2/3'ü yolda. Canlı örnek: 9000 · WEBSITE "ZB.Wall.P5" → d:\aspnetcore\zb.wall.p5\core\zb.app.wall.exe.
+  ZAMAN KORELASYONU (kullanıcı: "ntoskrnl olayı: exe gerçekte hangi portta bilinmiyor, çok sıkıntı" → 3 yol önerildi: netsh servicestate toplama,
+  IIS logları, korelasyon; kullanıcı korelasyonu seçti): `HttpSys.cs` `HttpSysEslesme.HesaplaAsync(ip, aralık)` — tek SPL: çekirdeğin (ntoskrnl / System)
+  kabul ettiği gelen bağlantılar port başına, iş exe'lerinin giden bağlantıları süreç başına, `t=floor(_time/60)` dakika; port × exe Pearson (eksik dakika 0),
+  `HttpSys:MinDakika`=5, `MinKorelasyon`=0,3, genel süreçler (`SurecAi.GenelExe`) hariç; aday başına r + eşlik (% dakika). KESİN DEĞİL (dışarı çıkmayan
+  uygulama yakalanmaz). Kullanım: (1) `GET /api/surec/httpsys?ip=&start=&end=` → IP kartı Gelen portlar tablosunda ntoskrnl satırı "↔ zaman korelasyonu:
+  muhtemelen X (r · % eşlik)" (`loadHttpSys` / `httpSysTahmin`, runProc'tan sonra yalnız ntoskrnl portu varsa, PROC_PENCERE aralığı; 404 → sessiz);
+  (2) ERT eksikleri BuildAsync: boş port çekirdekteyse (`HttpSys:Eksikte`=true) kanıta "HTTP.SYS PORT → EXE TAHMİNİ" + prompt'ta orta güçte kanıt. Sahte Splunk'la test.
 - **"Bu sunucuda hangi uygulama çalışıyor?"** (IP kartı, Gelen portlar tablosunun üstündeki düğme; `SurecAi` Surec.cs, `POST /api/surec/ai`):
   arayüzdeki /api/surec sonucu exe başına toplanıp (PID'ler, portlar, giden, bağlanan / bağlandığı uygulamalar) AI'a gider (yeniden
   sorgulanmaz) + ERT kayıtları + segment + genel bilgiler dosyası. Kesin genel süreçler kodda ayıklanır (`GenelAd` / `GenelYol`: svchost,

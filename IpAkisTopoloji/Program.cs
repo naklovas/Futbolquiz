@@ -227,6 +227,13 @@ app.MapPost("/api/surec/ai", async (SurecAiIstek req, EnvanterService envanter, 
     catch (Exception ex) when (ex is not OperationCanceledException) { return Results.Json(new { error = ex.Message }, statusCode: 502); }
 });
 
+// HTTP.sys port → asıl exe tahmini (Carbon Black zaman korelasyonu; HttpSys.cs). IP kartı "Gelen portlar" tablosundaki ntoskrnl satırları için
+app.MapGet("/api/surec/httpsys", async (string? ip, string? start, string? end, IConfiguration cfg, IHttpClientFactory factory, CancellationToken ct) =>
+{
+    if (!LookupQuery.TryParse(ip, start, end, cfg.GetValue("MaxRangeHours", 24), out var q, out var error)) return Results.BadRequest(new { error });
+    var res = await HttpSysEslesme.HesaplaAsync(q!.Ip, q.Start, q.End, cfg, factory.CreateClient("splunk"), ct);
+    return res.Hata != null ? Results.Json(new { error = res.Hata }, statusCode: 502) : Results.Ok(res);
+});
 app.MapGet("/api/surec", async (string? ip, string? start, string? end,
     IConfiguration cfg, IHttpClientFactory factory, EnvanterService envanter, CancellationToken ct) =>
 {

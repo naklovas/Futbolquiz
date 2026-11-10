@@ -656,7 +656,19 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
             // Sıra önemli (kullanıcı: SM açıklamaları önemsenmiyordu): metin Eksik:MaxKarakter'de kesilir ve uzun profil (ERT, MSY, ÇSY,
             // Kahin…) başta olunca SM / CB kesiliyordu. Güçlü kanıtlar önce, komşular ve profil sonda.
             if (smf.TryGetValue(ip, out var smfText)) sb.Append(smfText);
-            if (cb.TryGetValue(ip, out var c)) sb.Append(c.Text(env, ip, miss));
+            if (cb.TryGetValue(ip, out var c))
+            {
+                sb.Append(c.Text(env, ip, miss));
+                // HTTP.sys portları (kullanıcı: "ntoskrnl olayı: exe gerçekte hangi portta bilinmiyor"): boş portu çekirdek kabul ediyorsa
+                // zaman korelasyonuyla asıl exe tahmini (HttpSys.cs; Carbon Black dakika dakika, ek sorgu yalnız böyle port varsa)
+                var hsPort = c.Rows.Where(r => r.Yon == "in" && miss.Contains(r.Port) && HttpSysEslesme.Cekirdek(r.Yol)).Select(r => r.Port).ToHashSet();
+                if (hsPort.Count > 0 && cfg.GetValue("HttpSys:Eksikte", true))
+                {
+                    var hs = await HttpSysEslesme.HesaplaAsync(ip, DateTimeOffset.Now.AddHours(-hours), DateTimeOffset.Now, cfg, factory.CreateClient("splunk"), ct, hsPort);
+                    if (hs.Hata == null) sb.Append(HttpSysEslesme.Metin(hs));
+                    else log.LogWarning("HTTP.sys korelasyonu {Ip}: {Hata}", ip, hs.Hata);
+                }
+            }
             else sb.AppendLine($"Carbon Black (son {hours} saat): bu sunucuda ağ olayı yok (ajan yok ya da trafik yok).");
             sb.Append(DbHints(env, ip, miss, sb.ToString()));
             if (nes.TryGetValue(ip, out var ns)) sb.Append(NessusService.Metin(ns, cfg.GetValue("Eksik:NessusMaxKarakter", 2500)));
@@ -1280,7 +1292,7 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
             yazılmış uygulama alanı varsa çok güçlü; aynı satırdaki WEBSITE (IIS site adı) ve SERVICENAME; aynı sunucunun diğer portlarındaki uygulamalar; VIP ve havuz
             komşuları; BENZER ADLI SUNUCULARIN (aynı ad, farklı numara) uygulamaları; aynı segmentte aynı portu kullanan
             sunucuların uygulamaları; bu porta bağlanan istemci uygulamalar ve exe'nin bağlandığı yerler; sanal sunucu notları;
-            iş istekleri; sunucu adındaki kısaltmalar (ör. "atm", "sql", "web"). ntoskrnl.exe görünüyorsa port HTTP.sys üzerindendir; asıl uygulama aynı sunucudaki ve adı WEBSITE ile
+            iş istekleri; sunucu adındaki kısaltmalar (ör. "atm", "sql", "web"). ntoskrnl.exe görünüyorsa port HTTP.sys üzerindendir ("HTTP.SYS PORT → EXE TAHMİNİ" satırı varsa oradaki EN OLASI exe o portun asıl uygulamasıdır — orta güçte kanıt); asıl uygulama aynı sunucudaki ve adı WEBSITE ile
             örtüşen exe'dir.
 
             Kurallar:
