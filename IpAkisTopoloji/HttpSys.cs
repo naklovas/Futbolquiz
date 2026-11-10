@@ -13,6 +13,8 @@ record HttpSysPort(string Port, int Dakika, long Baglanti, List<HttpSysAday> Ada
 record HttpSysSonuc(string Ip, DateTimeOffset Baslangic, DateTimeOffset Bitis, int ToplamDakika, List<HttpSysPort> Portlar, string? Hata,
     List<HttpSysGiden>? Giden = null, List<string>? GenelAtilan = null);   // tanı: dışarı bağlanan iş exe'leri (dakika), ayıklanan genel süreçler
 record HttpSysGiden(string Exe, string Yol, int Dakika, long Baglanti);
+record HttpSysSurec(string Guid, int? Pid, string Exe, string Yol, List<string> Domainler, string? Link, long Olay,
+    string? KomutSatiri = null, string? Havuz = null, string? UstGuid = null, string? UstYol = null, int? UstPid = null, string? UstHavuz = null);
 
 static class HttpSysEslesme
 {
@@ -132,6 +134,81 @@ static class HttpSysEslesme
         var gidenOzet = giden.Select(kv => new HttpSysGiden(kv.Key.Replace('/', '\\').Split('\\').Last(), kv.Key, kv.Value.Count, kv.Value.Values.Sum()))
             .OrderByDescending(g => g.Dakika).Take(15).ToList();
         return new(ip, start, end, toplam, outp, null, gidenOzet, genelAtilan.Order().Take(30).ToList());
+    }
+
+    // IIS HAVUZLARI (kullanıcı: "w3wp.exe benim işimi görmüyor"): CB netconn olaylarında cmdline / parent yok ama process_guid, domain ve link_process var;
+    // ingress.event.procstart olayında cmdline (w3wp -ap "HavuzAdi") ve üst süreç (parent_guid / parent_path / parent_pid) bulunur.
+    // 1) Bu sunucunun netconn olaylarından süreç başına (process_guid): pid, yol, gittiği domain'ler, CB bağlantısı
+    // 2) Bu guid'lerin procstart olayı (son HttpSys:SurecGun = 30 gün): komut satırı, üst süreç → havuz adı; alt süreç üstü w3wp ise o havuz
+    public static async Task<List<HttpSysSurec>> SureclerAsync(string ip, DateTimeOffset start, DateTimeOffset end, IConfiguration cfg, HttpClient http, CancellationToken ct)
+    {
+        var s = cfg.GetSection("Splunk");
+        string index = s["Index"] ?? "carbonblack", sourcetype = s["Sourcetype"] ?? "bit9:carbonblack:json";
+        string splA = $"""
+            search index={index} sourcetype="{sourcetype}" TERM({ip}) local_ip="{ip}" process_guid=*
+            | eval yol=coalesce(process_path, "-")
+            | stats count latest(pid) as pid latest(yol) as yol values(domain) as domain latest(link_process) as link by process_guid
+            """;
+        var resA = await SplunkService.ExportAsync(splA, new LookupQuery(ip, start, end), cfg, http, ct, "Splunk");
+        var liste = new Dictionary<string, HttpSysSurec>(StringComparer.OrdinalIgnoreCase);
+        foreach (var r in resA.Rows)
+        {
+            string? V(string k) => r.TryGetValue(k, out var v) && !string.IsNullOrWhiteSpace(v) ? v.Trim() : null;
+            if (V("process_guid") is not { } g || V("yol") is not { } yol || Cekirdek(yol)) continue;
+            if (Genel(Ad(yol), yol)) continue;
+            var dom = (V("domain") ?? "").Split("|||", StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Distinct().Take(10).ToList();
+            liste[g] = new(g, int.TryParse(V("pid"), out int pid) ? pid : null, Ad(yol), yol, dom, V("link"), long.TryParse(V("count"), out long n) ? n : 0);
+        }
+        if (liste.Count == 0) return [];
+        int gun = cfg.GetValue("HttpSys:SurecGun", 30);
+        var ust = new Dictionary<string, (string? Cmd, string? UstGuid, string? UstYol, int? UstPid)>(StringComparer.OrdinalIgnoreCase);
+        foreach (var parca in liste.Keys.Chunk(40))
+        {
+            string splB = $"""
+                search index={index} sourcetype="{sourcetype}" type="ingress.event.procstart" ({string.Join(" OR ", parca.Select(g => $"process_guid=\"{g}\""))})
+                | eval cmd=coalesce(cmdline, command_line, process_cmdline, "")
+                | stats latest(cmd) as cmd latest(parent_guid) as ug latest(parent_path) as uy latest(parent_pid) as up by process_guid
+                """;
+            SplunkResult resB;
+            try { resB = await SplunkService.ExportAsync(splB, new LookupQuery(ip, end.AddDays(-gun), end), cfg, http, ct, "Splunk"); }
+            catch (Exception ex) when (ex is not OperationCanceledException) { break; }
+            foreach (var r in resB.Rows)
+            {
+                string? V(string k) => r.TryGetValue(k, out var v) && !string.IsNullOrWhiteSpace(v) ? v.Trim() : null;
+                if (V("process_guid") is { } g) ust[g] = (V("cmd"), V("ug"), V("uy"), int.TryParse(V("up"), out int up) ? up : null);
+            }
+        }
+        // ilk geçiş: komut satırı ve havuz; ikinci geçiş: üstü bilinen w3wp olan sürecin havuzu
+        foreach (var g in liste.Keys.ToList())
+            if (ust.TryGetValue(g, out var u))
+                liste[g] = liste[g] with { KomutSatiri = u.Cmd, Havuz = HavuzAdi(u.Cmd), UstGuid = u.UstGuid, UstYol = u.UstYol, UstPid = u.UstPid };
+        var havuzByGuid = liste.Values.Where(x => x.Havuz != null).ToDictionary(x => x.Guid, x => x.Havuz!, StringComparer.OrdinalIgnoreCase);
+        foreach (var g in liste.Keys.ToList())
+        {
+            var x = liste[g];
+            if (x.Havuz == null && x.UstGuid != null && havuzByGuid.TryGetValue(x.UstGuid, out var h)) liste[g] = x with { UstHavuz = h };
+        }
+        return liste.Values.OrderBy(x => x.Exe).ThenBy(x => x.Pid).ToList();
+    }
+
+    // w3wp.exe -ap "HavuzAdi" -v "v4.0" … → HavuzAdi
+    public static string? HavuzAdi(string? cmd)
+    {
+        if (string.IsNullOrWhiteSpace(cmd)) return null;
+        var m = System.Text.RegularExpressions.Regex.Match(cmd, @"-ap\s+(?:""([^""]+)""|(\S+))", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        return m.Success ? (m.Groups[1].Success ? m.Groups[1].Value : m.Groups[2].Value) : null;
+    }
+
+    // ERT eksikleri / AI kanıtı için kısa metin
+    public static string SurecMetin(List<HttpSysSurec> l)
+    {
+        var ilgili = l.Where(x => x.Havuz != null || x.UstHavuz != null || x.Domainler.Count > 0 && x.Exe.Equals("w3wp.exe", StringComparison.OrdinalIgnoreCase)).ToList();
+        if (ilgili.Count == 0) return "";
+        var sb = new StringBuilder("IIS UYGULAMA HAVUZLARI (Carbon Black süreç başlangıcı: w3wp komut satırı, alt süreçler; domain = sürecin bağlandığı DNS adları):\n");
+        foreach (var x in ilgili.Take(20))
+            sb.AppendLine($"- {x.Exe} PID {x.Pid}{(x.Havuz != null ? $" · HAVUZ \"{x.Havuz}\"" : "")}{(x.UstHavuz != null ? $" · üst süreç w3wp, HAVUZ \"{x.UstHavuz}\"" : x.UstYol != null ? $" · üst süreç {Ad(x.UstYol)}" : "")} · {x.Yol}"
+                + (x.Domainler.Count > 0 ? $" · bağlandığı: {string.Join(", ", x.Domainler.Take(5))}" : ""));
+        return sb.ToString();
     }
 
     // TANI (kullanıcı: "kontrol verisi basarsan bir yere gönderebilirim"): korelasyonun gördüğü ham veri, düz metin.

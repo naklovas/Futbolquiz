@@ -677,6 +677,13 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
                     if (hs.Hata == null) sb.Append(HttpSysEslesme.Metin(hs with { Portlar = hs.Portlar.Where(p => hsPort.Contains(p.Port)).ToList() }));
                     else log.LogWarning("HTTP.sys korelasyonu {Ip}: {Hata}", ip, hs.Hata);
                 }
+                // IIS havuzları (kullanıcı: "w3wp.exe işimi görmüyor"): w3wp komut satırındaki havuz adı, alt süreçler, bağlandığı DNS adları (CB procstart)
+                if (cfg.GetValue("HttpSys:HavuzEksikte", true) && c.Rows.Any(r => (r.Yol ?? "").Contains("w3wp", StringComparison.OrdinalIgnoreCase)
+                    || (r.Yol ?? "").Contains(@"\inetpub\", StringComparison.OrdinalIgnoreCase)))
+                {
+                    try { sb.Append(HttpSysEslesme.SurecMetin(await HttpSysEslesme.SureclerAsync(ip, DateTimeOffset.Now.AddHours(-hours), DateTimeOffset.Now, cfg, factory.CreateClient("splunk"), ct))); }
+                    catch (Exception ex) when (ex is not OperationCanceledException) { log.LogWarning("IIS havuzları {Ip}: {Hata}", ip, ex.Message); }
+                }
             }
             else sb.AppendLine($"Carbon Black (son {hours} saat): bu sunucuda ağ olayı yok (ajan yok ya da trafik yok).");
             sb.Append(DbHints(env, ip, miss, sb.ToString()));

@@ -244,6 +244,13 @@ app.MapGet("/api/surec/httpsys", async (string? ip, string? start, string? end, 
         giden = k.Sonuc.Giden, genelAtilan = k.Sonuc.GenelAtilan,
         kayit = kesin.Select(x => new { x.Port, x.Url, x.Kuyruk, x.Pid, x.ExeYol, x.Exe, x.Hostname, x.Tarih }), kayitDurum = kayit.Durum });
 });
+// IIS havuzları / süreç ayrıntısı (HttpSys.cs SureclerAsync): IP kartı süreç penceresiyle aynı aralık (PID'ler tabloyla eşleşsin)
+app.MapGet("/api/surec/havuz", async (string? ip, string? start, string? end, IConfiguration cfg, IHttpClientFactory factory, CancellationToken ct) =>
+{
+    if (!LookupQuery.TryParse(ip, start, end, cfg.GetValue("MaxRangeHours", 24), out var q, out var error)) return Results.BadRequest(new { error });
+    try { return Results.Ok(new { surecler = await HttpSysEslesme.SureclerAsync(q!.Ip, q.Start, q.End, cfg, factory.CreateClient("splunk"), ct) }); }
+    catch (Exception ex) when (ex is not OperationCanceledException) { return Results.Ok(new { surecler = Array.Empty<object>(), hata = ex.Message }); }
+});
 // Korelasyon tanısı (düz metin; kullanıcı kopyalayıp gönderebilsin)
 app.MapGet("/api/surec/httpsys/tani", async (string? ip, IConfiguration cfg, IHttpClientFactory factory, CancellationToken ct) =>
 {
