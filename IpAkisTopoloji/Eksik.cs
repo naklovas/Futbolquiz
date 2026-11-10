@@ -258,7 +258,38 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
     // hepsi katalog adında ya da katalog adının hepsi AI'ın adında; ya da biri diğerini harf-rakam olarak içeriyor) katalog yazımı.
     // Birden çok eşit aday varsa ya da hiç yoksa AI'ın adı serbest kalır (yeni); not gerekçeye eklenir.
     static readonly HashSet<string> GenelKelime = ["siste", "uygul", "servi", "web", "api", "yonet", "modul", "proje", "veri", "verit", "app",
-        "uygulama", "core", "test", "prod", "ortak", "genel", "islem", "batch", "zaman"];
+        "uygulama", "core", "test", "prod", "ortak", "genel", "islem", "batch", "zaman",
+        // kurum adları (kullanıcı: AI "Ziraat pos" dedi, kod 'Ziraatliyorum'a eşledi): tek başına uygulama ayırt etmez
+        "ziraa", "zirat", "katil", "banka", "zb", "zk", "zt", "ztek", "teknol"];
+    // Tokens 5 harf kökü kullanır ("ziraat" ve "ziraatliyorum" ikisi de "ziraa"): eşleşmeyi TAM KELİMEYLE de doğrula. İki kelime eşit sayılır:
+    // ortak başlangıç ≥ max(4, kısa kelime − 1) ve uzun kelimede bunun ötesi ≤ 4 harf (kartı ~ kartları, kredi ~ kredileri; ziraat ≁ ziraatliyorum)
+    static List<string> Kelimeler(string s)
+    {
+        var sb = new StringBuilder();
+        foreach (char ch in s.ToLower(new System.Globalization.CultureInfo("tr-TR")))
+            sb.Append(ch switch { 'ı' => 'i', 'ş' => 's', 'ğ' => 'g', 'ü' => 'u', 'ö' => 'o', 'ç' => 'c', 'â' => 'a', 'î' => 'i', _ => char.IsLetterOrDigit(ch) ? ch : ' ' });
+        return sb.ToString().Split(' ', StringSplitOptions.RemoveEmptyEntries).ToList();
+    }
+    static bool KelimeEs(string x, string y)
+    {
+        if (x == y) return true;
+        var (k, u) = x.Length <= y.Length ? (x, y) : (y, x);
+        int cp = 0; while (cp < k.Length && k[cp] == u[cp]) cp++;
+        return k.Length >= 3 && cp >= Math.Max(4, k.Length - 1) && u.Length - cp <= 4;
+    }
+    // iki adın tüm kelimeleri karşılıklı eşleşiyor mu (aynı kelime kümesi denetimi için)
+    static bool AyniKelimeler(string x, string y)
+    {
+        var a = Kelimeler(x); var b = Kelimeler(y);
+        return a.Count > 0 && a.All(w => b.Any(v => KelimeEs(w, v))) && b.All(w => a.Any(v => KelimeEs(w, v)));
+    }
+    // katalog adının ayırt edici kelimelerinin hepsi AI'ın adında tam kelime olarak var mı (ve tersi için de kullanılır)
+    static bool TamKelimeIcinde(string kucuk, string buyuk)
+    {
+        var bw = Kelimeler(buyuk);
+        var kw = Kelimeler(kucuk).Where(w => w.Length >= 3 && !GenelKelime.Contains(w.Length > 5 ? w[..5] : w)).ToList();
+        return kw.Count > 0 && kw.All(w => bw.Any(b => KelimeEs(w, b)));
+    }
     // Segment tarama / IP kartı AI'ı (SurecAi) da aynı katalog eşlemesini ve aday listesini kullanır
     public string Katalog(EnvanterSnapshot env, string name, out bool yeni, out string? not, string? ip = null, string? evidence = null) =>
         CatalogMatch(env, name, out yeni, out not, ip, evidence);
@@ -286,12 +317,14 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
         bool Anahtar(HashSet<string> t) => t.Any(x => x.Length >= 3 && !GenelKelime.Contains(x));
         var cat = _catTok!.Where(c => !env.IsSystemApp(c.App)).ToList();
         // 1) aynı kelime kümesi  2) AI'ın kelimelerinin hepsi katalog adında  3) katalog adının hepsi AI'ın adında  4) harf-rakam içerme
-        var esit = cat.Where(c => c.Tok.SetEquals(a)).Select(c => c.App).ToList();
-        var ust = cat.Where(c => key.Count > 0 && a.IsSubsetOf(c.Tok)).Select(c => c.App).ToList();
-        var altHam = cat.Where(c => Anahtar(c.Tok) && c.Tok.IsSubsetOf(a)).OrderByDescending(c => c.Tok.Count).ToList();
+        var esit = cat.Where(c => c.Tok.SetEquals(a) && AyniKelimeler(c.App, name)).Select(c => c.App).ToList();
+        var ust = cat.Where(c => key.Count > 0 && a.IsSubsetOf(c.Tok) && TamKelimeIcinde(name, c.App)).Select(c => c.App).ToList();
+        var altHam = cat.Where(c => Anahtar(c.Tok) && c.Tok.IsSubsetOf(a) && TamKelimeIcinde(c.App, name)).OrderByDescending(c => c.Tok.Count).ToList();
         // katalog adı AI'ın adının en az yarısını (anahtar kelimelerde) karşılamalı: "KREDİ" ⊂ "Kredi Kartı Takip" tek başına yetmez
         var alt = altHam.Where(c => c.Tok.Count(t => key.Contains(t)) * 2 >= key.Count).ToList();
-        var icer = cat.Where(c => na.Length >= 4 && Norm(c.App) is { Length: >= 4 } nc && (nc.Contains(na) || na.Contains(nc))).Select(c => c.App).ToList();
+        // harf-rakam içerme yalnız uzunluklar yakınsa (ZB.Wall.P5 ↔ zbwall evet; "ziraat" ↔ "ziraatliyorum" hayır)
+        var icer = cat.Where(c => na.Length >= 4 && Norm(c.App) is { Length: >= 4 } nc && (nc.Contains(na) || na.Contains(nc))
+            && Math.Min(nc.Length, na.Length) * 10 >= Math.Max(nc.Length, na.Length) * 6).Select(c => c.App).ToList();
         string? hit = null; List<string>? coklu = null;
         if (esit.Count == 1) hit = esit[0];
         else if (esit.Count > 1) coklu = esit;

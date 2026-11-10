@@ -379,7 +379,9 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
   KATALOG KONTROLÜ (kullanıcı: "içerideki uygulama isimleri kontrol edilsin, yoksa serbest atsın"; `CatalogMatch`): AI'ın adı ERT
   APPNAME kataloğuyla karşılaştırılır — birebir / harf-rakam eşit → o; değilse Tokens ile sırayla: aynı kelime kümesi, AI'ın kelimelerinin
   hepsi tek bir katalog adında, tek bir katalog adının kelimeleri AI'ın adında (anahtar kelimelerin en az yarısı), harf-rakam içerme
-  (ZB.Wall.P5 ↔ zbwall). Tek açık eşleşme → katalog yazımı (yeni=false); birden çok → serbest + gerekçede "birden çok benzer ad: …";
+  (ZB.Wall.P5 ↔ zbwall; yalnız uzunluklar yakınsa, kısa/uzun ≥ %60). TAM KELİME DOĞRULAMASI (kullanıcı: AI "Ziraat pos" dedi, kod 5 harf kökü "ziraa"
+  yüzünden 'Ziraatliyorum'a eşledi — "çok saçma"): esit / ust / alt eşleşmeleri `Kelimeler` + `KelimeEs` ile de doğrulanır (ortak başlangıç ≥ max(4, kısa−1),
+  uzunda kalan ≤ 4 harf); kurum adları (ziraat, katılım, banka, zb/zk/zt) GenelKelime'de — tek başına eşleşme sebebi olmaz. Tek açık eşleşme → katalog yazımı (yeni=false); birden çok → serbest + gerekçede "birden çok benzer ad: …";
   hiç yok → serbest (yeni=true) + "ERT kataloğunda yok" (varsa "benzer: …"). Not gerekçenin sonuna [ … ] olarak eklenir.
   KANIT SIRASI (kullanıcı: "kaynak / hedef açıklamasını önemsemiyor"): metin `Eksik:MaxKarakter`=6000'de kesildiği ve uzun profil başta
   olduğu için SM / CB kesiliyordu → sıra: başlık, boş portlar, SM, CB, DB ipuçları, adaylar, komşular, SUNUCU PROFİLİ (sonda). SM bölümünde
