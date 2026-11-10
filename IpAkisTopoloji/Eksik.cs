@@ -657,8 +657,13 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
             // Kahin…) başta olunca SM / CB kesiliyordu. Güçlü kanıtlar önce, komşular ve profil sonda.
             if (smf.TryGetValue(ip, out var smfText)) sb.Append(smfText);
             // HTTP.sys KAYDI (kullanıcı: "gerçek portları bir yere yazsak, önce oraya baksak"): sunuculardan netsh ile toplanan kesin port → exe
-            var kesin = httpSysKayit == null ? [] : (await httpSysKayit.IpAsync(ip, ct)).Where(k => miss.Contains(k.Port.ToString())).ToList();
+            // (kullanıcı: "AI'a göndermeden önce kanıt olarak toplayalım, liste yok"): boş port çekirdekte (ntoskrnl) ise kayıt yoksa / eskiyse sunucudan şimdi toplanır
+            bool cekirdekPort = cb.TryGetValue(ip, out var cb0) && cb0.Rows.Any(r => r.Yon == "in" && miss.Contains(r.Port) && HttpSysEslesme.Cekirdek(r.Yol));
+            var hsk = httpSysKayit == null ? null : await httpSysKayit.GetirAsync(ip, env.AppsOnIp(ip).Select(h => h.UnixName).OfType<string>().FirstOrDefault(),
+                cekirdekPort && cfg.GetValue("HttpSys:EksikteTopla", true), ct);
+            var kesin = hsk == null ? [] : hsk.Kayitlar.Where(k => miss.Contains(k.Port.ToString())).ToList();
             if (kesin.Count > 0) sb.Append(HttpSysKayitService.Metin(kesin));
+            else if (hsk?.Hata != null && cekirdekPort) log.LogWarning("HTTP.sys canlı toplama {Ip}: {Hata}", ip, hsk.Hata);
             if (cb.TryGetValue(ip, out var c))
             {
                 sb.Append(c.Text(env, ip, miss));

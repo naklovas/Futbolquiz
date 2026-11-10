@@ -118,19 +118,48 @@ record HttpSysKayit(string Ip, string? Hostname, int Port, string? Protokol, str
 
 sealed class HttpSysKayitService(IConfiguration cfg, ILogger<HttpSysKayitService> log)
 {
-    readonly System.Collections.Concurrent.ConcurrentDictionary<string, (DateTime At, List<HttpSysKayit> Liste)> _cache = new();
+    // IP → (okuma zamanı, kayıtlar, son toplama tarihi, kaynak)
+    readonly System.Collections.Concurrent.ConcurrentDictionary<string, (DateTime At, List<HttpSysKayit> Liste, DateTime? Toplama)> _cache = new();
+    readonly System.Collections.Concurrent.ConcurrentDictionary<string, SemaphoreSlim> _kilit = new();
     string Tablo => cfg["HttpSys:Tablo"] is { Length: > 0 } t && System.Text.RegularExpressions.Regex.IsMatch(t, @"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*){0,2}$")
         ? t : "dbo.DF_HTTPSYS_URL";
+    string? Cs => cfg["HttpSys:Baglanti"] is { Length: > 0 } b ? b : cfg.GetConnectionString("Envanter");
     public string? Durum { get; private set; }   // tablo yoksa / okunamıyorsa açıklama
+    bool CanliAcik => cfg.GetValue("HttpSys:CanliTopla", true) && OperatingSystem.IsWindows();
 
-    // IP'nin kayıtları (port başına birden çok URL / süreç olabilir); tablo yoksa boş liste
-    public async Task<List<HttpSysKayit>> IpAsync(string ip, CancellationToken ct)
+    public record Sonuc(List<HttpSysKayit> Kayitlar, DateTime? Toplama, string Kaynak, string? Hata);
+
+    // IP'nin kayıtları. topla=true ise kayıt yoksa ya da `HttpSys:YenilemeSaat`ten (24) eskiyse sunucudan şimdi toplanır (WinRM + netsh),
+    // tabloya yazılır. host: sunucu adı (ERT UNIXNAME; WinRM Kerberos IP ile çalışmaz). yenile=true → süreye bakmadan topla.
+    public async Task<Sonuc> GetirAsync(string ip, string? host, bool topla, CancellationToken ct, bool yenile = false)
+    {
+        var (liste, tarih) = await OkuAsync(ip, ct);
+        double saat = cfg.GetValue("HttpSys:YenilemeSaat", 24.0);
+        bool taze = tarih is { } t && DateTime.Now - t < TimeSpan.FromHours(saat);
+        if (!topla || !CanliAcik || (taze && !yenile)) return new(liste, tarih, tarih != null ? "tablo" : "yok", null);
+        var kilit = _kilit.GetOrAdd(ip, _ => new SemaphoreSlim(1, 1));
+        await kilit.WaitAsync(ct);
+        try
+        {
+            if (!yenile && _cache.TryGetValue(ip, out var c) && c.Toplama is { } ct2 && DateTime.Now - ct2 < TimeSpan.FromHours(saat))
+                return new(c.Liste, c.Toplama, "tablo", null);   // aynı anda gelen ikinci istek beklerken toplandı
+            var (yeniKayit, hata) = await ToplaAsync(ip, host, ct);
+            if (hata != null) return new(liste, tarih, tarih != null ? "tablo" : "yok", hata);
+            await YazAsync(ip, yeniKayit!, ct);
+            _cache[ip] = (DateTime.UtcNow, yeniKayit!, DateTime.Now);
+            return new(yeniKayit!, DateTime.Now, "şimdi toplandı", null);
+        }
+        finally { kilit.Release(); }
+    }
+    public async Task<List<HttpSysKayit>> IpAsync(string ip, CancellationToken ct) => (await OkuAsync(ip, ct)).Liste;
+
+    async Task<(List<HttpSysKayit> Liste, DateTime? Toplama)> OkuAsync(string ip, CancellationToken ct)
     {
         int dk = cfg.GetValue("HttpSys:KayitDakika", 10);
-        if (_cache.TryGetValue(ip, out var c) && DateTime.UtcNow - c.At < TimeSpan.FromMinutes(dk)) return c.Liste;
+        if (_cache.TryGetValue(ip, out var c) && DateTime.UtcNow - c.At < TimeSpan.FromMinutes(dk)) return (c.Liste, c.Toplama);
         var liste = new List<HttpSysKayit>();
-        string? cs = cfg["HttpSys:Baglanti"] is { Length: > 0 } b ? b : cfg.GetConnectionString("Envanter");
-        if (cs == null) return liste;
+        DateTime? toplama = null;
+        if (Cs is not { } cs) return (liste, null);
         try
         {
             await using var conn = new Microsoft.Data.SqlClient.SqlConnection(cs);
@@ -141,21 +170,154 @@ sealed class HttpSysKayitService(IConfiguration cfg, ILogger<HttpSysKayitService
             await using var r = await cmd.ExecuteReaderAsync(ct);
             string? S(int i) => r.IsDBNull(i) ? null : Convert.ToString(r.GetValue(i))?.Trim();
             while (await r.ReadAsync(ct))
-                liste.Add(new(S(0) ?? ip, S(1), Convert.ToInt32(r.GetValue(2)), S(3), S(4) ?? "", S(5), r.IsDBNull(6) ? null : Convert.ToInt32(r.GetValue(6)), S(7),
-                    r.IsDBNull(8) ? DateTime.MinValue : Convert.ToDateTime(r.GetValue(8))));
+            {
+                var t = r.IsDBNull(8) ? DateTime.MinValue : Convert.ToDateTime(r.GetValue(8));
+                if (toplama == null || t > toplama) toplama = t;
+                int port = Convert.ToInt32(r.GetValue(2));
+                if (port <= 0) continue;   // "toplandı, HTTP.sys kaydı yok" işaret satırı
+                liste.Add(new(S(0) ?? ip, S(1), port, S(3), S(4) ?? "", S(5), r.IsDBNull(6) ? null : Convert.ToInt32(r.GetValue(6)), S(7), t));
+            }
             Durum = null;
         }
         catch (Microsoft.Data.SqlClient.SqlException ex) when (ex.Number == 208)
         {
-            Durum = $"{Tablo} tablosu yok (sql/httpsys_kayit.sql + araclar/HttpSysTopla.ps1)";
+            Durum = $"{Tablo} tablosu yok (sql/httpsys_kayit.sql) — sonuçlar yalnız bellekte tutulur";
+            if (_cache.TryGetValue(ip, out var m)) return (m.Liste, m.Toplama);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             Durum = "HTTP.sys kayıtları okunamadı: " + ex.Message;
             log.LogWarning("HTTP.sys kayıtları okunamadı: {Hata}", ex.Message);
         }
-        _cache[ip] = (DateTime.UtcNow, liste);
-        return liste;
+        _cache[ip] = (DateTime.UtcNow, liste, toplama);
+        return (liste, toplama);
+    }
+
+    // Sunucudan canlı toplama: powershell.exe → Invoke-Command (WinRM) → netsh http show servicestate + Win32_Process. Komut SABİT; sunucu adı,
+    // kullanıcı ve parola ortam değişkeniyle geçer (komut satırına girmez). Kimlik: HttpSys:Kullanici / HttpSys:Sifre (appsettings.Production.json),
+    // yoksa uygulama havuzu hesabı. Hedefte WinRM açık ve hesap yerel yönetici olmalı.
+    const string Betik = """
+        $ErrorActionPreference = 'Stop'
+        $sb = {
+            $o = netsh http show servicestate view=requestq verbose=yes 2>$null
+            $p = @(Get-CimInstance Win32_Process | Select-Object ProcessId, ExecutablePath, CommandLine)
+            [pscustomobject]@{ Netsh = ($o -join "`n"); Proc = $p; Ad = $env:COMPUTERNAME }
+        }
+        $a = @{ ComputerName = $env:DF_HS_HOST; ScriptBlock = $sb }
+        if ($env:DF_HS_USER) {
+            $sec = ConvertTo-SecureString $env:DF_HS_PASS -AsPlainText -Force
+            $a.Credential = New-Object System.Management.Automation.PSCredential($env:DF_HS_USER, $sec)
+        }
+        Invoke-Command @a | Select-Object Netsh, Proc, Ad | ConvertTo-Json -Depth 4 -Compress
+        """;
+
+    async Task<(List<HttpSysKayit>? Liste, string? Hata)> ToplaAsync(string ip, string? host, CancellationToken ct)
+    {
+        string hedef = host is { Length: > 0 } h && !LookupQuery.TryParseIpv4(h, out _)
+            ? (h.Contains('.') || cfg["HttpSys:AlanAdi"] is not { Length: > 0 } dom ? h : h + "." + dom.TrimStart('.')) : ip;
+        if (!System.Text.RegularExpressions.Regex.IsMatch(hedef, @"^[A-Za-z0-9.\-]{1,255}$")) return (null, "geçersiz sunucu adı");
+        var psi = new System.Diagnostics.ProcessStartInfo("powershell.exe",
+            "-NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand " + Convert.ToBase64String(Encoding.Unicode.GetBytes(Betik)))
+        { RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false, CreateNoWindow = true,
+          StandardOutputEncoding = Encoding.UTF8, StandardErrorEncoding = Encoding.UTF8 };
+        psi.Environment["DF_HS_HOST"] = hedef;
+        if (cfg["HttpSys:Kullanici"] is { Length: > 0 } u) { psi.Environment["DF_HS_USER"] = u; psi.Environment["DF_HS_PASS"] = cfg["HttpSys:Sifre"] ?? ""; }
+        using var to = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        to.CancelAfter(TimeSpan.FromSeconds(cfg.GetValue("HttpSys:ToplaSaniye", 60)));
+        try
+        {
+            using var pr = System.Diagnostics.Process.Start(psi)!;
+            var outT = pr.StandardOutput.ReadToEndAsync(to.Token);
+            var errT = pr.StandardError.ReadToEndAsync(to.Token);
+            try { await pr.WaitForExitAsync(to.Token); }
+            catch (OperationCanceledException) { try { pr.Kill(true); } catch { } throw; }
+            string o = await outT, e = await errT;
+            if (pr.ExitCode != 0 || o.Trim().Length == 0)
+                return (null, $"{hedef}: " + (e.Trim() is { Length: > 0 } ee ? Cut1(System.Text.RegularExpressions.Regex.Replace(ee, @"\s+", " "), 300) : $"çıkış kodu {pr.ExitCode}"));
+            using var doc = System.Text.Json.JsonDocument.Parse(o);
+            var kok = doc.RootElement.ValueKind == System.Text.Json.JsonValueKind.Array ? doc.RootElement[0] : doc.RootElement;
+            string netsh = kok.TryGetProperty("Netsh", out var n) ? n.GetString() ?? "" : "";
+            string? ad = kok.TryGetProperty("Ad", out var adEl) ? adEl.GetString() : hedef;
+            var exe = new Dictionary<int, string?>();
+            if (kok.TryGetProperty("Proc", out var pl) && pl.ValueKind == System.Text.Json.JsonValueKind.Array)
+                foreach (var x in pl.EnumerateArray())
+                    if (x.TryGetProperty("ProcessId", out var pid) && pid.TryGetInt32(out int pi))
+                        exe[pi] = x.TryGetProperty("ExecutablePath", out var ep) && ep.ValueKind == System.Text.Json.JsonValueKind.String ? ep.GetString() : null;
+            return (Ayristir(netsh, ip, ad, exe), null);
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested) { return (null, $"{hedef}: {cfg.GetValue("HttpSys:ToplaSaniye", 60)} sn içinde cevap yok (WinRM)"); }
+        catch (Exception ex) when (ex is not OperationCanceledException) { return (null, $"{hedef}: {ex.Message}"); }
+    }
+    static string Cut1(string s, int n) => s.Length > n ? s[..n] + "…" : s;
+
+    // netsh http show servicestate view=requestq verbose=yes çıktısı (araclar/HttpSysTopla.ps1 ile aynı kurallar): girintisiz satır = yeni blok
+    // (kuyruk adı; 16 haneli onaltılık + süreçsiz = sunucu oturumu, atlanır), "  ID: n" süreç ("Controller process ID" sayılmaz), "http(s)://host:port/…" URL.
+    // URL başka bir IP'ye bağlıysa o IP'nin kaydı değildir.
+    public static List<HttpSysKayit> Ayristir(string netsh, string ip, string? ad, IReadOnlyDictionary<int, string?> exe)
+    {
+        var sonuc = new List<HttpSysKayit>();
+        string? kuyruk = null; var pids = new List<int>(); var urls = new List<string>();
+        void Bitir()
+        {
+            if (urls.Count == 0 || (kuyruk != null && System.Text.RegularExpressions.Regex.IsMatch(kuyruk, "^[0-9A-Fa-f]{16}$") && pids.Count == 0)) return;
+            foreach (var u in urls)
+            {
+                var m = System.Text.RegularExpressions.Regex.Match(u, @"^(?i)(https?)://([^/\s]+):(\d+)(/\S*)?");
+                if (!m.Success || !int.TryParse(m.Groups[3].Value, out int port)) continue;
+                string h = m.Groups[2].Value;
+                if (System.Text.RegularExpressions.Regex.IsMatch(h, @"^\d{1,3}(\.\d{1,3}){3}$") && h != ip) continue;
+                foreach (int? p in pids.Count > 0 ? pids.Select(x => (int?)x) : [null])
+                    sonuc.Add(new(ip, ad, port, m.Groups[1].Value.ToLowerInvariant(), u, kuyruk, p, p is int pp ? exe.GetValueOrDefault(pp) : null, DateTime.Now));
+            }
+        }
+        foreach (var raw in netsh.Replace("\r", "").Split('\n'))
+        {
+            if (raw.Length > 0 && !char.IsWhiteSpace(raw[0]) && !raw.StartsWith('-') && raw.Contains(':'))
+            {
+                Bitir();
+                kuyruk = raw[(raw.IndexOf(':') + 1)..].Trim();
+                if (kuyruk.Length == 0 || System.Text.RegularExpressions.Regex.IsMatch(kuyruk, "(?i)unnamed|adsız|adsiz")) kuyruk = null;
+                pids.Clear(); urls.Clear();
+                continue;
+            }
+            if (System.Text.RegularExpressions.Regex.Match(raw, @"^\s*ID:\s*(\d+)") is { Success: true } im) pids.Add(int.Parse(im.Groups[1].Value));
+            else if (System.Text.RegularExpressions.Regex.Match(raw, @"^\s*((?i)https?://\S+)\s*$") is { Success: true } um) urls.Add(um.Groups[1].Value);
+        }
+        Bitir();
+        return sonuc.DistinctBy(k => (k.Port, k.Url, k.Pid)).ToList();
+    }
+
+    // DeltaFlow'un kendi DF_ tablosuna yazar (IP'nin eski satırları silinir); kayıt yoksa PORT 0 işaret satırı ("toplandı, kayıt yok")
+    async Task YazAsync(string ip, List<HttpSysKayit> liste, CancellationToken ct)
+    {
+        if (Cs is not { } cs) return;
+        try
+        {
+            await using var conn = new Microsoft.Data.SqlClient.SqlConnection(cs);
+            await conn.OpenAsync(ct);
+            await using var tx = (Microsoft.Data.SqlClient.SqlTransaction)await conn.BeginTransactionAsync(ct);
+            await using (var del = new Microsoft.Data.SqlClient.SqlCommand($"DELETE FROM {Tablo} WHERE IP = @ip", conn, tx))
+            { del.Parameters.AddWithValue("@ip", ip); await del.ExecuteNonQueryAsync(ct); }
+            var satirlar = liste.Count > 0 ? liste : [new HttpSysKayit(ip, null, 0, null, "", null, null, null, DateTime.Now)];
+            foreach (var k in satirlar)
+            {
+                await using var ins = new Microsoft.Data.SqlClient.SqlCommand(
+                    $"INSERT INTO {Tablo} (IP, HOSTNAME, PORT, PROTOKOL, URL, KUYRUK, PID, EXE_YOL, TOPLAYAN) VALUES (@ip, @h, @p, @pr, @u, @k, @pid, @e, @t)", conn, tx);
+                ins.Parameters.AddWithValue("@ip", ip);
+                ins.Parameters.AddWithValue("@h", (object?)k.Hostname ?? "");
+                ins.Parameters.AddWithValue("@p", k.Port);
+                ins.Parameters.AddWithValue("@pr", (object?)k.Protokol ?? DBNull.Value);
+                ins.Parameters.AddWithValue("@u", k.Url);
+                ins.Parameters.AddWithValue("@k", (object?)k.Kuyruk ?? DBNull.Value);
+                ins.Parameters.AddWithValue("@pid", (object?)k.Pid ?? DBNull.Value);
+                ins.Parameters.AddWithValue("@e", (object?)k.ExeYol ?? DBNull.Value);
+                ins.Parameters.AddWithValue("@t", "DeltaFlow");
+                await ins.ExecuteNonQueryAsync(ct);
+            }
+            await tx.CommitAsync(ct);
+        }
+        catch (Microsoft.Data.SqlClient.SqlException ex) when (ex.Number == 208) { Durum = $"{Tablo} tablosu yok — toplanan kayıt yalnız bellekte"; }
+        catch (Exception ex) when (ex is not OperationCanceledException) { log.LogWarning("HTTP.sys kaydı yazılamadı: {Hata}", ex.Message); }
     }
 
     // AI kanıtı: boş portların kesin kaydı

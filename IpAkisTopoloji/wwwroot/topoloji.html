@@ -902,6 +902,7 @@ async function refreshOneri(ip) {
   if (state.oneri?.ip === ip) { state.oneri.busy = false; await loadOneri(ip); updateTargetApps(); }
 }
 document.addEventListener("click", e => { if (e.target.closest("#aiRefresh") && state.data?.target) refreshOneri(state.data.target.ip); });
+document.addEventListener("click", e => { const a = e.target.closest("[data-hsyenile]"); if (a) { e.preventDefault(); loadHttpSys(a.dataset.hsyenile, true); } });
 function updateTargetApps() {
   const box = $("#tgtApps");
   if (box && state.data?.target) box.innerHTML = targetApps(state.data.target);
@@ -1461,18 +1462,20 @@ async function runProc(params) {
 }
 
 let hsAbort = null;
-async function loadHttpSys(ip) {
+async function loadHttpSys(ip, yenile) {
   hsAbort?.abort(); hsAbort = new AbortController();
-  state.httpsys = { ip, status: "loading" };
+  state.httpsys = { ip, status: "loading", yenile };
+  if (yenile) { renderProc(); updateTargetApps(); }
   try {
-    const r = await fetch("api/surec/httpsys?" + new URLSearchParams({ ip, ...state.procRange }), { signal: hsAbort.signal });
+    const r = await fetch("api/surec/httpsys?" + new URLSearchParams({ ip, ...state.procRange, ...(yenile ? { yenile: "true" } : {}) }), { signal: hsAbort.signal });
     if (r.status === 404) { state.httpsys = null; return; }   // eski DLL
     const b = await r.json().catch(() => ({ error: `HTTP ${r.status}` }));
     if (!r.ok) throw new Error(b.error || `HTTP ${r.status}`);
     if (state.httpsys?.ip !== ip) return;
     const kayit = {};
     for (const k of b.kayit ?? []) (kayit[String(k.port)] ??= []).push(k);
-    state.httpsys = { ip, status: "ok", map: Object.fromEntries((b.portlar ?? []).map(p => [String(p.port), p])), kayit, korelasyonHata: b.korelasyonHata, kayitDurum: b.kayitDurum };
+    state.httpsys = { ip, status: "ok", map: Object.fromEntries((b.portlar ?? []).map(p => [String(p.port), p])), kayit, korelasyonHata: b.korelasyonHata, kayitDurum: b.kayitDurum,
+      kayitTarih: b.kayitTarih, kayitKaynak: b.kayitKaynak, kayitHata: b.kayitHata, toplayabilir: b.toplayabilir };
   } catch (e) { if (e.name !== "AbortError") state.httpsys = { ip, status: "error", error: e.message }; }
   renderProc(); updateTargetApps();
 }
@@ -1480,7 +1483,10 @@ async function loadHttpSys(ip) {
 function httpSysTahmin(port) {
   const h = state.httpsys;
   if (!h) return "";
-  if (h.status === "loading") return `<div class="small muted"><span class="spinner"></span> asıl exe zaman korelasyonuyla aranıyor…</div>`;
+  if (h.status === "loading") return `<div class="small muted"><span class="spinner"></span> asıl exe aranıyor (sunucudan HTTP.sys kaydı${h.yenile ? " yeniden" : ""} alınıyor + zaman korelasyonu)…</div>`;
+  const yen = h.toplayabilir ? ` <a href="#" class="small" data-hsyenile="${esc(h.ip)}" title="Sunucuya bağlanıp netsh http show servicestate'i şimdi yeniden al">↻ sunucudan yeniden al</a>` : "";
+  const kayitNot = h.kayitHata ? `<div class="small muted" title="${esc(h.kayitHata)}">sunucudan HTTP.sys kaydı alınamadı (WinRM / yetki)${yen}</div>`
+    : h.kayitTarih ? `<div class="small muted">HTTP.sys kaydı: ${h.kayitKaynak === "şimdi toplandı" ? "şimdi sunucudan alındı" : esc(String(h.kayitTarih).slice(0, 16).replace("T", " "))}${yen}</div>` : "";
   if (h.status === "error") return `<div class="small muted" title="${esc(h.error)}">zaman korelasyonu alınamadı</div>`;
   // Önce sunucudan toplanan kesin kayıt (netsh http show servicestate → DF_HTTPSYS_URL)
   const ks = h.kayit?.[String(port)];
@@ -1490,13 +1496,13 @@ function httpSysTahmin(port) {
     const tarih = ks.map(k => k.tarih).sort().pop();
     return `<div class="small" style="color:var(--ok)" title="Sunucudan 'netsh http show servicestate' ile toplanan HTTP.sys kaydı (${esc(String(tarih || "").slice(0, 10))}).\nURL: ${esc(urls.join(", "))}${grup.some(k => k.exeYol) ? "\nExe: " + esc(grup.map(k => k.exeYol).filter(Boolean).join(" · ")) : ""}">✔ HTTP.sys kaydı: ${grup.map(k =>
       `${k.exe ? `<b class="mono">${esc(k.exe)}</b>` : `<span class="muted">çalışan süreç yok</span>`}${k.kuyruk ? ` <span class="muted">· ${/w3wp/i.test(k.exe || "") || !k.exe ? "IIS havuzu" : "kuyruk"} ${esc(k.kuyruk)}</span>` : ""}`).join("; ")}
-      <span class="muted">· ${esc(urls[0])}${urls.length > 1 ? ` +${urls.length - 1}` : ""}</span></div>`;
+      <span class="muted">· ${esc(urls[0])}${urls.length > 1 ? ` +${urls.length - 1}` : ""}</span></div>${kayitNot}`;
   }
   const p = h.map?.[String(port)];
-  if (!p) return "";
-  if (!p.adaylar?.length) return `<div class="small muted" title="Bu portun gelen trafiğiyle aynı dakikalarda dışarı bağlanan bir iş exe'si bulunamadı (uygulama dışarı bağlanmıyor olabilir)">↔ zaman korelasyonu: aday yok (${fmt(p.dakika)} dk trafik)</div>`;
+  if (!p) return kayitNot;
+  if (!p.adaylar?.length) return kayitNot + `<div class="small muted" title="Bu portun gelen trafiğiyle aynı dakikalarda dışarı bağlanan bir iş exe'si bulunamadı (uygulama dışarı bağlanmıyor olabilir)">↔ zaman korelasyonu: aday yok (${fmt(p.dakika)} dk trafik)</div>`;
   const a = p.adaylar[0], diger = p.adaylar.slice(1);
-  return `<div class="small" style="color:var(--in)" title="Carbon Black: bu porta ntoskrnl'nin aldığı gelen bağlantılar ile exe'lerin giden bağlantıları dakika dakika karşılaştırıldı. Korelasyon ${a.r} · gelen trafiğin olduğu dakikaların %${a.eslik}'inde bu exe de dışarı bağlanıyor. Kesin değildir; kesin eşleme sunucuda 'netsh http show servicestate'.${diger.length ? "\nDiğer adaylar: " + diger.map(d => `${d.exe} (${d.r})`).join(", ") : ""}">↔ zaman korelasyonu: muhtemelen <b class="mono">${esc(a.exe)}</b> <span class="muted">(r ${a.r} · %${a.eslik} eşlik${diger.length ? ` · +${diger.length} aday` : ""})</span></div>`;
+  return kayitNot + `<div class="small" style="color:var(--in)" title="Carbon Black: bu porta ntoskrnl'nin aldığı gelen bağlantılar ile exe'lerin giden bağlantıları dakika dakika karşılaştırıldı. Korelasyon ${a.r} · gelen trafiğin olduğu dakikaların %${a.eslik}'inde bu exe de dışarı bağlanıyor. Kesin değildir; kesin eşleme sunucuda 'netsh http show servicestate'.${diger.length ? "\nDiğer adaylar: " + diger.map(d => `${d.exe} (${d.r})`).join(", ") : ""}">↔ zaman korelasyonu: muhtemelen <b class="mono">${esc(a.exe)}</b> <span class="muted">(r ${a.r} · %${a.eslik} eşlik${diger.length ? ` · +${diger.length} aday` : ""})</span></div>`;
 }
 
 function procView() {

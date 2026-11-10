@@ -230,15 +230,20 @@ app.MapPost("/api/surec/ai", async (SurecAiIstek req, EnvanterService envanter, 
 
 // HTTP.sys port → asıl exe tahmini (Carbon Black zaman korelasyonu; HttpSys.cs). IP kartı "Gelen portlar" tablosundaki ntoskrnl satırları için
 // Önce sunuculardan toplanan kesin kayıt (DF_HTTPSYS_URL), yanında korelasyon (kayıtsız portlar için)
-app.MapGet("/api/surec/httpsys", async (string? ip, string? start, string? end, IConfiguration cfg, IHttpClientFactory factory,
-    HttpSysKayitService kayit, CancellationToken ct) =>
+// Kayıt yoksa / eskiyse sunucudan ŞİMDİ toplanır (WinRM + netsh; yalnız Yetki:Topoloji olanlar tetikler, yenile=true süreye bakmaz)
+app.MapGet("/api/surec/httpsys", async (string? ip, string? start, string? end, bool? yenile, HttpContext ctx, IConfiguration cfg, IHttpClientFactory factory,
+    HttpSysKayitService kayit, EnvanterService envanter, CancellationToken ct) =>
 {
     if (!LookupQuery.TryParse(ip, start, end, cfg.GetValue("MaxRangeHours", 24), out var q, out var error)) return Results.BadRequest(new { error });
-    var kayitTask = kayit.IpAsync(q!.Ip, ct);
+    bool topla = Yetki.Var(cfg, ctx, Yetki.Topoloji);
+    var env = await envanter.GetAsync(false, ct);
+    string? host = env.AppsOnIp(q!.Ip).Select(h => h.UnixName).OfType<string>().FirstOrDefault();
+    var kayitTask = kayit.GetirAsync(q.Ip, host, topla, ct, yenile == true && topla);
     var res = await HttpSysEslesme.HesaplaAsync(q.Ip, q.Start, q.End, cfg, factory.CreateClient("splunk"), ct);
-    var kayitlar = await kayitTask;
+    var k = await kayitTask;
     return Results.Ok(new { res.Ip, res.ToplamDakika, res.Portlar, korelasyonHata = res.Hata,
-        kayit = kayitlar.Select(k => new { k.Port, k.Url, k.Kuyruk, k.Pid, k.ExeYol, k.Exe, k.Hostname, k.Tarih }), kayitDurum = kayit.Durum });
+        kayit = k.Kayitlar.Select(x => new { x.Port, x.Url, x.Kuyruk, x.Pid, x.ExeYol, x.Exe, x.Hostname, x.Tarih }),
+        kayitDurum = kayit.Durum, kayitTarih = k.Toplama, kayitKaynak = k.Kaynak, kayitHata = k.Hata, toplayabilir = topla });
 });
 app.MapGet("/api/surec", async (string? ip, string? start, string? end,
     IConfiguration cfg, IHttpClientFactory factory, EnvanterService envanter, CancellationToken ct) =>

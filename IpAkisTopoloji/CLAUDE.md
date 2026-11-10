@@ -290,6 +290,15 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
   `/api/surec/httpsys` artık `{portlar (korelasyon), korelasyonHata, kayit, kayitDurum}`; IP kartında kayıt varsa yeşil "✔ HTTP.sys kaydı: exe · kuyruk / IIS havuzu ·
   URL", yoksa korelasyon. ERT eksikleri: boş portun kaydı varsa kanıta "HTTP.SYS KAYDI (… KESİN)" + prompt'ta en güçlü kanıt, korelasyon yalnız kayıtsız portlara;
   `ProgramKontrol` kayıttaki exe yolundan da bilinen ürünü bulur. Ayrıştırma Python'a çevrilmiş aynı kurallarla örnek netsh çıktısında denendi (ortamda PowerShell yok).
+  CANLI TOPLAMA (kullanıcı: "AI'a göndermeden önce kanıt olarak toplayalım, IP arattığımda processlerde gösterelim, liste yok, kendi çalışmalı"):
+  `HttpSysKayitService.GetirAsync(ip, host, topla, ct, yenile)` — tablodaki kayıt yoksa / `HttpSys:YenilemeSaat`(24)'ten eskiyse DeltaFlow sunucuya bağlanır:
+  `powershell.exe -EncodedCommand` (SABİT betik) → `Invoke-Command -ComputerName <ERT UNIXNAME; IP biçimliyse IP, `HttpSys:AlanAdi` eki>` → netsh servicestate +
+  Win32_Process (PID → exe) JSON; sunucu adı / `HttpSys:Kullanici` / `HttpSys:Sifre` (appsettings.Production.json; yoksa uygulama havuzu hesabı) ortam değişkeniyle,
+  komut satırına girmez; `ToplaSaniye`=60; Windows değilse / `HttpSys:CanliTopla`=false kapalı. C# `Ayristir` (ps1 ile aynı kurallar; başka IP'ye bağlı URL atlanır;
+  örnek netsh çıktısıyla test edildi). Sonuç DF_HTTPSYS_URL'e yazılır (IP'nin satırları silinip; kayıt yoksa PORT 0 işaret satırı = "toplandı, kayıt yok";
+  TOPLAYAN "DeltaFlow"; tablo yoksa bellekte), IP başına SemaphoreSlim. Tetikleyiciler: IP kartı (runProc → ntoskrnl portu varsa `/api/surec/httpsys`, yalnız
+  Yetki:Topoloji olan toplar; "↻ sunucudan yeniden al" `yenile=true`; durum satırı "HTTP.sys kaydı: şimdi sunucudan alındı / tarih" ya da "alınamadı (WinRM / yetki)")
+  ve ERT eksikleri BuildAsync (boş port çekirdekteyse, `HttpSys:EksikteTopla`=true). GEREKSİNİM: hesap hedeflerde WinRM + yerel yönetici.
 - **"Bu sunucuda hangi uygulama çalışıyor?"** (IP kartı, Gelen portlar tablosunun üstündeki düğme; `SurecAi` Surec.cs, `POST /api/surec/ai`):
   arayüzdeki /api/surec sonucu exe başına toplanıp (PID'ler, portlar, giden, bağlanan / bağlandığı uygulamalar) AI'a gider (yeniden
   sorgulanmaz) + ERT kayıtları + segment + genel bilgiler dosyası. Kesin genel süreçler kodda ayıklanır (`GenelAd` / `GenelYol`: svchost,
