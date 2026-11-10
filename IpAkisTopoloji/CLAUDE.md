@@ -372,7 +372,9 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
   yazdı, açıklamada "<IP>:8031 … 8031 portundan" geçen port için "kanıt yok" dedi → (1) `pa`: açıklama metinlerinde (BRIEF / DESCRIPTION / ZT_*ACIKLAMA) bu
   sunucunun IP'si varsa "IP:port" ya da "N portu/portundan" → port özetinde "PORT N: TALEP AÇIKLAMASINDA BU SUNUCUNUN IP'SİYLE BİRLİKTE GEÇİYOR … o taleplerde bu
   sunucunun açıklaması: X", talep satırında "AÇIKLAMADA BOŞ PORT"; (2) "BU SUNUCUYU ANLATAN" ≥2 farklı sistem → `CokSistemBas` satırı + prompt kuralı (sunucu
-  düzeyinde kesin kanıt kuralı yalnız tek sistemde); `CokSistemKontrol`: port kanıtı (ZT_HEDEFPORT, açıklamada port, CB gelen port satırı) yoksa güven ≤ 40 + not. Sahte veriyle: Kron elendi, Pinblock / Ziraat POS / Bansoft.
+  düzeyinde kesin kanıt kuralı yalnız tek sistemde); `CokSistemKontrol`: port kanıtı (ZT_HEDEFPORT, açıklamada port, CB gelen port satırı) yoksa güven ≤ 40 + not. Kullanıcı (yeni DLL'den sonra): AI port kanıtı
+  olmayan portlarda null verdi — "tahmin yok, o zaman bu işin anlamı kalmaz" → prompt: port kanıtı yoksa da EN OLASI sistemi öner (VIP uygulaması, aynı VIP
+  portları), güven ≤ 40, null yazma; AI yine boş bırakırsa `CokSistemKontrol` en sık anılan sistemi (UrunAdi, katalog eşlemesi) güven 30 ile yazar, diğerleri gerekçede. Sahte veriyle: Kron elendi, Pinblock / Ziraat POS / Bansoft.
   HEDEF talebinde "A karşılığı … B'nin DB'lerine erişim" → bu sunucu B (kullanıcı örneği: "KKB Karşılığı / Ziraat Katılım prod segmentinin
   KÖS Db'lerine erişim talebi" + HEDEF → "KÖS"; AI null diyordu). Prompt kuralı: DB portu olsa da sahibi açıklamadaki sistem, null yazma.
   VERİTABANI SUNUCUSU (kullanıcı: "DB sunucusunda uygulamanın yanına 'X Veritabanı' yazsın"): `DbHints` kanıta "VERİTABANI SUNUCUSU

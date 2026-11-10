@@ -900,7 +900,8 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
                 if (sistemler.Count >= 2)
                     sb.AppendLine($"{CokSistemBas} {string.Join(" | ", sistemler.Take(6).Select(t => Cut(t, 60)))} — bu sunucuda birden çok sistem çalışıyor. " +
                         "Bir boş porta sistem atamak için O PORTA ÖZEL kanıt gerekir (ZT_HEDEFPORT eşleşmesi, açıklamada IP:port, portu kabul eden exe). " +
-                        "Port kanıtı yoksa listedeki ilk sistemi YAZMA: uygulama null ya da güven en çok 40, gerekçede olası sistemleri say.");
+                        "Port kanıtı yoksa yine EN OLASI sistemi öner (VIP'in uygulaması, aynı VIP / havuzdaki portlar, portun türü, sistem açıklamalarıyla uyum), " +
+                        "güven en çok 40 olsun ve gerekçede diğer olası sistemleri say; uygulama null YAZMA.");
             }
             // Hedef olduğu taleplerin kısa açıklamaları (kullanıcı: kısa açıklama / açıklama alanları da en kritik SM kanıtı)
             var kisa = all.Where(x => x.hedef && x.aj == null).Select(x => (t: G(x.r, "BRIEF_DESCRIPTION"), x)).Where(y => y.t != null)
@@ -1312,8 +1313,9 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
               için ayrıca erişim talebi, exe yolu ya da istemci bulunmasa da öneri o sistemdir (güven 70+); "bu port için kanıt yok"
               diye null YAZMA. Yalnız portun başka bir sisteme ait olduğunu gösteren daha güçlü kanıt (exe yolu) varsa ondan ayrıl.
               BU KURAL YALNIZ açıklamalar TEK sistem söylüyorsa geçerlidir: "BİRDEN ÇOK SİSTEM ANILIYOR" satırı varsa sunucuda birden çok
-              uygulama vardır; her porta o porta özel kanıtla (ZT_HEDEFPORT, "TALEP AÇIKLAMASINDA BU SUNUCUNUN IP'SİYLE BİRLİKTE GEÇİYOR",
-              portu kabul eden exe) sistem ata, port kanıtı olmayan porta ilk sistemi yazma (null ya da güven ≤ 40). komşu ve segment ipuçlarını bunun önüne koyma. "Bu
+              uygulama vardır; port kanıtı olan porta (ZT_HEDEFPORT, "TALEP AÇIKLAMASINDA BU SUNUCUNUN IP'SİYLE BİRLİKTE GEÇİYOR", portu
+              kabul eden exe) o sistemi ata. Port kanıtı olmayan porta da EN OLASI sistemi öner (VIP'in ERT uygulaması, aynı VIP'teki diğer
+              portlar, port türü), güven ≤ 40, gerekçede diğer olası sistemleri yaz; null YAZMA. komşu ve segment ipuçlarını bunun önüne koyma. "Bu
               sunucuya erişen taraflar" ise istemcilerdir, onların adını bu sunucuya yazma.
             - Bu sunucunun HEDEF olduğu bir talepte açıklama "<A> için / <A> karşılığı … <B>'nin DB'lerine / sunucularına / servisine
               erişim" diyorsa erişilen sistem <B> BU SUNUCUDUR (A karşı taraftır, isteyen uygulamadır). Ör. "KKB Karşılığı / Ziraat
@@ -1360,7 +1362,8 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
                 HATIRLATMA (kanıtlardan önemli): genel bilgiler dosyasındaki kurallar SM taleplerinden önce gelir. "BU SUNUCUYU ANLATAN
                 TALEP AÇIKLAMALARI" TEK bir sistem adı söylüyorsa öneriyi ona dayandır ve gerekçede alıntıla; port için ayrı kanıt olmaması
                 null yazmak için sebep değildir. "BİRDEN ÇOK SİSTEM ANILIYOR" varsa her portu kendi port kanıtına göre ata. "PORT N: TALEP
-                AÇIKLAMASINDA … GEÇİYOR" satırı o port için doğrudan kanıttır. Ajan / araç kurulum ya da
+                AÇIKLAMASINDA … GEÇİYOR" satırı o port için doğrudan kanıttır; port kanıtı olmayan porta da en olası sistemi düşük
+                güvenle öner, boş bırakma. Ajan / araç kurulum ya da
                 erişim talepleri (Dataskope vb.) sunucunun uygulamasını göstermez. Yalnızca JSON dizi döndür.
                 """);
             return q.ToString();
@@ -1437,8 +1440,20 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
                 string? ev = texts.GetValueOrDefault(ip);
                 if (ev?.Split('\n').FirstOrDefault(l => l.StartsWith(CokSistemBas)) is not { } cl) continue;
                 string liste = cl[CokSistemBas.Length..].Split(" — ")[0].Trim();
+                var olasi = liste.Split(" | ").Select(x => x.Trim()).Where(x => x.Length > 0).ToList();
                 foreach (var port in ports)
                 {
+                    // AI yine boş bıraktıysa (kullanıcı: "tahmin yok, o zaman bu işin anlamı kalmaz"): en sık anılan sistem, güven 30, diğerleri gerekçede
+                    if (port.Length > 0 && olasi.Count > 0 && outp.GetValueOrDefault((ip, port)) is not { Uygulama: not null } bos)
+                    {
+                        string sis = UrunAdi(olasi[0]) is { Length: > 0 } ua ? ua : olasi[0];
+                        string ad0 = CatalogMatch(env, sis, out bool y0, out var kn0, ip, ev);
+                        if (DbPort(ev, port, out _)) ad0 += " Veritabanı";
+                        outp[(ip, port)] = new EksikOneri(Cut(ad0, 200), y0, 30,
+                            $"Port için ayrı kanıt yok; sunucuyu anlatan talep açıklamalarında en sık geçen sistem '{olasi[0]}' (olası diğerleri: {string.Join(" | ", olasi.Skip(1))})"
+                            + (bos?.Gerekce is { Length: > 0 } g0 ? $" (AI: {Cut(g0, 160)})" : "") + (kn0 != null ? $" [{kn0}]" : ""), Ai, "AI", DateTime.Now);
+                        continue;
+                    }
                     if (outp.GetValueOrDefault((ip, port)) is not { Uygulama: not null } o || port.Length == 0) continue;
                     bool kanit = ev.Contains($"PORT {port}'E ERİŞİM TALEBİ VAR") || ev.Contains($"PORT {port}: TALEP AÇIKLAMASINDA") || PortLine(ev, port) != null;
                     if (kanit || o.Guven <= 40) continue;
