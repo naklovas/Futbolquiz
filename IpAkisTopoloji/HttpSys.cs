@@ -44,7 +44,8 @@ static class HttpSysEslesme
         string spl = $"""
             search index={index} sourcetype="{sourcetype}" TERM({ip}) local_ip="{ip}"
             | eval yon=if(lower(direction)=="outbound", "out", "in"), yol=coalesce(process_path, "-"), ly=lower(yol), lp=coalesce(local_port, "0")
-            | where yon=="out" OR like(ly, "%ntoskrnl.exe") OR ly=="system" OR ly=="ntoskrnl" OR lp=="0" OR lp==""
+            | eval pr=coalesce(Protocol, protocol, "")
+            | where yon=="out" OR like(ly, "%ntoskrnl.exe") OR ly=="system" OR ly=="ntoskrnl" OR ((lp=="0" OR lp=="") AND pr=="6")
             | eval port=if(yon=="in", if(lp=="", "0", lp), ""), rip=if(yon=="in", remote_ip, ""), t=floor(_time/60)
             | stats count by t yon port yol rip
             """;
@@ -57,7 +58,7 @@ static class HttpSysEslesme
         var giden = new Dictionary<string, Dictionary<long, long>>(StringComparer.OrdinalIgnoreCase);   // exe yolu → dakika → bağlantı
         var genelAtilan = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var gelenIst = new Dictionary<string, HashSet<(string Ip, long T)>>();   // çekirdek portu → (istemci, dakika)
-        // Canlı tanıda görüldü: Carbon Black çekirdeğin aldığı bağlantıyı asıl exe'ye de "gelen, local_port 0" olarak yazıyor (w3wp, bsissuerkys…)
+        // "gelen, local_port 0" olayları: canlıda bunların Protocol=1 (ICMP / ping) olduğu görüldü — HTTP isteği DEĞİL; yalnız TCP (6) olanlar sayılır
         var sifir = new Dictionary<string, HashSet<(string Ip, long T)>>(StringComparer.OrdinalIgnoreCase);   // exe yolu → (istemci, dakika)
         foreach (var r in res.Rows)
         {
@@ -142,7 +143,8 @@ static class HttpSysEslesme
         string spl = $"""
             search index={index} sourcetype="{sourcetype}" TERM({ip}) local_ip="{ip}"
             | eval yon=if(lower(direction)=="outbound", "out", "in"), yol=coalesce(process_path, "-")
-            | eval port=if(yon=="in", coalesce(local_port, "0"), ""), rip=if(yon=="in", remote_ip, ""), t=floor(_time/60)
+            | eval port=if(yon=="in", coalesce(local_port, "0"), ""), rip=if(yon=="in", remote_ip, ""), t=floor(_time/60), pr=coalesce(Protocol, protocol, "?")
+            | eval port=if(port=="0", "0/" . pr, port)
             | stats count by t yon port yol rip
             """;
         var sb = new StringBuilder();
@@ -177,7 +179,7 @@ static class HttpSysEslesme
         sb.AppendLine("Yön dağılımı (satır): " + string.Join(", ", yonlar.Select(kv => $"{kv.Key}={kv.Value}")));
         string Dk(IEnumerable<long> ts) { var l = ts.Order().ToList(); return string.Join(" ", l.Take(40).Select(x => DateTimeOffset.FromUnixTimeSeconds(x * 60).ToLocalTime().ToString("dd HH:mm"))) + (l.Count > 40 ? $" … (+{l.Count - 40})" : ""); }
 
-        sb.AppendLine().AppendLine("GELEN (port · süreç · dakika · bağlantı) — çekirdek = ntoskrnl / System:");
+        sb.AppendLine().AppendLine("GELEN (port · süreç · dakika · bağlantı) — çekirdek = ntoskrnl / System; port 0 satırlarında /protokol: 1 = ICMP (ping), 6 = TCP, 17 = UDP:");
         foreach (var ((port, yol), d) in gelen.OrderBy(kv => int.TryParse(kv.Key.Port, out var pi) ? pi : 0).ThenByDescending(kv => kv.Value.Count))
             sb.AppendLine($"  {port,-6} {(Cekirdek(yol) ? "[ÇEKİRDEK] " : "")}{yol} · {d.Count} dk · {d.Values.Sum()} bağlantı"
                 + (ipler.TryGetValue((port, yol), out var ii) ? $" · {ii.Select(v => v.Ip).Distinct().Count()} istemci ({string.Join(", ", ii.Select(v => v.Ip).Distinct().Take(3))})" : " · istemci IP yok"));
@@ -194,8 +196,8 @@ static class HttpSysEslesme
             sb.AppendLine().AppendLine($"ÇEKİRDEK PORTU {port}: {x.Count} dk, {x.Values.Sum()} bağlantı{(x.Count < minDakika ? " (MinDakika altı → zayıf)" : "")}");
             sb.AppendLine("  dakikalar: " + Dk(x.Keys));
             var K = ipler.Where(kv => kv.Key.Port == port && Cekirdek(kv.Key.Yol)).SelectMany(kv => kv.Value).ToHashSet();
-            sb.AppendLine($"  AYNI İSTEMCİ (exe'nin 'gelen port 0' olayı, aynı istemci ±1 dk; {K.Count} istemci×dakika):");
-            var es = ipler.Where(kv => kv.Key.Port == "0" && !Cekirdek(kv.Key.Yol))
+            sb.AppendLine($"  AYNI İSTEMCİ (exe'nin TCP 'gelen port 0' olayı, aynı istemci ±1 dk; {K.Count} istemci×dakika):");
+            var es = ipler.Where(kv => kv.Key.Port == "0/6" && !Cekirdek(kv.Key.Yol))
                 .Select(kv => (kv.Key.Yol, N: K.Count(k => kv.Value.Contains(k) || kv.Value.Contains((k.Ip, k.T - 1)) || kv.Value.Contains((k.Ip, k.T + 1)))))
                 .Where(v => v.N > 0).OrderByDescending(v => v.N).Take(10).ToList();
             if (es.Count == 0) sb.AppendLine("    eşleşen yok");

@@ -311,7 +311,10 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
   `rip` (remote_ip) da; çekirdek portunun (istemci, dakika) olaylarından kaçını exe'nin port 0 olayı aynı istemciden ±1 dk karşılıyor → `HttpSysAday.Istemci`
   (Eslik = yüzde); adaylarda önce bunlar, sonra giden korelasyonu. Kayıt: DF_HTTPSYS_KORELASYON.ISTEMCI (sonradan eklenen kolon, sql betiğinde ALTER; okuma
   SELECT * ad bazında, kolon yoksa yazmada atlanır). Arayüz "↔ aynı istemci eşleşmesi: muhtemelen X (N olay · %E)", AI metninde "güçlü". Tanıda port başına
-  "AYNI İSTEMCİ" bölümü, gelen satırlarında istemci sayısı.
+  "AYNI İSTEMCİ" bölümü, gelen satırlarında istemci sayısı. DÜZELTME (kullanıcının Splunk ekranı): "gelen port 0" olayları Protocol=1 = ICMP (ping) — HTTP değil → SPL'de yalnız
+  Protocol 6 (TCP) port 0 olayları; tanıda port 0 satırları "0/<protokol>". CB netconn alanları (canlı): Protocol, direction, local_ip/port, remote_ip/port,
+  domain (karşı tarafın DNS adı, ör. …vipws.zb), pid, process_guid, process_path, md5/sha256, link_process (CB konsolunda süreç sayfası), computer_name,
+  sensor_id, timestamp, type=ingress.event.netconn. cmdline / parent YOK (netconn'da). Sonraki fikir: w3wp PID başına gittiği domain'ler + link_process.
 - **"Bu sunucuda hangi uygulama çalışıyor?"** (IP kartı, Gelen portlar tablosunun üstündeki düğme; `SurecAi` Surec.cs, `POST /api/surec/ai`):
   arayüzdeki /api/surec sonucu exe başına toplanıp (PID'ler, portlar, giden, bağlanan / bağlandığı uygulamalar) AI'a gider (yeniden
   sorgulanmaz) + ERT kayıtları + segment + genel bilgiler dosyası. Kesin genel süreçler kodda ayıklanır (`GenelAd` / `GenelYol`: svchost,
