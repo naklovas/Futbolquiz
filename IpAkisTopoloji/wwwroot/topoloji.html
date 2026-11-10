@@ -851,7 +851,7 @@ function listenTable(t) {
   const tlsOn = state.nessus?.ip === t.ip;
   return `<div class="small muted" style="margin:-4px 0 6px">${fmt(nExe)} farklı exe · ${fmt(list.filter(r => !r.out).length)} port satırı${list.some(r => r.out) ? ` · ${fmt(list.filter(r => r.out).length)} exe yalnız dışarı bağlanıyor` : ""}</div>
     <div class="tbl-wrap" style="max-height:300px"><table>
-      <thead><tr><th>Gelen port</th><th>Çalışan süreç (exe)</th><th>PID</th><th class="num">Gelen bağlantı</th><th class="num">Karşı IP</th><th class="num">Giden bağlantı</th>${tlsOn ? `<th title="Portun KABUL ETTİĞİ SSL / TLS sürümleri (Nessus taramasının el sıkışması). İstemcilerin fiilen hangisiyle bağlandığı değil; kırmızı = eski sürüm hâlâ açık.">TLS (Nessus)</th>` : ""}<th>ERT'deki uygulama</th></tr></thead>
+      <thead><tr><th>Gelen port</th><th>Çalışan süreç (exe)</th><th>PID</th><th title="Carbon Black süreç başlangıcı: w3wp komut satırındaki havuz adı (-ap) ya da süreci başlatan w3wp'nin havuzu">IIS havuzu</th><th class="num">Gelen bağlantı</th><th class="num">Karşı IP</th><th class="num">Giden bağlantı</th>${tlsOn ? `<th title="Portun KABUL ETTİĞİ SSL / TLS sürümleri (Nessus taramasının el sıkışması). İstemcilerin fiilen hangisiyle bağlandığı değil; kırmızı = eski sürüm hâlâ açık.">TLS (Nessus)</th>` : ""}<th>ERT'deki uygulama</th></tr></thead>
       <tbody>${list.map(r => { const apps = r.out ? [] : ertApps(r.port), infra = PROC_INFRA.has(r.port); return `<tr${infra ? ` class="muted" title="Altyapı portu"` : ""}>
         <td class="mono">${r.out ? `<span class="small muted">— yalnız giden</span>` : r.port ? esc(r.port) : `<span class="small muted" title="Carbon Black olayında yerel port yok">?</span>`}${infra ? ` <span class="small muted">altyapı</span>` : ""}</td>
         <td><b class="mono"${r.yol ? ` title="${esc(r.yol)}"` : ""}>${esc(exeShort(r.name))}</b>${havuzNot(r)}${HTTPSYS.test(exeShort(r.name)) && !r.out
@@ -860,6 +860,7 @@ function listenTable(t) {
             + httpSysTahmin(r.port)
             + `<div class="small muted" title="Bu portu Windows HTTP.sys sürücüsü dinliyor: bağlantıyı çekirdek kabul eder, isteği URL kaydına göre asıl uygulamaya iletir. Carbon Black bağlantıyı bu yüzden ntoskrnl.exe / System adına yazar. Asıl uygulama exe'si (ör. HTTP.sys ile çalışan bir ASP.NET Core uygulaması ya da w3wp.exe) bu tabloda 'yalnız giden' olarak görünebilir; sunucuda 'netsh http show servicestate' kesin olarak gösterir.">HTTP.sys (Windows çekirdeği) · asıl uygulama ayrı exe ⓘ</div>` : ""}</td>
         <td class="mono small">${esc([...r.pids].join(", ") || "—")}</td>
+        <td class="small">${havuzHucre(r)}</td>
         <td class="num">${r.out ? "" : fmt(r.hits)}</td><td class="num">${r.out ? "" : fmt(r.peers)}</td><td class="num">${r.out && r.outHits ? fmt(r.outHits) : ""}</td>${tlsOn ? `<td>${r.out || !r.port ? "" : tlsCell(r.port)}</td>` : ""}
         <td>${r.out ? "" : apps.length ? esc(apps.join(", ")) : `<span class="small muted">kayıt yok</span>`}</td></tr>`; }).join("")}</tbody></table></div>`;
 }
@@ -1470,13 +1471,13 @@ async function loadHavuz(ip) {
   state.havuz = { ip, status: "loading" };
   try {
     const r = await fetch("api/surec/havuz?" + new URLSearchParams({ ip, ...state.procRange }), { signal: hvAbort.signal });
-    if (r.status === 404) { state.havuz = null; return; }   // eski DLL
+    if (r.status === 404) { state.havuz = { ip, status: "eski" }; renderProc(); return; }   // eski DLL
     const b = await r.json().catch(() => ({}));
     if (state.havuz?.ip !== ip) return;
     const byPid = {};
     for (const x of b.surecler ?? []) if (x.pid != null) (byPid[x.exe.toLowerCase() + "|" + x.pid] = x);
-    state.havuz = { ip, status: "ok", byPid, havuzlar: b.havuzlar ?? [], hata: b.hata };
-  } catch (e) { if (e.name !== "AbortError") state.havuz = null; }
+    state.havuz = { ip, status: "ok", byPid, havuzlar: b.havuzlar ?? [], bilgi: b.havuzBilgi, hata: b.hata };
+  } catch (e) { if (e.name !== "AbortError") state.havuz = { ip, status: "hata", hata: e.message }; }
   renderProc();
 }
 // Havuz adı ↔ VIP havuz adı / ERT adı (kelime eşleşmesi: BankSoftDebitCardWS ~ BS_DebitCard_Grp "debit", "card")
@@ -1506,8 +1507,10 @@ function havuzOzet(t) {
   const h = state.havuz;
   if (!h || h.ip !== t.ip) return "";
   if (h.status === "loading") return `<div class="small muted" style="margin:2px 0 6px"><span class="spinner"></span> IIS uygulama havuzları aranıyor (Carbon Black süreç başlangıçları)…</div>`;
+  if (h.status === "eski") return `<div class="small" style="color:var(--err);margin:2px 0 6px">IIS havuzları: sunucudaki DeltaFlow sürümü bu özelliği içermiyor (/api/surec/havuz yok) — yeni DLL kopyalanmalı</div>`;
+  if (h.status === "hata") return `<div class="small" style="color:var(--err);margin:2px 0 6px">IIS havuzları alınamadı: ${esc(h.hata)}</div>`;
   const hv = havuzEsleri(t);
-  if (!hv.length) return h.status === "ok" && h.hata ? `<div class="small muted" title="${esc(h.hata)}">IIS havuzları alınamadı</div>` : "";
+  if (!hv.length) return `<div class="small muted" style="margin:2px 0 6px">IIS uygulama havuzu bulunamadı${h.hata ? ` — hata: ${esc(h.hata)}` : ""}${h.bilgi ? ` <span title="Carbon Black süreç başlangıcı (procstart) araması">(${esc(h.bilgi)})</span>` : ""}</div>`;
   return `<div class="vipbox" style="margin:2px 0 8px;padding:6px 10px"><b>IIS uygulama havuzları</b> <span class="small muted">(${hv.length} · Carbon Black süreç başlangıcı, son 30 gün; w3wp komut satırındaki havuz adı)</span>
     <div class="tbl-wrap" style="max-height:220px;margin-top:4px"><table><thead><tr><th>Havuz</th><th>PID</th><th>Son başlangıç</th><th>Ad eşleşmesi (port)</th><th></th></tr></thead><tbody>
     ${hv.map(x => `<tr><td><b class="mono">${esc(x.ad)}</b>${x.bit32 ? ` <span class="small muted">32 bit</span>` : ""}${x.baslatma > 1 ? ` <span class="small muted" title="Bu aralıkta ${x.baslatma} kez başlatıldı (recycle)">×${x.baslatma}</span>` : ""}</td>
@@ -1516,16 +1519,28 @@ function havuzOzet(t) {
       <td>${x.link ? `<a class="small" href="${esc(x.link)}" target="_blank" rel="noopener" title="Carbon Black konsolunda süreç sayfası">CB ↗</a>` : ""}</td></tr>`).join("")}
     </tbody></table></div></div>`;
 }
+// Gelen portlar tablosu "IIS havuzu" kolonu
+function havuzHucre(r) {
+  const h = state.havuz;
+  if (!h) return "";
+  if (h.status === "loading") return `<span class="muted">…</span>`;
+  if (h.status !== "ok") return "";
+  const xs = [...r.pids].map(p => h.byPid[exeShort(r.name).toLowerCase() + "|" + p] ?? h.byPid[String(r.name).toLowerCase() + "|" + p]).filter(Boolean);
+  const ad = [...new Set(xs.map(x => x.havuz ?? x.ustHavuz).filter(Boolean))];
+  // tabloda PID'i olan w3wp için tüm havuzlar listesinden de (PID eşleşmesi)
+  if (!ad.length && /^w3wp\.exe$/i.test(exeShort(r.name))) for (const p of r.pids) { const x = h.havuzlar.find(v => String(v.pid) === String(p)); if (x) ad.push(x.ad); }
+  return ad.length ? ad.map(a => `<b class="mono">${esc(a)}</b>`).join(", ") + (xs.some(x => !x.havuz && x.ustHavuz) ? ` <span class="muted" title="Bu süreci havuzun w3wp'si başlatmış">(üst süreç)</span>` : "")
+    : `<span class="muted">—</span>`;
+}
 function havuzNot(r) {
   const h = state.havuz;
   if (h?.status !== "ok") return "";
   const xs = [...r.pids].map(p => h.byPid[exeShort(r.name).toLowerCase() + "|" + p] ?? h.byPid[String(r.name).toLowerCase() + "|" + p]).filter(Boolean);
   if (!xs.length) return "";
   return xs.map(x => {
-    const ad = x.havuz ? `havuz <b>${esc(x.havuz)}</b>` : x.ustHavuz ? `w3wp havuzu <b>${esc(x.ustHavuz)}</b> başlatmış` : x.ustYol ? `üst süreç ${esc(exeShort(x.ustYol.split(/[\\/]/).pop()))}` : "";
     const dom = x.domainler?.length ? `bağlandığı: ${esc(x.domainler.slice(0, 3).join(", "))}${x.domainler.length > 3 ? ` +${x.domainler.length - 3}` : ""}` : "";
     const link = x.link ? `<a href="${esc(x.link)}" target="_blank" rel="noopener" title="Carbon Black konsolunda süreç sayfası (komut satırı, üst süreç)">CB ↗</a>` : "";
-    const parts = [ad, dom, link].filter(Boolean);
+    const parts = [dom, link].filter(Boolean);   // havuz adı artık ayrı "IIS havuzu" kolonunda
     return parts.length ? `<div class="small" style="color:var(--in)" title="${esc(`PID ${x.pid}${x.komutSatiri ? "\nKomut satırı: " + x.komutSatiri : ""}${x.ustYol ? "\nÜst süreç: " + x.ustYol + (x.ustPid ? " (PID " + x.ustPid + ")" : "") : ""}${x.domainler?.length ? "\nBağlandığı DNS adları: " + x.domainler.join(", ") : ""}`)}">${xs.length > 1 ? `PID ${esc(x.pid)} · ` : ""}${parts.join(" · ")}</div>` : "";
   }).join("");
 }
