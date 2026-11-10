@@ -514,12 +514,14 @@ sealed class IslevService(IConfiguration cfg, IHttpClientFactory factory, Envant
     {
         var s = cfg.GetSection("Ai");
         string url = s["Url"] is { Length: > 0 } u ? u : throw new InvalidOperationException("Ai:Url tanımlı değil.");
-        var payload = new
+        var payload = new Dictionary<string, object>
         {
-            model = s["Model"] is { Length: > 0 } m ? m : "zt-ga-small-0",
-            messages = new[] { new { role = "user", content = prompt } },
-            temperature = s.GetValue("Temperature", 0.1)
+            ["model"] = s["Model"] is { Length: > 0 } m ? m : "zt-ga-small-0",
+            ["messages"] = new[] { new { role = "user", content = prompt } },
+            ["temperature"] = s.GetValue("Temperature", 0.1)
         };
+        // Cevap sınırı (kullanıcı: uzun JSON yarıda kesildi, "AI cevabı JSON değil"): Ai:MaxTokens verilirse gönderilir, verilmezse servis varsayılanı
+        if (s.GetValue<int?>("MaxTokens") is int mt and > 0) payload["max_tokens"] = mt;
         using var req = new HttpRequestMessage(HttpMethod.Post, url)
         {
             Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json")
@@ -540,9 +542,17 @@ sealed class IslevService(IConfiguration cfg, IHttpClientFactory factory, Envant
         if (a < 0) return null;
         char close = text[a] == '[' ? ']' : '}';
         int b = text.LastIndexOf(close);
-        if (b <= a) return null;
+        if (b <= a) b = text.Length - 1;
         try { using var doc = JsonDocument.Parse(text[a..(b + 1)]); return doc.RootElement.Clone(); }
-        catch (JsonException) { return null; }
+        catch (JsonException) { }
+        // Yarıda kesilmiş dizi (cevap sınırı): tamamlanmış son nesneye kadar alınıp dizi kapatılır — eksik kalan portlar "cevap vermedi" olur
+        if (text[a] == '[')
+            for (int i = text.LastIndexOf('}'); i > a; i = text.LastIndexOf('}', i - 1))
+                try { using var doc = JsonDocument.Parse(text[a..(i + 1)] + "]"); return doc.RootElement.Clone(); }
+                catch (JsonException) { }
+        // dizi başlamış ama hiç tamamlanmış nesne yok: boş dizi (portlar "cevap vermedi" olur, son kontroller yine çalışır)
+        if (text[a] == '[') { using var bos = JsonDocument.Parse("[]"); return bos.RootElement.Clone(); }
+        return null;
     }
     public static JsonElement? Prop(JsonElement e, string name)
     {

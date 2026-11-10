@@ -1335,7 +1335,7 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
             - Kanıt yetersizse "uygulama": null ve güven düşük yaz. Uydurma.
 
             Yalnızca JSON dizi döndür, başka metin yazma. Her boş port için bir eleman:
-            [{"ip":"…","port":"…","uygulama":"… ya da null","yeni":false,"veritabani":false,"guven":0-100,"gerekce":"tek cümle; hangi kanıta dayandığın"}]
+            [{"ip":"…","port":"…","uygulama":"… ya da null","yeni":false,"veritabani":false,"guven":0-100,"gerekce":"tek kısa cümle (en çok 200 karakter); hangi kanıta dayandığın"}]
             """);
         string kurallar = sb.ToString();
         int max = cfg.GetValue("Eksik:MaxKarakter", 6000);
