@@ -1484,7 +1484,7 @@ function httpSysTahmin(port) {
   const h = state.httpsys;
   if (!h) return "";
   if (h.status === "loading") return `<div class="small muted"><span class="spinner"></span> asıl exe ${h.yenile ? "yeniden hesaplanıyor" : "aranıyor (önce kayıtlı sonuç, yoksa Carbon Black zaman korelasyonu)"}…</div>`;
-  const yen = ` <a href="#" class="small" data-hsyenile="${esc(h.ip)}" title="Kayıtlı sonucu kullanmadan Carbon Black'ten yeniden hesapla ve kaydet">↻ yeniden hesapla</a>`;
+  const yen = ` <a href="#" class="small" data-hsyenile="${esc(h.ip)}" title="Kayıtlı sonucu kullanmadan Carbon Black'ten yeniden hesapla ve kaydet">↻ yeniden hesapla</a>` + ` · <a class="small" target="_blank" href="api/surec/httpsys/tani?ip=${encodeURIComponent(h.ip)}" title="Korelasyonun gördüğü ham veri (düz metin) — kopyalayıp gönderilebilir">tanı verisi ↗</a>`;
   const kayitNot = h.korTarih ? `<div class="small muted">${h.korKaynak === "kayıt" ? `kayıtlı sonuç · ${esc(String(h.korTarih).slice(0, 16).replace("T", " "))}` : "şimdi hesaplandı ve kaydedildi"}${yen}</div>` : "";
   if (h.status === "error") return `<div class="small muted" title="${esc(h.error)}">zaman korelasyonu alınamadı</div>`;
   // İsteğe bağlı kesin kayıt (araclar/HttpSysTopla.ps1 ile netsh'ten toplanmışsa DF_HTTPSYS_URL); DeltaFlow sunucuya bağlanmaz

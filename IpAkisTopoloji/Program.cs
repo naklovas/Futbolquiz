@@ -244,6 +244,13 @@ app.MapGet("/api/surec/httpsys", async (string? ip, string? start, string? end, 
         giden = k.Sonuc.Giden, genelAtilan = k.Sonuc.GenelAtilan,
         kayit = kesin.Select(x => new { x.Port, x.Url, x.Kuyruk, x.Pid, x.ExeYol, x.Exe, x.Hostname, x.Tarih }), kayitDurum = kayit.Durum });
 });
+// Korelasyon tanısı (düz metin; kullanıcı kopyalayıp gönderebilsin)
+app.MapGet("/api/surec/httpsys/tani", async (string? ip, IConfiguration cfg, IHttpClientFactory factory, CancellationToken ct) =>
+{
+    if (!LookupQuery.TryParse(ip, null, null, cfg.GetValue("MaxRangeHours", 24), out var q, out var error)) return Results.BadRequest(new { error });
+    var (kb, ks) = HttpSysEslesme.Aralik(cfg);
+    return Results.Text(await HttpSysEslesme.TaniAsync(q!.Ip, kb, ks, cfg, factory.CreateClient("splunk"), ct), "text/plain; charset=utf-8");
+});
 app.MapGet("/api/surec", async (string? ip, string? start, string? end,
     IConfiguration cfg, IHttpClientFactory factory, EnvanterService envanter, CancellationToken ct) =>
 {

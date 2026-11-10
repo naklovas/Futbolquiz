@@ -104,6 +104,76 @@ static class HttpSysEslesme
         return new(ip, start, end, toplam, outp, null, gidenOzet, genelAtilan.Order().Take(30).ToList());
     }
 
+    // TANI (kullanıcı: "kontrol verisi basarsan bir yere gönderebilirim"): korelasyonun gördüğü ham veri, düz metin.
+    // Filtresiz SPL (tüm gelen süreçler de) → ntoskrnl'nin gerçekten gelen trafiği kabul edip etmediği, exe'lerin dakikaları, port × exe ortak dakika ve r.
+    public static async Task<string> TaniAsync(string ip, DateTimeOffset start, DateTimeOffset end, IConfiguration cfg, HttpClient http, CancellationToken ct)
+    {
+        var s = cfg.GetSection("Splunk");
+        string index = s["Index"] ?? "carbonblack", sourcetype = s["Sourcetype"] ?? "bit9:carbonblack:json";
+        string spl = $"""
+            search index={index} sourcetype="{sourcetype}" TERM({ip}) local_ip="{ip}"
+            | eval yon=if(lower(direction)=="outbound", "out", "in"), yol=coalesce(process_path, "-")
+            | eval port=if(yon=="in", local_port, ""), t=floor(_time/60)
+            | stats count by t yon port yol
+            """;
+        var sb = new StringBuilder();
+        int minDakika = cfg.GetValue("HttpSys:MinDakika", 5); double minR = cfg.GetValue("HttpSys:MinKorelasyon", 0.3);
+        int toplam = Math.Max(1, (int)Math.Ceiling((end - start).TotalMinutes));
+        sb.AppendLine($"DeltaFlow HTTP.sys korelasyon tanısı · {DateTime.Now:yyyy-MM-dd HH:mm}");
+        sb.AppendLine($"IP {ip} · aralık {start:yyyy-MM-dd HH:mm} – {end:yyyy-MM-dd HH:mm} ({toplam} dk) · MinDakika {minDakika} · MinKorelasyon {minR}");
+        sb.AppendLine("SPL:").AppendLine(spl.Trim()).AppendLine();
+        SplunkResult res;
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        try { res = await SplunkService.ExportAsync(spl, new LookupQuery(ip, start, end), cfg, http, ct, "Splunk"); }
+        catch (Exception ex) when (ex is not OperationCanceledException) { return sb.AppendLine("SPLUNK HATASI: " + ex.Message).ToString(); }
+        sb.AppendLine($"Splunk: {res.Rows.Count} satır, {sw.ElapsedMilliseconds} ms{(res.Messages.Count > 0 ? " · mesajlar: " + string.Join(" | ", res.Messages) : "")}");
+        if (res.Rows.Count > 0) sb.AppendLine("İlk satır alanları: " + string.Join(", ", res.Rows[0].Select(kv => $"{kv.Key}={kv.Value}")));
+        sb.AppendLine();
+
+        var gelen = new Dictionary<(string Port, string Yol), Dictionary<long, long>>();
+        var giden = new Dictionary<string, Dictionary<long, long>>(StringComparer.OrdinalIgnoreCase);
+        var yonlar = new Dictionary<string, int>();
+        foreach (var r in res.Rows)
+        {
+            string? V(string k) => r.TryGetValue(k, out var v) && !string.IsNullOrWhiteSpace(v) ? v.Trim() : null;
+            if (!long.TryParse(V("t"), out long t) || !long.TryParse(V("count"), out long n)) continue;
+            string yon = V("yon") ?? "?", yol = V("yol") ?? "-";
+            yonlar[yon] = yonlar.GetValueOrDefault(yon) + 1;
+            var d = yon == "in" ? (gelen.TryGetValue((V("port") ?? "?", yol), out var g) ? g : gelen[(V("port") ?? "?", yol)] = [])
+                : (giden.TryGetValue(yol, out var o) ? o : giden[yol] = []);
+            d[t] = d.GetValueOrDefault(t) + n;
+        }
+        sb.AppendLine("Yön dağılımı (satır): " + string.Join(", ", yonlar.Select(kv => $"{kv.Key}={kv.Value}")));
+        string Ad(string y) => y.Replace('/', '\\').Split('\\').Last();
+        string Dk(IEnumerable<long> ts) { var l = ts.Order().ToList(); return string.Join(" ", l.Take(40).Select(x => DateTimeOffset.FromUnixTimeSeconds(x * 60).ToLocalTime().ToString("dd HH:mm"))) + (l.Count > 40 ? $" … (+{l.Count - 40})" : ""); }
+
+        sb.AppendLine().AppendLine("GELEN (port · süreç · dakika · bağlantı) — çekirdek = ntoskrnl / System:");
+        foreach (var ((port, yol), d) in gelen.OrderBy(kv => int.TryParse(kv.Key.Port, out var pi) ? pi : 0).ThenByDescending(kv => kv.Value.Count))
+            sb.AppendLine($"  {port,-6} {(Cekirdek(yol) ? "[ÇEKİRDEK] " : "")}{yol} · {d.Count} dk · {d.Values.Sum()} bağlantı");
+
+        sb.AppendLine().AppendLine("GİDEN (exe · dakika · bağlantı · durum):");
+        foreach (var (yol, d) in giden.OrderByDescending(kv => kv.Value.Count))
+            sb.AppendLine($"  {yol} · {d.Count} dk · {d.Values.Sum()} bağlantı · {(Cekirdek(yol) ? "çekirdek (atlanır)" : SurecAi.GenelExe(Ad(yol), yol) ? "GENEL SÜREÇ (atlanır)" : "iş exe'si")}");
+
+        var cek = gelen.Where(kv => Cekirdek(kv.Key.Yol)).GroupBy(kv => kv.Key.Port)
+            .ToDictionary(g => g.Key, g => g.SelectMany(kv => kv.Value).GroupBy(kv => kv.Key).ToDictionary(x => x.Key, x => x.Sum(y => y.Value)));
+        if (cek.Count == 0) sb.AppendLine().AppendLine("ÇEKİRDEĞİN KABUL ETTİĞİ GELEN BAĞLANTI YOK (bu aralıkta ntoskrnl / System gelen olayı görülmedi).");
+        foreach (var (port, x) in cek)
+        {
+            sb.AppendLine().AppendLine($"ÇEKİRDEK PORTU {port}: {x.Count} dk, {x.Values.Sum()} bağlantı{(x.Count < minDakika ? " (MinDakika altı → zayıf)" : "")}");
+            sb.AppendLine("  dakikalar: " + Dk(x.Keys));
+            foreach (var (yol, y) in giden.Where(kv => !Cekirdek(kv.Key)).Select(kv => (kv.Key, kv.Value))
+                .Select(v => (v.Key, v.Value, Ortak: x.Keys.Count(v.Value.ContainsKey))).OrderByDescending(v => v.Ortak).Take(15).Select(v => (v.Key, v.Value)))
+            {
+                int ortak = x.Keys.Count(y.ContainsKey);
+                // ±1 dakika kayma (olaylar dakika sınırına denk gelebilir)
+                int yakin = x.Keys.Count(k => y.ContainsKey(k) || y.ContainsKey(k - 1) || y.ContainsKey(k + 1));
+                sb.AppendLine($"  {Ad(yol),-40} ortak {ortak}/{x.Count} dk · ±1 dk {yakin} · r {Pearson(x, y, toplam):0.00}{(SurecAi.GenelExe(Ad(yol), yol) ? " · GENEL (atlanıyor)" : "")}");
+            }
+        }
+        return sb.ToString();
+    }
+
     // Dakika dizileri (eksik dakika = 0) üzerinde Pearson korelasyonu
     static double Pearson(Dictionary<long, long> x, Dictionary<long, long> y, int n)
     {
