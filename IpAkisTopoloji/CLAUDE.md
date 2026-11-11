@@ -368,7 +368,9 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
   `stats … by iis_site` satırı atabilirdi → `coalesce(iis_site, "?")` (ve host), "?" site listesine yazılmaz (o sunucuda yol W3SVC içeriyordu; asıl neden
   büyük ihtimalle süre sınırı → `IisSureSaniye`=60, hata kolonda "IIS sorgusu tamamlanamadı"). UYGULAMA ADI (canlı: /api/v1/kurumsal-krediler/…, ilk parça hep "api"):
   `iis_seg` = URI parçaları, `mvfilter` ile boş / api / apis / vN / rest / service(s) / ws / odata / public / internal atılır, ilk kalan = uygulama; sağlık kontrolleri
-  (healthcheck, health, ping, monitor…) gürültü listesinde; uygulama başına en sık `ornek` = "METOT /tam/yol" (`HttpSysIisUyg.Ornek`, kolon ipucunda).
+  (healthcheck, health, ping, monitor…) gürültü listesinde; uygulama başına en sık `ornek` = "METOT /tam/yol" (`HttpSysIisUyg.Ornek`, kolon ipucunda). HIZ (kullanıcı: "yine çok uzun sürüyor"):
+  /api/surec/httpsys artık IIS sorgusu YAPMAZ (çift sorgu Splunk'ın kullanıcı başına eşzamanlı arama sınırını dolduruyordu); `IisAsync` aynı IP için süren aramayı paylaşır
+  (`_iisSuren`, tarayıcı iptal etse de biter ve önbelleğe girer); SPL başında `| fields host source _raw`.
 - **"Bu sunucuda hangi uygulama çalışıyor?"** (IP kartı, Gelen portlar tablosunun üstündeki düğme; `SurecAi` Surec.cs, `POST /api/surec/ai`):
   arayüzdeki /api/surec sonucu exe başına toplanıp (PID'ler, portlar, giden, bağlanan / bağlandığı uygulamalar) AI'a gider (yeniden
   sorgulanmaz) + ERT kayıtları + segment + genel bilgiler dosyası. Kesin genel süreçler kodda ayıklanır (`GenelAd` / `GenelYol`: svchost,

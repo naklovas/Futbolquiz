@@ -236,7 +236,8 @@ app.MapGet("/api/surec/httpsys", async (string? ip, string? start, string? end, 
 {
     if (!LookupQuery.TryParse(ip, start, end, cfg.GetValue("MaxRangeHours", 24), out var q, out var error)) return Results.BadRequest(new { error });
     var urlTask = kayit.IpAsync(q!.Ip, ct);
-    var iisTask = HttpSysEslesme.IisAsync(q.Ip, cfg, factory.CreateClient("splunk"), ct);   // IIS erişim logu: port → site → uygulama (kesin)
+    // IIS bilgisi artık yalnız /api/surec/iis'ten (tabloda kolon); burada ikinci kez Splunk'a gidilmez (kullanıcı: "yine çok uzun sürüyor")
+    var iisTask = Task.FromResult((new List<HttpSysIis>(), (string?)null));
     var (kb, ks) = HttpSysEslesme.Aralik(cfg);   // süreç penceresi (3 saat) değil, son HttpSys:Saat saat
     var k = await kayit.KorelasyonAsync(q.Ip, kb, ks, factory.CreateClient("splunk"), ct, null, yenile == true);
     var kesin = await urlTask;

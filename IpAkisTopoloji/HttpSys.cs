@@ -297,14 +297,27 @@ static class HttpSysEslesme
     // date time s-ip cs-method cs-uri-stem cs-uri-query s-port cs-username c-ip (sonrası sunucuya göre değişir, kullanılmaz); source'ta …\W3SVC<n>\ = IIS site no.
     // Portta IIS logu varsa port KESİN bir IIS sitesinindir (HTTP.sys'i kendisi kullanan uygulama IIS loguna yazmaz); URI'nin ilk parçası uygulama / sanal dizin.
     static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (DateTime At, List<HttpSysIis> L, string? Hata)> _iisOnbellek = new();
-    public static async Task<(List<HttpSysIis> Liste, string? Hata)> IisAsync(string ip, IConfiguration cfg, HttpClient http, CancellationToken ct)
+    // Aynı IP için aynı anda gelen istekler tek Splunk aramasını paylaşır (sayfa açılışında çift sorgu Splunk'ın eşzamanlı arama sınırını dolduruyordu)
+    static readonly System.Collections.Concurrent.ConcurrentDictionary<string, Task<(List<HttpSysIis>, string?)>> _iisSuren = new();
+    public static Task<(List<HttpSysIis> Liste, string? Hata)> IisAsync(string ip, IConfiguration cfg, HttpClient http, CancellationToken ct)
     {
-        if (_iisOnbellek.TryGetValue(ip, out var c) && DateTime.UtcNow - c.At < TimeSpan.FromMinutes(cfg.GetValue("HttpSys:IisOnbellekDakika", 60))) return (c.L, c.Hata);
+        if (_iisOnbellek.TryGetValue(ip, out var c) && DateTime.UtcNow - c.At < TimeSpan.FromMinutes(cfg.GetValue("HttpSys:IisOnbellekDakika", 60)))
+            return Task.FromResult((c.L, c.Hata));
+        // tarayıcı isteği iptal etse de arama bitsin ve önbelleğe girsin (ct paylaşılmaz; süre sınırı zaten var)
+        return _iisSuren.GetOrAdd(ip, k => Task.Run(async () =>
+        {
+            try { return await IisAsync0(ip, cfg, http, CancellationToken.None); }
+            finally { _iisSuren.TryRemove(ip, out _); }
+        }));
+    }
+    static async Task<(List<HttpSysIis> Liste, string? Hata)> IisAsync0(string ip, IConfiguration cfg, HttpClient http, CancellationToken ct)
+    {
         var idx = cfg.GetSection("HttpSys:IisIndexleri").Get<string[]>() is { Length: > 0 } a ? a : ["iis_msy", "iis_csy"];
         if (idx.Any(x => !System.Text.RegularExpressions.Regex.IsMatch(x, @"^[A-Za-z0-9_\-\*]+$"))) return ([], "HttpSys:IisIndexleri geçersiz");
         var end = DateTimeOffset.Now;
         string spl = $"""
             search ({string.Join(" OR ", idx.Select(x => "index=" + x))}) TERM({ip})
+            | fields host source _raw
             | rex "^\S+ \S+ (?<iis_sip>\S+) (?<iis_m>\S+) (?<iis_uri>\S+) \S+ (?<iis_port>\d+) \S+ (?<iis_cip>\S+)"
             | where iis_sip="{ip}" OR iis_cip="{ip}"
             | eval yon=if(iis_sip="{ip}", "in", "out")
