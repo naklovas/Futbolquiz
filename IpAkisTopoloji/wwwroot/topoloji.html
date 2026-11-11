@@ -1584,7 +1584,7 @@ function iisHucre(r) {
   const u = p.uygulamalar.filter(x => x.ad && x.ad !== "/");
   return `<span title="IIS erişim logu (son 24 saat) · sunucu: ${esc(p.hostlar.join(", "))}\n${esc(p.uygulamalar.map(x => (x.ad === "/" ? "/ (kök)" : "/" + x.ad) + " — " + x.istek + " istek").join("\n"))}\nToplam ${p.istek} istek, ${p.istemci} istemci">
     <b class="mono">${esc(p.siteler.join(", ") || "IIS")}</b>${u.length ? ` · ${u.slice(0, 4).map(x => `<b class="mono" style="font-size:13px">/${esc(x.ad)}</b>`).join(", ")}${u.length > 4 ? ` <span class="muted">+${u.length - 4}</span>` : ""}` : ` · <span class="muted">/ (kök)</span>`}
-    <div class="small muted">${fmt(p.istek)} istek · ${fmt(p.istemci)} istemci</div></span>`;
+    <div class="small muted">${fmt(p.istek)} istek · ${fmt(p.istemci)} istemci${p.gurultu ? ` · <span title="Güvenlik tarayıcısı denemeleri (/cgi-bin, /cgi-sys, /s, /.%2e …) — uygulama sayılmadı">${fmt(p.gurultu)} tarama isteği ayıklandı</span>` : ""}</div></span>`;
 }
 // (kullanılmıyor) Gelen portlar tablosu "IIS havuzu" kolonu (kullanıcı: "griddeki havuz kolonunda yazarsa daha rahat görürüm"):
 // 1) süreç PID'i → havuz (Carbon Black süreç başlangıcı), 2) w3wp PID'i → sunucudaki havuz listesi,
@@ -1649,6 +1649,7 @@ function httpSysTahmin(port) {
   if (h.status === "error") return `<div class="small muted" title="${esc(h.error)}">zaman korelasyonu alınamadı</div>`;
   // IIS erişim logu (Splunk iis_msy / iis_csy): port KESİN bir IIS sitesinin; URI'nin ilk parçası uygulama; havuz adıyla kelime eşleşmesi
   const iis = h.iis?.[String(port)];
+  if (iis) return "";   // IIS logu varsa bilgi "IIS (site · uygulama)" kolonunda (tekrar yazılmaz; korelasyona gerek yok)
   if (iis) {
     const hvAd = iisHavuz(port);
     return kayitNot + `<div class="small" style="color:var(--ok)" title="Splunk IIS erişim logu (son 24 saat): bu porta gelen istekleri bir IIS sitesi karşılıyor — port KESİN IIS'in (w3wp).\nSite: ${esc(iis.siteler.join(", "))} · sunucu: ${esc(iis.hostlar.join(", "))}\nUygulamalar (URI'nin ilk parçası, istek): ${esc(iis.uygulamalar.map(u => "/" + u.ad.replace(/^\//, "") + " (" + u.istek + ")").join(", "))}">✔ IIS logu: site <b class="mono">${esc(iis.siteler.join(", ") || "?")}</b> · ${iis.uygulamalar.slice(0, 3).map(u => `<b class="mono">/${esc(u.ad.replace(/^\//, ""))}</b>`).join(", ")}${iis.uygulamalar.length > 3 ? ` +${iis.uygulamalar.length - 3}` : ""} <span class="muted">· ${fmt(iis.istek)} istek, ${fmt(iis.istemci)} istemci</span>${hvAd.length ? ` · havuz <b class="mono">${esc(hvAd.join(", "))}</b> <span class="muted">(ad eşleşmesi)</span>` : ""}</div>`;
