@@ -1366,11 +1366,12 @@ static class SplunkService
     // Firewall (Palo Alto) sorgusu da aynı Splunk bağlantısını kullanır.
     // Bağlantı veri akarken koparsa (TLS "The decryption operation failed", connection reset — genelde aradaki cihazın
     // zaman aşımı) hiç satır gelmemişse istek bir kez tekrarlanır; satır gelmişse eldekiyle devam edilir ve uyarı yazılır.
+    // sure: verilirse bu süre dolunca okuma bırakılır, o ana kadar gelen satırlar döner (WARN mesajıyla); bağlantı kapanınca Splunk aramayı iptal eder
     public static async Task<SplunkResult> ExportAsync(string spl, LookupQuery q, IConfiguration cfg, HttpClient http,
-        CancellationToken ct, string label)
+        CancellationToken ct, string label, TimeSpan? sure = null)
     {
-        try { return await ExportOnceAsync(spl, q, cfg, http, ct, label); }
-        catch (Exception ex) when (!ct.IsCancellationRequested && IsTransportError(ex))
+        try { return await ExportOnceAsync(spl, q, cfg, http, ct, label, sure); }
+        catch (Exception ex) when (!ct.IsCancellationRequested && IsTransportError(ex) && sure == null)
         {
             var r = await ExportOnceAsync(spl, q, cfg, http, ct, label);
             r.Messages.Insert(0, $"WARN: {label} bağlantısı ilk denemede koptu ({ex.Message}), tekrar denendi.");
@@ -1382,8 +1383,12 @@ static class SplunkService
         ex is IOException || (ex is HttpRequestException h && h.StatusCode == null && h.InnerException is IOException or System.Net.Sockets.SocketException);
 
     static async Task<SplunkResult> ExportOnceAsync(string spl, LookupQuery q, IConfiguration cfg, HttpClient http,
-        CancellationToken ct, string label)
+        CancellationToken ct0, string label, TimeSpan? sure = null)
     {
+        using var sureCts = CancellationTokenSource.CreateLinkedTokenSource(ct0);
+        if (sure is { } su) sureCts.CancelAfter(su);
+        var ct = sureCts.Token;
+        bool SureDoldu() => sure != null && sureCts.IsCancellationRequested && !ct0.IsCancellationRequested;
         var s = cfg.GetSection("Splunk");
         string baseUrl = (s["BaseUrl"] ?? throw new InvalidOperationException("Splunk:BaseUrl tanımlı değil.")).TrimEnd('/');
         string exportPath = s["ExportPath"] ?? "/services/search/v2/jobs/export";
@@ -1413,7 +1418,11 @@ static class SplunkService
         }
 
         var sw = Stopwatch.StartNew();
-        using var resp = await http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
+        HttpResponseMessage resp0;
+        try { resp0 = await http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct); }
+        catch (OperationCanceledException) when (SureDoldu())
+        { return new SplunkResult([], [$"WARN: {label} {sure!.Value.TotalSeconds:0} sn içinde cevap vermedi"], sw.ElapsedMilliseconds); }
+        using var resp = resp0;
         if (!resp.IsSuccessStatusCode)
         {
             string body = await resp.Content.ReadAsStringAsync(ct);
@@ -1429,6 +1438,16 @@ static class SplunkService
         while (true)
         {
             try { line = await reader.ReadLineAsync(ct); }
+            catch (OperationCanceledException) when (SureDoldu())
+            {
+                messages.Add($"WARN: {label} {sure!.Value.TotalSeconds:0} sn sınırında kesildi; {rows.Count:N0} satır alındı (sonuç kısmi)");
+                break;
+            }
+            catch (IOException) when (SureDoldu())
+            {
+                messages.Add($"WARN: {label} {sure!.Value.TotalSeconds:0} sn sınırında kesildi; {rows.Count:N0} satır alındı (sonuç kısmi)");
+                break;
+            }
             catch (IOException ex) when (rows.Count > 0 && !ct.IsCancellationRequested)
             {
                 messages.Add($"WARN: {label} bağlantısı veri akarken koptu ({ex.Message}); {rows.Count:N0} satır alındı, sonuç eksik olabilir. Aralığı kısaltmayı deneyin.");

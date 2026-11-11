@@ -347,7 +347,10 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
   (yalnız TERM(pc)); `iisHavuz` URI uygulaması BAŞINA en iyi havuz (bir sitede birden çok sanal dizin / havuz: /bskampws, /ldapauthenticationservice…);
   boşsa "havuz listesi boş" (ipucunda bilgi). Kullanıcı: "PID alanına gerek yok" → tablodan PID kolonu kaldırıldı (exe ipucunda). YAVAŞLIK: TERM(pc) o sunucunun TÜM CB olaylarını (milyonlarca netconn) getiriyor →
   procstart aramalarına `TERM(ingress.event.procstart)` (ham JSON'da tırnak içinde tek parça; indeksten süzülür). Kullanıcı: "hiç bitmiyor, 1 saat
-  falan yap" → pencere `HttpSys:SurecSaat` (saat), varsayılan 1 (SurecGun kaldırıldı). Bedeli: havuzlar ~29 saatte bir başladığı için 1 saatte az havuz görünür.
+  falan yap" → pencere `HttpSys:SurecSaat` (saat), varsayılan 1 (SurecGun kaldırıldı). Kullanıcı: "hâlâ dönüyor" → SÜRE SINIRI: `SplunkService.ExportAsync(..., sure)`
+  (süre dolunca okuma bırakılır, o ana kadarki satırlar + "WARN … sn sınırında kesildi (sonuç kısmi)"; bağlantı kapanınca Splunk aramayı iptal eder);
+  havuz uçlarındaki tüm Splunk çağrıları `HttpSys:HavuzSureSaniye`=20; procstart sorguları stats YERİNE `table` (akış halinde, en yeni önce; guid başına
+  ilk satır C#'ta); kısmi sonuç önbelleğe girmez; pencere yeniden `SurecSaat`=30. Sahte yavaş Splunk'la: 4 sn sınırda 4 havuzla döndü.
 - **"Bu sunucuda hangi uygulama çalışıyor?"** (IP kartı, Gelen portlar tablosunun üstündeki düğme; `SurecAi` Surec.cs, `POST /api/surec/ai`):
   arayüzdeki /api/surec sonucu exe başına toplanıp (PID'ler, portlar, giden, bağlanan / bağlandığı uygulamalar) AI'a gider (yeniden
   sorgulanmaz) + ERT kayıtları + segment + genel bilgiler dosyası. Kesin genel süreçler kodda ayıklanır (`GenelAd` / `GenelYol`: svchost,

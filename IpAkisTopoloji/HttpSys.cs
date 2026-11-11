@@ -152,7 +152,7 @@ static class HttpSysEslesme
             | eval yol=coalesce(process_path, "-")
             | stats count latest(pid) as pid latest(yol) as yol values(domain) as domain latest(link_process) as link by process_guid
             """;
-        var resA = await SplunkService.ExportAsync(splA, new LookupQuery(ip, start, end), cfg, http, ct, "Splunk");
+        var resA = await SplunkService.ExportAsync(splA, new LookupQuery(ip, start, end), cfg, http, ct, "Splunk", HavuzSure(cfg));
         var liste = new Dictionary<string, HttpSysSurec>(StringComparer.OrdinalIgnoreCase);
         foreach (var r in resA.Rows)
         {
@@ -174,16 +174,18 @@ static class HttpSysEslesme
                 string splB = $"""
                     search index={index} sourcetype="{sourcetype}" TERM(ingress.event.procstart) type="ingress.event.procstart" ({string.Join(" OR ", parca.Select(g => $"TERM({g})"))}) ({string.Join(" OR ", parca.Select(g => $"process_guid=\"{g}\""))})
                     | eval cmd=coalesce(command_line, cmdline, process_cmdline, "")
-                    | stats latest(cmd) as cmd latest(username) as un latest(link_parent) as lp latest(parent_path) as uy latest(parent_pid) as up by process_guid
+                    | eval un=username, lp=link_parent, uy=parent_path, up=parent_pid
+                    | table process_guid cmd un lp uy up
                     """;
                 SplunkResult resB;
-                try { resB = await SplunkService.ExportAsync(splB, new LookupQuery(ip, end.AddHours(-saat), end), cfg, http, ct, "Splunk"); }
+                // akış halinde (stats yok) + süre sınırı: süre dolarsa o ana kadar bulunanlar
+                try { resB = await SplunkService.ExportAsync(splB, new LookupQuery(ip, end.AddHours(-saat), end), cfg, http, ct, "Splunk", HavuzSure(cfg)); }
                 catch (Exception ex) when (ex is not OperationCanceledException) { break; }
                 foreach (var r in resB.Rows)
                 {
                     string? V(string k) => r.TryGetValue(k, out var v) && !string.IsNullOrWhiteSpace(v) ? v.Trim() : null;
                     var m = System.Text.RegularExpressions.Regex.Match(V("lp") ?? "", @"analyze/([0-9a-fA-F-]{20,})");
-                    if (V("process_guid") is { } g) d[g] = (V("cmd"), V("un"), m.Success ? m.Groups[1].Value : null, V("uy"), int.TryParse(V("up"), out int up) ? up : null);
+                    if (V("process_guid") is { } g && !d.ContainsKey(g)) d[g] = (V("cmd"), V("un"), m.Success ? m.Groups[1].Value : null, V("uy"), int.TryParse(V("up"), out int up) ? up : null);
                 }
             }
             return d;
@@ -236,7 +238,7 @@ static class HttpSysEslesme
             var r0 = await SplunkService.ExportAsync($"""
                 search index={index} sourcetype="{sourcetype}" TERM({ip}) local_ip="{ip}" computer_name=*
                 | stats count by computer_name | sort - count
-                """, new LookupQuery(ip, end.AddHours(-saat), end), cfg, http, ct, "Splunk");
+                """, new LookupQuery(ip, end.AddHours(-saat), end), cfg, http, ct, "Splunk", HavuzSure(cfg));
             var l = r0.Rows.Select(r => (Ad: r.GetValueOrDefault("computer_name")?.Trim() ?? "", Sayi: long.TryParse(r.GetValueOrDefault("count"), out long n) ? n : 0))
                 .Where(x => x.Ad.Length > 0).ToList();
             if (l.Count > 0) return l;
@@ -260,13 +262,17 @@ static class HttpSysEslesme
             search index={index} sourcetype="{sourcetype}" TERM(ingress.event.procstart) TERM({pc}) type="ingress.event.procstart" computer_name="{pc}"
             | where like(lower(process_path), "%w3wp.exe")
             | eval cmd=coalesce(command_line, cmdline, process_cmdline, "")
-            | stats latest(cmd) as cmd latest(username) as un latest(pid) as pid latest(process_path) as yol latest(_time) as t latest(link_process) as link by process_guid
-            """, new LookupQuery(ip, end.AddHours(-saat), end), cfg, http, ct, "Splunk");
+            | eval un=username, yol=process_path, t=_time, link=link_process
+            | table process_guid cmd un pid yol t link
+            """, new LookupQuery(ip, end.AddHours(-saat), end), cfg, http, ct, "Splunk", HavuzSure(cfg));
+        // akış halinde gelir (en yeni önce; stats yok ki süre dolunca o ana kadarkiler kalsın) → guid başına ilk satır
         var l = new List<HttpSysHavuz>();
         int adsiz = 0;
+        var gorulen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var r in res.Rows)
         {
             string? V(string k) => r.TryGetValue(k, out var v) && !string.IsNullOrWhiteSpace(v) ? v.Trim() : null;
+            if (V("process_guid") is { } gg && !gorulen.Add(gg)) continue;
             if ((HavuzAdi(V("cmd")) ?? HavuzKullanici(V("un"))) is not { } h) { adsiz++; continue; }
             l.Add(new(h, int.TryParse(V("pid"), out int pid) ? pid : null, (V("yol") ?? "").Contains("syswow64", StringComparison.OrdinalIgnoreCase),
                 double.TryParse(V("t"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double t)
@@ -280,7 +286,9 @@ static class HttpSysEslesme
         string bilgi = $"bilgisayar {pc}: son {saat:0.#} saatte {res.Rows.Count} w3wp başlangıcı" + (adsiz > 0 ? $" ({adsiz} tanesinde havuz adı okunamadı)" : "")
             + (pcs.Count > 1 ? $" · bu IP'de başka bilgisayar adları da görüldü: {string.Join(", ", pcs.Skip(1).Take(3).Select(x => $"{x.Ad} ({x.Sayi})"))}" : "")
             + (res.Messages.Count > 0 ? " · " + string.Join(" | ", res.Messages.Take(2)) : "");
-        if (res.Messages.All(m => !m.StartsWith("ERROR", StringComparison.OrdinalIgnoreCase))) _hvOnbellek[pc] = (DateTime.UtcNow, sonuc, bilgi);
+        // kısmi sonuç (süre doldu) önbelleğe girmez ki bir sonraki açılışta yeniden denensin; tam sonuç HavuzOnbellekSaat
+        if (res.Messages.All(m => !m.StartsWith("ERROR", StringComparison.OrdinalIgnoreCase) && !m.Contains("sınırında") && !m.Contains("cevap vermedi")))
+            _hvOnbellek[pc] = (DateTime.UtcNow, sonuc, bilgi);
         return (sonuc, bilgi, pcs);
     }
 
@@ -336,9 +344,11 @@ static class HttpSysEslesme
         return sb.ToString();
     }
 
-    // Süreç başlangıcı (procstart) arama penceresi, saat (kullanıcı: "hiç bitmiyor, 1 saat falan yap"): HttpSys:SurecSaat, varsayılan 1.
+    // Süreç başlangıcı (procstart) arama penceresi, saat: HttpSys:SurecSaat, varsayılan 30 (bir recycle turu; süre sınırı HavuzSure ile birlikte).
     // Not: IIS havuzları ~29 saatte bir yeniden başlar; 1 saatte yalnız o saatte başlayan havuzlar görünür (önbellek 6 saat ile birikir değil, her sorguda bu pencere).
-    public static double SurecSaat(IConfiguration cfg) => Math.Clamp(cfg.GetValue("HttpSys:SurecSaat", 1.0), 0.25, 24 * 30);
+    public static double SurecSaat(IConfiguration cfg) => Math.Clamp(cfg.GetValue("HttpSys:SurecSaat", 30.0), 0.25, 24 * 30);
+    // Süre sınırı (kullanıcı: "hâlâ devam ediyor"): Splunk bu kadar saniyede bitmezse bulunanlarla dönülür; HttpSys:HavuzSureSaniye (20)
+    public static TimeSpan HavuzSure(IConfiguration cfg) => TimeSpan.FromSeconds(Math.Clamp(cfg.GetValue("HttpSys:HavuzSureSaniye", 20.0), 3, 300));
 
     // w3wp.exe -ap "HavuzAdi" -v "v4.0" … → HavuzAdi
     public static string? HavuzAdi(string? cmd)
