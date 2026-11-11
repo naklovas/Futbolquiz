@@ -660,6 +660,12 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
             // Kesin kayıt (isteğe bağlı DF_HTTPSYS_URL; DeltaFlow sunucuya bağlanmaz, yalnız okur)
             var kesin = httpSysKayit == null ? [] : (await httpSysKayit.IpAsync(ip, ct)).Where(k => miss.Contains(k.Port.ToString())).ToList();
             if (kesin.Count > 0) sb.Append(HttpSysKayitService.Metin(kesin));
+            // IIS erişim logu (kullanıcı: Splunk iis_msy / iis_csy): boş port bir IIS sitesine aitse site + URI uygulamaları — KESİN
+            if (cfg.GetValue("HttpSys:IisEksikte", true))
+            {
+                var (iisL, _) = await HttpSysEslesme.IisAsync(ip, cfg, factory.CreateClient("splunk"), ct);
+                sb.Append(HttpSysEslesme.IisMetin(iisL, miss));
+            }
             if (cb.TryGetValue(ip, out var c))
             {
                 sb.Append(c.Text(env, ip, miss));
@@ -1313,7 +1319,7 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
             yazılmış uygulama alanı varsa çok güçlü; aynı satırdaki WEBSITE (IIS site adı) ve SERVICENAME; aynı sunucunun diğer portlarındaki uygulamalar; VIP ve havuz
             komşuları; BENZER ADLI SUNUCULARIN (aynı ad, farklı numara) uygulamaları; aynı segmentte aynı portu kullanan
             sunucuların uygulamaları; bu porta bağlanan istemci uygulamalar ve exe'nin bağlandığı yerler; sanal sunucu notları;
-            iş istekleri; sunucu adındaki kısaltmalar (ör. "atm", "sql", "web"). ntoskrnl.exe görünüyorsa port HTTP.sys üzerindendir ("HTTP.SYS KAYDI" satırı varsa o portu dinleyen süreç KESİN odur — exe yolu / IIS havuzu adı uygulamayı gösterir, en güçlü kanıtlardan say;
+            iş istekleri; sunucu adındaki kısaltmalar (ör. "atm", "sql", "web"). ntoskrnl.exe görünüyorsa port HTTP.sys üzerindendir ("IIS ERİŞİM LOGU" satırı varsa port KESİN o IIS sitesinindir ve URI'deki uygulama adı en güçlü kanıttır; "HTTP.SYS KAYDI" satırı varsa o portu dinleyen süreç KESİN odur — exe yolu / IIS havuzu adı uygulamayı gösterir, en güçlü kanıtlardan say;
             "HTTP.SYS PORT → EXE TAHMİNİ" satırındaki EN OLASI exe orta güçte kanıttır); asıl uygulama aynı sunucudaki ve adı WEBSITE ile
             örtüşen exe'dir.
 

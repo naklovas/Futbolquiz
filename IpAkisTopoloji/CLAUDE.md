@@ -334,6 +334,13 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
   `hostAdiIc`, `/api/surec/havuz` → `bilgisayarlar`; ERT ile aynıysa "✓ Carbon Black aynı"). HIZ (kullanıcı: "çok uzun sürdü"): SurecGun varsayılanı 7 (havuzlar ~29 saatte bir
   yeniden başlar), guid aramasında `TERM(guid)`, havuz aramasında `TERM(pc) procstart w3wp` anahtar kelimeleri; bellekte önbellek: IP → bilgisayar 12 saat,
   bilgisayar → havuzlar `HttpSys:HavuzOnbellekSaat`=6 saat (bilgide "önbellekten").
+  IIS ERİŞİM LOGLARI (kullanıcı: Splunk'ta `index=iis_msy` (…\inetpub\logs\AdvancedLogs\W3SVC4\…) ve `index=iis_csy` (sourcetype ms:iis:default,
+  …\LogFiles\W3SVC1\…), W3C; ilk 9 alan sabit: date time s-ip cs-method cs-uri-stem cs-uri-query s-port cs-username c-ip): `HttpSysEslesme.IisAsync`
+  (`HttpSys:IisIndexleri` varsayılan [iis_msy, iis_csy], `IisSaat`=24, IP başına `IisOnbellekDakika`=60) — TERM(ip) + rex + where s-ip = IP, source'tan W3SVC<n>,
+  URI'nin ilk parçası (küçük harf) uygulama → `HttpSysIis` (port, siteler, hostlar, istek, istemci (port başına dc), ilk 8 uygulama). `/api/surec/httpsys` →
+  `iis`, `iisHata`; ntoskrnl satırında en üstte yeşil "✔ IIS logu: site W3SVC4 · /vbmservice.svc … · N istek, M istemci · havuz X (ad eşleşmesi)" (havuz
+  adı ↔ URI uygulama adı `hvKelime`). ERT eksiklerinde boş portlar için "IIS ERİŞİM LOGU (KESİN …)" kanıtı (`IisMetin`, `HttpSys:IisEksikte`=true) + prompt'ta
+  en güçlü kanıt. IIS logu olmayan çekirdek portları = IIS dışı HTTP.sys (self-host) → korelasyon / havuz.
 - **"Bu sunucuda hangi uygulama çalışıyor?"** (IP kartı, Gelen portlar tablosunun üstündeki düğme; `SurecAi` Surec.cs, `POST /api/surec/ai`):
   arayüzdeki /api/surec sonucu exe başına toplanıp (PID'ler, portlar, giden, bağlanan / bağlandığı uygulamalar) AI'a gider (yeniden
   sorgulanmaz) + ERT kayıtları + segment + genel bilgiler dosyası. Kesin genel süreçler kodda ayıklanır (`GenelAd` / `GenelYol`: svchost,

@@ -13,6 +13,8 @@ record HttpSysPort(string Port, int Dakika, long Baglanti, List<HttpSysAday> Ada
 record HttpSysSonuc(string Ip, DateTimeOffset Baslangic, DateTimeOffset Bitis, int ToplamDakika, List<HttpSysPort> Portlar, string? Hata,
     List<HttpSysGiden>? Giden = null, List<string>? GenelAtilan = null);   // tanı: dışarı bağlanan iş exe'leri (dakika), ayıklanan genel süreçler
 record HttpSysGiden(string Exe, string Yol, int Dakika, long Baglanti);
+record HttpSysIisUyg(string Ad, long Istek);
+record HttpSysIis(string Port, List<string> Siteler, List<string> Hostlar, long Istek, int Istemci, List<HttpSysIisUyg> Uygulamalar);
 record HttpSysHavuz(string Ad, int? Pid, bool Bit32, DateTimeOffset? Baslangic, string? Guid, string? Link, string Bilgisayar, int Baslatma = 1);
 record HttpSysSurec(string Guid, int? Pid, string Exe, string Yol, List<string> Domainler, string? Link, long Olay,
     string? KomutSatiri = null, string? Havuz = null, string? UstGuid = null, string? UstYol = null, int? UstPid = null, string? UstHavuz = null);
@@ -279,6 +281,58 @@ static class HttpSysEslesme
             + (res.Messages.Count > 0 ? " · " + string.Join(" | ", res.Messages.Take(2)) : "");
         if (res.Messages.All(m => !m.StartsWith("ERROR", StringComparison.OrdinalIgnoreCase))) _hvOnbellek[pc] = (DateTime.UtcNow, sonuc, bilgi);
         return (sonuc, bilgi, pcs);
+    }
+
+    // IIS ERİŞİM LOGLARI (kullanıcı: Splunk'ta index=iis_msy / iis_csy, sourcetype ms:iis:default, W3C): ilk 9 alan sabit sırada —
+    // date time s-ip cs-method cs-uri-stem cs-uri-query s-port cs-username c-ip (sonrası sunucuya göre değişir, kullanılmaz); source'ta …\W3SVC<n>\ = IIS site no.
+    // Portta IIS logu varsa port KESİN bir IIS sitesinindir (HTTP.sys'i kendisi kullanan uygulama IIS loguna yazmaz); URI'nin ilk parçası uygulama / sanal dizin.
+    static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (DateTime At, List<HttpSysIis> L, string? Hata)> _iisOnbellek = new();
+    public static async Task<(List<HttpSysIis> Liste, string? Hata)> IisAsync(string ip, IConfiguration cfg, HttpClient http, CancellationToken ct)
+    {
+        if (_iisOnbellek.TryGetValue(ip, out var c) && DateTime.UtcNow - c.At < TimeSpan.FromMinutes(cfg.GetValue("HttpSys:IisOnbellekDakika", 60))) return (c.L, c.Hata);
+        var idx = cfg.GetSection("HttpSys:IisIndexleri").Get<string[]>() is { Length: > 0 } a ? a : ["iis_msy", "iis_csy"];
+        if (idx.Any(x => !System.Text.RegularExpressions.Regex.IsMatch(x, @"^[A-Za-z0-9_\-\*]+$"))) return ([], "HttpSys:IisIndexleri geçersiz");
+        var end = DateTimeOffset.Now;
+        string spl = $"""
+            search ({string.Join(" OR ", idx.Select(x => "index=" + x))}) TERM({ip})
+            | rex "^\S+ \S+ (?<iis_sip>\S+) (?<iis_m>\S+) (?<iis_uri>\S+) \S+ (?<iis_port>\d+) \S+ (?<iis_cip>\S+)"
+            | where iis_sip="{ip}"
+            | rex field=source "(?i)W3SVC(?<iis_site>\d+)"
+            | eval iis_app=lower(mvindex(split(iis_uri, "/"), 1)), iis_app=if(isnull(iis_app) OR iis_app="", "/", iis_app)
+            | eventstats dc(iis_cip) as pist by iis_port
+            | stats count max(pist) as pist latest(_time) as son by iis_port iis_site host iis_app
+            """;
+        List<HttpSysIis> l = [];
+        string? hata = null;
+        try
+        {
+            var res = await SplunkService.ExportAsync(spl, new LookupQuery(ip, end.AddHours(-cfg.GetValue("HttpSys:IisSaat", 24.0)), end), cfg, http, ct, "Splunk");
+            var satir = res.Rows.Select(r => (Port: r.GetValueOrDefault("iis_port") ?? "", Site: r.GetValueOrDefault("iis_site"), Host: r.GetValueOrDefault("host"),
+                App: r.GetValueOrDefault("iis_app") ?? "/", N: long.TryParse(r.GetValueOrDefault("count"), out long n) ? n : 0,
+                Ist: int.TryParse(r.GetValueOrDefault("pist"), out int pi) ? pi : 0)).Where(x => x.Port.Length > 0).ToList();
+            l = satir.GroupBy(x => x.Port).Select(g => new HttpSysIis(g.Key,
+                    g.Select(x => x.Site).Where(x => !string.IsNullOrEmpty(x)).Distinct().Select(x => "W3SVC" + x).ToList(),
+                    g.Select(x => x.Host).Where(x => !string.IsNullOrEmpty(x)).Select(x => x!).Distinct().ToList(),
+                    g.Sum(x => x.N), g.Max(x => x.Ist),
+                    g.GroupBy(x => x.App).Select(a => (Uygulama: a.Key, Istek: a.Sum(x => x.N))).OrderByDescending(a => a.Istek).Take(8)
+                        .Select(a => new HttpSysIisUyg(a.Uygulama, a.Istek)).ToList()))
+                .OrderByDescending(x => x.Istek).ToList();
+            if (res.Messages.Any(m => m.StartsWith("ERROR", StringComparison.OrdinalIgnoreCase))) hata = string.Join(" | ", res.Messages.Take(2));
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException) { hata = ex.Message; }
+        if (hata == null) _iisOnbellek[ip] = (DateTime.UtcNow, l, null);
+        return (l, hata);
+    }
+
+    public static string IisMetin(List<HttpSysIis> l, ICollection<string>? portlar = null)
+    {
+        var x = l.Where(p => portlar == null || portlar.Contains(p.Port)).ToList();
+        if (x.Count == 0) return "";
+        var sb = new StringBuilder("IIS ERİŞİM LOGU (KESİN: bu portu bir IIS sitesi karşılıyor; URI'nin ilk parçası uygulama / sanal dizin adı):\n");
+        foreach (var p in x)
+            sb.AppendLine($"- port {p.Port} → IIS sitesi {string.Join(", ", p.Siteler)} · {p.Istek} istek, {p.Istemci} istemci · uygulamalar: "
+                + string.Join(", ", p.Uygulamalar.Select(u => $"/{u.Ad.TrimStart('/')} ({u.Istek})")));
+        return sb.ToString();
     }
 
     // w3wp.exe -ap "HavuzAdi" -v "v4.0" … → HavuzAdi

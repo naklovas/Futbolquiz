@@ -1579,7 +1579,8 @@ async function loadHttpSys(ip, yenile) {
     const kayit = {};
     for (const k of b.kayit ?? []) (kayit[String(k.port)] ??= []).push(k);
     state.httpsys = { ip, status: "ok", map: Object.fromEntries((b.portlar ?? []).map(p => [String(p.port), p])), kayit, korelasyonHata: b.korelasyonHata, kayitDurum: b.kayitDurum,
-      korTarih: b.korelasyonTarih, korKaynak: b.korelasyonKaynak, korSaat: b.korelasyonSaat, minDakika: b.minDakika, giden: b.giden, genelAtilan: b.genelAtilan };
+      korTarih: b.korelasyonTarih, korKaynak: b.korelasyonKaynak, korSaat: b.korelasyonSaat, minDakika: b.minDakika, giden: b.giden, genelAtilan: b.genelAtilan,
+      iis: Object.fromEntries((b.iis ?? []).map(p => [String(p.port), p])), iisHata: b.iisHata };
   } catch (e) { if (e.name !== "AbortError") state.httpsys = { ip, status: "error", error: e.message }; }
   renderProc(); updateTargetApps();
 }
@@ -1591,6 +1592,15 @@ function httpSysTahmin(port) {
   const yen = ` <a href="#" class="small" data-hsyenile="${esc(h.ip)}" title="Kayıtlı sonucu kullanmadan Carbon Black'ten yeniden hesapla ve kaydet">↻ yeniden hesapla</a>` + ` · <a class="small" target="_blank" href="api/surec/httpsys/tani?ip=${encodeURIComponent(h.ip)}" title="Korelasyonun gördüğü ham veri (düz metin) — kopyalayıp gönderilebilir">tanı verisi ↗</a>`;
   const kayitNot = h.korTarih ? `<div class="small muted">${h.korKaynak === "kayıt" ? `kayıtlı sonuç · ${esc(String(h.korTarih).slice(0, 16).replace("T", " "))}` : "şimdi hesaplandı ve kaydedildi"}${yen}</div>` : "";
   if (h.status === "error") return `<div class="small muted" title="${esc(h.error)}">zaman korelasyonu alınamadı</div>`;
+  // IIS erişim logu (Splunk iis_msy / iis_csy): port KESİN bir IIS sitesinin; URI'nin ilk parçası uygulama; havuz adıyla kelime eşleşmesi
+  const iis = h.iis?.[String(port)];
+  if (iis) {
+    const hv = state.havuz?.status === "ok" && state.havuz.ip === h.ip ? state.havuz.havuzlar : [];
+    const hvEs = hv.map(x => ({ x, p: Math.max(0, ...iis.uygulamalar.map(u => hvKelime(u.ad).filter(w => hvKelime(x.ad).includes(w)).length
+      + (u.ad.replace(/[^a-z0-9]/gi, "").toLowerCase() === x.ad.replace(/[^a-z0-9]/gi, "").toLowerCase() ? 10 : 0))) })).filter(v => v.p > 0);
+    const enc = Math.max(0, ...hvEs.map(v => v.p)), hvAd = hvEs.filter(v => v.p === enc).map(v => v.x.ad);
+    return kayitNot + `<div class="small" style="color:var(--ok)" title="Splunk IIS erişim logu (son 24 saat): bu porta gelen istekleri bir IIS sitesi karşılıyor — port KESİN IIS'in (w3wp).\nSite: ${esc(iis.siteler.join(", "))} · sunucu: ${esc(iis.hostlar.join(", "))}\nUygulamalar (URI'nin ilk parçası, istek): ${esc(iis.uygulamalar.map(u => "/" + u.ad.replace(/^\//, "") + " (" + u.istek + ")").join(", "))}">✔ IIS logu: site <b class="mono">${esc(iis.siteler.join(", ") || "?")}</b> · ${iis.uygulamalar.slice(0, 3).map(u => `<b class="mono">/${esc(u.ad.replace(/^\//, ""))}</b>`).join(", ")}${iis.uygulamalar.length > 3 ? ` +${iis.uygulamalar.length - 3}` : ""} <span class="muted">· ${fmt(iis.istek)} istek, ${fmt(iis.istemci)} istemci</span>${hvAd.length ? ` · havuz <b class="mono">${esc(hvAd.join(", "))}</b> <span class="muted">(ad eşleşmesi)</span>` : ""}</div>`;
+  }
   // İsteğe bağlı kesin kayıt (araclar/HttpSysTopla.ps1 ile netsh'ten toplanmışsa DF_HTTPSYS_URL); DeltaFlow sunucuya bağlanmaz
   const ks = h.kayit?.[String(port)];
   if (ks?.length) {

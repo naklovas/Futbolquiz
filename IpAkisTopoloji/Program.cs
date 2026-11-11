@@ -236,10 +236,12 @@ app.MapGet("/api/surec/httpsys", async (string? ip, string? start, string? end, 
 {
     if (!LookupQuery.TryParse(ip, start, end, cfg.GetValue("MaxRangeHours", 24), out var q, out var error)) return Results.BadRequest(new { error });
     var urlTask = kayit.IpAsync(q!.Ip, ct);
+    var iisTask = HttpSysEslesme.IisAsync(q.Ip, cfg, factory.CreateClient("splunk"), ct);   // IIS erişim logu: port → site → uygulama (kesin)
     var (kb, ks) = HttpSysEslesme.Aralik(cfg);   // süreç penceresi (3 saat) değil, son HttpSys:Saat saat
     var k = await kayit.KorelasyonAsync(q.Ip, kb, ks, factory.CreateClient("splunk"), ct, null, yenile == true);
     var kesin = await urlTask;
-    return Results.Ok(new { k.Sonuc.Ip, k.Sonuc.ToplamDakika, k.Sonuc.Portlar, korelasyonHata = k.Sonuc.Hata, korelasyonTarih = k.Tarih, korelasyonKaynak = k.Kaynak,
+    var (iis, iisHata) = await iisTask;
+    return Results.Ok(new { iis, iisHata, k.Sonuc.Ip, k.Sonuc.ToplamDakika, k.Sonuc.Portlar, korelasyonHata = k.Sonuc.Hata, korelasyonTarih = k.Tarih, korelasyonKaynak = k.Kaynak,
         korelasyonSaat = Math.Round((ks - kb).TotalHours), minDakika = cfg.GetValue("HttpSys:MinDakika", 5),
         giden = k.Sonuc.Giden, genelAtilan = k.Sonuc.GenelAtilan,
         kayit = kesin.Select(x => new { x.Port, x.Url, x.Kuyruk, x.Pid, x.ExeYol, x.Exe, x.Hostname, x.Tarih }), kayitDurum = kayit.Durum });
