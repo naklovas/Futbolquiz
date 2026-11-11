@@ -684,7 +684,7 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
                     else log.LogWarning("HTTP.sys korelasyonu {Ip}: {Hata}", ip, hs.Hata);
                 }
                 // IIS havuzları (kullanıcı: "w3wp.exe işimi görmüyor"): w3wp komut satırındaki havuz adı, alt süreçler, bağlandığı DNS adları (CB procstart)
-                if (cfg.GetValue("HttpSys:HavuzEksikte", true) && c.Rows.Any(r => (r.Yol ?? "").Contains("w3wp", StringComparison.OrdinalIgnoreCase)
+                if (cfg.GetValue("HttpSys:HavuzEksikte", false) && c.Rows.Any(r => (r.Yol ?? "").Contains("w3wp", StringComparison.OrdinalIgnoreCase)
                     || (r.Yol ?? "").Contains(@"\inetpub\", StringComparison.OrdinalIgnoreCase)))
                 {
                     try

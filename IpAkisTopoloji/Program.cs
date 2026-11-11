@@ -258,6 +258,13 @@ app.MapGet("/api/surec/havuz", async (string? ip, string? start, string? end, IC
     var (hv, hvBilgi, pcs, hvHata) = await hvTask;
     return Results.Ok(new { surecler = sl, havuzlar = hv, havuzBilgi = hvBilgi, bilgisayarlar = pcs, hata = hata ?? hvHata });
 });
+// IIS erişim logu: IP'nin portları → site · uygulamalar (HttpSys.cs IisAsync; tek sorgu, 1 saat önbellek)
+app.MapGet("/api/surec/iis", async (string? ip, IConfiguration cfg, IHttpClientFactory factory, CancellationToken ct) =>
+{
+    if (!LookupQuery.TryParse(ip, null, null, cfg.GetValue("MaxRangeHours", 24), out var q, out var error)) return Results.BadRequest(new { error });
+    var (iis, hata) = await HttpSysEslesme.IisAsync(q!.Ip, cfg, factory.CreateClient("splunk"), ct);
+    return Results.Ok(new { iis, hata });
+});
 // Korelasyon tanısı (düz metin; kullanıcı kopyalayıp gönderebilsin)
 app.MapGet("/api/surec/httpsys/tani", async (string? ip, IConfiguration cfg, IHttpClientFactory factory, CancellationToken ct) =>
 {

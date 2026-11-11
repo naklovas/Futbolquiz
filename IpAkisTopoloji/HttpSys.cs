@@ -315,7 +315,8 @@ static class HttpSysEslesme
         string? hata = null;
         try
         {
-            var res = await SplunkService.ExportAsync(spl, new LookupQuery(ip, end.AddHours(-cfg.GetValue("HttpSys:IisSaat", 24.0)), end), cfg, http, ct, "Splunk");
+            var res = await SplunkService.ExportAsync(spl, new LookupQuery(ip, end.AddHours(-cfg.GetValue("HttpSys:IisSaat", 24.0)), end), cfg, http, ct, "Splunk",
+                TimeSpan.FromSeconds(Math.Clamp(cfg.GetValue("HttpSys:IisSureSaniye", 30.0), 5, 300)));   // bitmezse sayfa dönüp durmasın
             var satir = res.Rows.Select(r => (Port: r.GetValueOrDefault("iis_port") ?? "", Site: r.GetValueOrDefault("iis_site"), Host: r.GetValueOrDefault("host"),
                 App: r.GetValueOrDefault("iis_app") ?? "/", N: long.TryParse(r.GetValueOrDefault("count"), out long n) ? n : 0,
                 Ist: int.TryParse(r.GetValueOrDefault("pist"), out int pi) ? pi : 0)).Where(x => x.Port.Length > 0).ToList();
@@ -326,7 +327,8 @@ static class HttpSysEslesme
                     g.GroupBy(x => x.App).Select(a => (Uygulama: a.Key, Istek: a.Sum(x => x.N))).OrderByDescending(a => a.Istek).Take(8)
                         .Select(a => new HttpSysIisUyg(a.Uygulama, a.Istek)).ToList()))
                 .OrderByDescending(x => x.Istek).ToList();
-            if (res.Messages.Any(m => m.StartsWith("ERROR", StringComparison.OrdinalIgnoreCase))) hata = string.Join(" | ", res.Messages.Take(2));
+            if (res.Messages.Any(m => m.StartsWith("ERROR", StringComparison.OrdinalIgnoreCase) || m.Contains("sınırında") || m.Contains("cevap vermedi")))
+                hata = string.Join(" | ", res.Messages.Take(2));   // süre dolduysa önbelleğe girmez
         }
         catch (Exception ex) when (ex is not OperationCanceledException) { hata = ex.Message; }
         if (hata == null) _iisOnbellek[ip] = (DateTime.UtcNow, l, null);

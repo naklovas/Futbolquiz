@@ -708,14 +708,14 @@ function hostAdiHtml(t) {
 }
 function hostAdiIc() {
   if (!hostT) return "";
-  const h = state.havuz?.ip === hostT.ip ? state.havuz : null;
-  const cb = h?.bilgisayarlar ?? [];
+  const h = state.iis?.ip === hostT.ip ? state.iis : null;
+  const cb = h?.hostlar ?? [];   // IIS logundaki sunucu adı (host)
   const ayni = (a, b) => String(a).toLowerCase().split(".")[0] === String(b).toLowerCase().split(".")[0];
   const cbFark = cb.filter(c => !hostT.ert.some(e => ayni(e, c)));
   const parca = [];
   if (hostT.ert.length) parca.push(`<b class="mono">${esc(hostT.ert.join(", "))}</b> <span class="muted">(ERT)</span>`);
-  if (cbFark.length) parca.push(`<b class="mono">${esc(cbFark[0])}</b> <span class="muted" title="Carbon Black sensörünün bildirdiği bilgisayar adı${cbFark.length > 1 ? "\nBu IP'de görülen diğer adlar: " + esc(cbFark.slice(1).join(", ")) : ""}">(Carbon Black${cbFark.length > 1 ? ` +${cbFark.length - 1}` : ""})</span>`);
-  else if (cb.length && hostT.ert.length) parca.push(`<span class="muted small" title="Carbon Black sensörünün bildirdiği ad ERT ile aynı">✓ Carbon Black aynı</span>`);
+  if (cbFark.length) parca.push(`<b class="mono">${esc(cbFark[0])}</b> <span class="muted" title="IIS logunu gönderen sunucunun adı (Splunk host)${cbFark.length > 1 ? "\nDiğer adlar: " + esc(cbFark.slice(1).join(", ")) : ""}">(IIS${cbFark.length > 1 ? ` +${cbFark.length - 1}` : ""})</span>`);
+  else if (cb.length && hostT.ert.length) parca.push(`<span class="muted small" title="IIS logundaki sunucu adı ERT ile aynı">✓ IIS aynı</span>`);
   if (!parca.length) return h?.status === "loading" ? `<div class="small muted">Sunucu adı aranıyor…</div>` : "";
   return `<div class="small" style="margin:2px 0">Sunucu adı: ${parca.join(" · ")}</div>`;
 }
@@ -769,7 +769,7 @@ function targetApps(t) {
   const canAi = state.proc?.status === "ok" && state.proc.body.processes?.length;
   return ert + `<h2 style="margin-top:14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">Gelen portlar ve çalışan süreçler <span class="small muted" style="font-weight:400">Carbon Black · ${esc(rng)} · bu sunucuda ağ bağlantısı görülen tüm exe'ler</span>
     ${canAi ? `<button type="button" id="procAiBtn" class="mini" style="margin-left:auto" title="Genel Windows / altyapı exe'lerini ayıklayıp bu sunucuda gerçekte hangi iş uygulamalarının çalıştığını ve hangisinin hizmet verdiğini AI'a sorar"${state.procAi?.status === "loading" ? " disabled" : ""}>${state.procAi?.status === "loading" ? "AI inceliyor…" : "🤖 Bu sunucuda hangi uygulama çalışıyor?"}</button>` : ""}</h2>
-    ${procAiBox(t.ip)}${havuzOzet(t)}${listenTable(t)}`;
+    ${procAiBox(t.ip)}${listenTable(t)}`;
 }
 // "Bu sunucuda hangi uygulama çalışıyor?" (/api/surec/ai): arayüzdeki süreç listesi exe başına toplanıp AI'a gider
 function procAiBox(ip) {
@@ -870,15 +870,15 @@ function listenTable(t) {
   const tlsOn = state.nessus?.ip === t.ip;
   return `<div class="small muted" style="margin:-4px 0 6px">${fmt(nExe)} farklı exe · ${fmt(list.filter(r => !r.out).length)} port satırı${list.some(r => r.out) ? ` · ${fmt(list.filter(r => r.out).length)} exe yalnız dışarı bağlanıyor` : ""}</div>
     <div class="tbl-wrap" style="max-height:300px"><table>
-      <thead><tr><th>Gelen port</th><th>Çalışan süreç (exe)</th><th title="Carbon Black süreç başlangıcı: w3wp komut satırındaki havuz adı (-ap) ya da süreci başlatan w3wp'nin havuzu">IIS havuzu</th><th class="num">Gelen bağlantı</th><th class="num">Karşı IP</th><th class="num">Giden bağlantı</th>${tlsOn ? `<th title="Portun KABUL ETTİĞİ SSL / TLS sürümleri (Nessus taramasının el sıkışması). İstemcilerin fiilen hangisiyle bağlandığı değil; kırmızı = eski sürüm hâlâ açık.">TLS (Nessus)</th>` : ""}<th>ERT'deki uygulama</th></tr></thead>
+      <thead><tr><th>Gelen port</th><th>Çalışan süreç (exe)</th><th title="Splunk IIS erişim logu (son 24 saat): bu porta gelen istekleri karşılayan IIS sitesi ve uygulamalar (URI'nin ilk parçası)">IIS (site · uygulama)</th><th class="num">Gelen bağlantı</th><th class="num">Karşı IP</th><th class="num">Giden bağlantı</th>${tlsOn ? `<th title="Portun KABUL ETTİĞİ SSL / TLS sürümleri (Nessus taramasının el sıkışması). İstemcilerin fiilen hangisiyle bağlandığı değil; kırmızı = eski sürüm hâlâ açık.">TLS (Nessus)</th>` : ""}<th>ERT'deki uygulama</th></tr></thead>
       <tbody>${list.map(r => { const apps = r.out ? [] : ertApps(r.port), infra = PROC_INFRA.has(r.port); return `<tr${infra ? ` class="muted" title="Altyapı portu"` : ""}>
         <td class="mono">${r.out ? `<span class="small muted">— yalnız giden</span>` : r.port ? esc(r.port) : `<span class="small muted" title="Carbon Black olayında yerel port yok">?</span>`}${infra ? ` <span class="small muted">altyapı</span>` : ""}</td>
-        <td><b class="mono" title="${esc([r.yol, r.pids?.size ? "PID: " + [...r.pids].join(", ") : ""].filter(Boolean).join("\n"))}">${esc(exeShort(r.name))}</b>${havuzNot(r)}${HTTPSYS.test(exeShort(r.name)) && !r.out
+        <td><b class="mono" title="${esc([r.yol, r.pids?.size ? "PID: " + [...r.pids].join(", ") : ""].filter(Boolean).join("\n"))}">${esc(exeShort(r.name))}</b>${HTTPSYS.test(exeShort(r.name)) && !r.out
           ? (m => m ? `<div class="small" style="color:var(--in)" title="ERT'de bu port için kayıtlı ad (${esc(m.nm)}) şu exe'nin yolunda geçiyor: ${esc(m.hit.map(e => e.yol).join(" · "))}">→ asıl uygulama büyük ihtimalle <b class="mono">${esc(m.hit.map(e => e.name).join(", "))}</b> <span class="muted">(yolu ERT'deki "${esc(m.nm)}" ile eşleşiyor)</span></div>` : "")(httpSysApp(r.port))
             + (hs => hs.length ? `<div class="small" style="color:var(--ok)" title="IIS havuz adı bu portun VIP / ERT adıyla ortak kelime içeriyor (Carbon Black süreç başlangıcı)">→ IIS havuzu (ad eşleşmesi): ${hs.map(x => `<b class="mono">${esc(x.ad)}</b>${x.pid ? ` <span class="muted">PID ${esc(x.pid)}</span>` : ""}`).join(", ")}</div>` : "")(havuzEsleri(t).filter(x => x.es.some(e => e.port === String(r.port))))
             + httpSysTahmin(r.port)
             + `<div class="small muted" title="Bu portu Windows HTTP.sys sürücüsü dinliyor: bağlantıyı çekirdek kabul eder, isteği URL kaydına göre asıl uygulamaya iletir. Carbon Black bağlantıyı bu yüzden ntoskrnl.exe / System adına yazar. Asıl uygulama exe'si (ör. HTTP.sys ile çalışan bir ASP.NET Core uygulaması ya da w3wp.exe) bu tabloda 'yalnız giden' olarak görünebilir; sunucuda 'netsh http show servicestate' kesin olarak gösterir.">HTTP.sys (Windows çekirdeği) · asıl uygulama ayrı exe ⓘ</div>` : ""}</td>
-        <td>${havuzHucre(r, t)}</td>
+        <td>${iisHucre(r)}</td>
         <td class="num">${r.out ? "" : fmt(r.hits)}</td><td class="num">${r.out ? "" : fmt(r.peers)}</td><td class="num">${r.out && r.outHits ? fmt(r.outHits) : ""}</td>${tlsOn ? `<td>${r.out || !r.port ? "" : tlsCell(r.port)}</td>` : ""}
         <td>${r.out ? "" : apps.length ? esc(apps.join(", ")) : `<span class="small muted">kayıt yok</span>`}</td></tr>`; }).join("")}</tbody></table></div>`;
 }
@@ -1474,7 +1474,7 @@ async function runProc(params) {
     state.proc = { status: "ok", body, infra: false };
     // HTTP.sys (ntoskrnl) portu varsa asıl exe tahmini arka planda (zaman korelasyonu)
     if ((body.processes ?? []).some(n => HTTPSYS.test(exeShort(n.name)) && (n.portlar ?? n.listenPorts ?? []).length)) loadHttpSys(params.get("ip"));
-    loadHavuz(params.get("ip"));
+    loadIis(params.get("ip"));   // IIS erişim logu: port → site · uygulama (Carbon Black havuz araması kaldırıldı — kullanıcı: "fiyasko")
   } catch (e) {
     state.proc = e.name === "AbortError" ? null : { status: "error", error: e.message };
   }
@@ -1557,7 +1557,36 @@ function iisHavuz(port) {
   }
   return out.map(o => o.ad);
 }
-// Gelen portlar tablosu "IIS havuzu" kolonu (kullanıcı: "griddeki havuz kolonunda yazarsa daha rahat görürüm"):
+// IIS erişim logu (kullanıcı: "IIS'ten getir, o IP portun karşısında ne yazıyorsa"): /api/surec/iis → port → site · uygulamalar
+let iisAbort = null;
+async function loadIis(ip) {
+  iisAbort?.abort(); iisAbort = new AbortController();
+  state.iis = { ip, status: "loading" };
+  try {
+    const r = await fetch("api/surec/iis?" + new URLSearchParams({ ip }), { signal: iisAbort.signal });
+    if (r.status === 404) { state.iis = { ip, status: "eski" }; renderProc(); return; }
+    const b = await r.json().catch(() => ({}));
+    if (state.iis?.ip !== ip) return;
+    state.iis = { ip, status: "ok", map: Object.fromEntries((b.iis ?? []).map(p => [String(p.port), p])), hostlar: [...new Set((b.iis ?? []).flatMap(p => p.hostlar ?? []))], hata: b.hata };
+    const he = document.getElementById("hostAdi");
+    if (he) he.innerHTML = hostAdiIc();
+  } catch (e) { if (e.name !== "AbortError") state.iis = { ip, status: "hata", hata: e.message }; }
+  renderProc();
+}
+function iisHucre(r) {
+  const h = state.iis;
+  if (!h || r.out || !r.port) return "";
+  if (h.status === "loading") return `<span class="muted" title="Splunk IIS logu okunuyor">…</span>`;
+  if (h.status === "eski") return `<span class="muted" title="Sunucudaki DLL /api/surec/iis içermiyor">DLL eski</span>`;
+  if (h.status !== "ok") return `<span class="muted" title="${esc(h.hata || "")}">alınamadı</span>`;
+  const p = h.map[String(r.port)];
+  if (!p) return `<span class="muted">—</span>`;
+  const u = p.uygulamalar.filter(x => x.ad && x.ad !== "/");
+  return `<span title="IIS erişim logu (son 24 saat) · sunucu: ${esc(p.hostlar.join(", "))}\n${esc(p.uygulamalar.map(x => (x.ad === "/" ? "/ (kök)" : "/" + x.ad) + " — " + x.istek + " istek").join("\n"))}\nToplam ${p.istek} istek, ${p.istemci} istemci">
+    <b class="mono">${esc(p.siteler.join(", ") || "IIS")}</b>${u.length ? ` · ${u.slice(0, 4).map(x => `<b class="mono" style="font-size:13px">/${esc(x.ad)}</b>`).join(", ")}${u.length > 4 ? ` <span class="muted">+${u.length - 4}</span>` : ""}` : ` · <span class="muted">/ (kök)</span>`}
+    <div class="small muted">${fmt(p.istek)} istek · ${fmt(p.istemci)} istemci</div></span>`;
+}
+// (kullanılmıyor) Gelen portlar tablosu "IIS havuzu" kolonu (kullanıcı: "griddeki havuz kolonunda yazarsa daha rahat görürüm"):
 // 1) süreç PID'i → havuz (Carbon Black süreç başlangıcı), 2) w3wp PID'i → sunucudaki havuz listesi,
 // 3) ntoskrnl (HTTP.sys) portu → IIS logundaki uygulama adı ya da VIP / ERT adı ile eşleşen havuz
 function havuzHucre(r, t) {
