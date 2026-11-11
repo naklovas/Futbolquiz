@@ -13,7 +13,7 @@ record HttpSysPort(string Port, int Dakika, long Baglanti, List<HttpSysAday> Ada
 record HttpSysSonuc(string Ip, DateTimeOffset Baslangic, DateTimeOffset Bitis, int ToplamDakika, List<HttpSysPort> Portlar, string? Hata,
     List<HttpSysGiden>? Giden = null, List<string>? GenelAtilan = null);   // tanı: dışarı bağlanan iş exe'leri (dakika), ayıklanan genel süreçler
 record HttpSysGiden(string Exe, string Yol, int Dakika, long Baglanti);
-record HttpSysIisUyg(string Ad, long Istek);
+record HttpSysIisUyg(string Ad, long Istek, string? Ornek = null);   // Ornek: "GET /api/v1/…" tam yol örneği
 record HttpSysIis(string Port, List<string> Siteler, List<string> Hostlar, long Istek, int Istemci, List<HttpSysIisUyg> Uygulamalar, long Gurultu = 0);
 record HttpSysIisCagri(string Ip, string Port, List<string> Hostlar, List<string> Siteler, long Istek, List<HttpSysIisUyg> Uygulamalar, string? Ert);
 record HttpSysHavuz(string Ad, int? Pid, bool Bit32, DateTimeOffset? Baslangic, string? Guid, string? Link, string Bilgisayar, int Baslatma = 1, List<int>? Pidler = null);
@@ -309,10 +309,12 @@ static class HttpSysEslesme
             | where iis_sip="{ip}" OR iis_cip="{ip}"
             | eval yon=if(iis_sip="{ip}", "in", "out")
             | rex field=source "(?i)W3SVC(?<iis_site>\d+)"
-            | eval iis_app=lower(mvindex(split(iis_uri, "/"), 1)), iis_app=if(isnull(iis_app) OR iis_app="", "/", iis_app)
+            | eval iis_seg=split(lower(iis_uri), "/")
+            | eval iis_seg=mvfilter(NOT match(iis_seg, "^(|api|apis|v\d+(\.\d+)*|rest|services?|ws|odata|public|internal)$"))
+            | eval iis_app=mvindex(iis_seg, 0), iis_app=if(isnull(iis_app) OR iis_app="", "/", iis_app)
             | eval iis_site=coalesce(iis_site, "?"), host=coalesce(host, "?")
             | eventstats dc(iis_cip) as pist by yon iis_port
-            | stats count max(pist) as pist dc(iis_cip) as aist latest(_time) as son by yon iis_sip iis_port iis_site host iis_app
+            | stats count max(pist) as pist dc(iis_cip) as aist latest(_time) as son latest(iis_m) as ornekm latest(iis_uri) as ornek by yon iis_sip iis_port iis_site host iis_app
             """;
         List<HttpSysIis> l = [];
         string? hata = null;
@@ -324,18 +326,20 @@ static class HttpSysEslesme
             // bu IP'nin çağırdığı site / uygulamalar (aynı sorgu, yon=out)
             _iisCagri[ip] = res.Rows.Where(r => r.GetValueOrDefault("yon") == "out")
                 .Select(r => (Ip: r.GetValueOrDefault("iis_sip") ?? "", Port: r.GetValueOrDefault("iis_port") ?? "", Site: r.GetValueOrDefault("iis_site"),
-                    Host: r.GetValueOrDefault("host") ?? "", App: r.GetValueOrDefault("iis_app") ?? "/", N: long.TryParse(r.GetValueOrDefault("count"), out long n0) ? n0 : 0))
+                    Host: r.GetValueOrDefault("host") ?? "", App: r.GetValueOrDefault("iis_app") ?? "/", N: long.TryParse(r.GetValueOrDefault("count"), out long n0) ? n0 : 0,
+                    Ornek: $"{r.GetValueOrDefault("ornekm")} {r.GetValueOrDefault("ornek")}".Trim()))
                 .Where(x => x.Ip.Length > 0 && x.Port.Length > 0)
                 .GroupBy(x => (x.Ip, x.Port)).Select(g => new HttpSysIisCagri(g.Key.Ip, g.Key.Port,
                     g.Select(x => x.Host).Where(h => h.Length > 0).Distinct().ToList(),
                     g.Select(x => x.Site).Where(x => !string.IsNullOrEmpty(x) && x != "?").Distinct().Select(x => "W3SVC" + x).ToList(), g.Sum(x => x.N),
-                    g.Where(x => !IisTarama(x.App) && _iisAd.IsMatch(x.App)).GroupBy(x => x.App).Select(a => new HttpSysIisUyg(a.Key, a.Sum(x => x.N)))
+                    g.Where(x => !IisTarama(x.App) && _iisAd.IsMatch(x.App)).GroupBy(x => x.App).Select(a => new HttpSysIisUyg(a.Key, a.Sum(x => x.N), a.OrderByDescending(x => x.N).First().Ornek))
                         .OrderByDescending(a => a.Istek).Take(6).ToList(), null))
                 .OrderByDescending(x => x.Istek).Take(50).ToList();
             var satir = res.Rows.Where(r => r.GetValueOrDefault("yon") != "out").Select(r => (Port: r.GetValueOrDefault("iis_port") ?? "", Site: r.GetValueOrDefault("iis_site"), Host: r.GetValueOrDefault("host"),
                 App: r.GetValueOrDefault("iis_app") ?? "/", N: long.TryParse(r.GetValueOrDefault("count"), out long n) ? n : 0,
                 Ist: int.TryParse(r.GetValueOrDefault("pist"), out int pi) ? pi : 0,
-                AIst: int.TryParse(r.GetValueOrDefault("aist"), out int ai) ? ai : 0)).Where(x => x.Port.Length > 0).ToList();
+                AIst: int.TryParse(r.GetValueOrDefault("aist"), out int ai) ? ai : 0,
+                Ornek: $"{r.GetValueOrDefault("ornekm")} {r.GetValueOrDefault("ornek")}".Trim())).Where(x => x.Port.Length > 0).ToList();
             // TARAYICI GÜRÜLTÜSÜ (canlı: her sitede /cgi-bin, /cgi-sys, /s, /.%2e — Nessus vb. deneme istekleri): bilinen yollar + sunucunun portlarının
             // yarısından çoğunda görünen ve en çok 2 istemciden gelen adlar uygulama sayılmaz; başka uygulama varsa kök "/" da gösterilmez
             int portSay = satir.Select(x => x.Port).Distinct().Count();
@@ -346,7 +350,7 @@ static class HttpSysEslesme
                     g.Select(x => x.Site).Where(x => !string.IsNullOrEmpty(x) && x != "?").Distinct().Select(x => "W3SVC" + x).ToList(),
                     g.Select(x => x.Host).Where(x => !string.IsNullOrEmpty(x)).Select(x => x!).Distinct().ToList(),
                     g.Sum(x => x.N), g.Max(x => x.Ist),
-                    IisUyg(g.Select(x => (x.App, x.N, x.AIst)), Gurultu, out long gur), gur))
+                    IisUyg(g.Select(x => (x.App, x.N, x.AIst, x.Ornek)), Gurultu, out long gur), gur))
                 .OrderByDescending(x => x.Istek).ToList();
             if (res.Messages.Any(m => m.StartsWith("ERROR", StringComparison.OrdinalIgnoreCase) || m.Contains("sınırında") || m.Contains("cevap vermedi")))
                 hata = string.Join(" | ", res.Messages.Take(2));   // süre dolduysa önbelleğe girmez
@@ -362,7 +366,7 @@ static class HttpSysEslesme
 
     // Güvenlik tarayıcılarının denediği bilinen yollar (uygulama değil)
     static readonly System.Text.RegularExpressions.Regex _iisTarama = new(
-        @"^(cgi-bin|cgi-sys|cgi|s|scripts|_vti_bin|_vti_pvt|msadc|iisadmpwd|iissamples|printers|\.+|\.env|\.git|\.svn|\.ds_store|wp-.*|wordpress"
+        @"^(healthcheck|health|healthz|hc|ping|isalive|keepalive|alive|monitor|cgi-bin|cgi-sys|cgi|s|scripts|_vti_bin|_vti_pvt|msadc|iisadmpwd|iissamples|printers|\.+|\.env|\.git|\.svn|\.ds_store|wp-.*|wordpress"
         + @"|phpmyadmin|actuator|solr|jmx-console|web-console|invoker|server-status|server-info|robots\.txt|favicon\.ico|sitemap\.xml|crossdomain\.xml"
         + @"|clientaccesspolicy\.xml|trace\.axd|elmah\.axd|nessus.*|.*\.(php|cgi|pl|cfm|sh)|hnap1|boaform|dana-na|sslvpn|global-protect|\+cscoe\+|.*%.*)$",
         System.Text.RegularExpressions.RegexOptions.IgnoreCase);
@@ -370,9 +374,10 @@ static class HttpSysEslesme
     // Port başına uygulama listesi: tarama yolları, geçersiz karakterli adlar (canlı: OGNL "${#w=#context.get(…)}.action") ve portta başka uygulama
     // varken TEK istemciden gelen az istekli adlar (canlı: rastgele "/ixou7arxei1w", "/cpsrw_aukvsi") elenir; başka uygulama varsa "/" gösterilmez
     static readonly System.Text.RegularExpressions.Regex _iisAd = new(@"^[a-z0-9][a-z0-9._~\-]{0,63}$|^/$", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-    static List<HttpSysIisUyg> IisUyg(IEnumerable<(string App, long N, int AIst)> satir, Func<string, bool> gurultu, out long gur)
+    static List<HttpSysIisUyg> IisUyg(IEnumerable<(string App, long N, int AIst, string? Ornek)> satir, Func<string, bool> gurultu, out long gur)
     {
-        var a = satir.GroupBy(x => x.App).Select(g => (Ad: g.Key, N: g.Sum(x => x.N), Ist: g.Max(x => x.AIst))).ToList();
+        var a = satir.GroupBy(x => x.App).Select(g => (Ad: g.Key, N: g.Sum(x => x.N), Ist: g.Max(x => x.AIst),
+            Ornek: g.OrderByDescending(x => x.N).Select(x => x.Ornek).FirstOrDefault())).ToList();
         long toplam = a.Sum(x => x.N);
         var iyi = a.Where(x => !gurultu(x.Ad) && _iisAd.IsMatch(x.Ad)).OrderByDescending(x => x.N).ToList();
         if (iyi.Count > 1)
@@ -382,7 +387,7 @@ static class HttpSysEslesme
         }
         if (iyi.Any(x => x.Ad != "/")) iyi = iyi.Where(x => x.Ad != "/").ToList();
         gur = toplam - iyi.Sum(x => x.N) - (a.FirstOrDefault(x => x.Ad == "/").N is var k && !iyi.Any(x => x.Ad == "/") ? k : 0);
-        return iyi.Take(8).Select(x => new HttpSysIisUyg(x.Ad, x.N)).ToList();
+        return iyi.Take(8).Select(x => new HttpSysIisUyg(x.Ad, x.N, x.Ornek)).ToList();
     }
 
     public static string IisMetin(List<HttpSysIis> l, ICollection<string>? portlar = null)

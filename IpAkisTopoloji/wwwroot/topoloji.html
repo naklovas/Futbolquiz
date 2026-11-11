@@ -876,7 +876,7 @@ function listenTable(t) {
   const tlsOn = state.nessus?.ip === t.ip;
   return `<div class="small muted" style="margin:-4px 0 6px">${fmt(nExe)} farklı exe · ${fmt(list.filter(r => !r.out).length)} port satırı${list.some(r => r.out) ? ` · ${fmt(list.filter(r => r.out).length)} exe yalnız dışarı bağlanıyor` : ""}</div>
     <div class="tbl-wrap" style="max-height:300px"><table>
-      <thead><tr><th>Gelen port</th><th>Çalışan süreç (exe)</th><th title="Splunk IIS erişim logu (son 24 saat): bu porta gelen istekleri karşılayan IIS sitesi ve uygulamalar (URI'nin ilk parçası)">IIS (site · uygulama)</th><th class="num">Gelen bağlantı</th><th class="num">Karşı IP</th><th class="num">Giden bağlantı</th>${tlsOn ? `<th title="Portun KABUL ETTİĞİ SSL / TLS sürümleri (Nessus taramasının el sıkışması). İstemcilerin fiilen hangisiyle bağlandığı değil; kırmızı = eski sürüm hâlâ açık.">TLS (Nessus)</th>` : ""}<th>ERT'deki uygulama</th></tr></thead>
+      <thead><tr><th>Gelen port</th><th>Çalışan süreç (exe)</th><th title="Splunk IIS erişim logu (son 24 saat): bu porta gelen istekleri karşılayan IIS sitesi ve uygulamalar (URI'nin ilk anlamlı parçası; api / v1 / rest atlanır)">IIS (site · uygulama)</th><th class="num">Gelen bağlantı</th><th class="num">Karşı IP</th><th class="num">Giden bağlantı</th>${tlsOn ? `<th title="Portun KABUL ETTİĞİ SSL / TLS sürümleri (Nessus taramasının el sıkışması). İstemcilerin fiilen hangisiyle bağlandığı değil; kırmızı = eski sürüm hâlâ açık.">TLS (Nessus)</th>` : ""}<th>ERT'deki uygulama</th></tr></thead>
       <tbody>${list.map(r => { const apps = r.out ? [] : ertApps(r.port), infra = PROC_INFRA.has(r.port); return `<tr${infra ? ` class="muted" title="Altyapı portu"` : ""}>
         <td class="mono">${r.out ? `<span class="small muted">— yalnız giden</span>` : r.port ? esc(r.port) : `<span class="small muted" title="Carbon Black olayında yerel port yok">?</span>`}${infra ? ` <span class="small muted">altyapı</span>` : ""}</td>
         <td><b class="mono" title="${esc([r.yol, r.pids?.size ? "PID: " + [...r.pids].join(", ") : ""].filter(Boolean).join("\n"))}">${r.iisYalniz ? `<span class="small muted" title="Bu port IIS logunda var (son 24 saat) ama Carbon Black süreç penceresinde bağlantı görülmedi">IIS (Carbon Black'te bu aralıkta görülmedi)</span>` : esc(exeShort(r.name))}</b>${HTTPSYS.test(exeShort(r.name)) && !r.out
@@ -1591,7 +1591,7 @@ function iisCagriHtml(t) {
     ${h.cagri.map(c => `<tr><td class="mono">${esc(c.hostlar.join(", ") || "—")}</td>
       <td class="mono"><a href="?ip=${encodeURIComponent(c.ip)}" title="Bu IP'nin topolojisini aç">${esc(c.ip)}</a>:${esc(c.port)}</td>
       <td>${c.ert ? esc(c.ert) : `<span class="muted small">kayıt yok</span>`}</td>
-      <td><b class="mono">${esc(c.siteler.join(", ") || "IIS")}</b>${c.uygulamalar.filter(u => u.ad !== "/").length ? " · " + c.uygulamalar.filter(u => u.ad !== "/").slice(0, 4).map(u => `<span class="mono" title="${fmt(u.istek)} istek">/${esc(u.ad)}</span>`).join(", ") : ""}</td>
+      <td><b class="mono">${esc(c.siteler.join(", ") || "IIS")}</b>${c.uygulamalar.filter(u => u.ad !== "/").length ? " · " + c.uygulamalar.filter(u => u.ad !== "/").slice(0, 4).map(u => `<span class="mono" title="${fmt(u.istek)} istek${u.ornek ? " · örnek: " + esc(u.ornek.slice(0, 200)) : ""}">${esc(u.ad)}</span>`).join(", ") : ""}</td>
       <td class="num">${fmt(c.istek)}</td></tr>`).join("")}
     </tbody></table></div></details>`;
 }
@@ -1605,9 +1605,9 @@ function iisHucre(r) {
   // sorgu hata / süre sınırıyla döndüyse "—" değil nedeni (kullanıcı: Splunk'ta var, DeltaFlow'da boş)
   if (!p) return h.hata ? `<span class="small" style="color:var(--err)" title="${esc(h.hata)}">IIS sorgusu tamamlanamadı</span>` : `<span class="muted">—</span>`;
   const u = p.uygulamalar.filter(x => x.ad && x.ad !== "/");
-  return `<span title="IIS erişim logu (son 24 saat) · sunucu: ${esc(p.hostlar.join(", "))}\n${esc(p.uygulamalar.map(x => (x.ad === "/" ? "/ (kök)" : "/" + x.ad) + " — " + x.istek + " istek").join("\n"))}\nToplam ${p.istek} istek, ${p.istemci} istemci">
-    <b class="mono">${esc(p.siteler.join(", ") || "IIS")}</b>${u.length ? ` · ${u.slice(0, 4).map(x => `<b class="mono" style="font-size:13px">/${esc(x.ad)}</b>`).join(", ")}${u.length > 4 ? ` <span class="muted">+${u.length - 4}</span>` : ""}` : ` · <span class="muted">/ (kök)</span>`}
-    <div class="small muted">${fmt(p.istek)} istek · ${fmt(p.istemci)} istemci${p.gurultu ? ` · <span title="Güvenlik tarayıcısı denemeleri (/cgi-bin, /cgi-sys, /s, /.%2e …) — uygulama sayılmadı">${fmt(p.gurultu)} tarama isteği ayıklandı</span>` : ""}</div></span>`;
+  return `<span title="IIS erişim logu (son 24 saat) · sunucu: ${esc(p.hostlar.join(", "))}\n${esc(p.uygulamalar.map(x => (x.ad === "/" ? "/ (kök)" : x.ad) + " — " + x.istek + " istek" + (x.ornek ? "\n    örnek: " + x.ornek.slice(0, 160) : "")).join("\n"))}\nToplam ${p.istek} istek, ${p.istemci} istemci">
+    <b class="mono">${esc(p.siteler.join(", ") || "IIS")}</b>${u.length ? ` · ${u.slice(0, 4).map(x => `<b class="mono" style="font-size:13px" title="${esc(x.ornek ? "örnek: " + x.ornek.slice(0, 200) : "")}">${esc(x.ad)}</b>`).join(", ")}${u.length > 4 ? ` <span class="muted">+${u.length - 4}</span>` : ""}` : ` · <span class="muted">/ (kök)</span>`}
+    <div class="small muted">${fmt(p.istek)} istek · ${fmt(p.istemci)} istemci${p.gurultu ? ` · <span title="Güvenlik tarayıcısı denemeleri (/cgi-bin, /cgi-sys, /s, /.%2e …) ve load balancer sağlık kontrolleri (/healthcheck …) — uygulama sayılmadı">${fmt(p.gurultu)} tarama / sağlık kontrolü isteği ayıklandı</span>` : ""}</div></span>`;
 }
 // (kullanılmıyor) Gelen portlar tablosu "IIS havuzu" kolonu (kullanıcı: "griddeki havuz kolonunda yazarsa daha rahat görürüm"):
 // 1) süreç PID'i → havuz (Carbon Black süreç başlangıcı), 2) w3wp PID'i → sunucudaki havuz listesi,
