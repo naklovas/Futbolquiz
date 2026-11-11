@@ -327,7 +327,11 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
   `SurecMetin`'de "Sunucudaki havuzlar" satırı. Arayüz: Gelen portlar tablosunun üstünde "IIS uygulama havuzları" kutusu (`havuzOzet`: havuz, PID, 32 bit, son
   başlangıç, ad eşleşmesi, CB ↗) ve ntoskrnl satırında "→ IIS havuzu (ad eşleşmesi): X" (`havuzEsleri`: havuz adı ↔ VIP havuz adı (memberOf.pool) / ERT
   APPNAME / WEBSITE / SERVICENAME; `hvKelime` camelCase böler + bitişik ikililer (Bank Soft ~ Banksoft), ≥4 harf, genel kelimeler hariç; puan = ortak kelime
-  (tam ad içerme 10), yalnız en yüksek puanlılar). Örnek: BankSoftDebitCardWS ↔ /Common/BS_DebitCard_Grp → port 80.
+  (tam ad içerme 10), yalnız en yüksek puanlılar). Örnek: BankSoftDebitCardWS ↔ /Common/BS_DebitCard_Grp → port 80. Tabloda "IIS havuzu" kolonu (`havuzHucre`); kutu boşken nedeni (bilgi: bilgisayar,
+  w3wp başlangıç sayısı / eski DLL 404 / hata). Kullanıcı: Splunk'ta IP'li alt sorgu (head 1 computer_name) 3 satır, hostname'li tam liste getirdi + hostname
+  araması yavaş → `BilgisayarlarAsync` IP'nin olaylarında `stats count by computer_name` (en sık ad; diğerleri bilgide), procstart aramasında `TERM(pc)`
+  (indeks; computer_name alan araması yavaş). KÜNYE: IP kartında "Sunucu adı: <ERT UNIXNAME> (ERT) · <CB computer_name> (Carbon Black)" (`hostAdiHtml` /
+  `hostAdiIc`, `/api/surec/havuz` → `bilgisayarlar`; ERT ile aynıysa "✓ Carbon Black aynı").
 - **"Bu sunucuda hangi uygulama çalışıyor?"** (IP kartı, Gelen portlar tablosunun üstündeki düğme; `SurecAi` Surec.cs, `POST /api/surec/ai`):
   arayüzdeki /api/surec sonucu exe başına toplanıp (PID'ler, portlar, giden, bağlanan / bağlandığı uygulamalar) AI'a gider (yeniden
   sorgulanmaz) + ERT kayıtları + segment + genel bilgiler dosyası. Kesin genel süreçler kodda ayıklanır (`GenelAd` / `GenelYol`: svchost,

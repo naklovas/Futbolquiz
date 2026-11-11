@@ -700,6 +700,25 @@ function renderStatus(d) {
 let tagMap = null;
 fetch("api/etiketler").then(r => r.ok ? r.json() : null).then(b => { if (b?.ipler) tagMap = b.ipler; }).catch(() => {});
 
+// Künyede sunucu adı (kullanıcı: "sunucunun hostname bilgisini künyede verelim"): ERT UNIXNAME + Carbon Black computer_name (/api/surec/havuz ile gelir)
+let hostT = null;
+function hostAdiHtml(t) {
+  hostT = { ip: t.ip, ert: [...new Set((t.apps ?? []).map(a => a.unixName).filter(Boolean))] };
+  return hostAdiIc();
+}
+function hostAdiIc() {
+  if (!hostT) return "";
+  const h = state.havuz?.ip === hostT.ip ? state.havuz : null;
+  const cb = h?.bilgisayarlar ?? [];
+  const ayni = (a, b) => String(a).toLowerCase().split(".")[0] === String(b).toLowerCase().split(".")[0];
+  const cbFark = cb.filter(c => !hostT.ert.some(e => ayni(e, c)));
+  const parca = [];
+  if (hostT.ert.length) parca.push(`<b class="mono">${esc(hostT.ert.join(", "))}</b> <span class="muted">(ERT)</span>`);
+  if (cbFark.length) parca.push(`<b class="mono">${esc(cbFark[0])}</b> <span class="muted" title="Carbon Black sensörünün bildirdiği bilgisayar adı${cbFark.length > 1 ? "\nBu IP'de görülen diğer adlar: " + esc(cbFark.slice(1).join(", ")) : ""}">(Carbon Black${cbFark.length > 1 ? ` +${cbFark.length - 1}` : ""})</span>`);
+  else if (cb.length && hostT.ert.length) parca.push(`<span class="muted small" title="Carbon Black sensörünün bildirdiği ad ERT ile aynı">✓ Carbon Black aynı</span>`);
+  if (!parca.length) return h?.status === "loading" ? `<div class="small muted">Sunucu adı aranıyor…</div>` : "";
+  return `<div class="small" style="margin:2px 0">Sunucu adı: ${parca.join(" · ")}</div>`;
+}
 function renderTarget(d) {
   const t = d.target, s = t.segment;
   const segDl = s ? `<dl>
@@ -718,7 +737,7 @@ function renderTarget(d) {
   const apps = `<div id="tgtApps">${targetApps(t)}</div>`;
 
   return `<div class="target-grid">
-      <div><div class="bigip">${esc(t.ip)}</div><div class="tagrow">${(tagMap?.[t.ip] ?? []).map(x => tagChip(x, t.ip, true)).join("")}<button type="button" class="eg-add" data-tagip="${esc(t.ip)}" title="Bu sunucuya etiket ekle (ERT TAG kolonuna yazılır)">+ Etiket</button></div><div id="fizKonum">${globalThis.fizKonumHtml?.(t.ip) ?? ""}</div>${segDl}</div>
+      <div><div class="bigip">${esc(t.ip)}</div><div class="tagrow">${(tagMap?.[t.ip] ?? []).map(x => tagChip(x, t.ip, true)).join("")}<button type="button" class="eg-add" data-tagip="${esc(t.ip)}" title="Bu sunucuya etiket ekle (ERT TAG kolonuna yazılır)">+ Etiket</button></div><div id="hostAdi">${hostAdiHtml(t)}</div><div id="fizKonum">${globalThis.fizKonumHtml?.(t.ip) ?? ""}</div>${segDl}</div>
       <div>
         <div class="kpis" style="margin-bottom:12px">
           <div class="kpi"><b style="color:var(--in)">${fmt(inPeers)}</b><span>gelen IP · ${fmt(inSegs)} segment</span></div>
@@ -1476,7 +1495,9 @@ async function loadHavuz(ip) {
     if (state.havuz?.ip !== ip) return;
     const byPid = {};
     for (const x of b.surecler ?? []) if (x.pid != null) (byPid[x.exe.toLowerCase() + "|" + x.pid] = x);
-    state.havuz = { ip, status: "ok", byPid, havuzlar: b.havuzlar ?? [], bilgi: b.havuzBilgi, hata: b.hata };
+    state.havuz = { ip, status: "ok", byPid, havuzlar: b.havuzlar ?? [], bilgi: b.havuzBilgi, bilgisayarlar: b.bilgisayarlar ?? [], hata: b.hata };
+    const he = document.getElementById("hostAdi");
+    if (he) he.innerHTML = hostAdiIc();
   } catch (e) { if (e.name !== "AbortError") state.havuz = { ip, status: "hata", hata: e.message }; }
   renderProc();
 }

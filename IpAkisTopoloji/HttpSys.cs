@@ -214,26 +214,36 @@ static class HttpSysEslesme
     // son HttpSys:SurecGun günde başlamış w3wp'ler. procstart'ta IP yok → önce bu IP'nin computer_name'i (netconn), sonra o bilgisayarın w3wp başlangıçları.
     public static async Task<List<HttpSysHavuz>> HavuzlarAsync(string ip, IConfiguration cfg, HttpClient http, CancellationToken ct) =>
         (await HavuzlarBilgiAsync(ip, cfg, http, ct)).Liste;
-    // Bilgi: boş dönerse nedeni (arayüzde gösterilir)
-    public static async Task<(List<HttpSysHavuz> Liste, string Bilgi)> HavuzlarBilgiAsync(string ip, IConfiguration cfg, HttpClient http, CancellationToken ct)
+    // IP → Carbon Black bilgisayar adı (procstart'ta IP yok). Tek olaydan değil, en sık geçen ad (kullanıcı: IP'li alt sorgu 3 satır, hostname'li tam liste getirdi)
+    public static async Task<List<(string Ad, long Sayi)>> BilgisayarlarAsync(string ip, IConfiguration cfg, HttpClient http, CancellationToken ct)
     {
         var s = cfg.GetSection("Splunk");
         string index = s["Index"] ?? "carbonblack", sourcetype = s["Sourcetype"] ?? "bit9:carbonblack:json";
         var end = DateTimeOffset.Now;
-        string? pc = null;
         foreach (var saat in new[] { 24, 24 * 7 })
         {
             var r0 = await SplunkService.ExportAsync($"""
                 search index={index} sourcetype="{sourcetype}" TERM({ip}) local_ip="{ip}" computer_name=*
-                | head 1 | table computer_name
+                | stats count by computer_name | sort - count
                 """, new LookupQuery(ip, end.AddHours(-saat), end), cfg, http, ct, "Splunk");
-            pc = r0.Rows.Select(r => r.GetValueOrDefault("computer_name")).FirstOrDefault(v => !string.IsNullOrWhiteSpace(v))?.Trim();
-            if (pc != null) break;
+            var l = r0.Rows.Select(r => (Ad: r.GetValueOrDefault("computer_name")?.Trim() ?? "", Sayi: long.TryParse(r.GetValueOrDefault("count"), out long n) ? n : 0))
+                .Where(x => x.Ad.Length > 0).ToList();
+            if (l.Count > 0) return l;
         }
-        if (pc == null || pc.Contains('"')) return ([], "Carbon Black olaylarında bu IP'nin bilgisayar adı (computer_name) bulunamadı (son 7 gün)");
+        return [];
+    }
+    // Bilgi: boş dönerse nedeni (arayüzde gösterilir)
+    public static async Task<(List<HttpSysHavuz> Liste, string Bilgi, List<(string Ad, long Sayi)> Bilgisayarlar)> HavuzlarBilgiAsync(string ip, IConfiguration cfg, HttpClient http, CancellationToken ct)
+    {
+        var s = cfg.GetSection("Splunk");
+        string index = s["Index"] ?? "carbonblack", sourcetype = s["Sourcetype"] ?? "bit9:carbonblack:json";
+        var end = DateTimeOffset.Now;
+        var pcs = await BilgisayarlarAsync(ip, cfg, http, ct);
+        string? pc = pcs.FirstOrDefault().Ad;
+        if (string.IsNullOrEmpty(pc) || pc.Contains('"') || pc.Contains(' ')) return ([], "Carbon Black olaylarında bu IP'nin bilgisayar adı (computer_name) bulunamadı (son 7 gün)", pcs);
         int gun = cfg.GetValue("HttpSys:SurecGun", 30);
         var res = await SplunkService.ExportAsync($"""
-            search index={index} sourcetype="{sourcetype}" type="ingress.event.procstart" computer_name="{pc}"
+            search index={index} sourcetype="{sourcetype}" TERM({pc}) type="ingress.event.procstart" computer_name="{pc}"
             | where like(lower(process_path), "%w3wp.exe")
             | eval cmd=coalesce(command_line, cmdline, process_cmdline, "")
             | stats latest(cmd) as cmd latest(username) as un latest(pid) as pid latest(process_path) as yol latest(_time) as t latest(link_process) as link by process_guid
@@ -253,7 +263,8 @@ static class HttpSysEslesme
         var sonuc = l.GroupBy(x => x.Ad, StringComparer.OrdinalIgnoreCase).Select(g => g.OrderByDescending(x => x.Baslangic).First() with { Baslatma = g.Count() })
             .OrderBy(x => x.Ad, StringComparer.OrdinalIgnoreCase).ToList();
         return (sonuc, $"bilgisayar {pc}: son {gun} günde {res.Rows.Count} w3wp başlangıcı" + (adsiz > 0 ? $" ({adsiz} tanesinde havuz adı okunamadı)" : "")
-            + (res.Messages.Count > 0 ? " · " + string.Join(" | ", res.Messages.Take(2)) : ""));
+            + (pcs.Count > 1 ? $" · bu IP'de başka bilgisayar adları da görüldü: {string.Join(", ", pcs.Skip(1).Take(3).Select(x => $"{x.Ad} ({x.Sayi})"))}" : "")
+            + (res.Messages.Count > 0 ? " · " + string.Join(" | ", res.Messages.Take(2)) : ""), pcs);
     }
 
     // w3wp.exe -ap "HavuzAdi" -v "v4.0" … → HavuzAdi
