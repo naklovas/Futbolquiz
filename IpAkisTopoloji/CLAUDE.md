@@ -352,7 +352,7 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
   havuz uçlarındaki tüm Splunk çağrıları `HttpSys:HavuzSureSaniye`=20; procstart sorguları stats YERİNE `table` (akış halinde, en yeni önce; guid başına
   ilk satır C#'ta); kısmi sonuç önbelleğe girmez; pencere yeniden `SurecSaat`=30. Sahte yavaş Splunk'la: 4 sn sınırda 4 havuzla döndü. SONUÇ: kullanıcı "havuz bilgisi olayı fiyasko" → IP kartında CB havuz araması
   KALDIRILDI (loadHavuz / havuzOzet / havuzNot / havuzHucre çağrılmıyor, kod duruyor; `HttpSys:HavuzEksikte` varsayılanı false). Yerine (kullanıcı: "IIS'ten getir,
-  o IP portun karşısında ne yazıyorsa"): `GET /api/surec/iis?ip=` (`IisAsync`, `IisSureSaniye`=30 süre sınırı, süre dolarsa önbelleğe girmez) → `loadIis`
+  o IP portun karşısında ne yazıyorsa"): `GET /api/surec/iis?ip=` (`IisAsync`, `IisSureSaniye`=60 süre sınırı, süre dolarsa önbelleğe girmez) → `loadIis`
   (proc yüklenince) → tabloda "IIS (site · uygulama)" kolonu (`iisHucre`: W3SVC n · /uygulamalar, istek / istemci, ipucunda uygulama başına istek);
   künyede sunucu adı ERT + IIS log host'u. TARAYICI GÜRÜLTÜSÜ (kullanıcı: "saçma havuz isimleri var": her sitede /cgi-bin, /cgi-sys, /s, /.%2e):
   `IisTarama` bilinen tarama yolları (cgi-bin, cgi-sys, s, scripts, _vti_*, .env/.git, wp-*, phpmyadmin, actuator, *.php/cgi/pl, % içerenler…) + sunucunun portlarının

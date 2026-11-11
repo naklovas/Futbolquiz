@@ -319,7 +319,7 @@ static class HttpSysEslesme
         try
         {
             var res = await SplunkService.ExportAsync(spl, new LookupQuery(ip, end.AddHours(-cfg.GetValue("HttpSys:IisSaat", 24.0)), end), cfg, http, ct, "Splunk",
-                TimeSpan.FromSeconds(Math.Clamp(cfg.GetValue("HttpSys:IisSureSaniye", 30.0), 5, 300)));   // bitmezse sayfa dönüp durmasın
+                TimeSpan.FromSeconds(Math.Clamp(cfg.GetValue("HttpSys:IisSureSaniye", 60.0), 5, 300)));   // bitmezse sayfa dönüp durmasın
             // ÇAĞIRDIĞI SERVİSLER (kullanıcı: "IP ile aratınca bir sürü log geliyor" — o loglarda bu IP istemci, c-ip): başka sunucuların IIS loglarında
             // bu IP'nin çağırdığı site / uygulamalar (aynı sorgu, yon=out)
             _iisCagri[ip] = res.Rows.Where(r => r.GetValueOrDefault("yon") == "out")

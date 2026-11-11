@@ -1602,7 +1602,8 @@ function iisHucre(r) {
   if (h.status === "eski") return `<span class="muted" title="Sunucudaki DLL /api/surec/iis içermiyor">DLL eski</span>`;
   if (h.status !== "ok") return `<span class="muted" title="${esc(h.hata || "")}">alınamadı</span>`;
   const p = h.map[String(r.port)];
-  if (!p) return `<span class="muted">—</span>`;
+  // sorgu hata / süre sınırıyla döndüyse "—" değil nedeni (kullanıcı: Splunk'ta var, DeltaFlow'da boş)
+  if (!p) return h.hata ? `<span class="small" style="color:var(--err)" title="${esc(h.hata)}">IIS sorgusu tamamlanamadı</span>` : `<span class="muted">—</span>`;
   const u = p.uygulamalar.filter(x => x.ad && x.ad !== "/");
   return `<span title="IIS erişim logu (son 24 saat) · sunucu: ${esc(p.hostlar.join(", "))}\n${esc(p.uygulamalar.map(x => (x.ad === "/" ? "/ (kök)" : "/" + x.ad) + " — " + x.istek + " istek").join("\n"))}\nToplam ${p.istek} istek, ${p.istemci} istemci">
     <b class="mono">${esc(p.siteler.join(", ") || "IIS")}</b>${u.length ? ` · ${u.slice(0, 4).map(x => `<b class="mono" style="font-size:13px">/${esc(x.ad)}</b>`).join(", ")}${u.length > 4 ? ` <span class="muted">+${u.length - 4}</span>` : ""}` : ` · <span class="muted">/ (kök)</span>`}
