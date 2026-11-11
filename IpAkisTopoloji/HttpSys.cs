@@ -331,11 +331,7 @@ static class HttpSysEslesme
                     g.Select(x => x.Site).Where(x => !string.IsNullOrEmpty(x)).Distinct().Select(x => "W3SVC" + x).ToList(),
                     g.Select(x => x.Host).Where(x => !string.IsNullOrEmpty(x)).Select(x => x!).Distinct().ToList(),
                     g.Sum(x => x.N), g.Max(x => x.Ist),
-                    g.GroupBy(x => x.App).Where(a => !Gurultu(a.Key)).Select(a => (Uygulama: a.Key, Istek: a.Sum(x => x.N)))
-                        .OrderByDescending(a => a.Istek).ToList() is var ul
-                        ? (ul.Any(a => a.Uygulama != "/") ? ul.Where(a => a.Uygulama != "/") : ul).Take(8).Select(a => new HttpSysIisUyg(a.Uygulama, a.Istek)).ToList()
-                        : [],
-                    g.Where(x => Gurultu(x.App)).Sum(x => x.N)))
+                    IisUyg(g.Select(x => (x.App, x.N, x.AIst)), Gurultu, out long gur), gur))
                 .OrderByDescending(x => x.Istek).ToList();
             if (res.Messages.Any(m => m.StartsWith("ERROR", StringComparison.OrdinalIgnoreCase) || m.Contains("sınırında") || m.Contains("cevap vermedi")))
                 hata = string.Join(" | ", res.Messages.Take(2));   // süre dolduysa önbelleğe girmez
@@ -352,6 +348,23 @@ static class HttpSysEslesme
         + @"|clientaccesspolicy\.xml|trace\.axd|elmah\.axd|nessus.*|.*\.(php|cgi|pl|cfm|sh)|hnap1|boaform|dana-na|sslvpn|global-protect|\+cscoe\+|.*%.*)$",
         System.Text.RegularExpressions.RegexOptions.IgnoreCase);
     public static bool IisTarama(string a) => _iisTarama.IsMatch(a.Trim());
+    // Port başına uygulama listesi: tarama yolları, geçersiz karakterli adlar (canlı: OGNL "${#w=#context.get(…)}.action") ve portta başka uygulama
+    // varken TEK istemciden gelen az istekli adlar (canlı: rastgele "/ixou7arxei1w", "/cpsrw_aukvsi") elenir; başka uygulama varsa "/" gösterilmez
+    static readonly System.Text.RegularExpressions.Regex _iisAd = new(@"^[a-z0-9][a-z0-9._~\-]{0,63}$|^/$", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+    static List<HttpSysIisUyg> IisUyg(IEnumerable<(string App, long N, int AIst)> satir, Func<string, bool> gurultu, out long gur)
+    {
+        var a = satir.GroupBy(x => x.App).Select(g => (Ad: g.Key, N: g.Sum(x => x.N), Ist: g.Max(x => x.AIst))).ToList();
+        long toplam = a.Sum(x => x.N);
+        var iyi = a.Where(x => !gurultu(x.Ad) && _iisAd.IsMatch(x.Ad)).OrderByDescending(x => x.N).ToList();
+        if (iyi.Count > 1)
+        {
+            var enCok = iyi[0].Ad;
+            iyi = iyi.Where(x => x.Ad == enCok || !(x.Ist <= 1 && x.N <= Math.Max(20, toplam * 0.03))).ToList();
+        }
+        if (iyi.Any(x => x.Ad != "/")) iyi = iyi.Where(x => x.Ad != "/").ToList();
+        gur = toplam - iyi.Sum(x => x.N) - (a.FirstOrDefault(x => x.Ad == "/").N is var k && !iyi.Any(x => x.Ad == "/") ? k : 0);
+        return iyi.Take(8).Select(x => new HttpSysIisUyg(x.Ad, x.N)).ToList();
+    }
 
     public static string IisMetin(List<HttpSysIis> l, ICollection<string>? portlar = null)
     {
