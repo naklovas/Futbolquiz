@@ -315,7 +315,7 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
   Protocol 6 (TCP) port 0 olayları; tanıda port 0 satırları "0/<protokol>". CB netconn alanları (canlı): Protocol, direction, local_ip/port, remote_ip/port,
   domain (karşı tarafın DNS adı, ör. …vipws.zb), pid, process_guid, process_path, md5/sha256, link_process (CB konsolunda süreç sayfası), computer_name,
   sensor_id, timestamp, type=ingress.event.netconn. cmdline / parent YOK (netconn'da). IIS HAVUZLARI (yapıldı; Splunk'ta ingress.event.procstart da var): `HttpSysEslesme.SureclerAsync` — (1) netconn'dan process_guid başına pid, yol,
-  values(domain), link_process (genel / çekirdek hariç, w3wp dahil); (2) bu guid'lerin procstart olayı (40'ar guid, son `HttpSys:SurecGun`=30 gün):
+  values(domain), link_process (genel / çekirdek hariç, w3wp dahil); (2) bu guid'lerin procstart olayı (40'ar guid, son `HttpSys:SurecGun`=7 gün):
   coalesce(cmdline, command_line, process_cmdline), parent_guid / parent_path / parent_pid → `HavuzAdi` (w3wp `-ap "X"`), üstü w3wp olan alt sürece
   `UstHavuz`. `GET /api/surec/havuz?ip=&start=&end=` (IP kartı süreç penceresi); Gelen portlar tablosunda exe altında "havuz X / w3wp havuzu X başlatmış ·
   bağlandığı: … · CB ↗" (`loadHavuz` / `havuzNot`, anahtar exe|pid). ERT eksiklerinde w3wp / \inetpub\ varsa `SurecMetin` kanıta ("IIS UYGULAMA HAVUZLARI",
@@ -331,7 +331,9 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
   w3wp başlangıç sayısı / eski DLL 404 / hata). Kullanıcı: Splunk'ta IP'li alt sorgu (head 1 computer_name) 3 satır, hostname'li tam liste getirdi + hostname
   araması yavaş → `BilgisayarlarAsync` IP'nin olaylarında `stats count by computer_name` (en sık ad; diğerleri bilgide), procstart aramasında `TERM(pc)`
   (indeks; computer_name alan araması yavaş). KÜNYE: IP kartında "Sunucu adı: <ERT UNIXNAME> (ERT) · <CB computer_name> (Carbon Black)" (`hostAdiHtml` /
-  `hostAdiIc`, `/api/surec/havuz` → `bilgisayarlar`; ERT ile aynıysa "✓ Carbon Black aynı").
+  `hostAdiIc`, `/api/surec/havuz` → `bilgisayarlar`; ERT ile aynıysa "✓ Carbon Black aynı"). HIZ (kullanıcı: "çok uzun sürdü"): SurecGun varsayılanı 7 (havuzlar ~29 saatte bir
+  yeniden başlar), guid aramasında `TERM(guid)`, havuz aramasında `TERM(pc) procstart w3wp` anahtar kelimeleri; bellekte önbellek: IP → bilgisayar 12 saat,
+  bilgisayar → havuzlar `HttpSys:HavuzOnbellekSaat`=6 saat (bilgide "önbellekten").
 - **"Bu sunucuda hangi uygulama çalışıyor?"** (IP kartı, Gelen portlar tablosunun üstündeki düğme; `SurecAi` Surec.cs, `POST /api/surec/ai`):
   arayüzdeki /api/surec sonucu exe başına toplanıp (PID'ler, portlar, giden, bağlanan / bağlandığı uygulamalar) AI'a gider (yeniden
   sorgulanmaz) + ERT kayıtları + segment + genel bilgiler dosyası. Kesin genel süreçler kodda ayıklanır (`GenelAd` / `GenelYol`: svchost,

@@ -140,7 +140,7 @@ static class HttpSysEslesme
     // IIS HAVUZLARI (kullanıcı: "w3wp.exe benim işimi görmüyor"): CB netconn olaylarında cmdline / parent yok ama process_guid, domain ve link_process var;
     // ingress.event.procstart olayında cmdline (w3wp -ap "HavuzAdi") ve üst süreç (parent_guid / parent_path / parent_pid) bulunur.
     // 1) Bu sunucunun netconn olaylarından süreç başına (process_guid): pid, yol, gittiği domain'ler, CB bağlantısı
-    // 2) Bu guid'lerin procstart olayı (son HttpSys:SurecGun = 30 gün): komut satırı, üst süreç → havuz adı; alt süreç üstü w3wp ise o havuz
+    // 2) Bu guid'lerin procstart olayı (son HttpSys:SurecGun = 7 gün; havuzlar ~29 saatte bir yeniden başlar): komut satırı, üst süreç → havuz adı; alt süreç üstü w3wp ise o havuz
     public static async Task<List<HttpSysSurec>> SureclerAsync(string ip, DateTimeOffset start, DateTimeOffset end, IConfiguration cfg, HttpClient http, CancellationToken ct)
     {
         var s = cfg.GetSection("Splunk");
@@ -161,7 +161,7 @@ static class HttpSysEslesme
             liste[g] = new(g, int.TryParse(V("pid"), out int pid) ? pid : null, Ad(yol), yol, dom, V("link"), long.TryParse(V("count"), out long n) ? n : 0);
         }
         if (liste.Count == 0) return [];
-        int gun = cfg.GetValue("HttpSys:SurecGun", 30);
+        int gun = cfg.GetValue("HttpSys:SurecGun", 7);
         // Canlı alanlar: command_line, username ("IIS APPPOOL\\Havuz"), parent_path, parent_pid; parent_guid SAYISAL (guid biçiminde değil) →
         // üst sürecin guid'i link_parent içinden (…/#analyze/<guid>/<segment>)
         async Task<Dictionary<string, (string? Cmd, string? Kullanici, string? UstGuid, string? UstYol, int? UstPid)>> ProcAsync(IEnumerable<string> guidler)
@@ -170,7 +170,7 @@ static class HttpSysEslesme
             foreach (var parca in guidler.Distinct(StringComparer.OrdinalIgnoreCase).Chunk(40))
             {
                 string splB = $"""
-                    search index={index} sourcetype="{sourcetype}" type="ingress.event.procstart" ({string.Join(" OR ", parca.Select(g => $"process_guid=\"{g}\""))})
+                    search index={index} sourcetype="{sourcetype}" type="ingress.event.procstart" ({string.Join(" OR ", parca.Select(g => $"TERM({g})"))}) ({string.Join(" OR ", parca.Select(g => $"process_guid=\"{g}\""))})
                     | eval cmd=coalesce(command_line, cmdline, process_cmdline, "")
                     | stats latest(cmd) as cmd latest(username) as un latest(link_parent) as lp latest(parent_path) as uy latest(parent_pid) as up by process_guid
                     """;
@@ -215,7 +215,16 @@ static class HttpSysEslesme
     public static async Task<List<HttpSysHavuz>> HavuzlarAsync(string ip, IConfiguration cfg, HttpClient http, CancellationToken ct) =>
         (await HavuzlarBilgiAsync(ip, cfg, http, ct)).Liste;
     // IP → Carbon Black bilgisayar adı (procstart'ta IP yok). Tek olaydan değil, en sık geçen ad (kullanıcı: IP'li alt sorgu 3 satır, hostname'li tam liste getirdi)
+    static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (DateTime At, List<(string Ad, long Sayi)> L)> _pcOnbellek = new();
+    static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (DateTime At, List<HttpSysHavuz> L, string Bilgi)> _hvOnbellek = new(StringComparer.OrdinalIgnoreCase);
     public static async Task<List<(string Ad, long Sayi)>> BilgisayarlarAsync(string ip, IConfiguration cfg, HttpClient http, CancellationToken ct)
+    {
+        if (_pcOnbellek.TryGetValue(ip, out var c) && DateTime.UtcNow - c.At < TimeSpan.FromHours(12) && c.L.Count > 0) return c.L;
+        var l = await BilgisayarlarAsync0(ip, cfg, http, ct);
+        _pcOnbellek[ip] = (DateTime.UtcNow, l);
+        return l;
+    }
+    static async Task<List<(string Ad, long Sayi)>> BilgisayarlarAsync0(string ip, IConfiguration cfg, HttpClient http, CancellationToken ct)
     {
         var s = cfg.GetSection("Splunk");
         string index = s["Index"] ?? "carbonblack", sourcetype = s["Sourcetype"] ?? "bit9:carbonblack:json";
@@ -241,9 +250,12 @@ static class HttpSysEslesme
         var pcs = await BilgisayarlarAsync(ip, cfg, http, ct);
         string? pc = pcs.FirstOrDefault().Ad;
         if (string.IsNullOrEmpty(pc) || pc.Contains('"') || pc.Contains(' ')) return ([], "Carbon Black olaylarında bu IP'nin bilgisayar adı (computer_name) bulunamadı (son 7 gün)", pcs);
-        int gun = cfg.GetValue("HttpSys:SurecGun", 30);
+        int gun = cfg.GetValue("HttpSys:SurecGun", 7);
+        // havuzlar seyrek değişir: bilgisayar başına HttpSys:HavuzOnbellekSaat (6) saat bellekte
+        if (_hvOnbellek.TryGetValue(pc, out var hc) && DateTime.UtcNow - hc.At < TimeSpan.FromHours(cfg.GetValue("HttpSys:HavuzOnbellekSaat", 6.0)))
+            return (hc.L, hc.Bilgi + $" · önbellekten ({hc.At.ToLocalTime():HH:mm})", pcs);
         var res = await SplunkService.ExportAsync($"""
-            search index={index} sourcetype="{sourcetype}" TERM({pc}) type="ingress.event.procstart" computer_name="{pc}"
+            search index={index} sourcetype="{sourcetype}" TERM({pc}) procstart w3wp type="ingress.event.procstart" computer_name="{pc}"
             | where like(lower(process_path), "%w3wp.exe")
             | eval cmd=coalesce(command_line, cmdline, process_cmdline, "")
             | stats latest(cmd) as cmd latest(username) as un latest(pid) as pid latest(process_path) as yol latest(_time) as t latest(link_process) as link by process_guid
@@ -262,9 +274,11 @@ static class HttpSysEslesme
         // havuz başına en son başlayan süreç (eski PID'ler recycle ile kapanmıştır)
         var sonuc = l.GroupBy(x => x.Ad, StringComparer.OrdinalIgnoreCase).Select(g => g.OrderByDescending(x => x.Baslangic).First() with { Baslatma = g.Count() })
             .OrderBy(x => x.Ad, StringComparer.OrdinalIgnoreCase).ToList();
-        return (sonuc, $"bilgisayar {pc}: son {gun} günde {res.Rows.Count} w3wp başlangıcı" + (adsiz > 0 ? $" ({adsiz} tanesinde havuz adı okunamadı)" : "")
+        string bilgi = $"bilgisayar {pc}: son {gun} günde {res.Rows.Count} w3wp başlangıcı" + (adsiz > 0 ? $" ({adsiz} tanesinde havuz adı okunamadı)" : "")
             + (pcs.Count > 1 ? $" · bu IP'de başka bilgisayar adları da görüldü: {string.Join(", ", pcs.Skip(1).Take(3).Select(x => $"{x.Ad} ({x.Sayi})"))}" : "")
-            + (res.Messages.Count > 0 ? " · " + string.Join(" | ", res.Messages.Take(2)) : ""), pcs);
+            + (res.Messages.Count > 0 ? " · " + string.Join(" | ", res.Messages.Take(2)) : "");
+        if (res.Messages.All(m => !m.StartsWith("ERROR", StringComparison.OrdinalIgnoreCase))) _hvOnbellek[pc] = (DateTime.UtcNow, sonuc, bilgi);
+        return (sonuc, bilgi, pcs);
     }
 
     // w3wp.exe -ap "HavuzAdi" -v "v4.0" … → HavuzAdi
