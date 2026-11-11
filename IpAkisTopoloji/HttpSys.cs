@@ -310,6 +310,7 @@ static class HttpSysEslesme
             | eval yon=if(iis_sip="{ip}", "in", "out")
             | rex field=source "(?i)W3SVC(?<iis_site>\d+)"
             | eval iis_app=lower(mvindex(split(iis_uri, "/"), 1)), iis_app=if(isnull(iis_app) OR iis_app="", "/", iis_app)
+            | eval iis_site=coalesce(iis_site, "?"), host=coalesce(host, "?")
             | eventstats dc(iis_cip) as pist by yon iis_port
             | stats count max(pist) as pist dc(iis_cip) as aist latest(_time) as son by yon iis_sip iis_port iis_site host iis_app
             """;
@@ -327,7 +328,7 @@ static class HttpSysEslesme
                 .Where(x => x.Ip.Length > 0 && x.Port.Length > 0)
                 .GroupBy(x => (x.Ip, x.Port)).Select(g => new HttpSysIisCagri(g.Key.Ip, g.Key.Port,
                     g.Select(x => x.Host).Where(h => h.Length > 0).Distinct().ToList(),
-                    g.Select(x => x.Site).Where(x => !string.IsNullOrEmpty(x)).Distinct().Select(x => "W3SVC" + x).ToList(), g.Sum(x => x.N),
+                    g.Select(x => x.Site).Where(x => !string.IsNullOrEmpty(x) && x != "?").Distinct().Select(x => "W3SVC" + x).ToList(), g.Sum(x => x.N),
                     g.Where(x => !IisTarama(x.App) && _iisAd.IsMatch(x.App)).GroupBy(x => x.App).Select(a => new HttpSysIisUyg(a.Key, a.Sum(x => x.N)))
                         .OrderByDescending(a => a.Istek).Take(6).ToList(), null))
                 .OrderByDescending(x => x.Istek).Take(50).ToList();
@@ -342,7 +343,7 @@ static class HttpSysEslesme
                 .Select(g => g.Key).ToHashSet();
             bool Gurultu(string a) => yaygin.Contains(a) || IisTarama(a);
             l = satir.GroupBy(x => x.Port).Select(g => new HttpSysIis(g.Key,
-                    g.Select(x => x.Site).Where(x => !string.IsNullOrEmpty(x)).Distinct().Select(x => "W3SVC" + x).ToList(),
+                    g.Select(x => x.Site).Where(x => !string.IsNullOrEmpty(x) && x != "?").Distinct().Select(x => "W3SVC" + x).ToList(),
                     g.Select(x => x.Host).Where(x => !string.IsNullOrEmpty(x)).Select(x => x!).Distinct().ToList(),
                     g.Sum(x => x.N), g.Max(x => x.Ist),
                     IisUyg(g.Select(x => (x.App, x.N, x.AIst)), Gurultu, out long gur), gur))

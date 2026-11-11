@@ -363,8 +363,9 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
   ÇAĞIRDIĞI SERVİSLER (kullanıcı: "onu da ekleyelim"): aynı IIS sorgusu `where iis_sip=IP OR iis_cip=IP`, `yon` in / out; out satırları `HttpSysIisCagri`
   (hedef IP, port, hostlar, siteler, istek, uygulamalar — tarama yolları hariç) → `_iisCagri` (IisCagri(ip)); `/api/surec/iis` → `cagri` (hedef IP:port'un ERT
   uygulamasıyla, envanter okunamazsa boş); IP kartında tablonun altında katlanır "IIS üzerinden çağırdığı servisler" (`iisCagriHtml`). IIS logunda olup CB süreç penceresinde (dün 09–12)
-  görülmeyen portlar da tabloya satır olarak eklenir (`iisYalniz`, "IIS (Carbon Black'te bu aralıkta görülmedi)"; kullanıcı: "IIS site neden yok?"). Canlı örnek: 9000–9002
-  zb.app.wall.exe (HTTP.sys self-host, IIS logu yok — ERT WEBSITE eşleşmesi doğru), IIS siteleri başka portlarda.
+  görülmeyen portlar da tabloya satır olarak eklenir (`iisYalniz`, "IIS (Carbon Black'te bu aralıkta görülmedi)"; kullanıcı: "IIS site neden yok?"). Canlı örnek: 9000–9003
+  zb.app.wall.exe IIS logunda VAR (ASP.NET Core IIS arkasında) ama kolon boştu → HATA: site no `source`'taki W3SVC<n>'den; yol W3SVC içermeyince iis_site null,
+  `stats … by iis_site` satırı ATIYORDU → `coalesce(iis_site, "?")` (ve host), "?" site listesine yazılmaz.
 - **"Bu sunucuda hangi uygulama çalışıyor?"** (IP kartı, Gelen portlar tablosunun üstündeki düğme; `SurecAi` Surec.cs, `POST /api/surec/ai`):
   arayüzdeki /api/surec sonucu exe başına toplanıp (PID'ler, portlar, giden, bağlanan / bağlandığı uygulamalar) AI'a gider (yeniden
   sorgulanmaz) + ERT kayıtları + segment + genel bilgiler dosyası. Kesin genel süreçler kodda ayıklanır (`GenelAd` / `GenelYol`: svchost,
