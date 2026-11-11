@@ -358,7 +358,11 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
   `IisTarama` bilinen tarama yolları (cgi-bin, cgi-sys, s, scripts, _vti_*, .env/.git, wp-*, phpmyadmin, actuator, *.php/cgi/pl, % içerenler…) + sunucunun portlarının
   yarısından çoğunda görünen ve en çok 2 istemciden (SPL `dc(iis_cip) as aist`) gelen adlar uygulama sayılmaz; başka uygulama varsa "/" gösterilmez; `HttpSysIis.Gurultu`
   (ayıklanan istek) kolonda "N tarama isteği ayıklandı". IIS logu olan ntoskrnl satırında korelasyon / IIS satırı artık yazılmaz (bilgi kolonda). Canlıda kalan gürültü (OGNL "${#w=#context.get(…)}.action",
-  rastgele "/ixou7arxei1w") → `IisUyg`: geçersiz karakterli adlar (`_iisAd` = harf/rakam . _ ~ -) ve portta başka uygulama varken tek istemcili, az istekli (≤ max(20, %3)) adlar elenir.
+  rastgele "/ixou7arxei1w") → `IisUyg`: geçersiz karakterli adlar (`_iisAd` = harf/rakam . _ ~ -) ve portta başka uygulama varken tek istemcili, az istekli (≤ max(20, %3)) adlar elenir. Canlı: IIS logu Splunk'a gelmeyen bir sunucuda
+  (Splunk'ta host'u yok; IP yalnız başka sunucuların logunda c-ip olarak geçiyor) kolon boş kalır — doğru davranış (forwarder / inputs.conf eksik).
+  ÇAĞIRDIĞI SERVİSLER (kullanıcı: "onu da ekleyelim"): aynı IIS sorgusu `where iis_sip=IP OR iis_cip=IP`, `yon` in / out; out satırları `HttpSysIisCagri`
+  (hedef IP, port, hostlar, siteler, istek, uygulamalar — tarama yolları hariç) → `_iisCagri` (IisCagri(ip)); `/api/surec/iis` → `cagri` (hedef IP:port'un ERT
+  uygulamasıyla, envanter okunamazsa boş); IP kartında tablonun altında katlanır "IIS üzerinden çağırdığı servisler" (`iisCagriHtml`).
 - **"Bu sunucuda hangi uygulama çalışıyor?"** (IP kartı, Gelen portlar tablosunun üstündeki düğme; `SurecAi` Surec.cs, `POST /api/surec/ai`):
   arayüzdeki /api/surec sonucu exe başına toplanıp (PID'ler, portlar, giden, bağlanan / bağlandığı uygulamalar) AI'a gider (yeniden
   sorgulanmaz) + ERT kayıtları + segment + genel bilgiler dosyası. Kesin genel süreçler kodda ayıklanır (`GenelAd` / `GenelYol`: svchost,

@@ -15,6 +15,7 @@ record HttpSysSonuc(string Ip, DateTimeOffset Baslangic, DateTimeOffset Bitis, i
 record HttpSysGiden(string Exe, string Yol, int Dakika, long Baglanti);
 record HttpSysIisUyg(string Ad, long Istek);
 record HttpSysIis(string Port, List<string> Siteler, List<string> Hostlar, long Istek, int Istemci, List<HttpSysIisUyg> Uygulamalar, long Gurultu = 0);
+record HttpSysIisCagri(string Ip, string Port, List<string> Hostlar, List<string> Siteler, long Istek, List<HttpSysIisUyg> Uygulamalar, string? Ert);
 record HttpSysHavuz(string Ad, int? Pid, bool Bit32, DateTimeOffset? Baslangic, string? Guid, string? Link, string Bilgisayar, int Baslatma = 1, List<int>? Pidler = null);
 record HttpSysSurec(string Guid, int? Pid, string Exe, string Yol, List<string> Domainler, string? Link, long Olay,
     string? KomutSatiri = null, string? Havuz = null, string? UstGuid = null, string? UstYol = null, int? UstPid = null, string? UstHavuz = null);
@@ -305,11 +306,12 @@ static class HttpSysEslesme
         string spl = $"""
             search ({string.Join(" OR ", idx.Select(x => "index=" + x))}) TERM({ip})
             | rex "^\S+ \S+ (?<iis_sip>\S+) (?<iis_m>\S+) (?<iis_uri>\S+) \S+ (?<iis_port>\d+) \S+ (?<iis_cip>\S+)"
-            | where iis_sip="{ip}"
+            | where iis_sip="{ip}" OR iis_cip="{ip}"
+            | eval yon=if(iis_sip="{ip}", "in", "out")
             | rex field=source "(?i)W3SVC(?<iis_site>\d+)"
             | eval iis_app=lower(mvindex(split(iis_uri, "/"), 1)), iis_app=if(isnull(iis_app) OR iis_app="", "/", iis_app)
-            | eventstats dc(iis_cip) as pist by iis_port
-            | stats count max(pist) as pist dc(iis_cip) as aist latest(_time) as son by iis_port iis_site host iis_app
+            | eventstats dc(iis_cip) as pist by yon iis_port
+            | stats count max(pist) as pist dc(iis_cip) as aist latest(_time) as son by yon iis_sip iis_port iis_site host iis_app
             """;
         List<HttpSysIis> l = [];
         string? hata = null;
@@ -317,7 +319,19 @@ static class HttpSysEslesme
         {
             var res = await SplunkService.ExportAsync(spl, new LookupQuery(ip, end.AddHours(-cfg.GetValue("HttpSys:IisSaat", 24.0)), end), cfg, http, ct, "Splunk",
                 TimeSpan.FromSeconds(Math.Clamp(cfg.GetValue("HttpSys:IisSureSaniye", 30.0), 5, 300)));   // bitmezse sayfa dönüp durmasın
-            var satir = res.Rows.Select(r => (Port: r.GetValueOrDefault("iis_port") ?? "", Site: r.GetValueOrDefault("iis_site"), Host: r.GetValueOrDefault("host"),
+            // ÇAĞIRDIĞI SERVİSLER (kullanıcı: "IP ile aratınca bir sürü log geliyor" — o loglarda bu IP istemci, c-ip): başka sunucuların IIS loglarında
+            // bu IP'nin çağırdığı site / uygulamalar (aynı sorgu, yon=out)
+            _iisCagri[ip] = res.Rows.Where(r => r.GetValueOrDefault("yon") == "out")
+                .Select(r => (Ip: r.GetValueOrDefault("iis_sip") ?? "", Port: r.GetValueOrDefault("iis_port") ?? "", Site: r.GetValueOrDefault("iis_site"),
+                    Host: r.GetValueOrDefault("host") ?? "", App: r.GetValueOrDefault("iis_app") ?? "/", N: long.TryParse(r.GetValueOrDefault("count"), out long n0) ? n0 : 0))
+                .Where(x => x.Ip.Length > 0 && x.Port.Length > 0)
+                .GroupBy(x => (x.Ip, x.Port)).Select(g => new HttpSysIisCagri(g.Key.Ip, g.Key.Port,
+                    g.Select(x => x.Host).Where(h => h.Length > 0).Distinct().ToList(),
+                    g.Select(x => x.Site).Where(x => !string.IsNullOrEmpty(x)).Distinct().Select(x => "W3SVC" + x).ToList(), g.Sum(x => x.N),
+                    g.Where(x => !IisTarama(x.App) && _iisAd.IsMatch(x.App)).GroupBy(x => x.App).Select(a => new HttpSysIisUyg(a.Key, a.Sum(x => x.N)))
+                        .OrderByDescending(a => a.Istek).Take(6).ToList(), null))
+                .OrderByDescending(x => x.Istek).Take(50).ToList();
+            var satir = res.Rows.Where(r => r.GetValueOrDefault("yon") != "out").Select(r => (Port: r.GetValueOrDefault("iis_port") ?? "", Site: r.GetValueOrDefault("iis_site"), Host: r.GetValueOrDefault("host"),
                 App: r.GetValueOrDefault("iis_app") ?? "/", N: long.TryParse(r.GetValueOrDefault("count"), out long n) ? n : 0,
                 Ist: int.TryParse(r.GetValueOrDefault("pist"), out int pi) ? pi : 0,
                 AIst: int.TryParse(r.GetValueOrDefault("aist"), out int ai) ? ai : 0)).Where(x => x.Port.Length > 0).ToList();
@@ -340,6 +354,10 @@ static class HttpSysEslesme
         if (hata == null) _iisOnbellek[ip] = (DateTime.UtcNow, l, null);
         return (l, hata);
     }
+
+    static readonly System.Collections.Concurrent.ConcurrentDictionary<string, List<HttpSysIisCagri>> _iisCagri = new();
+    // IisAsync'ten sonra: bu IP'nin istemci olarak göründüğü (çağırdığı) IIS servisleri
+    public static List<HttpSysIisCagri> IisCagri(string ip) => _iisCagri.TryGetValue(ip, out var l) ? l : [];
 
     // Güvenlik tarayıcılarının denediği bilinen yollar (uygulama değil)
     static readonly System.Text.RegularExpressions.Regex _iisTarama = new(
