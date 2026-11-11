@@ -15,7 +15,7 @@ record HttpSysSonuc(string Ip, DateTimeOffset Baslangic, DateTimeOffset Bitis, i
 record HttpSysGiden(string Exe, string Yol, int Dakika, long Baglanti);
 record HttpSysIisUyg(string Ad, long Istek);
 record HttpSysIis(string Port, List<string> Siteler, List<string> Hostlar, long Istek, int Istemci, List<HttpSysIisUyg> Uygulamalar);
-record HttpSysHavuz(string Ad, int? Pid, bool Bit32, DateTimeOffset? Baslangic, string? Guid, string? Link, string Bilgisayar, int Baslatma = 1);
+record HttpSysHavuz(string Ad, int? Pid, bool Bit32, DateTimeOffset? Baslangic, string? Guid, string? Link, string Bilgisayar, int Baslatma = 1, List<int>? Pidler = null);
 record HttpSysSurec(string Guid, int? Pid, string Exe, string Yol, List<string> Domainler, string? Link, long Olay,
     string? KomutSatiri = null, string? Havuz = null, string? UstGuid = null, string? UstYol = null, int? UstPid = null, string? UstHavuz = null);
 
@@ -274,7 +274,8 @@ static class HttpSysEslesme
                 V("process_guid"), V("link"), pc));
         }
         // havuz başına en son başlayan süreç (eski PID'ler recycle ile kapanmıştır)
-        var sonuc = l.GroupBy(x => x.Ad, StringComparer.OrdinalIgnoreCase).Select(g => g.OrderByDescending(x => x.Baslangic).First() with { Baslatma = g.Count() })
+        var sonuc = l.GroupBy(x => x.Ad, StringComparer.OrdinalIgnoreCase).Select(g => g.OrderByDescending(x => x.Baslangic).First() with { Baslatma = g.Count(),
+                Pidler = g.Where(x => x.Pid != null).Select(x => x.Pid!.Value).Distinct().ToList() })
             .OrderBy(x => x.Ad, StringComparer.OrdinalIgnoreCase).ToList();
         string bilgi = $"bilgisayar {pc}: son {gun} günde {res.Rows.Count} w3wp başlangıcı" + (adsiz > 0 ? $" ({adsiz} tanesinde havuz adı okunamadı)" : "")
             + (pcs.Count > 1 ? $" · bu IP'de başka bilgisayar adları da görüldü: {string.Join(", ", pcs.Skip(1).Take(3).Select(x => $"{x.Ad} ({x.Sayi})"))}" : "")
