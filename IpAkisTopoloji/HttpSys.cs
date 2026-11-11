@@ -390,8 +390,8 @@ static class HttpSysEslesme
         return iyi.Take(8).Select(x => new HttpSysIisUyg(x.Ad, x.N, x.Ornek)).ToList();
     }
 
-    // IIS logu penceresi (kullanıcı: "sonsuz döngüye girdi, ne kadar zamanlık çekiyoruz"): HttpSys:IisSaat, varsayılan 4 saat (24 saatte bir sunucuda 73 bin istek)
-    public static double IisSaat(IConfiguration cfg) => Math.Clamp(cfg.GetValue("HttpSys:IisSaat", 4.0), 0.25, 72);
+    // IIS logu penceresi (kullanıcı: "sonsuz döngüye girdi, ne kadar zamanlık çekiyoruz"): HttpSys:IisSaat, varsayılan 1 saat (kullanıcı: "1 saat bile yeter"; 24 saatte bir sunucuda 73 bin istek)
+    public static double IisSaat(IConfiguration cfg) => Math.Clamp(cfg.GetValue("HttpSys:IisSaat", 1.0), 0.25, 72);
 
     public static string IisMetin(List<HttpSysIis> l, ICollection<string>? portlar = null)
     {
