@@ -172,7 +172,7 @@ static class HttpSysEslesme
             foreach (var parca in guidler.Distinct(StringComparer.OrdinalIgnoreCase).Chunk(40))
             {
                 string splB = $"""
-                    search index={index} sourcetype="{sourcetype}" type="ingress.event.procstart" ({string.Join(" OR ", parca.Select(g => $"TERM({g})"))}) ({string.Join(" OR ", parca.Select(g => $"process_guid=\"{g}\""))})
+                    search index={index} sourcetype="{sourcetype}" TERM(ingress.event.procstart) type="ingress.event.procstart" ({string.Join(" OR ", parca.Select(g => $"TERM({g})"))}) ({string.Join(" OR ", parca.Select(g => $"process_guid=\"{g}\""))})
                     | eval cmd=coalesce(command_line, cmdline, process_cmdline, "")
                     | stats latest(cmd) as cmd latest(username) as un latest(link_parent) as lp latest(parent_path) as uy latest(parent_pid) as up by process_guid
                     """;
@@ -257,7 +257,7 @@ static class HttpSysEslesme
         if (_hvOnbellek.TryGetValue(pc, out var hc) && DateTime.UtcNow - hc.At < TimeSpan.FromHours(cfg.GetValue("HttpSys:HavuzOnbellekSaat", 6.0)))
             return (hc.L, hc.Bilgi + $" · önbellekten ({hc.At.ToLocalTime():HH:mm})", pcs);
         var res = await SplunkService.ExportAsync($"""
-            search index={index} sourcetype="{sourcetype}" TERM({pc}) type="ingress.event.procstart" computer_name="{pc}"
+            search index={index} sourcetype="{sourcetype}" TERM(ingress.event.procstart) TERM({pc}) type="ingress.event.procstart" computer_name="{pc}"
             | where like(lower(process_path), "%w3wp.exe")
             | eval cmd=coalesce(command_line, cmdline, process_cmdline, "")
             | stats latest(cmd) as cmd latest(username) as un latest(pid) as pid latest(process_path) as yol latest(_time) as t latest(link_process) as link by process_guid
