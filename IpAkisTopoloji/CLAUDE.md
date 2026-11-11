@@ -343,7 +343,9 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
   en güçlü kanıt. IIS logu olmayan çekirdek portları = IIS dışı HTTP.sys (self-host) → korelasyon / havuz. KOLON (kullanıcı: "griddeki havuz kolonunda yazarsa daha rahat görürüm"):
   `havuzHucre(r, t)` sırayla: süreç PID'i → havuz (SureclerAsync), w3wp PID'i → havuz listesi (`HttpSysHavuz.Pidler` = son 7 gündeki tüm PID'ler; tablo dünün
   PID'leriyle gelir, havuzlar her gün yeniden başlar), ntoskrnl portu → `iisHavuz` (IIS URI ↔ havuz adı) ya da `havuzEsleri` (VIP / ERT adı); kalın 13px,
-  ipucunda nasıl bulunduğu, ad eşleşmesinde "(ad)".
+  ipucunda nasıl bulunduğu, ad eşleşmesinde "(ad)". Canlı: havuz araması 0 döndü → eklediğim `procstart w3wp` anahtar kelimeleri kaldırıldı
+  (yalnız TERM(pc)); `iisHavuz` URI uygulaması BAŞINA en iyi havuz (bir sitede birden çok sanal dizin / havuz: /bskampws, /ldapauthenticationservice…);
+  boşsa "havuz listesi boş" (ipucunda bilgi). Kullanıcı: "PID alanına gerek yok" → tablodan PID kolonu kaldırıldı (exe ipucunda).
 - **"Bu sunucuda hangi uygulama çalışıyor?"** (IP kartı, Gelen portlar tablosunun üstündeki düğme; `SurecAi` Surec.cs, `POST /api/surec/ai`):
   arayüzdeki /api/surec sonucu exe başına toplanıp (PID'ler, portlar, giden, bağlanan / bağlandığı uygulamalar) AI'a gider (yeniden
   sorgulanmaz) + ERT kayıtları + segment + genel bilgiler dosyası. Kesin genel süreçler kodda ayıklanır (`GenelAd` / `GenelYol`: svchost,
