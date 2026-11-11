@@ -163,7 +163,7 @@ static class HttpSysEslesme
             liste[g] = new(g, int.TryParse(V("pid"), out int pid) ? pid : null, Ad(yol), yol, dom, V("link"), long.TryParse(V("count"), out long n) ? n : 0);
         }
         if (liste.Count == 0) return [];
-        int gun = cfg.GetValue("HttpSys:SurecGun", 7);
+        double saat = SurecSaat(cfg);
         // Canlı alanlar: command_line, username ("IIS APPPOOL\\Havuz"), parent_path, parent_pid; parent_guid SAYISAL (guid biçiminde değil) →
         // üst sürecin guid'i link_parent içinden (…/#analyze/<guid>/<segment>)
         async Task<Dictionary<string, (string? Cmd, string? Kullanici, string? UstGuid, string? UstYol, int? UstPid)>> ProcAsync(IEnumerable<string> guidler)
@@ -177,7 +177,7 @@ static class HttpSysEslesme
                     | stats latest(cmd) as cmd latest(username) as un latest(link_parent) as lp latest(parent_path) as uy latest(parent_pid) as up by process_guid
                     """;
                 SplunkResult resB;
-                try { resB = await SplunkService.ExportAsync(splB, new LookupQuery(ip, end.AddDays(-gun), end), cfg, http, ct, "Splunk"); }
+                try { resB = await SplunkService.ExportAsync(splB, new LookupQuery(ip, end.AddHours(-saat), end), cfg, http, ct, "Splunk"); }
                 catch (Exception ex) when (ex is not OperationCanceledException) { break; }
                 foreach (var r in resB.Rows)
                 {
@@ -252,7 +252,7 @@ static class HttpSysEslesme
         var pcs = await BilgisayarlarAsync(ip, cfg, http, ct);
         string? pc = pcs.FirstOrDefault().Ad;
         if (string.IsNullOrEmpty(pc) || pc.Contains('"') || pc.Contains(' ')) return ([], "Carbon Black olaylarında bu IP'nin bilgisayar adı (computer_name) bulunamadı (son 7 gün)", pcs);
-        int gun = cfg.GetValue("HttpSys:SurecGun", 7);
+        double saat = SurecSaat(cfg);
         // havuzlar seyrek değişir: bilgisayar başına HttpSys:HavuzOnbellekSaat (6) saat bellekte
         if (_hvOnbellek.TryGetValue(pc, out var hc) && DateTime.UtcNow - hc.At < TimeSpan.FromHours(cfg.GetValue("HttpSys:HavuzOnbellekSaat", 6.0)))
             return (hc.L, hc.Bilgi + $" · önbellekten ({hc.At.ToLocalTime():HH:mm})", pcs);
@@ -261,7 +261,7 @@ static class HttpSysEslesme
             | where like(lower(process_path), "%w3wp.exe")
             | eval cmd=coalesce(command_line, cmdline, process_cmdline, "")
             | stats latest(cmd) as cmd latest(username) as un latest(pid) as pid latest(process_path) as yol latest(_time) as t latest(link_process) as link by process_guid
-            """, new LookupQuery(ip, end.AddDays(-gun), end), cfg, http, ct, "Splunk");
+            """, new LookupQuery(ip, end.AddHours(-saat), end), cfg, http, ct, "Splunk");
         var l = new List<HttpSysHavuz>();
         int adsiz = 0;
         foreach (var r in res.Rows)
@@ -277,7 +277,7 @@ static class HttpSysEslesme
         var sonuc = l.GroupBy(x => x.Ad, StringComparer.OrdinalIgnoreCase).Select(g => g.OrderByDescending(x => x.Baslangic).First() with { Baslatma = g.Count(),
                 Pidler = g.Where(x => x.Pid != null).Select(x => x.Pid!.Value).Distinct().ToList() })
             .OrderBy(x => x.Ad, StringComparer.OrdinalIgnoreCase).ToList();
-        string bilgi = $"bilgisayar {pc}: son {gun} günde {res.Rows.Count} w3wp başlangıcı" + (adsiz > 0 ? $" ({adsiz} tanesinde havuz adı okunamadı)" : "")
+        string bilgi = $"bilgisayar {pc}: son {saat:0.#} saatte {res.Rows.Count} w3wp başlangıcı" + (adsiz > 0 ? $" ({adsiz} tanesinde havuz adı okunamadı)" : "")
             + (pcs.Count > 1 ? $" · bu IP'de başka bilgisayar adları da görüldü: {string.Join(", ", pcs.Skip(1).Take(3).Select(x => $"{x.Ad} ({x.Sayi})"))}" : "")
             + (res.Messages.Count > 0 ? " · " + string.Join(" | ", res.Messages.Take(2)) : "");
         if (res.Messages.All(m => !m.StartsWith("ERROR", StringComparison.OrdinalIgnoreCase))) _hvOnbellek[pc] = (DateTime.UtcNow, sonuc, bilgi);
@@ -335,6 +335,10 @@ static class HttpSysEslesme
                 + string.Join(", ", p.Uygulamalar.Select(u => $"/{u.Ad.TrimStart('/')} ({u.Istek})")));
         return sb.ToString();
     }
+
+    // Süreç başlangıcı (procstart) arama penceresi, saat (kullanıcı: "hiç bitmiyor, 1 saat falan yap"): HttpSys:SurecSaat, varsayılan 1.
+    // Not: IIS havuzları ~29 saatte bir yeniden başlar; 1 saatte yalnız o saatte başlayan havuzlar görünür (önbellek 6 saat ile birikir değil, her sorguda bu pencere).
+    public static double SurecSaat(IConfiguration cfg) => Math.Clamp(cfg.GetValue("HttpSys:SurecSaat", 1.0), 0.25, 24 * 30);
 
     // w3wp.exe -ap "HavuzAdi" -v "v4.0" … → HavuzAdi
     public static string? HavuzAdi(string? cmd)

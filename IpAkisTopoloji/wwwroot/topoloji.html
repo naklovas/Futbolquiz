@@ -1531,7 +1531,7 @@ function havuzOzet(t) {
   if (h.status === "hata") return `<div class="small" style="color:var(--err);margin:2px 0 6px">IIS havuzları alınamadı: ${esc(h.hata)}</div>`;
   const hv = havuzEsleri(t);
   if (!hv.length) return `<div class="small muted" style="margin:2px 0 6px">IIS uygulama havuzu bulunamadı${h.hata ? ` — hata: ${esc(h.hata)}` : ""}${h.bilgi ? ` <span title="Carbon Black süreç başlangıcı (procstart) araması">(${esc(h.bilgi)})</span>` : ""}</div>`;
-  return `<div class="vipbox" style="margin:2px 0 8px;padding:6px 10px"><b>IIS uygulama havuzları</b> <span class="small muted">(${hv.length} · Carbon Black süreç başlangıcı, son 30 gün; w3wp komut satırındaki havuz adı)</span>
+  return `<div class="vipbox" style="margin:2px 0 8px;padding:6px 10px"><b>IIS uygulama havuzları</b> <span class="small muted">(${hv.length} · Carbon Black süreç başlangıcı; w3wp komut satırındaki havuz adı)</span>
     <div class="tbl-wrap" style="max-height:220px;margin-top:4px"><table><thead><tr><th>Havuz</th><th>PID</th><th>Son başlangıç</th><th>Ad eşleşmesi (port)</th><th></th></tr></thead><tbody>
     ${hv.map(x => `<tr><td><b class="mono">${esc(x.ad)}</b>${x.bit32 ? ` <span class="small muted">32 bit</span>` : ""}${x.baslatma > 1 ? ` <span class="small muted" title="Bu aralıkta ${x.baslatma} kez başlatıldı (recycle)">×${x.baslatma}</span>` : ""}</td>
       <td class="mono small">${esc(x.pid ?? "—")}</td><td class="small">${esc(String(x.baslangic ?? "").slice(0, 16).replace("T", " "))}</td>
@@ -1569,7 +1569,7 @@ function havuzHucre(r, t) {
   const xs = [...r.pids].map(p => h.byPid[exeShort(r.name).toLowerCase() + "|" + p] ?? h.byPid[String(r.name).toLowerCase() + "|" + p]).filter(Boolean);
   const ad = new Map();   // havuz → nasıl bulundu
   for (const x of xs) { if (x.havuz) ad.set(x.havuz, "PID " + x.pid + " (süreç başlangıcı)"); else if (x.ustHavuz) ad.set(x.ustHavuz, "bu süreci havuzun w3wp'si başlatmış"); }
-  if (!ad.size && /^w3wp\.exe$/i.test(exeShort(r.name))) for (const p of r.pids) { const x = h.havuzlar.find(v => String(v.pid) === String(p) || (v.pidler ?? []).some(q => String(q) === String(p))); if (x) ad.set(x.ad, "PID " + p + " (havuzun son 7 gündeki süreçlerinden)"); }
+  if (!ad.size && /^w3wp\.exe$/i.test(exeShort(r.name))) for (const p of r.pids) { const x = h.havuzlar.find(v => String(v.pid) === String(p) || (v.pidler ?? []).some(q => String(q) === String(p))); if (x) ad.set(x.ad, "PID " + p + " (havuzun süreçlerinden)"); }
   if (!ad.size && HTTPSYS.test(exeShort(r.name)) && r.port && !r.out) {
     for (const a of iisHavuz(r.port)) ad.set(a, "IIS logundaki uygulama adı (URI) havuz adıyla eşleşiyor");
     if (!ad.size) for (const x of havuzEsleri(t).filter(x => x.es.some(e => e.port === String(r.port))))
