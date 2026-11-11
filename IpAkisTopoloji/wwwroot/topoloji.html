@@ -865,15 +865,21 @@ function listenTable(t) {
     }
     return null;
   };
+  // IIS logunda olup Carbon Black süreç penceresinde (dün 09:00–12:00) görülmeyen portlar da satır olsun (kullanıcı: "IIS site neden yok?")
+  if (state.iis?.status === "ok" && state.iis.ip === t.ip) {
+    const var_ = new Set([...rows.values()].filter(r => !r.out).map(r => String(r.port)));
+    for (const p of Object.keys(state.iis.map)) if (!var_.has(p))
+      rows.set("~iis|" + p, { port: p, out: false, name: "", iisYalniz: true, yol: "", pids: new Set(), hits: 0, peers: 0, outHits: 0 });
+  }
   const list = [...rows.values()].sort((a, b) => a.out - b.out || (+a.port || 1e9) - (+b.port || 1e9) || b.hits - a.hits || b.outHits - a.outHits);
-  const nExe = new Set(list.map(r => r.name.toLowerCase())).size;
+  const nExe = new Set(list.filter(r => !r.iisYalniz).map(r => r.name.toLowerCase())).size;
   const tlsOn = state.nessus?.ip === t.ip;
   return `<div class="small muted" style="margin:-4px 0 6px">${fmt(nExe)} farklı exe · ${fmt(list.filter(r => !r.out).length)} port satırı${list.some(r => r.out) ? ` · ${fmt(list.filter(r => r.out).length)} exe yalnız dışarı bağlanıyor` : ""}</div>
     <div class="tbl-wrap" style="max-height:300px"><table>
       <thead><tr><th>Gelen port</th><th>Çalışan süreç (exe)</th><th title="Splunk IIS erişim logu (son 24 saat): bu porta gelen istekleri karşılayan IIS sitesi ve uygulamalar (URI'nin ilk parçası)">IIS (site · uygulama)</th><th class="num">Gelen bağlantı</th><th class="num">Karşı IP</th><th class="num">Giden bağlantı</th>${tlsOn ? `<th title="Portun KABUL ETTİĞİ SSL / TLS sürümleri (Nessus taramasının el sıkışması). İstemcilerin fiilen hangisiyle bağlandığı değil; kırmızı = eski sürüm hâlâ açık.">TLS (Nessus)</th>` : ""}<th>ERT'deki uygulama</th></tr></thead>
       <tbody>${list.map(r => { const apps = r.out ? [] : ertApps(r.port), infra = PROC_INFRA.has(r.port); return `<tr${infra ? ` class="muted" title="Altyapı portu"` : ""}>
         <td class="mono">${r.out ? `<span class="small muted">— yalnız giden</span>` : r.port ? esc(r.port) : `<span class="small muted" title="Carbon Black olayında yerel port yok">?</span>`}${infra ? ` <span class="small muted">altyapı</span>` : ""}</td>
-        <td><b class="mono" title="${esc([r.yol, r.pids?.size ? "PID: " + [...r.pids].join(", ") : ""].filter(Boolean).join("\n"))}">${esc(exeShort(r.name))}</b>${HTTPSYS.test(exeShort(r.name)) && !r.out
+        <td><b class="mono" title="${esc([r.yol, r.pids?.size ? "PID: " + [...r.pids].join(", ") : ""].filter(Boolean).join("\n"))}">${r.iisYalniz ? `<span class="small muted" title="Bu port IIS logunda var (son 24 saat) ama Carbon Black süreç penceresinde bağlantı görülmedi">IIS (Carbon Black'te bu aralıkta görülmedi)</span>` : esc(exeShort(r.name))}</b>${HTTPSYS.test(exeShort(r.name)) && !r.out
           ? (m => m ? `<div class="small" style="color:var(--in)" title="ERT'de bu port için kayıtlı ad (${esc(m.nm)}) şu exe'nin yolunda geçiyor: ${esc(m.hit.map(e => e.yol).join(" · "))}">→ asıl uygulama büyük ihtimalle <b class="mono">${esc(m.hit.map(e => e.name).join(", "))}</b> <span class="muted">(yolu ERT'deki "${esc(m.nm)}" ile eşleşiyor)</span></div>` : "")(httpSysApp(r.port))
             + (hs => hs.length ? `<div class="small" style="color:var(--ok)" title="IIS havuz adı bu portun VIP / ERT adıyla ortak kelime içeriyor (Carbon Black süreç başlangıcı)">→ IIS havuzu (ad eşleşmesi): ${hs.map(x => `<b class="mono">${esc(x.ad)}</b>${x.pid ? ` <span class="muted">PID ${esc(x.pid)}</span>` : ""}`).join(", ")}</div>` : "")(havuzEsleri(t).filter(x => x.es.some(e => e.port === String(r.port))))
             + httpSysTahmin(r.port)
