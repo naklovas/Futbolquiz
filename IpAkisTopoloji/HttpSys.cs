@@ -320,7 +320,7 @@ static class HttpSysEslesme
         string? hata = null;
         try
         {
-            var res = await SplunkService.ExportAsync(spl, new LookupQuery(ip, end.AddHours(-cfg.GetValue("HttpSys:IisSaat", 24.0)), end), cfg, http, ct, "Splunk",
+            var res = await SplunkService.ExportAsync(spl, new LookupQuery(ip, end.AddHours(-IisSaat(cfg)), end), cfg, http, ct, "Splunk",
                 TimeSpan.FromSeconds(Math.Clamp(cfg.GetValue("HttpSys:IisSureSaniye", 60.0), 5, 300)));   // bitmezse sayfa dönüp durmasın
             // ÇAĞIRDIĞI SERVİSLER (kullanıcı: "IP ile aratınca bir sürü log geliyor" — o loglarda bu IP istemci, c-ip): başka sunucuların IIS loglarında
             // bu IP'nin çağırdığı site / uygulamalar (aynı sorgu, yon=out)
@@ -389,6 +389,9 @@ static class HttpSysEslesme
         gur = toplam - iyi.Sum(x => x.N) - (a.FirstOrDefault(x => x.Ad == "/").N is var k && !iyi.Any(x => x.Ad == "/") ? k : 0);
         return iyi.Take(8).Select(x => new HttpSysIisUyg(x.Ad, x.N, x.Ornek)).ToList();
     }
+
+    // IIS logu penceresi (kullanıcı: "sonsuz döngüye girdi, ne kadar zamanlık çekiyoruz"): HttpSys:IisSaat, varsayılan 4 saat (24 saatte bir sunucuda 73 bin istek)
+    public static double IisSaat(IConfiguration cfg) => Math.Clamp(cfg.GetValue("HttpSys:IisSaat", 4.0), 0.25, 72);
 
     public static string IisMetin(List<HttpSysIis> l, ICollection<string>? portlar = null)
     {

@@ -268,7 +268,7 @@ app.MapGet("/api/surec/iis", async (string? ip, IConfiguration cfg, IHttpClientF
     try { env = await envanter.GetAsync(false, ct); } catch (Exception ex) when (ex is not OperationCanceledException) { }   // envanter yoksa ERT adı boş kalır
     var cagri = HttpSysEslesme.IisCagri(q.Ip).Select(c => env == null ? c : c with { Ert = env.AppsOnIp(c.Ip).Where(a => !string.IsNullOrWhiteSpace(a.AppName))
         .OrderBy(a => a.Port == c.Port ? 0 : 1).Select(a => a.AppName).FirstOrDefault() }).ToList();
-    return Results.Ok(new { iis, cagri, hata });
+    return Results.Ok(new { iis, cagri, hata, saat = HttpSysEslesme.IisSaat(cfg) });
 });
 // Korelasyon tanısı (düz metin; kullanıcı kopyalayıp gönderebilsin)
 app.MapGet("/api/surec/httpsys/tani", async (string? ip, IConfiguration cfg, IHttpClientFactory factory, CancellationToken ct) =>
