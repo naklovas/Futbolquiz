@@ -1617,12 +1617,12 @@ async function loadGelenPortlar(ip) {
   state.gelenPort = { ip, status: "loading" };
   try {
     const r = await fetch("api/surec/gelenportlar?" + new URLSearchParams({ ip }), { signal: gpAbort.signal });
-    if (r.status === 404) { state.gelenPort = null; return; }
+    if (r.status === 404) { state.gelenPort = null; updateTargetApps(); return; }
     const b = await r.json().catch(() => ({}));
     if (state.gelenPort?.ip !== ip) return;
     state.gelenPort = { ip, status: "ok", portlar: b.portlar ?? [], saat: b.saat ?? 72, hata: b.hata };
   } catch (e) { if (e.name !== "AbortError") state.gelenPort = null; }
-  renderProc();
+  renderProc(); updateTargetApps();   // IP kartındaki tablo da (eskiden yalnız akış penceresi yenileniyordu → tablo "yeniden hesapla"ya basılana kadar dönüyordu)
 }
 let iisAbort = null;
 async function loadIis(ip) {
@@ -1630,7 +1630,7 @@ async function loadIis(ip) {
   state.iis = { ip, status: "loading" };
   try {
     const r = await fetch("api/surec/iis?" + new URLSearchParams({ ip }), { signal: iisAbort.signal });
-    if (r.status === 404) { state.iis = { ip, status: "eski" }; renderProc(); return; }
+    if (r.status === 404) { state.iis = { ip, status: "eski" }; renderProc(); updateTargetApps(); return; }
     const b = await r.json().catch(() => ({}));
     if (state.iis?.ip !== ip) return;
     state.iis = { ip, status: "ok", map: Object.fromEntries((b.iis ?? []).map(p => [String(p.port), p])), hostlar: [...new Set((b.iis ?? []).flatMap(p => p.hostlar ?? []))],
@@ -1638,7 +1638,7 @@ async function loadIis(ip) {
     const he = document.getElementById("hostAdi");
     if (he) he.innerHTML = hostAdiIc();
   } catch (e) { if (e.name !== "AbortError") state.iis = { ip, status: "hata", hata: e.message }; }
-  renderProc();
+  renderProc(); updateTargetApps();
 }
 // IIS üzerinden çağırdığı servisler (kullanıcı: IP ile arayınca başka sunucuların IIS loglarında bu IP istemci olarak geçiyor): hedef sunucu, IP:port, site, uygulamalar
 function iisCagriHtml(t) {

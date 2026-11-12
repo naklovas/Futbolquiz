@@ -382,7 +382,8 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
   "N uygulama · modüllere göre" listesi (uygulama → modül, istek, yüzde çubuğu, üstüne gelince örnek). Pilot klasörü ↔ port ayrımı ağ verisinde yok
   (Splunk Stream `index=wall` da yalnız Wall'da; port + URL var, klasör yok) — kullanıcı bıraktı. DÖNEN SATIRLAR (kullanıcı: "en üstteki 2 satır hep dönüyor"): ntoskrnl satırlarındaki
   zaman korelasyonu (72 saat, dakika bazlı) süre sınırsızdı → `HttpSys:KorelasyonSureSaniye`=90 (`KorSure`); süre dolarsa kısmi sonuç kullanılmaz / kaydedilmez,
-  satırda kırmızı "zaman korelasyonu tamamlanamadı (süre sınırı) ↻ yeniden dene". IIS penceresi `iisSure` ile saatin altındaysa "30 dk" yazılır. Ayrıca canlıda görülen çelişki: ERT'de 10000 "Kredi Kartı Başvuru", ama süreç
+  satırda kırmızı "zaman korelasyonu tamamlanamadı (süre sınırı) ↻ yeniden dene". IIS penceresi `iisSure` ile saatin altındaysa "30 dk" yazılır. GÖSTERİM HATASI (kullanıcı: "IIS verisi ancak yeniden hesapla'ya basınca geliyor"): `loadIis` / `loadGelenPortlar` bitince
+  yalnız `renderProc` (akış penceresi) çağrılıyordu, IP kartı tablosu (`updateTargetApps`) yenilenmiyordu → ikisi de artık `updateTargetApps` çağırır. Ayrıca canlıda görülen çelişki: ERT'de 10000 "Kredi Kartı Başvuru", ama süreç
   hsms64.exe ve VIP havuzu HSM_Provizyon_10000_GRP (ERT uyuşmazlık uyarısı önerildi, yapılmadı).
 - **"Bu sunucuda hangi uygulama çalışıyor?"** (IP kartı, Gelen portlar tablosunun üstündeki düğme; `SurecAi` Surec.cs, `POST /api/surec/ai`):
   arayüzdeki /api/surec sonucu exe başına toplanıp (PID'ler, portlar, giden, bağlanan / bağlandığı uygulamalar) AI'a gider (yeniden
