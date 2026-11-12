@@ -849,7 +849,7 @@ app.MapGet("/api/imza/durum", (ServisImzaService imza) => Results.Ok(new { @is =
 app.MapPost("/api/imza/tara", async (ImzaIstek? req, HttpContext ctx, IConfiguration cfg, ServisImzaService imza, CancellationToken ct) =>
 {
     if (!Yetki.Var(cfg, ctx, Yetki.Topoloji)) return Yetki.Red(ctx, "Servis imzası taraması (topoloji)");
-    try { return Results.Ok(await imza.BaslatAsync(req?.Mod ?? "yeni", ctx.User?.Identity?.Name ?? "?", ct)); }
+    try { return Results.Ok(await imza.BaslatAsync(req?.Mod ?? "yeni", req?.Ipler, ctx.User?.Identity?.Name ?? "?", ct)); }
     catch (InvalidOperationException ex) { return Results.Conflict(new { error = ex.Message }); }
 });
 app.MapPost("/api/imza/durdur", (HttpContext ctx, IConfiguration cfg, ServisImzaService imza) =>
@@ -1853,7 +1853,7 @@ static class AppResponseService
 }
 
 // JSON çıktısı (camelCase) önceki anonim nesnelerle birebir aynı: mevcut arayüz etkilenmez.
-record ImzaIstek(string? Mod);
+record ImzaIstek(string? Mod, List<string>? Ipler);
 record SplunkResult(List<Dictionary<string, string>> Rows, List<string> Messages, long ElapsedMs);
 record AppResponseResult(string Appliance, int VifgCount, int RawL4, int RawL7,
     List<L4Row> L4, List<L7Row> L7, List<string> Messages, long ElapsedMs);

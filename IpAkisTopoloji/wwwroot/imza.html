@@ -121,16 +121,16 @@
       <span class="sp" style="flex:1"></span><button type="button" id="csv" hidden>Excel'e aktar</button></div>
     <div class="tools" id="tools">
       <input type="search" id="q" placeholder="IP, sunucu, port, ERT adı, exe, IIS uygulaması, öneri ara…" style="min-width:320px">
-      <select id="durum">
+      <select id="durum" title="ERT tarafı">
         <option value="">Tüm satırlar</option>
+        <option value="bostum">ERT'de adı boş (tümü)</option>
         <option value="oneri">Boş · öneri var</option>
         <option value="bos">Boş · öneri yok</option>
         <option value="uyumsuz">ERT farklı (uyumsuz)</option>
         <option value="ertyok">ERT'de kaydı yok</option>
         <option value="kayitli">ERT'de kayıtlı</option>
-        <option value="veriyok">Carbon Black / IIS verisi yok</option>
-        <option value="taranmadi">Henüz taranmadı</option>
       </select>
+      <select id="veri" title="Tarama tarafı"><option value="">Tarama: tümü</option><option value="var">Veri bulundu</option><option value="yok">Tarandı, veri yok</option><option value="taranmadi">Henüz taranmadı</option></select>
       <select id="guven"><option value="">Tüm güvenler</option><option value="güçlü">Güçlü</option><option value="orta">Orta</option><option value="zayıf">Zayıf</option></select>
       <label title="RDP, SMB, DNS, WinRM gibi altyapı portları (sözlüğe ve öneriye girmez)"><input type="checkbox" id="alt"> Altyapı portları</label>
     </div>
@@ -147,11 +147,12 @@ const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const fmt = n => Number(n || 0).toLocaleString("tr-TR");
 const tarih = d => d ? String(d).slice(0, 16).replace("T", " ") : "";
-const st = { veri: null, tab: "satir", limit: 500, yetki: {}, durumFiltre: "" };
-const DURUM = { kayitli: "ERT'de kayıtlı", bos: "boş · öneri yok", oneri: "boş · öneri var", uyumsuz: "ERT farklı", ertyok: "ERT'de kaydı yok", veriyok: "veri yok", taranmadi: "taranmadı" };
+const st = { veri: null, tab: "satir", limit: 500, yetki: {}, durumFiltre: "", sec: new Set() };
+const DURUM = { kayitli: "ERT'de kayıtlı", bos: "boş", oneri: "boş · öneri var", uyumsuz: "ERT farklı", ertyok: "ERT'de kaydı yok" };
+const VERI = { yok: "tarandı · veri yok", taranmadi: "taranmadı" };
 const gKls = g => g === "güçlü" ? "guclu" : g === "zayıf" ? "zayif" : "orta";
 // satırın filtre durumu: boş / ERT'de yok + öneri → "oneri"
-const dur = r => (r.durum === "bos" || r.durum === "ertyok") && r.oneri ? (r.durum === "bos" ? "oneri" : "ertyok") : r.durum;
+const dur = r => r.durum === "bos" && r.oneri ? "oneri" : r.durum;
 
 async function load() {
   try {
@@ -164,23 +165,31 @@ async function load() {
 }
 
 function runHtml() {
-  const v = st.veri, k = v?.kayit, is = v?.is;
+  const v = st.veri, k = v?.kayit || {}, is = v?.is;
   const yetki = st.yetki.topoloji;
   const btn = (id, t, title, prim) => `<button id="${id}" type="button"${prim ? ` class="primary"` : ""}${yetki ? "" : " disabled"} title="${esc(yetki ? title : "Yetkiniz yok (DokuPanel: Yetki:Topoloji)")}">${t}</button>`;
   if (is?.durum === "calisiyor") {
     const yuz = is.toplam ? Math.round(is.biten * 100 / is.toplam) : 0;
-    return `<div class="run"><div><span class="spinner"></span> <b>Taranıyor</b> · ${esc(is.asama)} · ${fmt(is.sunucu)} sunucuda veri bulundu
+    return `<div class="run"><div><span class="spinner"></span> <b>Taranıyor</b> · ${esc(is.asama)} · ${fmt(is.sunucu)} sunucuda veri
       <button id="stop" type="button" style="margin-left:10px">Durdur</button></div><div class="bar"><i style="width:${yuz}%"></i></div>
       <div class="sub">Grup ${fmt(is.biten)} / ${fmt(is.toplam)} · başlangıç ${esc(tarih(is.baslangic))} · sayfa kapatılsa da tarama sunucuda sürer; 10 grupta bir kaydedilir</div></div>`;
   }
-  const yarim = k && !k.bitis;
-  const bilgi = !k ? `Henüz tarama yok. "Tüm ERT'yi tara" ile başlatın (tüm sunucular parça parça sorgulanır; uzun sürer).`
-    : `Son tarama: ${esc(tarih(k.baslangic))}${k.bitis ? ` – ${esc(tarih(k.bitis))}` : ` · <b style="color:var(--warn)">yarım kaldı</b>`} · ${fmt(k.taranan)} / ${fmt(k.toplamIp)} sunucu tarandı · ${fmt(k.sunucu)} sunucuda veri ·
-       Carbon Black son ${k.cbSaat} saat, IIS logu son ${k.iisDakika} dk${k.kaydeden ? ` · ${esc(k.kaydeden)}` : ""}`;
+  const suzIp = [...new Set(suz().map(r => r.ip))];
+  const bilgi = !k.tarama ? `Henüz tarama yok · ERT'de ${fmt(k.toplamIp)} sunucu, adı boş portu olan ${fmt(k.bosSunucu)} sunucu.`
+    : `Son tarama: ${esc(tarih(k.baslangic))}${k.bitis ? ` – ${esc(tarih(k.bitis))}` : ""} · ${esc(k.kapsam || "")} · toplam ${fmt(k.taranan)} / ${fmt(k.toplamIp)} sunucu tarandı (veri bulunan: ${fmt(k.sunucu)}) ·
+       Carbon Black son ${k.cbSaat} saat, IIS logu son ${k.iisDakika} dk${k.bekleyen ? ` · <b style="color:var(--warn)">${fmt(k.bekleyen)} sunucu bekliyor</b>` : ""}`;
   const son = is && is.durum !== "calisiyor" ? ` · son iş: ${esc(is.asama)}${is.hata ? ` — <span style="color:var(--err)">${esc(is.hata)}</span>` : ""}` : "";
-  return `<div class="run"><div class="tools" style="margin:0">${bilgi}${son}<span class="sp"></span>
-    ${yarim ? btn("devam", "Kaldığı yerden devam et", "Taranmayan sunucularla devam eder", true) : ""}
-    ${btn("tara", k ? "Baştan tara" : "Tüm ERT'yi tara", "Tüm ERT sunucularını Carbon Black (son 72 saat) ve IIS logu (son 30 dk) ile tarar; önceki tarama silinir", !yarim)}</div></div>`;
+  return `<div class="run"><div>${bilgi}${son}</div>
+    <div class="tools" style="margin:0">
+      ${btn("tBos", `Adı boş portu olan sunucuları tara (${fmt(k.bosSunucu)})`, "Yalnız ERT'de uygulama adı boş portu olan sunucular. Öneri için aynı servisin ERT'de adı dolu olduğu sunucular da gerekir; bu sunuculardaki dolu portlar sözlüğe girer, kalanları sonra 'Taranmamışları tara' ile ekleyebilirsiniz.", !k.tarama)}
+      ${btn("tSec", `Seçili ${fmt(st.sec.size)} sunucuyu tara`, "Tabloda işaretlediğiniz satırların sunucuları (mevcut taramaya eklenir)")}
+      ${btn("tSuz", `Süzülen satırların sunucularını tara (${fmt(suzIp.length)})`, "Şu anki süzgece uyan satırların sunucuları (mevcut taramaya eklenir)")}
+      <span style="display:inline-flex;gap:4px"><input id="tekIp" placeholder="IP" style="width:130px">${btn("tTek", "Tara", "Tek sunucu tara (mevcut taramaya eklenir)")}</span>
+      <span class="sp"></span>
+      ${k.bekleyen ? btn("tDevam", `Kaldığı yerden devam (${fmt(k.bekleyen)})`, "Yarım kalan taramanın bekleyen sunucuları", true) : ""}
+      ${k.tarama ? btn("tKalan", "Taranmamışları tara", "ERT'de olup hiç taranmamış sunucular (sözlüğü güçlendirir)") : ""}
+      ${btn("tara", "Baştan tüm ERT", "Tüm ERT sunucuları; önceki tarama silinir")}
+    </div></div>`;
 }
 
 function istatistik(l) {
@@ -188,18 +197,21 @@ function istatistik(l) {
   const kart = (k, v, t, title) => `<div class="stat${st.durumFiltre === k ? " on" : ""}" data-f="${k}" title="${esc(title || "")}"><b>${fmt(v)}</b><span>${t}</span></div>`;
   return kart("", l.length, "IP + port satırı")
     + kart("kayitli", say(r => r.durum === "kayitli"), "ERT'de kayıtlı")
+    + kart("bostum", say(r => r.durum === "bos"), "ERT'de adı boş")
     + kart("oneri", say(r => r.durum === "bos" && r.oneri), "Boş · öneri var", "Adı boş satırlardan aynı servisin başka sunucularda ERT adı bulunanlar")
-    + kart("bos", say(r => r.durum === "bos" && !r.oneri), "Boş · öneri yok")
     + kart("uyumsuz", say(r => r.durum === "uyumsuz"), "ERT farklı", "ERT'de adı dolu ama aynı servis başka sunucularda farklı adla kayıtlı")
     + kart("ertyok", say(r => r.durum === "ertyok"), "ERT'de kaydı yok", "Carbon Black / IIS'te port var, ERT'de bu IP + port satırı yok")
-    + kart("veriyok", say(r => r.durum === "veriyok"), "Veri yok", "Tarandı ama bu portta Carbon Black / IIS verisi görülmedi");
+    + kart("v:taranmadi", say(r => r.veri === "taranmadi"), "Taranmadı", "Sunucusu henüz taranmamış satırlar");
 }
 
 function suz() {
   const v = st.veri; if (!v) return [];
-  const q = $("#q").value.trim().toLocaleLowerCase("tr"), d = $("#durum").value || st.durumFiltre, g = $("#guven").value, alt = $("#alt").checked;
+  const q = $("#q").value.trim().toLocaleLowerCase("tr"), g = $("#guven").value, alt = $("#alt").checked;
+  let d = $("#durum").value, vf = $("#veri").value;
+  if (st.durumFiltre.startsWith("v:")) vf = vf || st.durumFiltre.slice(2); else d = d || st.durumFiltre;
   return v.satirlar.filter(r => (alt || !r.altyapi)
-    && (!d || (d === "oneri" ? r.durum === "bos" && r.oneri : d === "bos" ? r.durum === "bos" && !r.oneri : r.durum === d))
+    && (!d || (d === "bostum" ? r.durum === "bos" : d === "oneri" ? r.durum === "bos" && r.oneri : d === "bos" ? r.durum === "bos" && !r.oneri : r.durum === d))
+    && (!vf || r.veri === vf)
     && (!g || r.guven === g)
     && (!q || [r.ip, r.port, r.sunucu, r.ert, r.website, r.exe, r.exeYol, r.oneri, r.not, ...(r.iis || [])].some(x => String(x ?? "").toLocaleLowerCase("tr").includes(q))));
 }
@@ -212,9 +224,10 @@ function oneriHucre(r) {
 }
 
 function satirTablo(l) {
-  $("#head").innerHTML = `<tr><th>IP</th><th>Sunucu</th><th>Port</th><th>ERT uygulaması</th><th>Exe (Carbon Black)</th><th>IIS uygulamaları</th><th class="num">Bağlantı</th><th>Durum</th><th>Tespit edilen uygulama</th></tr>`;
+  $("#head").innerHTML = `<tr><th style="width:28px"><input type="checkbox" id="secHep" title="Süzülen satırların hepsini seç / bırak"${l.length && l.every(r => st.sec.has(r.ip)) ? " checked" : ""}></th><th>IP</th><th>Sunucu</th><th>Port</th><th>ERT uygulaması</th><th>Exe (Carbon Black)</th><th>IIS uygulamaları</th><th class="num">Bağlantı</th><th>Durum</th><th>Tespit edilen uygulama</th></tr>`;
   const g = l.slice(0, st.limit);
   $("#body").innerHTML = g.length ? g.map(r => `<tr${r.altyapi ? ` class="alt"` : ""}>
+    <td><input type="checkbox" data-sec="${esc(r.ip)}"${st.sec.has(r.ip) ? " checked" : ""}></td>
     <td class="ip"><a href="./?ip=${encodeURIComponent(r.ip)}" target="_blank" rel="noopener">${esc(r.ip)}</a></td>
     <td class="small">${esc(r.sunucu || "")}</td>
     <td class="mono">${esc(r.port)}${r.altyapi ? ` <span class="small muted">altyapı</span>` : ""}</td>
@@ -222,9 +235,9 @@ function satirTablo(l) {
     <td>${r.exe ? `<span class="mono" title="${esc(r.exeYol || "")}">${esc(r.exe)}</span>${r.httpSys ? `<span class="hs" title="Carbon Black bu portu ntoskrnl (HTTP.sys) adına yazıyor; asıl exe ERT WEBSITE / uygulama adının exe yolunda geçmesinden bulundu">HTTP.sys</span>` : ""}` : `<span class="muted small">—</span>`}</td>
     <td class="small">${(r.iis || []).length ? esc(r.iis.slice(0, 5).join(", ")) + (r.iis.length > 5 ? ` <span class="muted">+${r.iis.length - 5}</span>` : "") : ""}</td>
     <td class="num">${r.baglanti ? fmt(r.baglanti) : ""}</td>
-    <td><span class="d ${r.durum}">${DURUM[dur(r)] ?? r.durum}</span></td>
+    <td><span class="d ${r.durum}">${DURUM[dur(r)] ?? r.durum}</span>${VERI[r.veri] ? `<div class="small muted">${VERI[r.veri]}</div>` : ""}</td>
     <td>${oneriHucre(r)}</td></tr>`).join("")
-    : `<tr><td colspan="9" class="empty">${st.veri?.kayit ? "Filtreye uyan satır yok." : "Henüz tarama yok."}</td></tr>`;
+    : `<tr><td colspan="10" class="empty">${st.veri?.kayit ? "Filtreye uyan satır yok." : "Henüz tarama yok."}</td></tr>`;
   $("#count").textContent = `${fmt(l.length)} satır${l.length > st.limit ? ` · ilk ${fmt(st.limit)} gösteriliyor` : ""}`;
   $("#more").hidden = l.length <= st.limit;
 }
@@ -242,6 +255,17 @@ function sozlukTablo() {
   $("#more").hidden = l.length <= st.limit;
 }
 
+function bagla() {
+  $("#tara")?.addEventListener("click", () => tara("yeni"));
+  $("#tDevam")?.addEventListener("click", () => tara("devam"));
+  $("#tKalan")?.addEventListener("click", () => tara("kalan"));
+  $("#tBos")?.addEventListener("click", () => tara("bos"));
+  $("#tSec")?.addEventListener("click", () => st.sec.size ? tara("ip", [...st.sec]) : alert("Önce tablodan satır seçin."));
+  $("#tSuz")?.addEventListener("click", () => { const ips = [...new Set(suz().map(r => r.ip))]; ips.length ? tara("ip", ips) : alert("Süzgece uyan satır yok."); });
+  $("#tTek")?.addEventListener("click", () => { const ip = $("#tekIp").value.trim(); /^\d+\.\d+\.\d+\.\d+$/.test(ip) ? tara("ip", [ip]) : alert("Geçerli bir IP girin."); });
+  $("#stop")?.addEventListener("click", async () => { await fetch("api/imza/durdur", { method: "POST" }); });
+}
+
 function ciz() {
   const v = st.veri;
   $("#run").innerHTML = runHtml();
@@ -250,14 +274,14 @@ function ciz() {
   $("#tools").style.display = st.tab === "satir" ? "" : "none";
   if (st.tab === "satir") satirTablo(suz()); else sozlukTablo();
   $("#msgs").innerHTML = v?.mesajlar?.length ? `<details><summary>${v.mesajlar.length} tarama uyarısı</summary>${v.mesajlar.map(m => `<div>${esc(m)}</div>`).join("")}</details>` : "";
-  $("#tara")?.addEventListener("click", () => tara("yeni"));
-  $("#devam")?.addEventListener("click", () => tara("devam"));
-  $("#stop")?.addEventListener("click", async () => { await fetch("api/imza/durdur", { method: "POST" }); });
+  bagla();
+  $("#secHep")?.addEventListener("change", e => { const ips = suz().map(r => r.ip); ips.forEach(ip => e.target.checked ? st.sec.add(ip) : st.sec.delete(ip)); ciz(); });
 }
 
-async function tara(mod) {
+async function tara(mod, ipler) {
   if (mod === "yeni" && !confirm("Tüm ERT sunucuları Carbon Black ve IIS logu ile taranacak (uzun sürer; önceki tarama silinir). Başlatılsın mı?")) return;
-  const r = await fetch("api/imza/tara", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mod }) });
+  if (mod === "ip" && ipler.length > 200 && !confirm(`${ipler.length} sunucu taranacak (mevcut taramaya eklenir). Başlatılsın mı?`)) return;
+  const r = await fetch("api/imza/tara", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mod, ipler }) });
   const b = await r.json().catch(() => ({}));
   if (!r.ok) { alert(b.error || `HTTP ${r.status}`); return; }
   st.veri = { ...(st.veri || { satirlar: [], sozluk: [], mesajlar: [] }), is: b };
@@ -273,7 +297,7 @@ function izle() {
       st.veri.is = b.is;
       // çalışırken tablo dakikada bir yenilenir (bulunanlar dolsun); bitince hemen
       if (b.is?.durum !== "calisiyor" || Date.now() - sonYenile > 60000) { sonYenile = Date.now(); await load(); return; }
-      $("#run").innerHTML = runHtml(); $("#stop")?.addEventListener("click", async () => { await fetch("api/imza/durdur", { method: "POST" }); });
+      $("#run").innerHTML = runHtml(); bagla();
     } catch {}
     if (st.veri?.is?.durum === "calisiyor") izle();
   }, 3000);
@@ -294,12 +318,14 @@ function csv() {
   a.download = st.tab === "satir" ? "servis_imzasi.csv" : "servis_imzasi_sozluk.csv"; a.click();
 }
 
-["#q", "#durum", "#guven", "#alt"].forEach(s => $(s).addEventListener(s === "#q" ? "input" : "change", () => { st.limit = 500; if (s === "#durum") st.durumFiltre = ""; ciz(); }));
+["#q", "#durum", "#veri", "#guven", "#alt"].forEach(s => $(s).addEventListener(s === "#q" ? "input" : "change", () => { st.limit = 500; if (s === "#durum" || s === "#veri") st.durumFiltre = ""; ciz(); }));
 $("#more").addEventListener("click", () => { st.limit += 1000; ciz(); });
 $("#csv").addEventListener("click", csv);
 document.addEventListener("click", e => {
   const t = e.target.closest("[data-tab]");
   if (t) { st.tab = t.dataset.tab; document.querySelectorAll("[data-tab]").forEach(b => b.classList.toggle("on", b === t)); st.limit = 500; ciz(); return; }
+  const c = e.target.closest("[data-sec]");
+  if (c) { c.checked ? st.sec.add(c.dataset.sec) : st.sec.delete(c.dataset.sec); $("#run").innerHTML = runHtml(); bagla(); return; }
   const f = e.target.closest("[data-f]");
   if (f) { st.durumFiltre = f.dataset.f; $("#durum").value = ""; st.tab = "satir"; document.querySelectorAll("[data-tab]").forEach(b => b.classList.toggle("on", b.dataset.tab === "satir")); st.limit = 500; ciz(); }
 });

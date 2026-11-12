@@ -398,7 +398,11 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
   (sunucu sayısı), IIS uygulamaları, çelişki. Öneri (boş / ertyok): aynı exe|port başka sunucularda + IIS kümeleri Jaccard ≥ 0,5 → güçlü; yalnız exe|port → orta; exe yoksa
   IIS kümesi ≥ 0,6 → zayıf; en çok sunucudaki ad, %60'ın altında çoğunluk → bir kademe düşük + "net çoğunluk yok"; adaylar ipucunda. ERT dolu ama aynı servis ≥2 sunucuda
   başka adla (açık çoğunluk) → "uyumsuz" (ör. hsms64.exe:10000 "Kredi Kartı Başvuru" ↔ "HSM Provizyon"). Uçlar: GET `/api/imza` (satırlar, sözlük, kayıt, iş), `/api/imza/durum`,
-  POST `/api/imza/tara {mod: yeni|devam}` / `/api/imza/durdur` (Yetki:Topoloji). Sayfa: tarama bandı (ilerleme, tahmini kalan, durdur), istatistik kartları (tıkla süz), "IP + port
+  POST `/api/imza/tara {mod, ipler}` / `/api/imza/durdur` (Yetki:Topoloji). KAPSAM (kullanıcı: "tekil seçim yapamıyorum; önce boş olanları yapacağım, ~12K IP port"):
+  mod yeni (tüm ERT, öncekini siler) | bos (adı boş portu olan sunucular) | ip (seçili / süzülen / tek IP) | kalan (hiç taranmamışlar) | devam (`ImzaTarama.Bekleyen`);
+  yeni dışındakiler mevcut taramaya EKLENİR (aynı IP'nin verisi yenilenir), `Kapsam` bilgide. Satırda `Durum` yalnız ERT tarafı (kayitli | bos | uyumsuz | ertyok),
+  tarama tarafı ayrı `Veri` (var | yok | taranmadi) — tarama yokken "boş" süzgeci boş geliyordu. Öneri için referans (ERT'de adı dolu, aynı exe'li) sunucuların da
+  taranmış olması gerekir; yalnız boşlar taranırsa sözlük o sunuculardaki dolu portlardan çıkar → sonra "Taranmamışları tara". Sayfa: tarama bandı (ilerleme, tahmini kalan, durdur), istatistik kartları (tıkla süz), "IP + port
   satırları" | "Sözlük" sekmeleri, arama / durum / güven / altyapı süzgeçleri, ilk 500 + "daha fazla", CSV (Yetki:Disari). Sahte envanter (DF_FAKE_ENV yalnız scratch kopyada) +
   sahte Splunk ile uçtan uca test edildi (Wall güçlü, HSM uyumsuz, foo ertyok).
 - **"Bu sunucuda hangi uygulama çalışıyor?"** (IP kartı, Gelen portlar tablosunun üstündeki düğme; `SurecAi` Surec.cs, `POST /api/surec/ai`):
