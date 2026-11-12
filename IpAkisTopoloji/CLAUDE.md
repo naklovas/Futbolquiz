@@ -402,7 +402,9 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
   mod yeni (tüm ERT, öncekini siler) | bos (adı boş portu olan sunucular) | ip (seçili / süzülen / tek IP) | kalan (hiç taranmamışlar) | devam (`ImzaTarama.Bekleyen`);
   yeni dışındakiler mevcut taramaya EKLENİR (aynı IP'nin verisi yenilenir), `Kapsam` bilgide. Satırda `Durum` yalnız ERT tarafı (kayitli | bos | uyumsuz | ertyok),
   tarama tarafı ayrı `Veri` (var | yok | taranmadi) — tarama yokken "boş" süzgeci boş geliyordu. Öneri için referans (ERT'de adı dolu, aynı exe'li) sunucuların da
-  taranmış olması gerekir; yalnız boşlar taranırsa sözlük o sunuculardaki dolu portlardan çıkar → sonra "Taranmamışları tara". Sayfa: tarama bandı (ilerleme, tahmini kalan, durdur), istatistik kartları (tıkla süz), "IP + port
+  taranmış olması gerekir; yalnız boşlar taranırsa sözlük o sunuculardaki dolu portlardan çıkar → sonra "Taranmamışları tara". GENEL SÜREÇLER (kullanıcı: "dsasql.exe … bir sürü svchost geldi"; dsasql.exe SQL Server
+  değil — sqlservr.exe; büyük ihtimalle DB izleme / denetim ajanı): `ImzaSatir.Genel` (SurecAi.GenelExe ya da `Imza:GenelExeler` listesi); ERT'de kaydı olmayan
+  genel satırlar varsayılan gizli ("Genel süreçler" kutucuğu), exe yanında "genel" notu; zaten sözlüğe / öneriye girmiyordu. Sayfa: tarama bandı (ilerleme, tahmini kalan, durdur), istatistik kartları (tıkla süz), "IP + port
   satırları" | "Sözlük" sekmeleri, arama / durum / güven / altyapı süzgeçleri, ilk 500 + "daha fazla", CSV (Yetki:Disari). Sahte envanter (DF_FAKE_ENV yalnız scratch kopyada) +
   sahte Splunk ile uçtan uca test edildi (Wall güçlü, HSM uyumsuz, foo ertyok).
 - **"Bu sunucuda hangi uygulama çalışıyor?"** (IP kartı, Gelen portlar tablosunun üstündeki düğme; `SurecAi` Surec.cs, `POST /api/surec/ai`):

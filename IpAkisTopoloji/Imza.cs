@@ -19,7 +19,7 @@ record ImzaIs(string Durum, int Toplam, int Biten, string Asama, DateTime Baslan
 record ImzaAday(string Ad, int Sunucu);
 // Durum = ERT tarafı (kayitli | bos | uyumsuz | ertyok); Veri = tarama tarafı (var | yok | taranmadi) — kullanıcı: tarama yokken "boş" süzgeci boş geliyordu
 record ImzaSatir(string Ip, string Port, string? Sunucu, string? Ert, string? Website, string? Exe, string? ExeYol, bool HttpSys,
-    long Baglanti, int Istemci, List<string> Iis, string Durum, string? Oneri, string? Guven, string? Not, List<ImzaAday>? Adaylar, bool Altyapi, string Veri);
+    long Baglanti, int Istemci, List<string> Iis, string Durum, string? Oneri, string? Guven, string? Not, List<ImzaAday>? Adaylar, bool Altyapi, string Veri, bool Genel = false);
 record ImzaSozluk(string Exe, string Port, List<ImzaAday> Adlar, List<string> Iis, int Sunucu, bool Celiski);
 record ImzaSonuc(ImzaIs? Is, object? Kayit, List<ImzaSatir> Satirlar, List<ImzaSozluk> Sozluk, List<string> Mesajlar, string? Uyari);
 
@@ -287,6 +287,8 @@ sealed class ServisImzaService(IConfiguration cfg, IHttpClientFactory factory, E
     ImzaSonuc Hesapla(ImzaTarama? t, EnvanterSnapshot env)
     {
         var infra = AppTopology.InfraPorts(cfg);
+        // Genel süreçlere ek olarak ajan / izleme exe'leri (kullanıcı: "dsasql.exe … bir sürü svchost geldi"): Imza:GenelExeler (ör. ["dsasql.exe"])
+        var ajan = cfg.GetSection("Imza:GenelExeler").GetChildren().Select(c => c.Value?.Trim().ToLowerInvariant()).OfType<string>().Where(x => x.Length > 0).ToHashSet();
         var veri = (t?.Sunucular ?? []).ToDictionary(s => s.Ip);
         var taranan = (t?.Taranan ?? []).ToHashSet();
         var satirlar = new List<(ImzaSatir S, HashSet<string> IisSet, string? Anahtar)>();
@@ -319,13 +321,13 @@ sealed class ServisImzaService(IConfiguration cfg, IHttpClientFactory factory, E
                 }
                 var iis = v?.Iis.FirstOrDefault(x => x.Port == port)?.Uygulamalar ?? [];
                 string? exe = yol == null ? null : HttpSysEslesme.Cekirdek(yol) ? "ntoskrnl.exe" : ExeAd(yol);
-                bool genel = exe != null && exe != "ntoskrnl.exe" && SurecAi.GenelExe(exe, yol);
+                bool genel = exe != null && exe != "ntoskrnl.exe" && (SurecAi.GenelExe(exe, yol) || ajan.Contains(exe));
                 bool alt = infra.Contains(port);
                 string? anahtar = exe == null || exe == "ntoskrnl.exe" || genel || alt ? null : exe + "|" + port;
                 string durum = rows.Count == 0 ? "ertyok" : adlar.Count > 0 ? "kayitli" : "bos";
                 string veriDurum = exe != null || iis.Count > 0 ? "var" : taranan.Contains(ip) ? "yok" : "taranmadi";
                 var s = new ImzaSatir(ip, port, sunucuAd, adlar.Count > 0 ? string.Join(" | ", adlar) : null, website, exe, yol, hs && exe != "ntoskrnl.exe",
-                    gel.Sum(x => x.Baglanti), gel.Count > 0 ? gel.Max(x => x.Istemci) : 0, iis, durum, null, null, null, null, alt, veriDurum);
+                    gel.Sum(x => x.Baglanti), gel.Count > 0 ? gel.Max(x => x.Istemci) : 0, iis, durum, null, null, null, null, alt, veriDurum, genel);
                 satirlar.Add((s, iis.ToHashSet(StringComparer.OrdinalIgnoreCase), anahtar));
             }
         }
