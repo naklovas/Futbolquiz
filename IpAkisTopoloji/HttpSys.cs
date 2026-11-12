@@ -415,16 +415,15 @@ static class HttpSysEslesme
         var (bas, son) = Aralik(cfg);
         string spl = $"""
             search index={index} sourcetype="{sourcetype}" TERM({ip}) local_ip="{ip}"
-            | where lower(direction)!="outbound"
-            | eval lp=coalesce(local_port, "0")
-            | where lp!="0" AND lp!=""
+            | eval yon=if(lower(direction)=="outbound", "out", "in"), lp=if(yon=="in", coalesce(local_port, "0"), "-"), lp=if(lp=="", "0", lp)
             | eval yol=coalesce(process_path, "-")
-            | stats count dc(remote_ip) as ist max(_time) as son by lp yol
+            | stats count dc(remote_ip) as ist max(_time) as son by yon lp yol
             """;
         try
         {
             var res = await SplunkService.ExportAsync(spl, new LookupQuery(ip, bas, son), cfg, http, ct, "Splunk", TimeSpan.FromSeconds(30));
-            var l = res.Rows.Select(r => new HttpSysGelen(r.GetValueOrDefault("lp") ?? "", r.GetValueOrDefault("yol") ?? "-", Ad(r.GetValueOrDefault("yol") ?? "-"),
+            // yon=out satırları lp "-" (giden; tabloda "yalnız giden"), gelen port 0 = ICMP / portsuz
+            var l = res.Rows.Where(r => (r.GetValueOrDefault("yol") ?? "-") != "-").Select(r => new HttpSysGelen(r.GetValueOrDefault("lp") ?? "", r.GetValueOrDefault("yol") ?? "-", Ad(r.GetValueOrDefault("yol") ?? "-"),
                     long.TryParse(r.GetValueOrDefault("count"), out long n) ? n : 0, int.TryParse(r.GetValueOrDefault("ist"), out int i) ? i : 0,
                     double.TryParse(r.GetValueOrDefault("son"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double t)
                         ? DateTimeOffset.FromUnixTimeMilliseconds((long)(t * 1000)).ToLocalTime() : null))

@@ -878,12 +878,23 @@ function listenTable(t) {
   };
   // Son 72 saatte gelen bağlantı görülüp süreç penceresinde olmayan port × exe'ler (kullanıcı: "tanıda exesini yakalamış, ekranda yok")
   if (state.gelenPort?.status === "ok" && state.gelenPort.ip === t.ip) {
-    const varPort = new Set([...rows.values()].filter(r => !r.out).map(r => String(r.port)));
-    for (const g of state.gelenPort.portlar) {
+    const varPort = new Set([...rows.values()].filter(r => !r.out && String(r.port) !== "0").map(r => String(r.port)));
+    const varExe = new Set([...rows.values()].map(r => exeShort(r.name).toLowerCase()));
+    const gp = state.gelenPort.portlar;
+    // 1) gelen port (≠ 0) tabloda yoksa
+    for (const g of gp.filter(g => g.port !== "-" && g.port !== "0")) {
       if (varPort.has(String(g.port))) continue;
       const k = g.port + "|" + g.exe.toLowerCase();
       const r = rows.get(k) ?? { port: g.port, name: g.exe, yol: g.yol, pids: new Set(), hits: 0, peers: 0, outHits: 0, uzun: state.gelenPort.saat, son: g.son };
-      r.hits += g.baglanti; r.peers = Math.max(r.peers, g.istemci); rows.set(k, r);
+      r.hits += g.baglanti; r.peers = Math.max(r.peers, g.istemci); rows.set(k, r); varExe.add(g.exe.toLowerCase());
+    }
+    // 2) exe tabloda hiç yoksa (kullanıcı: "zb.app.wall.exe tanıda var ekranda yok"): port 0 olayı varsa port 0 satırı, yoksa "yalnız giden"
+    for (const [exe, gs] of Map.groupBy ? Map.groupBy(gp, g => g.exe.toLowerCase()) : gp.reduce((m, g) => m.set(g.exe.toLowerCase(), [...(m.get(g.exe.toLowerCase()) ?? []), g]), new Map())) {
+      if (varExe.has(exe)) continue;
+      const g0 = gs.find(g => g.port === "0"), out = gs.filter(g => g.port === "-");
+      const r = g0 ? { port: "0", name: gs[0].exe, yol: gs[0].yol, pids: new Set(), hits: g0.baglanti, peers: g0.istemci, outHits: out.reduce((a, g) => a + g.baglanti, 0), uzun: state.gelenPort.saat, son: g0.son }
+        : { port: "", out: true, name: gs[0].exe, yol: gs[0].yol, pids: new Set(), hits: 0, peers: 0, outHits: out.reduce((a, g) => a + g.baglanti, 0), uzun: state.gelenPort.saat };
+      rows.set((g0 ? "0|" : "~out|") + exe, r);
     }
   }
   // IIS logunda olup Carbon Black süreç penceresinde (dün 09:00–12:00) görülmeyen portlar da satır olsun (kullanıcı: "IIS site neden yok?")
