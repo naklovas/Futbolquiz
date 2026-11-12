@@ -298,7 +298,7 @@ sealed class ServisImzaService(IConfiguration cfg, IHttpClientFactory factory, E
         {
             var ert = env.AppsOnIp(ip).Where(h => !(int.TryParse(h.Port, out int pn) && pn >= Dyn)).GroupBy(h => h.Port ?? "").ToDictionary(g => g.Key, g => g.ToList());
             veri.TryGetValue(ip, out var v);
-            var yollar = (v?.Gelen.Select(x => x.Yol) ?? []).Concat(v?.Giden ?? []).Where(y => !HttpSysEslesme.Cekirdek(y) && !SurecAi.GenelExe(ExeAd(y), y))
+            var yollar = (v?.Gelen.Select(x => x.Yol) ?? []).Concat(v?.Giden ?? []).Where(y => !HttpSysEslesme.Cekirdek(y) && !HttpSysEslesme.Genel(ExeAd(y), y))
                 .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
             var portlar = ert.Keys.Where(p => p.Length > 0).ToList();
             foreach (var p in v?.Gelen.Select(x => x.Port) ?? [])
@@ -321,7 +321,7 @@ sealed class ServisImzaService(IConfiguration cfg, IHttpClientFactory factory, E
                 }
                 var iis = v?.Iis.FirstOrDefault(x => x.Port == port)?.Uygulamalar ?? [];
                 string? exe = yol == null ? null : HttpSysEslesme.Cekirdek(yol) ? "ntoskrnl.exe" : ExeAd(yol);
-                bool genel = exe != null && exe != "ntoskrnl.exe" && (SurecAi.GenelExe(exe, yol) || ajan.Contains(exe));
+                bool genel = exe != null && exe != "ntoskrnl.exe" && (HttpSysEslesme.Genel(exe, yol!) || ajan.Contains(exe));
                 bool alt = infra.Contains(port);
                 string? anahtar = exe == null || exe == "ntoskrnl.exe" || genel || alt ? null : exe + "|" + port;
                 string durum = rows.Count == 0 ? "ertyok" : adlar.Count > 0 ? "kayitli" : "bos";
