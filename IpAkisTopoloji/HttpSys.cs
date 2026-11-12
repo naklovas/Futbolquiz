@@ -35,6 +35,7 @@ static class HttpSysEslesme
 
     // Korelasyon penceresi (kullanıcı: "2 dk trafik — çok az"): IP kartının 3 saatlik süreç penceresi seyrek portlarda yetmiyor →
     // istenen aralıktan bağımsız son HttpSys:Saat (varsayılan 72) saat, şimdiye kadar
+    public static TimeSpan KorSure(IConfiguration cfg) => TimeSpan.FromSeconds(Math.Clamp(cfg.GetValue("HttpSys:KorelasyonSureSaniye", 90.0), 10, 600));
     public static (DateTimeOffset Start, DateTimeOffset End) Aralik(IConfiguration cfg)
     {
         double saat = Math.Clamp(cfg.GetValue("HttpSys:Saat", 72.0), 1, 24 * 14);
@@ -58,8 +59,12 @@ static class HttpSysEslesme
             """;
         int toplam = Math.Max(1, (int)Math.Ceiling((end - start).TotalMinutes));
         SplunkResult res;
-        try { res = await SplunkService.ExportAsync(spl, new LookupQuery(ip, start, end), cfg, http, ct, "Splunk"); }
+        // SÜRE SINIRI (kullanıcı: "en üstteki 2 satır hep dönüyor"): 72 saatlik dakika bazlı sorgu yoğun sunucuda bitmiyordu → HttpSys:KorelasyonSureSaniye
+        // (varsayılan 90); süre dolarsa kısmi sonuç KULLANILMAZ (yanlış korelasyon kaydedilmesin), hata döner, kayda yazılmaz
+        try { res = await SplunkService.ExportAsync(spl, new LookupQuery(ip, start, end), cfg, http, ct, "Splunk", KorSure(cfg)); }
         catch (Exception ex) when (ex is not OperationCanceledException) { return new(ip, start, end, toplam, [], ex.Message); }
+        if (res.Messages.Any(m => m.Contains("sınırında") || m.Contains("cevap vermedi")))
+            return new(ip, start, end, toplam, [], $"Carbon Black sorgusu {KorSure(cfg).TotalSeconds:0} sn içinde bitmedi (son {Math.Round((end - start).TotalHours)} saat çok büyük; HttpSys:Saat kısaltılabilir)");
 
         var gelen = new Dictionary<string, Dictionary<long, long>>();   // port → dakika → bağlantı
         var giden = new Dictionary<string, Dictionary<long, long>>(StringComparer.OrdinalIgnoreCase);   // exe yolu → dakika → bağlantı

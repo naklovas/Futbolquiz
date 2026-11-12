@@ -1756,6 +1756,7 @@ function httpSysTahmin(port) {
       <span class="muted">· ${esc(urls[0])}${urls.length > 1 ? ` +${urls.length - 1}` : ""}</span></div>`;
   }
   const p = h.map?.[String(port)];
+  if (!p && h.korelasyonHata) return `<div class="small" style="color:var(--err)" title="${esc(h.korelasyonHata)}">zaman korelasyonu tamamlanamadı (süre sınırı) <a href="#" class="small" data-hsyenile="${esc(h.ip)}">↻ yeniden dene</a></div>`;
   if (!p) return kayitNot;
   const pen = h.korSaat ? `son ${h.korSaat} saatte ` : "";
   // Tanı (kullanıcı: "hiçbir şey bulamadı"): sunucuda dışarı bağlanan iş exe'si var mı, genel diye ayıklananlar
