@@ -847,8 +847,6 @@ function listenTable(t) {
       return { port, hits: ps.reduce((a, p) => a + p.hits, 0), peers: new Set(ps.map(p => p.ip)).size };
     });
     for (const x of ports) {
-      // port 0 = ICMP (ping) ya da portsuz olay — dinlenen port değil (kullanıcı: tabloda anlamsız "0" satırları)
-      if (String(x.port) === "0") { icmp.add(exeShort(n.name)); continue; }
       const k = x.port + "|" + n.name.toLowerCase();
       const r = rows.get(k) ?? { port: x.port, name: n.name, yol: n.yol, pids: new Set(), hits: 0, peers: 0, outHits: 0 };
       if (n.pid && !r.pids.has(n.pid)) { r.pids.add(n.pid); r.outHits += n.outHits || 0; }
