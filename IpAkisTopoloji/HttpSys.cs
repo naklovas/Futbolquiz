@@ -394,7 +394,7 @@ static class HttpSysEslesme
     // Port başına uygulama listesi: tarama yolları, geçersiz karakterli adlar (canlı: OGNL "${#w=#context.get(…)}.action") ve portta başka uygulama
     // varken TEK istemciden gelen az istekli adlar (canlı: rastgele "/ixou7arxei1w", "/cpsrw_aukvsi") elenir; başka uygulama varsa "/" gösterilmez
     static readonly System.Text.RegularExpressions.Regex _iisAd = new(@"^[a-z0-9][a-z0-9._~\-]{0,63}$|^/$", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-    static List<HttpSysIisUyg> IisUyg(IEnumerable<(string App, string Mod, long N, int AIst, string? Ornek)> satir, Func<string, bool> gurultu, out long gur)
+    internal static List<HttpSysIisUyg> IisUyg(IEnumerable<(string App, string Mod, long N, int AIst, string? Ornek)> satir, Func<string, bool> gurultu, out long gur)
     {
         var a = satir.GroupBy(x => x.App).Select(g => (Ad: g.Key, N: g.Sum(x => x.N), Ist: g.Max(x => x.AIst),
             Ornek: g.OrderByDescending(x => x.N).Select(x => x.Ornek).FirstOrDefault(),

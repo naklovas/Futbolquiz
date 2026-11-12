@@ -45,6 +45,7 @@ topoloji çizer ve şirket içi AI'a etki analizi yaptırır. Canlıda IIS'te, W
 | `FizikselEnvanter.cs` | Fiziksel envanter: nlyte kabin → host → VM → uygulama (doku DB'deki KabinHostVm vb., yalnız okur; `wwwroot/fiziksel.js`) |
 | `FizikselDeger.cs` | Fiziksel cihaz değerleri (V / İ / E / G / B): tür / model / kabin kuralları, miras, ERT ad eşleşmesi (`partial FizikselService`) |
 | `FizikselKayit.cs` | Fiziksel değer denetim kaydı (DF_FIZIKSEL_DEGER_*), elle değer, çok sayfalı Excel (`Xlsx` yazıcı, dış kütüphanesiz) |
+| `Imza.cs` | Servis imzası: tüm ERT IP + port → Carbon Black exe + IIS uygulamaları, boş satırlara aynı servisin ERT adı (`wwwroot/imza.html`, DF_SERVIS_IMZA) |
 | `HttpSys.cs` | HTTP.sys (ntoskrnl) port → asıl exe: Carbon Black zaman korelasyonu (`HttpSysEslesme`), sonucun kaydı (`HttpSysKayitService`, DF_HTTPSYS_KORELASYON) |
 | `araclar/HttpSysTopla.ps1` | İSTEĞE BAĞLI: sunucularda elle `netsh http show servicestate` → DF_HTTPSYS_URL (DeltaFlow bağlanmaz) |
 | `Nessus.cs` | Nessus / Tenable.sc: repository'deki tarama sonuçlarından teknoloji, sertifika, OS, kurulu yazılım |
@@ -385,6 +386,21 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
   satırda kırmızı "zaman korelasyonu tamamlanamadı (süre sınırı) ↻ yeniden dene". IIS penceresi `iisSure` ile saatin altındaysa "30 dk" yazılır. GÖSTERİM HATASI (kullanıcı: "IIS verisi ancak yeniden hesapla'ya basınca geliyor"): `loadIis` / `loadGelenPortlar` bitince
   yalnız `renderProc` (akış penceresi) çağrılıyordu, IP kartı tablosu (`updateTargetApps`) yenilenmiyordu → ikisi de artık `updateTargetApps` çağırır. Ayrıca canlıda görülen çelişki: ERT'de 10000 "Kredi Kartı Başvuru", ama süreç
   hsms64.exe ve VIP havuzu HSM_Provizyon_10000_GRP (ERT uyuşmazlık uyarısı önerildi, yapılmadı).
+- **Servis imzası** (`Imza.cs`, `wwwroot/imza.html`, sekme çubuğunda "Servis imzası ↗"; kullanıcı: "Entropi'deki envanteri alalım, IP port karşılığında
+  bulduklarımızı bir tabloya basalım; boş olanlarda aynı servis çalışıyorsa tespit ettiğimiz uygulamayı basalım"; "exe – IIS uygulaması – ERT adı, bir yol bulmamız lazım";
+  sonra AI ile yorumlatılacak): TÜM ERT arka planda (`ServisImzaService`, tek iş): IP'ler `Imza:ParcaIp`=40'lık gruplar, grup başına Carbon Black (son `Imza:CbSaat`=72 saat;
+  `stats count dc(remote_ip) by local_ip yon lp yol`) + IIS logu (son `Imza:IisDakika`=30 dk; port → uygulama, gürültü `HttpSysEslesme.IisUyg` / `IisTarama` ile, IP kartıyla
+  aynı kural), sorgu başına `Imza:SureSaniye`=120 sınır. Ham tarama (`ImzaTarama`: sunucu başına gelen port × exe, giden exe'ler, IIS port × uygulamalar, Taranan) gzip JSON
+  `Imza:Tablo` dbo.DF_SERVIS_IMZA (`sql/servis_imza.sql`, tek satır AD='TUM', TAMAM) — 10 grupta bir ara kayıt, durdurulan / yarım iş "Kaldığı yerden devam" (mod devam).
+  Eşleşme her açılışta ham veriden (`Hesapla`, tarama + envanter sürümüne göre önbellek): satır = ERT IP + port (dinamik ≥49152 hariç) ∪ CB / IIS'te görülüp ERT'de olmayan
+  portlar ("ertyok"). Exe: o portu kabul eden iş exe'si; yalnız ntoskrnl ise ERT WEBSITE / APPNAME / SERVICENAME adı sunucudaki TEK iş exe'sinin yolunda geçiyorsa o exe
+  (`HttpSysExe`, `HttpSys=true`). İmza anahtarı exe|port (genel / altyapı / çözülemeyen ntoskrnl hariç). SÖZLÜK: ERT'de tek, sistem dışı adı olan satırlar → exe|port → adlar
+  (sunucu sayısı), IIS uygulamaları, çelişki. Öneri (boş / ertyok): aynı exe|port başka sunucularda + IIS kümeleri Jaccard ≥ 0,5 → güçlü; yalnız exe|port → orta; exe yoksa
+  IIS kümesi ≥ 0,6 → zayıf; en çok sunucudaki ad, %60'ın altında çoğunluk → bir kademe düşük + "net çoğunluk yok"; adaylar ipucunda. ERT dolu ama aynı servis ≥2 sunucuda
+  başka adla (açık çoğunluk) → "uyumsuz" (ör. hsms64.exe:10000 "Kredi Kartı Başvuru" ↔ "HSM Provizyon"). Uçlar: GET `/api/imza` (satırlar, sözlük, kayıt, iş), `/api/imza/durum`,
+  POST `/api/imza/tara {mod: yeni|devam}` / `/api/imza/durdur` (Yetki:Topoloji). Sayfa: tarama bandı (ilerleme, tahmini kalan, durdur), istatistik kartları (tıkla süz), "IP + port
+  satırları" | "Sözlük" sekmeleri, arama / durum / güven / altyapı süzgeçleri, ilk 500 + "daha fazla", CSV (Yetki:Disari). Sahte envanter (DF_FAKE_ENV yalnız scratch kopyada) +
+  sahte Splunk ile uçtan uca test edildi (Wall güçlü, HSM uyumsuz, foo ertyok).
 - **"Bu sunucuda hangi uygulama çalışıyor?"** (IP kartı, Gelen portlar tablosunun üstündeki düğme; `SurecAi` Surec.cs, `POST /api/surec/ai`):
   arayüzdeki /api/surec sonucu exe başına toplanıp (PID'ler, portlar, giden, bağlanan / bağlandığı uygulamalar) AI'a gider (yeniden
   sorgulanmaz) + ERT kayıtları + segment + genel bilgiler dosyası. Kesin genel süreçler kodda ayıklanır (`GenelAd` / `GenelYol`: svchost,

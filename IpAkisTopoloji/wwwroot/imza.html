@@ -1,0 +1,315 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DeltaFlow · Servis imzası</title>
+<link rel="icon" href="deltaflow.svg">
+<script>
+  try { const t = localStorage.getItem("deltaflow.theme"); if (t === "light" || t === "dark") document.documentElement.dataset.theme = t; } catch {}
+</script>
+<!--
+  Servis imzası (Imza.cs): tüm ERT IP + port satırlarının karşısına Carbon Black exe'si ve IIS uygulamaları; ERT'de adı dolu satırlardan
+  "exe + port (+ IIS uygulamaları) → ERT adı" sözlüğü çıkar, boş satırlara aynı servisin ERT adı önerilir. ERT'ye yazılmaz.
+-->
+<style>
+  :root {
+    --bg: #f5f6f8; --panel: #ffffff; --text: #1d2330; --muted: #677084; --line: #dde1e8;
+    --in: #2f6fd6; --in-soft: #e5eefc; --ok: #2e8b57; --err: #c8353a; --warn: #b7791f;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #14171d; --panel: #1c2028; --text: #e4e7ec; --muted: #9098a8; --line: #2d333e;
+      --in: #6ea0f0; --in-soft: #1f2d45; --ok: #5cc28a; --err: #ef6b6f; --warn: #e0b050;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #14171d; --panel: #1c2028; --text: #e4e7ec; --muted: #9098a8; --line: #2d333e;
+    --in: #6ea0f0; --in-soft: #1f2d45; --ok: #5cc28a; --err: #ef6b6f; --warn: #e0b050;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 "Segoe UI", system-ui, sans-serif; }
+  header { padding: 14px 20px; background: var(--panel); border-bottom: 1px solid var(--line); display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
+  header img { width: 30px; height: 30px; }
+  header h1 { margin: 0; font-size: 19px; }
+  header a { color: var(--muted); text-decoration: none; font-size: 13px; }
+  header a:hover { color: var(--in); }
+  header .sp { flex: 1; }
+  #me { font-size: 12.5px; color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 4px 12px; }
+  main { padding: 18px 20px 40px; max-width: 1700px; margin: 0 auto; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; }
+  .sub { color: var(--muted); font-size: 12.5px; }
+  .stats { display: flex; gap: 10px; flex-wrap: wrap; margin: 12px 0; }
+  .stat { border: 1px solid var(--line); border-radius: 10px; padding: 8px 14px; min-width: 120px; background: var(--bg); }
+  .stat b { display: block; font-size: 20px; font-variant-numeric: tabular-nums; }
+  .stat span { color: var(--muted); font-size: 11.5px; text-transform: uppercase; letter-spacing: .04em; }
+  input, select, button, textarea { font: inherit; color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; }
+  button { cursor: pointer; }
+  button:disabled { opacity: .5; cursor: default; }
+  button.primary { background: var(--in); border-color: var(--in); color: #fff; font-weight: 600; }
+  .tools { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 4px 0 12px; }
+  .tools .sp { flex: 1; }
+  .tools label { display: flex; gap: 6px; align-items: center; font-size: 13px; }
+  .warn { border: 1px solid var(--warn); background: color-mix(in srgb, var(--warn) 12%, transparent); border-radius: 10px; padding: 9px 14px; margin-bottom: 12px; font-size: 13px; }
+  .run { border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; margin-bottom: 12px; background: var(--bg); display: grid; gap: 6px; font-size: 13px; }
+  .run .bar { height: 8px; border-radius: 99px; background: var(--line); overflow: hidden; }
+  .run .bar i { display: block; height: 100%; background: var(--in); transition: width .4s; }
+  .grid { border: 1px solid var(--line); border-radius: 10px; overflow: auto; max-height: calc(100vh - 330px); }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  th[data-sort], th [data-sort] { cursor: pointer; user-select: none; }
+  th .arr { margin-left: 3px; opacity: .35; }
+  th .on > .arr, th.on > .arr { opacity: 1; color: var(--in); }
+  th .sub2 { font-weight: 500; text-transform: none; letter-spacing: 0; margin-left: 6px; border: 1px solid var(--line); border-radius: 999px; padding: 0 6px; }
+  th .sub2.on { border-color: var(--in); color: var(--in); }
+  th { position: sticky; top: 0; background: var(--bg); color: var(--muted); font-size: 11.5px; text-transform: uppercase; letter-spacing: .04em; text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--line); z-index: 1; }
+  td { padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  tr:hover td { background: var(--in-soft); }
+  tr.alt td { color: var(--muted); }
+  .mono { font-family: Consolas, ui-monospace, monospace; }
+  .ip a { font-family: Consolas, ui-monospace, monospace; font-weight: 600; color: var(--text); text-decoration: none; }
+  .ip a:hover { color: var(--in); text-decoration: underline; }
+  .chips span { display: inline-block; background: var(--bg); border: 1px solid var(--line); border-radius: 4px; padding: 0 6px; margin: 1px 3px 1px 0; font-size: 12px; }
+  .small { font-size: 12px; } .muted { color: var(--muted); }
+  .sug b { font-size: 13.5px; }
+  .sug .why { color: var(--muted); font-size: 12px; margin-top: 2px; max-width: 520px; }
+  .conf { display: inline-block; width: 46px; height: 6px; border-radius: 9px; background: var(--line); vertical-align: middle; margin: 0 6px; overflow: hidden; }
+  .conf i { display: block; height: 100%; }
+  .st { display: inline-block; font-size: 11px; font-weight: 700; border-radius: 999px; padding: 1px 8px; border: 1px solid; }
+  .st.ai { color: var(--in); border-color: var(--in); }
+  .st.ok { color: var(--ok); border-color: var(--ok); }
+  .st.red { color: var(--err); border-color: var(--err); }
+  .st.new { color: var(--warn); border-color: var(--warn); }
+  .st.una { color: #8250df; border-color: #8250df; }
+  .acts { white-space: nowrap; }
+  .acts button { padding: 2px 8px; font-size: 12px; }
+  .foot { display: flex; justify-content: space-between; align-items: center; margin-top: 10px; color: var(--muted); font-size: 12.5px; gap: 10px; flex-wrap: wrap; }
+  .empty { padding: 40px; text-align: center; color: var(--muted); }
+  .spinner { display: inline-block; width: 12px; height: 12px; border: 2px solid var(--line); border-top-color: var(--in); border-radius: 50%; animation: sp 0.8s linear infinite; vertical-align: -2px; }
+  @keyframes sp { to { transform: rotate(360deg); } }
+  .drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(640px, 100vw); background: var(--panel); border-left: 1px solid var(--line);
+    box-shadow: -12px 0 32px rgba(0,0,0,.18); z-index: 50; display: flex; flex-direction: column; }
+  .drawer .dh { padding: 14px 18px; border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; gap: 10px; align-items: start; }
+  .drawer .dh h3 { margin: 0; font-size: 17px; }
+  .drawer pre { margin: 0; padding: 14px 18px; overflow: auto; white-space: pre-wrap; font-size: 12px; line-height: 1.5; flex: 1; }
+  .g { display:inline-block; font-size:11px; font-weight:700; border-radius:999px; padding:0 7px; border:1px solid; margin-left:4px; }
+  .g.guclu { color: var(--ok); border-color: var(--ok); } .g.orta { color: var(--in); border-color: var(--in); } .g.zayif { color: var(--warn); border-color: var(--warn); }
+  .d { display:inline-block; font-size:11px; border-radius:4px; padding:0 6px; border:1px solid var(--line); color: var(--muted); white-space:nowrap; }
+  .d.kayitli { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 50%, transparent); }
+  .d.bos, .d.ertyok { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 50%, transparent); }
+  .d.uyumsuz { color: var(--err); border-color: var(--err); }
+  .tabs { display:flex; gap:6px; margin: 4px 0 12px; }
+  .tabs button.on { background: var(--in); border-color: var(--in); color:#fff; }
+  .hs { font-size: 10.5px; color: var(--in); border: 1px solid var(--in); border-radius: 4px; padding: 0 4px; margin-left: 4px; }
+  .stat { cursor: pointer; } .stat.on { border-color: var(--in); box-shadow: 0 0 0 1px var(--in) inset; }
+</style>
+</head>
+<body>
+<header>
+  <img src="deltaflow.svg" alt="">
+  <div><h1>Servis imzası · ERT karşılaştırması</h1>
+    <div class="sub">ERT'deki her IP + port satırı · karşısında Carbon Black'te o portu kabul eden exe ve IIS logundaki uygulamalar · adı boş satırlara aynı servisin başka sunuculardaki ERT adı önerilir (ERT'ye yazılmaz)</div></div>
+  <span class="sp"></span>
+  <a href="./">← DeltaFlow</a>
+  <span id="me"></span>
+</header>
+<main>
+  <section class="panel">
+    <div id="run"></div>
+    <div id="warn"></div>
+    <div class="stats" id="stats"></div>
+    <div class="tabs"><button type="button" data-tab="satir" class="on">IP + port satırları</button><button type="button" data-tab="sozluk" title="ERT'de adı dolu satırlardan çıkan eşleşmeler: exe + port → ERT adı">Sözlük (exe + port → ERT adı)</button>
+      <span class="sp" style="flex:1"></span><button type="button" id="csv" hidden>Excel'e aktar</button></div>
+    <div class="tools" id="tools">
+      <input type="search" id="q" placeholder="IP, sunucu, port, ERT adı, exe, IIS uygulaması, öneri ara…" style="min-width:320px">
+      <select id="durum">
+        <option value="">Tüm satırlar</option>
+        <option value="oneri">Boş · öneri var</option>
+        <option value="bos">Boş · öneri yok</option>
+        <option value="uyumsuz">ERT farklı (uyumsuz)</option>
+        <option value="ertyok">ERT'de kaydı yok</option>
+        <option value="kayitli">ERT'de kayıtlı</option>
+        <option value="veriyok">Carbon Black / IIS verisi yok</option>
+        <option value="taranmadi">Henüz taranmadı</option>
+      </select>
+      <select id="guven"><option value="">Tüm güvenler</option><option value="güçlü">Güçlü</option><option value="orta">Orta</option><option value="zayıf">Zayıf</option></select>
+      <label title="RDP, SMB, DNS, WinRM gibi altyapı portları (sözlüğe ve öneriye girmez)"><input type="checkbox" id="alt"> Altyapı portları</label>
+    </div>
+    <div class="grid"><table>
+      <thead id="head"></thead>
+      <tbody id="body"><tr><td class="empty"><span class="spinner"></span> Yükleniyor…</td></tr></tbody>
+    </table></div>
+    <div class="foot"><span id="count"></span><span><button id="more" hidden>Daha fazla göster</button></span></div>
+    <div id="msgs" class="sub" style="margin-top:10px"></div>
+  </section>
+</main>
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const fmt = n => Number(n || 0).toLocaleString("tr-TR");
+const tarih = d => d ? String(d).slice(0, 16).replace("T", " ") : "";
+const st = { veri: null, tab: "satir", limit: 500, yetki: {}, durumFiltre: "" };
+const DURUM = { kayitli: "ERT'de kayıtlı", bos: "boş · öneri yok", oneri: "boş · öneri var", uyumsuz: "ERT farklı", ertyok: "ERT'de kaydı yok", veriyok: "veri yok", taranmadi: "taranmadı" };
+const gKls = g => g === "güçlü" ? "guclu" : g === "zayıf" ? "zayif" : "orta";
+// satırın filtre durumu: boş / ERT'de yok + öneri → "oneri"
+const dur = r => (r.durum === "bos" || r.durum === "ertyok") && r.oneri ? (r.durum === "bos" ? "oneri" : "ertyok") : r.durum;
+
+async function load() {
+  try {
+    const r = await fetch("api/imza");
+    if (r.status === 404) { $("#body").innerHTML = `<tr><td class="empty">Sunucudaki DLL bu sayfayı içermiyor (güncel DLL'i kopyalayın).</td></tr>`; return; }
+    st.veri = await r.json();
+  } catch (e) { $("#body").innerHTML = `<tr><td class="empty" style="color:var(--err)">Alınamadı: ${esc(e.message)}</td></tr>`; return; }
+  ciz();
+  if (st.veri.is?.durum === "calisiyor") izle();
+}
+
+function runHtml() {
+  const v = st.veri, k = v?.kayit, is = v?.is;
+  const yetki = st.yetki.topoloji;
+  const btn = (id, t, title, prim) => `<button id="${id}" type="button"${prim ? ` class="primary"` : ""}${yetki ? "" : " disabled"} title="${esc(yetki ? title : "Yetkiniz yok (DokuPanel: Yetki:Topoloji)")}">${t}</button>`;
+  if (is?.durum === "calisiyor") {
+    const yuz = is.toplam ? Math.round(is.biten * 100 / is.toplam) : 0;
+    return `<div class="run"><div><span class="spinner"></span> <b>Taranıyor</b> · ${esc(is.asama)} · ${fmt(is.sunucu)} sunucuda veri bulundu
+      <button id="stop" type="button" style="margin-left:10px">Durdur</button></div><div class="bar"><i style="width:${yuz}%"></i></div>
+      <div class="sub">Grup ${fmt(is.biten)} / ${fmt(is.toplam)} · başlangıç ${esc(tarih(is.baslangic))} · sayfa kapatılsa da tarama sunucuda sürer; 10 grupta bir kaydedilir</div></div>`;
+  }
+  const yarim = k && !k.bitis;
+  const bilgi = !k ? `Henüz tarama yok. "Tüm ERT'yi tara" ile başlatın (tüm sunucular parça parça sorgulanır; uzun sürer).`
+    : `Son tarama: ${esc(tarih(k.baslangic))}${k.bitis ? ` – ${esc(tarih(k.bitis))}` : ` · <b style="color:var(--warn)">yarım kaldı</b>`} · ${fmt(k.taranan)} / ${fmt(k.toplamIp)} sunucu tarandı · ${fmt(k.sunucu)} sunucuda veri ·
+       Carbon Black son ${k.cbSaat} saat, IIS logu son ${k.iisDakika} dk${k.kaydeden ? ` · ${esc(k.kaydeden)}` : ""}`;
+  const son = is && is.durum !== "calisiyor" ? ` · son iş: ${esc(is.asama)}${is.hata ? ` — <span style="color:var(--err)">${esc(is.hata)}</span>` : ""}` : "";
+  return `<div class="run"><div class="tools" style="margin:0">${bilgi}${son}<span class="sp"></span>
+    ${yarim ? btn("devam", "Kaldığı yerden devam et", "Taranmayan sunucularla devam eder", true) : ""}
+    ${btn("tara", k ? "Baştan tara" : "Tüm ERT'yi tara", "Tüm ERT sunucularını Carbon Black (son 72 saat) ve IIS logu (son 30 dk) ile tarar; önceki tarama silinir", !yarim)}</div></div>`;
+}
+
+function istatistik(l) {
+  const say = f => l.filter(f).length;
+  const kart = (k, v, t, title) => `<div class="stat${st.durumFiltre === k ? " on" : ""}" data-f="${k}" title="${esc(title || "")}"><b>${fmt(v)}</b><span>${t}</span></div>`;
+  return kart("", l.length, "IP + port satırı")
+    + kart("kayitli", say(r => r.durum === "kayitli"), "ERT'de kayıtlı")
+    + kart("oneri", say(r => r.durum === "bos" && r.oneri), "Boş · öneri var", "Adı boş satırlardan aynı servisin başka sunucularda ERT adı bulunanlar")
+    + kart("bos", say(r => r.durum === "bos" && !r.oneri), "Boş · öneri yok")
+    + kart("uyumsuz", say(r => r.durum === "uyumsuz"), "ERT farklı", "ERT'de adı dolu ama aynı servis başka sunucularda farklı adla kayıtlı")
+    + kart("ertyok", say(r => r.durum === "ertyok"), "ERT'de kaydı yok", "Carbon Black / IIS'te port var, ERT'de bu IP + port satırı yok")
+    + kart("veriyok", say(r => r.durum === "veriyok"), "Veri yok", "Tarandı ama bu portta Carbon Black / IIS verisi görülmedi");
+}
+
+function suz() {
+  const v = st.veri; if (!v) return [];
+  const q = $("#q").value.trim().toLocaleLowerCase("tr"), d = $("#durum").value || st.durumFiltre, g = $("#guven").value, alt = $("#alt").checked;
+  return v.satirlar.filter(r => (alt || !r.altyapi)
+    && (!d || (d === "oneri" ? r.durum === "bos" && r.oneri : d === "bos" ? r.durum === "bos" && !r.oneri : r.durum === d))
+    && (!g || r.guven === g)
+    && (!q || [r.ip, r.port, r.sunucu, r.ert, r.website, r.exe, r.exeYol, r.oneri, r.not, ...(r.iis || [])].some(x => String(x ?? "").toLocaleLowerCase("tr").includes(q))));
+}
+
+function oneriHucre(r) {
+  if (!r.oneri) return r.durum === "kayitli" ? "" : `<span class="muted small">—</span>`;
+  const ad = (r.adaylar || []).map(a => `${a.ad} (${a.sunucu} sunucu)`).join("\n");
+  return `<div title="${esc(ad)}"><b>${esc(r.oneri)}</b><span class="g ${gKls(r.guven)}">${esc(r.guven)}</span>
+    <div class="small muted" style="max-width:440px">${esc(r.not)}</div></div>`;
+}
+
+function satirTablo(l) {
+  $("#head").innerHTML = `<tr><th>IP</th><th>Sunucu</th><th>Port</th><th>ERT uygulaması</th><th>Exe (Carbon Black)</th><th>IIS uygulamaları</th><th class="num">Bağlantı</th><th>Durum</th><th>Tespit edilen uygulama</th></tr>`;
+  const g = l.slice(0, st.limit);
+  $("#body").innerHTML = g.length ? g.map(r => `<tr${r.altyapi ? ` class="alt"` : ""}>
+    <td class="ip"><a href="./?ip=${encodeURIComponent(r.ip)}" target="_blank" rel="noopener">${esc(r.ip)}</a></td>
+    <td class="small">${esc(r.sunucu || "")}</td>
+    <td class="mono">${esc(r.port)}${r.altyapi ? ` <span class="small muted">altyapı</span>` : ""}</td>
+    <td>${r.ert ? esc(r.ert) : `<span class="muted small">${r.durum === "ertyok" ? "ERT'de satır yok" : "boş"}</span>`}${r.website ? `<div class="small muted">WEBSITE: ${esc(r.website)}</div>` : ""}</td>
+    <td>${r.exe ? `<span class="mono" title="${esc(r.exeYol || "")}">${esc(r.exe)}</span>${r.httpSys ? `<span class="hs" title="Carbon Black bu portu ntoskrnl (HTTP.sys) adına yazıyor; asıl exe ERT WEBSITE / uygulama adının exe yolunda geçmesinden bulundu">HTTP.sys</span>` : ""}` : `<span class="muted small">—</span>`}</td>
+    <td class="small">${(r.iis || []).length ? esc(r.iis.slice(0, 5).join(", ")) + (r.iis.length > 5 ? ` <span class="muted">+${r.iis.length - 5}</span>` : "") : ""}</td>
+    <td class="num">${r.baglanti ? fmt(r.baglanti) : ""}</td>
+    <td><span class="d ${r.durum}">${DURUM[dur(r)] ?? r.durum}</span></td>
+    <td>${oneriHucre(r)}</td></tr>`).join("")
+    : `<tr><td colspan="9" class="empty">${st.veri?.kayit ? "Filtreye uyan satır yok." : "Henüz tarama yok."}</td></tr>`;
+  $("#count").textContent = `${fmt(l.length)} satır${l.length > st.limit ? ` · ilk ${fmt(st.limit)} gösteriliyor` : ""}`;
+  $("#more").hidden = l.length <= st.limit;
+}
+
+function sozlukTablo() {
+  const q = $("#q").value.trim().toLocaleLowerCase("tr");
+  const l = (st.veri?.sozluk || []).filter(s => !q || [s.exe, s.port, ...s.adlar.map(a => a.ad), ...s.iis].some(x => String(x).toLocaleLowerCase("tr").includes(q)));
+  $("#head").innerHTML = `<tr><th>Exe</th><th>Port</th><th>ERT adı (sunucu sayısı)</th><th>IIS uygulamaları</th><th class="num">Sunucu</th></tr>`;
+  const g = l.slice(0, st.limit);
+  $("#body").innerHTML = g.length ? g.map(s => `<tr><td class="mono">${esc(s.exe)}</td><td class="mono">${esc(s.port)}</td>
+    <td>${s.adlar.map((a, i) => `<span${i ? ` class="muted"` : ""}>${i ? "" : "<b>"}${esc(a.ad)}${i ? "" : "</b>"} (${a.sunucu})</span>`).join(" · ")}${s.celiski ? ` <span class="d uyumsuz" title="Aynı exe + port ERT'de farklı adlarla kayıtlı">çelişki</span>` : ""}</td>
+    <td class="small">${esc(s.iis.join(", "))}</td><td class="num">${fmt(s.sunucu)}</td></tr>`).join("")
+    : `<tr><td colspan="5" class="empty">Sözlük boş (tarama yok ya da ERT'de adı dolu satırda exe görülmedi).</td></tr>`;
+  $("#count").textContent = `${fmt(l.length)} imza · ${fmt(l.filter(s => s.celiski).length)} çelişkili`;
+  $("#more").hidden = l.length <= st.limit;
+}
+
+function ciz() {
+  const v = st.veri;
+  $("#run").innerHTML = runHtml();
+  $("#warn").innerHTML = v?.uyari ? `<div class="warn">${esc(v.uyari)}</div>` : "";
+  $("#stats").innerHTML = istatistik((v?.satirlar || []).filter(r => $("#alt").checked || !r.altyapi));
+  $("#tools").style.display = st.tab === "satir" ? "" : "none";
+  if (st.tab === "satir") satirTablo(suz()); else sozlukTablo();
+  $("#msgs").innerHTML = v?.mesajlar?.length ? `<details><summary>${v.mesajlar.length} tarama uyarısı</summary>${v.mesajlar.map(m => `<div>${esc(m)}</div>`).join("")}</details>` : "";
+  $("#tara")?.addEventListener("click", () => tara("yeni"));
+  $("#devam")?.addEventListener("click", () => tara("devam"));
+  $("#stop")?.addEventListener("click", async () => { await fetch("api/imza/durdur", { method: "POST" }); });
+}
+
+async function tara(mod) {
+  if (mod === "yeni" && !confirm("Tüm ERT sunucuları Carbon Black ve IIS logu ile taranacak (uzun sürer; önceki tarama silinir). Başlatılsın mı?")) return;
+  const r = await fetch("api/imza/tara", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mod }) });
+  const b = await r.json().catch(() => ({}));
+  if (!r.ok) { alert(b.error || `HTTP ${r.status}`); return; }
+  st.veri = { ...(st.veri || { satirlar: [], sozluk: [], mesajlar: [] }), is: b };
+  ciz(); izle();
+}
+
+let izTimer = null, sonYenile = 0;
+function izle() {
+  clearTimeout(izTimer);
+  izTimer = setTimeout(async () => {
+    try {
+      const b = await (await fetch("api/imza/durum")).json();
+      st.veri.is = b.is;
+      // çalışırken tablo dakikada bir yenilenir (bulunanlar dolsun); bitince hemen
+      if (b.is?.durum !== "calisiyor" || Date.now() - sonYenile > 60000) { sonYenile = Date.now(); await load(); return; }
+      $("#run").innerHTML = runHtml(); $("#stop")?.addEventListener("click", async () => { await fetch("api/imza/durdur", { method: "POST" }); });
+    } catch {}
+    if (st.veri?.is?.durum === "calisiyor") izle();
+  }, 3000);
+}
+
+function csv() {
+  if (!st.yetki.disari) return;
+  const l = st.tab === "satir" ? suz() : null;
+  const q = v => `"${String(v ?? "").replace(/"/g, '""')}"`;
+  const lines = st.tab === "satir"
+    ? [["IP", "SUNUCU", "PORT", "ERT UYGULAMASI", "WEBSITE", "EXE", "EXE YOLU", "HTTP.SYS", "IIS UYGULAMALARI", "BAĞLANTI", "DURUM", "TESPİT EDİLEN UYGULAMA", "GÜVEN", "NASIL", "ADAYLAR"].join(";"),
+       ...l.map(r => [r.ip, r.sunucu, r.port, r.ert, r.website, r.exe, r.exeYol, r.httpSys ? "evet" : "", (r.iis || []).join(", "), r.baglanti, DURUM[dur(r)] ?? r.durum, r.oneri, r.guven, r.not,
+         (r.adaylar || []).map(a => `${a.ad} (${a.sunucu})`).join(", ")].map(q).join(";"))]
+    : [["EXE", "PORT", "ERT ADLARI", "IIS UYGULAMALARI", "SUNUCU", "ÇELİŞKİ"].join(";"),
+       ...(st.veri?.sozluk || []).map(s => [s.exe, s.port, s.adlar.map(a => `${a.ad} (${a.sunucu})`).join(", "), s.iis.join(", "), s.sunucu, s.celiski ? "evet" : ""].map(q).join(";"))];
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob(["﻿" + lines.join("\r\n")], { type: "text/csv;charset=utf-8" }));
+  a.download = st.tab === "satir" ? "servis_imzasi.csv" : "servis_imzasi_sozluk.csv"; a.click();
+}
+
+["#q", "#durum", "#guven", "#alt"].forEach(s => $(s).addEventListener(s === "#q" ? "input" : "change", () => { st.limit = 500; if (s === "#durum") st.durumFiltre = ""; ciz(); }));
+$("#more").addEventListener("click", () => { st.limit += 1000; ciz(); });
+$("#csv").addEventListener("click", csv);
+document.addEventListener("click", e => {
+  const t = e.target.closest("[data-tab]");
+  if (t) { st.tab = t.dataset.tab; document.querySelectorAll("[data-tab]").forEach(b => b.classList.toggle("on", b === t)); st.limit = 500; ciz(); return; }
+  const f = e.target.closest("[data-f]");
+  if (f) { st.durumFiltre = f.dataset.f; $("#durum").value = ""; st.tab = "satir"; document.querySelectorAll("[data-tab]").forEach(b => b.classList.toggle("on", b.dataset.tab === "satir")); st.limit = 500; ciz(); }
+});
+fetch("api/me").then(r => r.ok ? r.json() : null).then(me => {
+  if (me?.name) $("#me").textContent = "👤 " + me.name;
+  st.yetki = me?.yetki || {};
+  $("#csv").hidden = !st.yetki.disari;
+  if (st.veri) ciz();
+}).catch(() => {});
+load();
+</script>
+</body>
+</html>

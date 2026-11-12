@@ -42,6 +42,7 @@ builder.Services.AddSingleton<IslevService>();
 builder.Services.AddSingleton<EksikService>();
 builder.Services.AddSingleton<HttpSysKayitService>();
 builder.Services.AddSingleton<SegmentTaramaService>();
+builder.Services.AddSingleton<ServisImzaService>();
 builder.Services.AddSingleton<NessusService>();
 builder.Services.AddSingleton<FizikselService>();
 builder.Services.AddMemoryCache();
@@ -841,6 +842,20 @@ app.MapPost("/api/segment/tarama", async (SegmentIstek req, HttpContext ctx, ICo
     if (!Yetki.Var(cfg, ctx, Yetki.Topoloji)) return Yetki.Red(ctx, "Segment tarama (topoloji)");
     try { return Results.Ok(await seg.BaslatAsync(req, ctx.User?.Identity?.Name ?? "?", ct)); }
     catch (InvalidOperationException ex) { return Results.BadRequest(new { error = ex.Message }); }
+});
+// SERVİS İMZASI (Imza.cs, wwwroot/imza.html): tüm ERT IP + port → Carbon Black exe + IIS uygulamaları; boş satırlara aynı servisin ERT adı
+app.MapGet("/api/imza", async (ServisImzaService imza, CancellationToken ct) => Results.Ok(await imza.SonucAsync(ct)));
+app.MapGet("/api/imza/durum", (ServisImzaService imza) => Results.Ok(new { @is = imza.Durum, uyari = imza.Uyari }));
+app.MapPost("/api/imza/tara", async (ImzaIstek? req, HttpContext ctx, IConfiguration cfg, ServisImzaService imza, CancellationToken ct) =>
+{
+    if (!Yetki.Var(cfg, ctx, Yetki.Topoloji)) return Yetki.Red(ctx, "Servis imzası taraması (topoloji)");
+    try { return Results.Ok(await imza.BaslatAsync(req?.Mod ?? "yeni", ctx.User?.Identity?.Name ?? "?", ct)); }
+    catch (InvalidOperationException ex) { return Results.Conflict(new { error = ex.Message }); }
+});
+app.MapPost("/api/imza/durdur", (HttpContext ctx, IConfiguration cfg, ServisImzaService imza) =>
+{
+    if (!Yetki.Var(cfg, ctx, Yetki.Topoloji)) return Yetki.Red(ctx, "Servis imzası taraması (topoloji)");
+    imza.Durdur(); return Results.Ok(new { ok = true });
 });
 // Kayıtlı taramalar (tür + ad başına son tarama; sayfada "kayıtlı" bilgisi için)
 app.MapGet("/api/segment/kayitlar", async (SegmentTaramaService seg, CancellationToken ct) =>
@@ -1838,6 +1853,7 @@ static class AppResponseService
 }
 
 // JSON çıktısı (camelCase) önceki anonim nesnelerle birebir aynı: mevcut arayüz etkilenmez.
+record ImzaIstek(string? Mod);
 record SplunkResult(List<Dictionary<string, string>> Rows, List<string> Messages, long ElapsedMs);
 record AppResponseResult(string Appliance, int VifgCount, int RawL4, int RawL7,
     List<L4Row> L4, List<L7Row> L7, List<string> Messages, long ElapsedMs);
