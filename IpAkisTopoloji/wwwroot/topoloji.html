@@ -833,7 +833,7 @@ function listenTable(t) {
   if (pr.status === "loading") return `<div class="small muted"><span class="spinner"></span> Carbon Black'ten alınıyor…</div>`;
   if (pr.status === "error") return `<div class="unk" style="color:var(--err)">Alınamadı: ${esc(pr.error)}</div>`;
   // port × exe satırları (aynı exe'nin PID kopyaları tek satır); gelen bağlantısı olmayan exe'ler "yalnız giden" satırı
-  const rows = new Map();
+  const rows = new Map(), icmp = new Set();
   for (const n of pr.body.processes ?? []) {
     if (!(n.portlar ?? n.listenPorts ?? []).length) {
       const k = "~out|" + n.name.toLowerCase();
@@ -847,13 +847,15 @@ function listenTable(t) {
       return { port, hits: ps.reduce((a, p) => a + p.hits, 0), peers: new Set(ps.map(p => p.ip)).size };
     });
     for (const x of ports) {
+      // port 0 = ICMP (ping) ya da portsuz olay — dinlenen port değil (kullanıcı: tabloda anlamsız "0" satırları)
+      if (String(x.port) === "0") { icmp.add(exeShort(n.name)); continue; }
       const k = x.port + "|" + n.name.toLowerCase();
       const r = rows.get(k) ?? { port: x.port, name: n.name, yol: n.yol, pids: new Set(), hits: 0, peers: 0, outHits: 0 };
       if (n.pid && !r.pids.has(n.pid)) { r.pids.add(n.pid); r.outHits += n.outHits || 0; }
       r.hits += x.hits; r.peers += x.peers; rows.set(k, r);
     }
   }
-  if (!rows.size) return `<div class="unk">Seçili aralıkta bu sunucuda Carbon Black ağ olayı görülmedi (ajan yok ya da trafik yok).</div>`;
+  if (!rows.size && !(state.gelenPort?.ip === t.ip && state.gelenPort.portlar?.length) && !(state.iis?.ip === t.ip && Object.keys(state.iis.map ?? {}).length)) return `<div class="unk">Seçili aralıkta bu sunucuda Carbon Black ağ olayı görülmedi (ajan yok ya da trafik yok).</div>`;
   const ertApps = port => [...new Set(t.apps.filter(a => String(a.port ?? "") === port).map(a => a.appName).filter(Boolean))];
   // HTTP.sys portu (ntoskrnl): ERT'deki WEBSITE (IIS site adı) / uygulama / servis adı, sunucudaki bir exe'nin yolunda geçiyorsa
   // asıl uygulama odur (canlı örnek: 9000 · ERT WEBSITE "ZB.Wall.P5" → d:\aspnetcore\zb.wall.p5\core\zb.app.wall.exe)
@@ -876,6 +878,16 @@ function listenTable(t) {
     }
     return null;
   };
+  // Son 72 saatte gelen bağlantı görülüp süreç penceresinde olmayan port × exe'ler (kullanıcı: "tanıda exesini yakalamış, ekranda yok")
+  if (state.gelenPort?.status === "ok" && state.gelenPort.ip === t.ip) {
+    const varPort = new Set([...rows.values()].filter(r => !r.out).map(r => String(r.port)));
+    for (const g of state.gelenPort.portlar) {
+      if (varPort.has(String(g.port))) continue;
+      const k = g.port + "|" + g.exe.toLowerCase();
+      const r = rows.get(k) ?? { port: g.port, name: g.exe, yol: g.yol, pids: new Set(), hits: 0, peers: 0, outHits: 0, uzun: state.gelenPort.saat, son: g.son };
+      r.hits += g.baglanti; r.peers = Math.max(r.peers, g.istemci); rows.set(k, r);
+    }
+  }
   // IIS logunda olup Carbon Black süreç penceresinde (dün 09:00–12:00) görülmeyen portlar da satır olsun (kullanıcı: "IIS site neden yok?")
   if (state.iis?.status === "ok" && state.iis.ip === t.ip) {
     const var_ = new Set([...rows.values()].filter(r => !r.out).map(r => String(r.port)));
@@ -885,12 +897,13 @@ function listenTable(t) {
   const list = [...rows.values()].sort((a, b) => a.out - b.out || (+a.port || 1e9) - (+b.port || 1e9) || b.hits - a.hits || b.outHits - a.outHits);
   const nExe = new Set(list.filter(r => !r.iisYalniz).map(r => r.name.toLowerCase())).size;
   const tlsOn = state.nessus?.ip === t.ip;
-  return `<div class="small muted" style="margin:-4px 0 6px">${fmt(nExe)} farklı exe · ${fmt(list.filter(r => !r.out).length)} port satırı${list.some(r => r.out) ? ` · ${fmt(list.filter(r => r.out).length)} exe yalnız dışarı bağlanıyor` : ""}</div>
+  const icmpNot = icmp.size ? ` · <span title="Port 0 = ping (ICMP) ya da portsuz olay; dinlenen port değil, tabloda gösterilmez">${icmp.size} süreçte port 0 (ping) olayı gizlendi</span>` : "";
+  return `<div class="small muted" style="margin:-4px 0 6px">${fmt(nExe)} farklı exe · ${fmt(list.filter(r => !r.out).length)} port satırı${list.some(r => r.out) ? ` · ${fmt(list.filter(r => r.out).length)} exe yalnız dışarı bağlanıyor` : ""}${icmpNot}${state.gelenPort?.status === "loading" ? ` · <span class="spinner"></span> son 72 saatin portları ekleniyor` : ""}</div>
     <div class="tbl-wrap" style="max-height:300px"><table>
       <thead><tr><th>Gelen port</th><th>Çalışan süreç (exe)</th><th title="Splunk IIS erişim logu (son ${state.iis?.saat ?? 1} saat): bu porta gelen istekleri karşılayan IIS sitesi ve uygulamalar (URI'nin ilk anlamlı parçası; api / v1 / rest atlanır)">IIS (site · uygulama)</th><th class="num">Gelen bağlantı</th><th class="num">Karşı IP</th><th class="num">Giden bağlantı</th>${tlsOn ? `<th title="Portun KABUL ETTİĞİ SSL / TLS sürümleri (Nessus taramasının el sıkışması). İstemcilerin fiilen hangisiyle bağlandığı değil; kırmızı = eski sürüm hâlâ açık.">TLS (Nessus)</th>` : ""}<th title="Bu sunucu bu portla bir LB VIP havuzunun üyesiyse havuz adı ve VIP adresi (vip_envanteri)">VIP havuzu</th><th>ERT'deki uygulama</th></tr></thead>
       <tbody>${list.map(r => { const apps = r.out ? [] : ertApps(r.port), infra = PROC_INFRA.has(r.port); return `<tr${infra ? ` class="muted" title="Altyapı portu"` : ""}>
         <td class="mono">${r.out ? `<span class="small muted">— yalnız giden</span>` : r.port ? esc(r.port) : `<span class="small muted" title="Carbon Black olayında yerel port yok">?</span>`}${infra ? ` <span class="small muted">altyapı</span>` : ""}</td>
-        <td><b class="mono" title="${esc([r.yol, r.pids?.size ? "PID: " + [...r.pids].join(", ") : ""].filter(Boolean).join("\n"))}">${r.iisYalniz ? `<span class="small muted" title="Bu port IIS logunda var (son ${state.iis?.saat ?? 1} saat) ama Carbon Black süreç penceresinde bağlantı görülmedi">IIS (Carbon Black'te bu aralıkta görülmedi)</span>` : esc(exeShort(r.name))}</b>${HTTPSYS.test(exeShort(r.name)) && !r.out
+        <td><b class="mono" title="${esc([r.yol, r.pids?.size ? "PID: " + [...r.pids].join(", ") : ""].filter(Boolean).join("\n"))}">${r.iisYalniz ? `<span class="small muted" title="Bu port IIS logunda var (son ${state.iis?.saat ?? 1} saat) ama Carbon Black süreç penceresinde bağlantı görülmedi">IIS (Carbon Black'te bu aralıkta görülmedi)</span>` : esc(exeShort(r.name))}</b>${r.uzun ? ` <span class="small muted" title="Süreç penceresinde (dün 09:00–12:00) bağlantı yok; son ${r.uzun} saatte görüldü${r.son ? " · son: " + esc(String(r.son).slice(0, 16).replace("T", " ")) : ""}">· son ${r.uzun} saatte</span>` : ""}${HTTPSYS.test(exeShort(r.name)) && !r.out
           ? (m => m ? `<div class="small" style="color:var(--in)" title="ERT'de bu port için kayıtlı ad (${esc(m.nm)}) şu exe'nin yolunda geçiyor: ${esc(m.hit.map(e => e.yol).join(" · "))}">→ asıl uygulama büyük ihtimalle <b class="mono">${esc(m.hit.map(e => e.name).join(", "))}</b> <span class="muted">(yolu ERT'deki "${esc(m.nm)}" ile eşleşiyor)</span></div>` : "")(httpSysApp(r.port))
             + (hs => hs.length ? `<div class="small" style="color:var(--ok)" title="IIS havuz adı bu portun VIP / ERT adıyla ortak kelime içeriyor (Carbon Black süreç başlangıcı)">→ IIS havuzu (ad eşleşmesi): ${hs.map(x => `<b class="mono">${esc(x.ad)}</b>${x.pid ? ` <span class="muted">PID ${esc(x.pid)}</span>` : ""}`).join(", ")}</div>` : "")(havuzEsleri(t).filter(x => x.es.some(e => e.port === String(r.port))))
             + httpSysTahmin(r.port)
@@ -1492,7 +1505,8 @@ async function runProc(params) {
     state.proc = { status: "ok", body, infra: false };
     // HTTP.sys (ntoskrnl) portu varsa asıl exe tahmini arka planda (zaman korelasyonu)
     if ((body.processes ?? []).some(n => HTTPSYS.test(exeShort(n.name)) && (n.portlar ?? n.listenPorts ?? []).length)) loadHttpSys(params.get("ip"));
-    loadIis(params.get("ip"));   // IIS erişim logu: port → site · uygulama (Carbon Black havuz araması kaldırıldı — kullanıcı: "fiyasko")
+    loadIis(params.get("ip"));
+    loadGelenPortlar(params.get("ip"));   // son 72 saatin gelen portları (süreç penceresinde görülmeyenler tabloya eklenir)   // IIS erişim logu: port → site · uygulama (Carbon Black havuz araması kaldırıldı — kullanıcı: "fiyasko")
   } catch (e) {
     state.proc = e.name === "AbortError" ? null : { status: "error", error: e.message };
   }
@@ -1576,6 +1590,19 @@ function iisHavuz(port) {
   return out.map(o => o.ad);
 }
 // IIS erişim logu (kullanıcı: "IIS'ten getir, o IP portun karşısında ne yazıyorsa"): /api/surec/iis → port → site · uygulamalar
+let gpAbort = null;
+async function loadGelenPortlar(ip) {
+  gpAbort?.abort(); gpAbort = new AbortController();
+  state.gelenPort = { ip, status: "loading" };
+  try {
+    const r = await fetch("api/surec/gelenportlar?" + new URLSearchParams({ ip }), { signal: gpAbort.signal });
+    if (r.status === 404) { state.gelenPort = null; return; }
+    const b = await r.json().catch(() => ({}));
+    if (state.gelenPort?.ip !== ip) return;
+    state.gelenPort = { ip, status: "ok", portlar: b.portlar ?? [], saat: b.saat ?? 72, hata: b.hata };
+  } catch (e) { if (e.name !== "AbortError") state.gelenPort = null; }
+  renderProc();
+}
 let iisAbort = null;
 async function loadIis(ip) {
   iisAbort?.abort(); iisAbort = new AbortController();

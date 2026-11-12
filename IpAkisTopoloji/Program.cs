@@ -271,6 +271,13 @@ app.MapGet("/api/surec/iis", async (string? ip, IConfiguration cfg, IHttpClientF
         .OrderBy(a => a.Port == c.Port ? 0 : 1).Select(a => a.AppName).FirstOrDefault() }).ToList();
     return Results.Ok(new { iis, cagri, hata, saat = HttpSysEslesme.IisSaat(cfg) });
 });
+// Son HttpSys:Saat (72) saatin gelen portları × exe (IP kartı tablosunda süreç penceresinde görülmeyen portlar için)
+app.MapGet("/api/surec/gelenportlar", async (string? ip, IConfiguration cfg, IHttpClientFactory factory, CancellationToken ct) =>
+{
+    if (!LookupQuery.TryParse(ip, null, null, cfg.GetValue("MaxRangeHours", 24), out var q, out var error)) return Results.BadRequest(new { error });
+    var (l, hata) = await HttpSysEslesme.GelenPortlarAsync(q!.Ip, cfg, factory.CreateClient("splunk"), ct);
+    return Results.Ok(new { portlar = l, hata, saat = Math.Round((HttpSysEslesme.Aralik(cfg).End - HttpSysEslesme.Aralik(cfg).Start).TotalHours) });
+});
 // Korelasyon tanısı (düz metin; kullanıcı kopyalayıp gönderebilsin)
 app.MapGet("/api/surec/httpsys/tani", async (string? ip, IConfiguration cfg, IHttpClientFactory factory, CancellationToken ct) =>
 {

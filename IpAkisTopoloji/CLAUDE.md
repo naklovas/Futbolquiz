@@ -371,7 +371,11 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
   (healthcheck, health, ping, monitor…) gürültü listesinde; uygulama başına en sık `ornek` = "METOT /tam/yol" (`HttpSysIisUyg.Ornek`, kolon ipucunda). HIZ (kullanıcı: "yine çok uzun sürüyor"):
   /api/surec/httpsys artık IIS sorgusu YAPMAZ (çift sorgu Splunk'ın kullanıcı başına eşzamanlı arama sınırını dolduruyordu); `IisAsync` aynı IP için süren aramayı paylaşır
   (`_iisSuren`, tarayıcı iptal etse de biter ve önbelleğe girer); SPL başında `| fields host source _raw`. Gelen portlar tablosunda "VIP havuzu" kolonu (`vipHucre`:
-  memberOf port = satır portu → havuz adı ("/Common/" atılır) + VIP adresleri, tıklanır); "Bu sunucu bir VIP havuzunda" kutusu sunucu portuna, sonra VIP portuna göre sıralı.
+  memberOf port = satır portu → havuz adı ("/Common/" atılır) + VIP adresleri, tıklanır); "Bu sunucu bir VIP havuzunda" kutusu sunucu portuna, sonra VIP portuna göre sıralı. SON 72 SAATİN PORTLARI (kullanıcı: "tanıda exesini yakalamış
+  [hsms64.exe 10000], ekranda yok, saçma"): `GET /api/surec/gelenportlar?ip=` (`GelenPortlarAsync`: HttpSys:Saat penceresi, gelen, port ≠ 0, stats port × yol, 30 sn sınır,
+  30 dk önbellek) → `loadGelenPortlar`; süreç penceresinde OLMAYAN portlar tabloya eklenir ("· son 72 saatte", ipucunda son görülme). Port 0 satırları (ICMP ping /
+  portsuz) tablodan çıkarıldı, başlıkta "N süreçte port 0 (ping) olayı gizlendi". Ayrıca canlıda görülen çelişki: ERT'de 10000 "Kredi Kartı Başvuru", ama süreç
+  hsms64.exe ve VIP havuzu HSM_Provizyon_10000_GRP (ERT uyuşmazlık uyarısı önerildi, yapılmadı).
 - **"Bu sunucuda hangi uygulama çalışıyor?"** (IP kartı, Gelen portlar tablosunun üstündeki düğme; `SurecAi` Surec.cs, `POST /api/surec/ai`):
   arayüzdeki /api/surec sonucu exe başına toplanıp (PID'ler, portlar, giden, bağlanan / bağlandığı uygulamalar) AI'a gider (yeniden
   sorgulanmaz) + ERT kayıtları + segment + genel bilgiler dosyası. Kesin genel süreçler kodda ayıklanır (`GenelAd` / `GenelYol`: svchost,

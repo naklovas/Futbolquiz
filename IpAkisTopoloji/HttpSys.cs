@@ -13,6 +13,7 @@ record HttpSysPort(string Port, int Dakika, long Baglanti, List<HttpSysAday> Ada
 record HttpSysSonuc(string Ip, DateTimeOffset Baslangic, DateTimeOffset Bitis, int ToplamDakika, List<HttpSysPort> Portlar, string? Hata,
     List<HttpSysGiden>? Giden = null, List<string>? GenelAtilan = null);   // tanı: dışarı bağlanan iş exe'leri (dakika), ayıklanan genel süreçler
 record HttpSysGiden(string Exe, string Yol, int Dakika, long Baglanti);
+record HttpSysGelen(string Port, string Yol, string Exe, long Baglanti, int Istemci, DateTimeOffset? Son);
 record HttpSysIisUyg(string Ad, long Istek, string? Ornek = null);   // Ornek: "GET /api/v1/…" tam yol örneği
 record HttpSysIis(string Port, List<string> Siteler, List<string> Hostlar, long Istek, int Istemci, List<HttpSysIisUyg> Uygulamalar, long Gurultu = 0);
 record HttpSysIisCagri(string Ip, string Port, List<string> Hostlar, List<string> Siteler, long Istek, List<HttpSysIisUyg> Uygulamalar, string? Ert);
@@ -401,6 +402,38 @@ static class HttpSysEslesme
         if (iyi.Any(x => x.Ad != "/")) iyi = iyi.Where(x => x.Ad != "/").ToList();
         gur = toplam - iyi.Sum(x => x.N) - (a.FirstOrDefault(x => x.Ad == "/").N is var k && !iyi.Any(x => x.Ad == "/") ? k : 0);
         return iyi.Take(8).Select(x => new HttpSysIisUyg(x.Ad, x.N, x.Ornek)).ToList();
+    }
+
+    // SON 72 SAATİN GELEN PORTLARI (kullanıcı: "tanıda exesini yakalamış, ekranda yok, saçma"): IP kartı süreç tablosu sabit 3 saatlik pencereden
+    // (dün 09–12) gelir, seyrek trafikli portlar (canlı: hsms64.exe 10000) görünmez → tek hafif sorgu, port × exe; port 0 (ICMP / portsuz) hariç
+    static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (DateTime At, List<HttpSysGelen> L)> _gelenOnbellek = new();
+    public static async Task<(List<HttpSysGelen> Liste, string? Hata)> GelenPortlarAsync(string ip, IConfiguration cfg, HttpClient http, CancellationToken ct)
+    {
+        if (_gelenOnbellek.TryGetValue(ip, out var c) && DateTime.UtcNow - c.At < TimeSpan.FromMinutes(30)) return (c.L, null);
+        var s = cfg.GetSection("Splunk");
+        string index = s["Index"] ?? "carbonblack", sourcetype = s["Sourcetype"] ?? "bit9:carbonblack:json";
+        var (bas, son) = Aralik(cfg);
+        string spl = $"""
+            search index={index} sourcetype="{sourcetype}" TERM({ip}) local_ip="{ip}"
+            | where lower(direction)!="outbound"
+            | eval lp=coalesce(local_port, "0")
+            | where lp!="0" AND lp!=""
+            | eval yol=coalesce(process_path, "-")
+            | stats count dc(remote_ip) as ist max(_time) as son by lp yol
+            """;
+        try
+        {
+            var res = await SplunkService.ExportAsync(spl, new LookupQuery(ip, bas, son), cfg, http, ct, "Splunk", TimeSpan.FromSeconds(30));
+            var l = res.Rows.Select(r => new HttpSysGelen(r.GetValueOrDefault("lp") ?? "", r.GetValueOrDefault("yol") ?? "-", Ad(r.GetValueOrDefault("yol") ?? "-"),
+                    long.TryParse(r.GetValueOrDefault("count"), out long n) ? n : 0, int.TryParse(r.GetValueOrDefault("ist"), out int i) ? i : 0,
+                    double.TryParse(r.GetValueOrDefault("son"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double t)
+                        ? DateTimeOffset.FromUnixTimeMilliseconds((long)(t * 1000)).ToLocalTime() : null))
+                .Where(x => x.Port.Length > 0).ToList();
+            string? hata = res.Messages.FirstOrDefault(m => m.StartsWith("ERROR", StringComparison.OrdinalIgnoreCase) || m.Contains("sınırında") || m.Contains("cevap vermedi"));
+            if (hata == null) _gelenOnbellek[ip] = (DateTime.UtcNow, l);
+            return (l, hata);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException) { return ([], ex.Message); }
     }
 
     // IIS logu penceresi (kullanıcı: "sonsuz döngüye girdi, ne kadar zamanlık çekiyoruz"): HttpSys:IisSaat, varsayılan 1 saat (kullanıcı: "1 saat bile yeter"; 24 saatte bir sunucuda 73 bin istek)
