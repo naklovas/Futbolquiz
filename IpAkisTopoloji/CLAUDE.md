@@ -375,7 +375,9 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
   [hsms64.exe 10000], ekranda yok, saçma"): `GET /api/surec/gelenportlar?ip=` (`GelenPortlarAsync`: HttpSys:Saat penceresi, gelen, port ≠ 0, stats port × yol, 30 sn sınır,
   30 dk önbellek) → `loadGelenPortlar`; süreç penceresinde OLMAYAN portlar tabloya eklenir ("· son 72 saatte", ipucunda son görülme). Port 0 satırlarını gizleme
   denendi, kullanıcı GERİ ALDIRDI ("hsms.exe en azından 0 olsa da görünüyordu") — port 0 satırları yine gösterilir. Kullanıcı: "zb.app.wall.exe tanıda var ekranda yok" → `GelenPortlarAsync` artık tüm
-  yönler (`stats by yon lp yol`; giden lp "-"); arayüzde tabloda HİÇ olmayan exe'ler de eklenir (gelen port 0 varsa port 0 satırı, yoksa "yalnız giden"), "· son 72 saatte". Ayrıca canlıda görülen çelişki: ERT'de 10000 "Kredi Kartı Başvuru", ama süreç
+  yönler (`stats by yon lp yol`; giden lp "-"); arayüzde tabloda HİÇ olmayan exe'ler de eklenir (gelen port 0 varsa port 0 satırı, yoksa "yalnız giden"), "· son 72 saatte". Kullanıcı: "detaylarda yazıyor ama altta port olarak görünmüyor" → ntoskrnl / IIS-yalnız port satırında `httpSysApp`
+  TEK exe bulursa satır o exe'ye yazılır ("HTTP.sys üzerinden (CB'de ntoskrnl.exe) · ERT "X" ile eşleşti"), exe'nin "yalnız giden" satırı kalkar (giden sayısı ilk port satırına);
+  72 saatte görülen exe'ler de eşleşme adayı. Ayrıca canlıda görülen çelişki: ERT'de 10000 "Kredi Kartı Başvuru", ama süreç
   hsms64.exe ve VIP havuzu HSM_Provizyon_10000_GRP (ERT uyuşmazlık uyarısı önerildi, yapılmadı).
 - **"Bu sunucuda hangi uygulama çalışıyor?"** (IP kartı, Gelen portlar tablosunun üstündeki düğme; `SurecAi` Surec.cs, `POST /api/surec/ai`):
   arayüzdeki /api/surec sonucu exe başına toplanıp (PID'ler, portlar, giden, bağlanan / bağlandığı uygulamalar) AI'a gider (yeniden
