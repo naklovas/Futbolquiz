@@ -816,6 +816,17 @@ document.addEventListener("click", e => { if (e.target.closest("#procAiBtn") && 
 const exeShort = n => String(n || "").split(/[\\/]/).pop() || n;
 // HTTP.sys: gelen bağlantıyı çekirdek kabul eder (PID 4 / System)
 const HTTPSYS = /^(ntoskrnl\.exe|system)$/i;
+// Gelen portlar tablosu "VIP havuzu" kolonu (kullanıcı: "VIP havuzunda karşılık gelen portu tabloya koyalım"): bu porttaki havuz üyelikleri
+function vipHucre(t, port) {
+  const ms = (t.memberOf ?? []).filter(m => String(m.port ?? "") === String(port));
+  if (!ms.length) return `<span class="muted">—</span>`;
+  const havuz = [...new Map(ms.map(m => [m.pool ?? "", m])).values()];
+  return havuz.map(m => {
+    const vipler = ms.filter(x => (x.pool ?? "") === (m.pool ?? "")).map(x => `${x.lbIp}:${x.lbPort ?? ""}`);
+    return `<div><b class="mono" style="font-size:13px" title="VIP: ${esc(vipler.join(", "))}">${esc(String(m.pool ?? "(havuz adı yok)").replace(/^\/Common\//i, ""))}</b>
+      <span class="small muted">· ${vipler.slice(0, 2).map(v => `<a href="?ip=${encodeURIComponent(v.split(":")[0])}" class="mono">${esc(v)}</a>`).join(", ")}${vipler.length > 2 ? ` +${vipler.length - 2}` : ""}</span></div>`;
+  }).join("");
+}
 function listenTable(t) {
   const pr = state.proc;
   if (!pr) return `<div class="unk">Carbon Black (Splunk) kaynağı seçili değil.</div>`;
@@ -876,7 +887,7 @@ function listenTable(t) {
   const tlsOn = state.nessus?.ip === t.ip;
   return `<div class="small muted" style="margin:-4px 0 6px">${fmt(nExe)} farklı exe · ${fmt(list.filter(r => !r.out).length)} port satırı${list.some(r => r.out) ? ` · ${fmt(list.filter(r => r.out).length)} exe yalnız dışarı bağlanıyor` : ""}</div>
     <div class="tbl-wrap" style="max-height:300px"><table>
-      <thead><tr><th>Gelen port</th><th>Çalışan süreç (exe)</th><th title="Splunk IIS erişim logu (son ${state.iis?.saat ?? 1} saat): bu porta gelen istekleri karşılayan IIS sitesi ve uygulamalar (URI'nin ilk anlamlı parçası; api / v1 / rest atlanır)">IIS (site · uygulama)</th><th class="num">Gelen bağlantı</th><th class="num">Karşı IP</th><th class="num">Giden bağlantı</th>${tlsOn ? `<th title="Portun KABUL ETTİĞİ SSL / TLS sürümleri (Nessus taramasının el sıkışması). İstemcilerin fiilen hangisiyle bağlandığı değil; kırmızı = eski sürüm hâlâ açık.">TLS (Nessus)</th>` : ""}<th>ERT'deki uygulama</th></tr></thead>
+      <thead><tr><th>Gelen port</th><th>Çalışan süreç (exe)</th><th title="Splunk IIS erişim logu (son ${state.iis?.saat ?? 1} saat): bu porta gelen istekleri karşılayan IIS sitesi ve uygulamalar (URI'nin ilk anlamlı parçası; api / v1 / rest atlanır)">IIS (site · uygulama)</th><th class="num">Gelen bağlantı</th><th class="num">Karşı IP</th><th class="num">Giden bağlantı</th>${tlsOn ? `<th title="Portun KABUL ETTİĞİ SSL / TLS sürümleri (Nessus taramasının el sıkışması). İstemcilerin fiilen hangisiyle bağlandığı değil; kırmızı = eski sürüm hâlâ açık.">TLS (Nessus)</th>` : ""}<th title="Bu sunucu bu portla bir LB VIP havuzunun üyesiyse havuz adı ve VIP adresi (vip_envanteri)">VIP havuzu</th><th>ERT'deki uygulama</th></tr></thead>
       <tbody>${list.map(r => { const apps = r.out ? [] : ertApps(r.port), infra = PROC_INFRA.has(r.port); return `<tr${infra ? ` class="muted" title="Altyapı portu"` : ""}>
         <td class="mono">${r.out ? `<span class="small muted">— yalnız giden</span>` : r.port ? esc(r.port) : `<span class="small muted" title="Carbon Black olayında yerel port yok">?</span>`}${infra ? ` <span class="small muted">altyapı</span>` : ""}</td>
         <td><b class="mono" title="${esc([r.yol, r.pids?.size ? "PID: " + [...r.pids].join(", ") : ""].filter(Boolean).join("\n"))}">${r.iisYalniz ? `<span class="small muted" title="Bu port IIS logunda var (son ${state.iis?.saat ?? 1} saat) ama Carbon Black süreç penceresinde bağlantı görülmedi">IIS (Carbon Black'te bu aralıkta görülmedi)</span>` : esc(exeShort(r.name))}</b>${HTTPSYS.test(exeShort(r.name)) && !r.out
@@ -886,6 +897,7 @@ function listenTable(t) {
             + `<div class="small muted" title="Bu portu Windows HTTP.sys sürücüsü dinliyor: bağlantıyı çekirdek kabul eder, isteği URL kaydına göre asıl uygulamaya iletir. Carbon Black bağlantıyı bu yüzden ntoskrnl.exe / System adına yazar. Asıl uygulama exe'si (ör. HTTP.sys ile çalışan bir ASP.NET Core uygulaması ya da w3wp.exe) bu tabloda 'yalnız giden' olarak görünebilir; sunucuda 'netsh http show servicestate' kesin olarak gösterir.">HTTP.sys (Windows çekirdeği) · asıl uygulama ayrı exe ⓘ</div>` : ""}</td>
         <td>${iisHucre(r)}</td>
         <td class="num">${r.out ? "" : fmt(r.hits)}</td><td class="num">${r.out ? "" : fmt(r.peers)}</td><td class="num">${r.out && r.outHits ? fmt(r.outHits) : ""}</td>${tlsOn ? `<td>${r.out || !r.port ? "" : tlsCell(r.port)}</td>` : ""}
+        <td>${r.out || !r.port ? "" : vipHucre(t, r.port)}</td>
         <td>${r.out ? "" : apps.length ? esc(apps.join(", ")) : `<span class="small muted">kayıt yok</span>`}</td></tr>`; }).join("")}</tbody></table></div>`;
 }
 // "AI önerisi" kolonu: ERT eksikleri sayfasının önerileri (/api/eksik/ip); uygulama adı boş satırlarda
@@ -952,7 +964,7 @@ function vipCard(t) {
   }
   if (t.memberOf?.length) {
     html += `<div class="vipbox"><h2>Bu sunucu bir VIP havuzunda</h2>
-      ${t.memberOf.map(m => `<div>VIP <a href="?ip=${encodeURIComponent(m.lbIp)}" class="mono">${esc(m.lbIp)}:${esc(m.lbPort ?? "")}</a>
+      ${[...t.memberOf].sort((a, b) => (+a.port || 0) - (+b.port || 0) || (+a.lbPort || 0) - (+b.lbPort || 0)).map(m => `<div>VIP <a href="?ip=${encodeURIComponent(m.lbIp)}" class="mono">${esc(m.lbIp)}:${esc(m.lbPort ?? "")}</a>
         <span class="muted small">${esc(m.pool ?? "")} · bu sunucuda port ${esc(m.port ?? "")}</span></div>`).join("")}
       <div class="small muted" style="margin-top:4px">İstemciler bu sunucuya VIP üzerinden gelir; gelen trafikte LB GW IP'si görünür. VIP'e tıklayarak istemcileri görebilirsiniz.</div></div>`;
   }
