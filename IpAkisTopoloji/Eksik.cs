@@ -368,9 +368,52 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
         Candidates(env, ip, evidence).Where(c => AjanOf(c) is not { } a || AjanSunucusu(env, ip, a, evidence)).ToList();
 
     // Katalog adı sunucuya atanmamış bir uygulamaysa (yalnız ERT_APPLICATIONDETAIL'de) gerekçeye not düşülür: ERT'de sunucu ataması eksik
+    // KURUM ÖNEKİ (kullanıcı: "başında ZK olanlar Ziraat Katılım, DIB olanlar Ziraat Dinamik; öneksizler banka uygulaması — bakılmadığı için banka
+    // uygulamalarını ZK / DIB sunucularıyla, ZK / DIB uygulamalarını banka sunucularıyla eşleştiriyor"): uygulama adının öneki ↔ sunucunun kurumu.
+    // `Eksik:UygulamaOnekleri` {"ZK": ["zk"], "DIB": ["dib"]} = önek → sunucunun segment Domain'i ya da sunucu adı bu öneklerden biriyle başlar.
+    // Banka sunucusu (Domain zb…, başka önek grubuna girmeyen) → yalnız öneksiz uygulamalar; ZK / DIB sunucusu → yalnız o önekli uygulamalar;
+    // kurumu belirsiz sunucuda (İştirak / Diğer) süzme yok. Aynı sunucuda ERT'de zaten kayıtlı adlar her zaman uyar.
+    Dictionary<string, string[]>? _onek;
+    Dictionary<string, string[]> UygOnekleri => _onek ??= cfg.GetSection("Eksik:UygulamaOnekleri").GetChildren()
+        .Select(c => (Key: c.Key.ToUpperInvariant(), V: c.GetChildren().Select(x => x.Value).OfType<string>().Where(x => x.Length > 0).Select(x => x.ToLowerInvariant()).ToArray()))
+        .Where(x => x.V.Length > 0).ToDictionary(x => x.Key, x => x.V) is { Count: > 0 } d ? d
+        : new() { ["ZK"] = ["zk"], ["DIB"] = ["dib"] };
+    // adın kurum öneki ("[ZK] SAS…", "ZK SAS", "ZK-…", "DIB_…"); ZB / öneksiz = "" (banka)
+    string UygOnek(string ad)
+    {
+        var m = System.Text.RegularExpressions.Regex.Match(ad.Trim(), @"^(?:\[([A-Za-z]{2,4})\]|([A-Za-z]{2,4})(?:[\s_\-.]|$))");
+        string o = m.Success ? (m.Groups[1].Success ? m.Groups[1].Value : m.Groups[2].Value).ToUpperInvariant() : "";
+        return UygOnekleri.ContainsKey(o) ? o : "";
+    }
+    static readonly System.Text.RegularExpressions.Regex _onekAt = new(@"^(?:\[[A-Za-z]{2,4}\][\s_\-.]*|[A-Za-z]{2,4}[\s_\-.]+)", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+    // sunucunun grubu: önek grubu ("ZK" / "DIB"), banka (""), belirsiz (null)
+    string? SunucuGrup(EnvanterSnapshot env, string ip)
+    {
+        string dom = (env.FindSegment(ip)?.Domain ?? "").Trim().ToLowerInvariant();
+        string host = (env.AppsOnIp(ip).Select(h => h.UnixName).OfType<string>().FirstOrDefault() ?? "").Trim().ToLowerInvariant();
+        foreach (var (k, on) in UygOnekleri) if (on.Any(o => dom.StartsWith(o) || (o.Length >= 3 && host.StartsWith(o)))) return k;
+        return dom.StartsWith("zb") ? "" : null;
+    }
+    bool KurumUyar(EnvanterSnapshot env, string ip, string app)
+    {
+        if (!cfg.GetValue("Eksik:KurumOnekKurali", true) || SunucuGrup(env, ip) is not { } g) return true;
+        if (env.AppNamesOnIp(ip).Contains(app, StringComparer.OrdinalIgnoreCase)) return true;
+        return UygOnek(app) == g;
+    }
+    string KurumAd(string grup) => grup == "" ? "banka (öneksiz)" : grup;
+
     string CatalogMatch(EnvanterSnapshot env, string name, out bool yeni, out string? not, string? ip = null, string? evidence = null)
     {
         string ad = CatalogMatch0(env, name, out yeni, out not, ip, evidence);
+        if (ip != null && !yeni && !KurumUyar(env, ip, ad))
+        {
+            // aynı adın sunucunun kurumuna uyan kaydı ([ZK] Kredi ↔ Kredi) varsa o; yoksa önek atılmış ad serbest kalır
+            string g = SunucuGrup(env, ip)!, kok = UygOnek(ad) == "" ? ad : _onekAt.Replace(ad, "").Trim();
+            var es = env.KatalogAdlari.Where(k => !env.IsSystemApp(k) && UygOnek(k) == g && Norm(UygOnek(k) == "" ? k : _onekAt.Replace(k, "")) == Norm(kok)).ToList();
+            string eski = ad;
+            if (es.Count == 1) { ad = es[0]; not = $"'{eski}' {KurumAd(UygOnek(eski))} uygulaması, sunucu {KurumAd(g)} → kurumun kaydı '{ad}' seçildi" + (not != null ? "; " + not : ""); }
+            else { ad = g == "" ? kok : $"[{g}] {kok}"; yeni = true; not = $"'{eski}' {KurumAd(UygOnek(eski))} uygulaması ama sunucu {KurumAd(g)}; kurumun kataloğunda karşılığı yok, serbest ad" + (not != null ? "; " + not : ""); }
+        }
         if (!yeni && env.Atanmamis(ad))
             not = (not != null ? not + "; " : "") + "ERT'de hiçbir sunucuya atanmamış uygulama (ERT_APPLICATIONDETAIL) — sunucu ataması eksik";
         return ad;
@@ -401,7 +444,7 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
         var key = a.Where(t => t.Length >= 3 && !GenelKelime.Contains(t)).ToHashSet();
         if (key.Count == 0 && na.Length < 4) { not = "ERT kataloğunda yok"; return name; }
         bool Anahtar(HashSet<string> t) => t.Any(x => x.Length >= 3 && !GenelKelime.Contains(x));
-        var cat = _catTok!.Where(c => !env.IsSystemApp(c.App)).ToList();
+        var cat = _catTok!.Where(c => !env.IsSystemApp(c.App) && (ip == null || KurumUyar(env, ip, c.App))).ToList();   // kurum öneki uymayanlar aday değil
         // 1) aynı kelime kümesi  2) AI'ın kelimelerinin hepsi katalog adında  3) katalog adının hepsi AI'ın adında  4) harf-rakam içerme
         var esit = cat.Where(c => c.Tok.SetEquals(a) && AyniKelimeler(c.App, name)).Select(c => c.App).ToList();
         var ust = cat.Where(c => key.Count > 0 && a.IsSubsetOf(c.Tok) && TamKelimeIcinde(name, c.App)).Select(c => c.App).ToList();
@@ -1102,7 +1145,7 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
     {
         PrepCatalog(env);
         var list = new List<string>();
-        void Add(IEnumerable<string?> xs) { foreach (var x in xs) if (x != null && !env.IsSystemApp(x) && !list.Contains(x, StringComparer.OrdinalIgnoreCase)) list.Add(x); }
+        void Add(IEnumerable<string?> xs) { foreach (var x in xs) if (x != null && !env.IsSystemApp(x) && KurumUyar(env, ip, x) && !list.Contains(x, StringComparer.OrdinalIgnoreCase)) list.Add(x); }
         Add(env.AppNamesOnIp(ip));
         foreach (var m in env.MemberOf(ip))
         {
@@ -1127,7 +1170,7 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
         // sunucuya atanmamış uygulamalar: adı birebir geçmese de açıklamasının (ACIKLAMA) ayırt edici kelimelerinden en az 2'si kanıtta
         // (kullanıcı: "sunucusu olmayan uygulamalar da sorunun bir parçası, envanterdeki eksik anlamında")
         var aciklamali = _atanTok!.Select(c => (c.App, n: c.Tok.Count(tok.Contains)))
-            .Where(x => x.n >= 2).OrderByDescending(x => x.n).Take(5).Select(x => (string?)x.App).ToList();
+            .Where(x => x.n >= 2 && KurumUyar(env, ip, x.App)).OrderByDescending(x => x.n).Take(5).Select(x => (string?)x.App).ToList();
         var bas = list.Take(25).ToList();
         foreach (var x in aciklamali) if (x != null && !bas.Contains(x, StringComparer.OrdinalIgnoreCase)) bas.Add(x);
         foreach (var x in list.Skip(25)) if (bas.Count < 30 && !bas.Contains(x, StringComparer.OrdinalIgnoreCase)) bas.Add(x);
@@ -1375,7 +1418,9 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
 
             Kurallar:
             - Uygulama adını mümkünse "ADAY UYGULAMALAR" listesinden HARFİ HARFİNE seç ("yeni": false).
-              Genel ürün adı (ör. "SAS") YAZMA; adaylarda aynı ürünün birden çok kaydı varsa (ZT SAS Enterprise Miner, [ZK] SAS IFRS TFRS9…)
+              KURUM ÖNEKİ: uygulama adının başındaki "[ZK]" / "ZK" Ziraat Katılım, "DIB" Ziraat Dinamik uygulamasıdır; öneksiz adlar banka (Ziraat Bankası)
+              uygulamasıdır. Banka sunucusuna (Domain zb…) önekli, ZK / DIB sunucusuna öneksiz ya da başka önekli uygulama ÖNERME (kod da süzer).
+                            Genel ürün adı (ör. "SAS") YAZMA; adaylarda aynı ürünün birden çok kaydı varsa (ZT SAS Enterprise Miner, [ZK] SAS IFRS TFRS9…)
               sunucuya uyanı seç: kurum öneki sunucu adının başıyla aynı olan ([ZK] ↔ zkprod…), BENZER ADLI SUNUCULARDA / aynı sunucunun
               diğer portlarında kayıtlı olan, adındaki ayırt edici kelime kanıtta ya da sunucu adında geçen.
             - Hiçbir aday uymuyor ama kanıt açıkça bir uygulamayı gösteriyorsa kısa bir ad öner ("yeni": true).
