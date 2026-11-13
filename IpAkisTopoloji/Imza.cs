@@ -411,6 +411,12 @@ xlog"];
         var satirlar = new List<(ImzaSatir S, HashSet<string> IisSet, string? Anahtar)>();
         var sunucuExe = new Dictionary<string, HashSet<string>>();   // sunucuda çalışan iş exe'leri (HTTP.sys portunu sözlükteki exe'ye bağlamak için)
         bool Sistem(string? a) => a != null && a.StartsWith("Sistem Portudur", StringComparison.OrdinalIgnoreCase);
+        // SİSTEM PORTLARI (kullanıcı: "sistem portudur ifadesi olan portlar listeye geliyor, altyapı listende yok"): ERT'de "Sistem Portudur" yazan satır altyapıdır;
+        // ayrıca bir port ≥ 3 sunucuda ve o portun dolu kayıtlarının yarısından çoğunda "Sistem Portudur" ise adı boş sunucularda da altyapı sayılır
+        var sistemPort = env.HostIps.SelectMany(ip => env.AppsOnIp(ip).Where(h => !string.IsNullOrWhiteSpace(h.Port) && !string.IsNullOrWhiteSpace(h.AppName))
+                .Select(h => (h.Port!, Ip: ip, S: Sistem(h.AppName))).Distinct())
+            .GroupBy(x => x.Item1).Where(g => g.Count(x => x.S) >= 3 && g.Count(x => x.S) * 2 > g.Select(x => x.Ip).Distinct().Count())
+            .Select(g => g.Key).ToHashSet();
 
         foreach (var ip in Ipler(env))
         {
@@ -459,7 +465,7 @@ xlog"];
                 string? exe = yol == null ? null : HttpSysEslesme.Cekirdek(yol) ? "ntoskrnl.exe" : ExeAd(yol);
                 bool genel = exe == null && gen.Count > 0;   // portu yalnız gereksiz süreç kabul ediyor
                 string? genelExe = gen.Count > 0 ? string.Join(", ", gen.Select(x => ExeAd(x.Yol)).Distinct().Take(3)) : null;
-                bool alt = infra.Contains(port);
+                bool alt = infra.Contains(port) || sistemPort.Contains(port) || (adlar.Count > 0 && adlar.All(Sistem));
                 // çözülemeyen HTTP.sys portu: IIS uygulamaları varsa "HTTP.sys|port" imzası (eşleşmede IIS kümesi şart)
                 string? anahtar = genel || alt || exe == null ? null : exe == "ntoskrnl.exe" ? (iis.Count > 0 ? "http.sys|" + port : null) : exe + "|" + port;
                 string durum = rows.Count == 0 ? "ertyok" : adlar.Count > 0 ? "kayitli" : "bos";

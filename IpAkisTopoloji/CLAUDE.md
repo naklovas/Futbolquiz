@@ -426,7 +426,9 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
   önerilerden ÖNCE ve TARAMADAN BAĞIMSIZ (envanter): satırın IP:port'u bir havuzun üyesiyse (anahtar VIP ip | VIP port | havuz adı) diğer üyelerin aynı üye portundaki
   ERT adları (sistem portu hariç, üye başına ilk ad) → boş / ERT'de yok satıra öneri "güçlü" (%60 altı çoğunlukta "orta"), not "aynı VIP havuzu (havuz · VIP) → …";
   ERT dolu ama havuzun açık çoğunluğu başka adla → "uyumsuz" (ad listesi " | " ile bölünüp karşılaştırılır). Sahte veriyle: HSM havuzu, boş üye "HSM Provizyon güçlü",
-  "Kredi Kartı Başvuru" kayıtlı üye uyumsuz — tarama yokken.
+  "Kredi Kartı Başvuru" kayıtlı üye uyumsuz — tarama yokken. SİSTEM PORTLARI (kullanıcı: "sistem portudur ifadesi olan portlar listeye geliyor"):
+  `Altyapi` = Uygulama:AltyapiPortlari ∪ satırın ERT adlarının hepsi "Sistem Portudur…" ∪ ERT'de ≥ 3 sunucuda ve dolu kayıtların yarısından çoğunda "Sistem Portudur"
+  olan portlar (`sistemPort`; adı boş sunucularda da altyapı) → varsayılan gizli, sözlüğe / öneriye girmez.
   İLERLEME (kullanıcı: "progress bar üste, hangi sunucu hangi port, yüzde kaç"): `ImzaIs` ToplamSunucu / BitenSunucu / Adim (cb | iis) / Yuzde (grup içinde CB = yarım) /
   Grup ("ip sunucuadı (ERT portları)") / Son (son biten 12 sunucu: "ip → port exe (IIS: …)", ntoskrnl "HTTP.sys") / Kalan ("4 dk", "1 sa 5 dk"); sayfada bant
   `position: sticky` üstte, yüzdeli çubuk, şu an sorgulanan sunucu çipleri, son bitenler listesi. Sayfa: tarama bandı (ilerleme, tahmini kalan, durdur), istatistik kartları (tıkla süz), "IP + port
