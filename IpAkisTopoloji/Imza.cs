@@ -24,7 +24,7 @@ record ImzaAday(string Ad, int Sunucu);
 // Durum = ERT tarafı (kayitli | bos | uyumsuz | ertyok); Veri = tarama tarafı (var | yok | taranmadi) — kullanıcı: tarama yokken "boş" süzgeci boş geliyordu
 record ImzaSatir(string Ip, string Port, string? Sunucu, string? Ert, string? Website, string? Exe, string? ExeYol, bool HttpSys,
     long Baglanti, int Istemci, List<string> Iis, string Durum, string? Oneri, string? Guven, string? Not, List<ImzaAday>? Adaylar, bool Altyapi, string Veri, bool Genel = false,
-    string? GenelExe = null, List<string>? Vip = null);   // Vip: "havuz · VIP ip:port" (vip_envanteri, üye portu = satır portu)
+    string? GenelExe = null, List<string>? Vip = null, string? Kurum = null);   // Vip: "havuz · VIP ip:port" (vip_envanteri, üye portu = satır portu)
 record ImzaSozluk(string Exe, string Port, List<ImzaAday> Adlar, List<string> Iis, int Sunucu, bool Celiski);
 record ImzaSonuc(ImzaIs? Is, object? Kayit, List<ImzaSatir> Satirlar, List<ImzaSozluk> Sozluk, List<string> Mesajlar, string? Uyari);
 
@@ -51,14 +51,14 @@ sealed class ServisImzaService(IConfiguration cfg, IHttpClientFactory factory, E
     // ---------------- Tarama ----------------
     // mod: yeni (tüm ERT, önceki tarama silinir) | devam (bekleyenler) | bos (adı boş portu olan sunucular) | kalan (hiç taranmamışlar) | ip (verilen IP'ler);
     // yeni dışındaki kapsamlar mevcut taramaya EKLENİR (aynı IP yeniden taranırsa verisi yenilenir) — kullanıcı: "tekil seçim yapamıyorum", "önce boş olanları yapacağım"
-    public async Task<ImzaIs> BaslatAsync(string mod, List<string>? ipler, string user, CancellationToken ct)
+    public async Task<ImzaIs> BaslatAsync(string mod, List<string>? ipler, string user, CancellationToken ct, string? kurum = null)
     {
         lock (_gate) if (_is?.Durum == "calisiyor") throw new InvalidOperationException("Tarama zaten çalışıyor.");
         var env = await envanter.GetAsync(false, ct);
         var tum = Ipler(env).ToList();
         ImzaTarama? eski; lock (_gate) eski = _son;
         eski ??= await OkuAsync(ct);
-        var t = mod == "yeni" || eski == null ? new ImzaTarama(DateTime.Now, null, CbSaat, IisDakika, [], [], [], tum.Count, user) : eski with { ToplamIp = tum.Count, Kaydeden = user };
+        var t = (mod == "yeni" && string.IsNullOrWhiteSpace(kurum)) || eski == null ? new ImzaTarama(DateTime.Now, null, CbSaat, IisDakika, [], [], [], tum.Count, user) : eski with { ToplamIp = tum.Count, Kaydeden = user };
         var yapilan = t.Taranan.ToHashSet();
         List<string> liste = mod switch
         {
@@ -70,6 +70,8 @@ sealed class ServisImzaService(IConfiguration cfg, IHttpClientFactory factory, E
             "ip" => (ipler ?? []).Select(x => x.Trim()).Where(x => EnvanterSnapshot.TryToUInt(x, out _) && !Test(env, x)).Distinct().ToList(),
             _ => throw new InvalidOperationException("Geçersiz kapsam: " + mod)
         };
+        // kurum seçiliyse (Banka / Katılım / İştirak / Diğer) yalnız o kurumun sunucuları; "yeni" kurumla verilirse önceki tarama silinmez, eklenir
+        if (!string.IsNullOrWhiteSpace(kurum) && mod != "devam" && mod != "ip") liste = liste.Where(ip => Kurum(env, ip) == kurum).ToList();
         if (liste.Count == 0) throw new InvalidOperationException(mod == "devam" ? "Bekleyen sunucu yok." : "Taranacak sunucu yok.");
         liste = liste.OrderBy(ip => EnvanterSnapshot.TryToUInt(ip, out uint u) ? u : 0).ToList();
         string kapsam = mod switch { "yeni" => "tüm ERT", "bos" => "adı boş portu olan sunucular", "kalan" => "taranmamış sunucular", "ip" => $"{liste.Count} seçili sunucu", _ => t.Kapsam ?? "devam" };
@@ -224,6 +226,22 @@ xlog"];
         return d != null && words.Any(w => d.Contains(w, StringComparison.OrdinalIgnoreCase));
     }
     IEnumerable<string> Ipler(EnvanterSnapshot env) => env.HostIps.Where(ip => EnvanterSnapshot.TryToUInt(ip, out _) && !Test(env, ip)).Distinct();
+
+    // KURUM (kullanıcı: "zb ile başlayanlar banka, zi ile başlayanlar iştirak, zk ile başlayan katılım bankası"; "sunucu adına göre değil, yine domain bilgisi"):
+    // segment Domain'inin (KonsolideSegmentler4.Domain) önekinden;
+    // Imza:Kurumlar {"Banka": ["zb"], …} ile değişir; eşleşmeyen "Diğer"
+    Dictionary<string, string[]>? _kurumlar;
+    Dictionary<string, string[]> Kurumlar => _kurumlar ??= cfg.GetSection("Imza:Kurumlar").GetChildren()
+        .Select(c => (c.Key, c.GetChildren().Select(x => x.Value).OfType<string>().Where(x => x.Length > 0).Select(x => x.ToLowerInvariant()).ToArray()))
+        .Where(x => x.Item2.Length > 0).ToDictionary(x => x.Key, x => x.Item2) is { Count: > 0 } d ? d
+        : new() { ["Ziraat Bankası"] = ["zb"], ["Ziraat Katılım"] = ["zk"], ["İştirak"] = ["zi"] };
+    public IEnumerable<string> KurumAdlari => Kurumlar.Keys.Append("Diğer");
+    string Kurum(EnvanterSnapshot env, string ip)
+    {
+        string ad = (env.FindSegment(ip)?.Domain ?? "").Trim().ToLowerInvariant();
+        foreach (var (k, onekler) in Kurumlar) if (onekler.Any(o => ad.StartsWith(o))) return k;
+        return "Diğer";
+    }
 
     static string Sure2(TimeSpan t) => t.TotalMinutes < 1 ? "1 dk'dan az" : t.TotalHours < 1 ? $"{(int)t.TotalMinutes} dk" : $"{(int)t.TotalHours} sa {t.Minutes} dk";
     static string Terimler(IEnumerable<string> ips) => "(" + string.Join(" OR ", ips.Select(ip => $"TERM({ip})")) + ")";
@@ -412,6 +430,7 @@ xlog"];
                 return l.Count > 0 ? l : null;
             }
             string? sunucuAd = ert.Values.SelectMany(x => x).Select(h => h.UnixName).FirstOrDefault(x => !string.IsNullOrWhiteSpace(x));
+            string kurum = Kurum(env, ip);
             foreach (var port in portlar)
             {
                 var rows = ert.GetValueOrDefault(port) ?? [];
@@ -437,7 +456,7 @@ xlog"];
                 string veriDurum = exe != null || iis.Count > 0 || gen.Count > 0 ? "var" : taranan.Contains(ip) ? "yok" : "taranmadi";
                 var s = new ImzaSatir(ip, port, sunucuAd, adlar.Count > 0 ? string.Join(" | ", adlar) : null, website, exe, yol, hs && exe != "ntoskrnl.exe",
                     gel.Sum(x => x.Baglanti), gel.Count > 0 ? gel.Max(x => x.Istemci) : 0, iis, durum, null, null, null, null, alt, veriDurum, genel, genelExe,
-                    Vip(ip, port));
+                    Vip(ip, port), kurum);
                 satirlar.Add((s, iis.ToHashSet(StringComparer.OrdinalIgnoreCase), anahtar));
             }
         }
@@ -503,7 +522,8 @@ xlog"];
         var kayit = (object)new
         {
             tarama = t != null, baslangic = t?.Baslangic, bitis = t?.Bitis, cbSaat = t?.CbSaat ?? CbSaat, iisDakika = t?.IisDakika ?? IisDakika, taranan = t?.Taranan.Count ?? 0,
-            toplamIp = Ipler(env).Count(), testSunucu = env.HostIps.Count(ip => EnvanterSnapshot.TryToUInt(ip, out _) && Test(env, ip)),
+            toplamIp = Ipler(env).Count(), kurumlar = KurumAdlari.Select(k => new { ad = k, sunucu = Ipler(env).Count(ip => Kurum(env, ip) == k),
+                bos = Ipler(env).Count(ip => Kurum(env, ip) == k && env.AppsOnIp(ip).Any(h => string.IsNullOrWhiteSpace(h.AppName) && !string.IsNullOrWhiteSpace(h.Port) && !(int.TryParse(h.Port, out int pn) && pn >= Dyn))) }).ToList(), testSunucu = env.HostIps.Count(ip => EnvanterSnapshot.TryToUInt(ip, out _) && Test(env, ip)),
             sunucu = t?.Sunucular.Count ?? 0, kaydeden = t?.Kaydeden, bekleyen = t?.Bekleyen?.Count ?? 0, kapsam = t?.Kapsam,
             bosSunucu = Ipler(env).Count(ip => env.AppsOnIp(ip).Any(h => string.IsNullOrWhiteSpace(h.AppName) && !string.IsNullOrWhiteSpace(h.Port) && !(int.TryParse(h.Port, out int pn) && pn >= Dyn)))
         };

@@ -127,6 +127,7 @@
     <div class="tabs"><button type="button" data-tab="satir" class="on">IP + port satırları</button><button type="button" data-tab="sozluk" title="ERT'de adı dolu satırlardan çıkan eşleşmeler: exe + port → ERT adı">Sözlük (exe + port → ERT adı)</button>
       <span class="sp" style="flex:1"></span><button type="button" id="csv" hidden>Excel'e aktar</button></div>
     <div class="tools" id="tools">
+      <select id="kurum" title="Segment Domain'inin önekine göre: zb = Ziraat Bankası, zk = Ziraat Katılım, zi = İştirak (Imza:Kurumlar). Tarama düğmeleri de bu seçime uyar."><option value="">Kurum: Tümü</option></select>
       <input type="search" id="q" placeholder="IP, sunucu, port, ERT adı, exe, IIS uygulaması, öneri ara…" style="min-width:320px">
       <select id="durum" title="ERT tarafı">
         <option value="">Tüm satırlar</option>
@@ -155,7 +156,7 @@ const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const fmt = n => Number(n || 0).toLocaleString("tr-TR");
 const tarih = d => d ? String(d).slice(0, 16).replace("T", " ") : "";
-const st = { veri: null, tab: "satir", limit: 500, yetki: {}, durumFiltre: "", sec: new Set() };
+const st = { veri: null, tab: "satir", limit: 500, yetki: {}, durumFiltre: "", sec: new Set(), kurum: "" };
 const DURUM = { kayitli: "ERT'de kayıtlı", bos: "boş", oneri: "boş · öneri var", uyumsuz: "ERT farklı", ertyok: "ERT'de kaydı yok" };
 const VERI = { yok: "tarandı · veri yok", taranmadi: "taranmadı" };
 const gKls = g => g === "güçlü" ? "guclu" : g === "zayıf" ? "zayif" : "orta";
@@ -190,6 +191,8 @@ function runHtml() {
       <div class="sub">Başlangıç ${esc(tarih(is.baslangic))} · sayfa kapatılsa da tarama sunucuda sürer; 10 grupta bir kaydedilir</div></div>`;
   }
   const suzIp = [...new Set(suz().map(r => r.ip))];
+  const kur = (k.kurumlar || []).find(x => x.ad === st.kurum), kAd = st.kurum ? ` · ${st.kurum}` : "";
+  const bosSay = kur ? kur.bos : k.bosSunucu;
   const testNot = k.testSunucu ? ` · <span title="Segment Domain'inde 'test' geçen sunucular (Eksik:TestIfadeleri) taranmaz ve listelenmez">${fmt(k.testSunucu)} test sunucusu dışarıda</span>` : "";
   const bilgi = (!k.tarama ? `Henüz tarama yok · ERT'de ${fmt(k.toplamIp)} sunucu, adı boş portu olan ${fmt(k.bosSunucu)} sunucu.`
     : `Son tarama: ${esc(tarih(k.baslangic))}${k.bitis ? ` – ${esc(tarih(k.bitis))}` : ""} · ${esc(k.kapsam || "")} · toplam ${fmt(k.taranan)} / ${fmt(k.toplamIp)} sunucu tarandı (veri bulunan: ${fmt(k.sunucu)}) ·
@@ -197,14 +200,14 @@ function runHtml() {
   const son = is && is.durum !== "calisiyor" ? ` · son iş: ${esc(is.asama)}${is.hata ? ` — <span style="color:var(--err)">${esc(is.hata)}</span>` : ""}` : "";
   return `<div class="run"><div>${bilgi}${son}</div>
     <div class="tools" style="margin:0">
-      ${btn("tBos", `Adı boş portu olan sunucuları tara (${fmt(k.bosSunucu)})`, "Yalnız ERT'de uygulama adı boş portu olan sunucular. Öneri için aynı servisin ERT'de adı dolu olduğu sunucular da gerekir; bu sunuculardaki dolu portlar sözlüğe girer, kalanları sonra 'Taranmamışları tara' ile ekleyebilirsiniz.", !k.tarama)}
+      ${btn("tBos", `Adı boş portu olan sunucuları tara${kAd} (${fmt(bosSay)})`, "Yalnız ERT'de uygulama adı boş portu olan sunucular. Öneri için aynı servisin ERT'de adı dolu olduğu sunucular da gerekir; bu sunuculardaki dolu portlar sözlüğe girer, kalanları sonra 'Taranmamışları tara' ile ekleyebilirsiniz.", !k.tarama)}
       ${btn("tSec", `Seçili ${fmt(st.sec.size)} sunucuyu tara`, "Tabloda işaretlediğiniz satırların sunucuları (mevcut taramaya eklenir)")}
       ${btn("tSuz", `Süzülen satırların sunucularını tara (${fmt(suzIp.length)})`, "Şu anki süzgece uyan satırların sunucuları (mevcut taramaya eklenir)")}
       <span style="display:inline-flex;gap:4px"><input id="tekIp" placeholder="IP" style="width:130px">${btn("tTek", "Tara", "Tek sunucu tara (mevcut taramaya eklenir)")}</span>
       <span class="sp"></span>
       ${k.bekleyen ? btn("tDevam", `Kaldığı yerden devam (${fmt(k.bekleyen)})`, "Yarım kalan taramanın bekleyen sunucuları", true) : ""}
-      ${k.tarama ? btn("tKalan", "Taranmamışları tara", "ERT'de olup hiç taranmamış sunucular (sözlüğü güçlendirir)") : ""}
-      ${btn("tara", "Baştan tüm ERT", "Tüm ERT sunucuları; önceki tarama silinir")}
+      ${k.tarama ? btn("tKalan", `Taranmamışları tara${kAd}`, "ERT'de olup hiç taranmamış sunucular (sözlüğü güçlendirir)") : ""}
+      ${btn("tara", st.kurum ? `Tüm ${st.kurum} sunucularını tara` : "Baştan tüm ERT", st.kurum ? "Seçili kurumun tüm sunucuları (mevcut taramaya eklenir)" : "Tüm ERT sunucuları; önceki tarama silinir")}
     </div></div>`;
 }
 
@@ -223,9 +226,9 @@ function istatistik(l) {
 function suz() {
   const v = st.veri; if (!v) return [];
   const q = $("#q").value.trim().toLocaleLowerCase("tr"), g = $("#guven").value, alt = $("#alt").checked, gen = $("#gen").checked;
-  let d = $("#durum").value, vf = $("#veri").value;
+  let d = $("#durum").value, vf = $("#veri").value; const ku = st.kurum;
   if (st.durumFiltre.startsWith("v:")) vf = vf || st.durumFiltre.slice(2); else d = d || st.durumFiltre;
-  return v.satirlar.filter(r => (alt || !r.altyapi) && (gen || !(r.genel && r.durum === "ertyok"))
+  return v.satirlar.filter(r => (!ku || r.kurum === ku) && (alt || !r.altyapi) && (gen || !(r.genel && r.durum === "ertyok"))
     && (!d || (d === "bostum" ? r.durum === "bos" : d === "oneri" ? r.durum === "bos" && r.oneri : d === "bos" ? r.durum === "bos" && !r.oneri : r.durum === d))
     && (!vf || r.veri === vf)
     && (!g || r.guven === g)
@@ -286,6 +289,9 @@ function bagla() {
 
 function ciz() {
   const v = st.veri;
+  const ks = v?.kayit?.kurumlar || [], sel = $("#kurum");
+  const opt = `<option value="">Kurum: Tümü</option>` + ks.map(x => `<option value="${esc(x.ad)}"${x.ad === st.kurum ? " selected" : ""}>${esc(x.ad)} (${fmt(x.sunucu)} sunucu)</option>`).join("");
+  if (sel.dataset.o !== opt) { sel.innerHTML = opt; sel.dataset.o = opt; }
   $("#run").innerHTML = runHtml();
   $("#warn").innerHTML = v?.uyari ? `<div class="warn">${esc(v.uyari)}</div>` : "";
   $("#stats").innerHTML = istatistik((v?.satirlar || []).filter(r => ($("#alt").checked || !r.altyapi) && ($("#gen").checked || !(r.genel && r.durum === "ertyok"))));
@@ -297,9 +303,10 @@ function ciz() {
 }
 
 async function tara(mod, ipler) {
-  if (mod === "yeni" && !confirm("Tüm ERT sunucuları Carbon Black ve IIS logu ile taranacak (uzun sürer; önceki tarama silinir). Başlatılsın mı?")) return;
+  if (mod === "yeni" && !st.kurum && !confirm("Tüm ERT sunucuları Carbon Black ve IIS logu ile taranacak (uzun sürer; önceki tarama silinir). Başlatılsın mı?")) return;
+  if (mod === "yeni" && st.kurum && !confirm(`${st.kurum} sunucularının hepsi taranacak (mevcut taramaya eklenir). Başlatılsın mı?`)) return;
   if (mod === "ip" && ipler.length > 200 && !confirm(`${ipler.length} sunucu taranacak (mevcut taramaya eklenir). Başlatılsın mı?`)) return;
-  const r = await fetch("api/imza/tara", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mod, ipler }) });
+  const r = await fetch("api/imza/tara", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mod, ipler, kurum: st.kurum || null }) });
   const b = await r.json().catch(() => ({}));
   if (!r.ok) { alert(b.error || `HTTP ${r.status}`); return; }
   st.veri = { ...(st.veri || { satirlar: [], sozluk: [], mesajlar: [] }), is: b };
@@ -326,8 +333,8 @@ function csv() {
   const l = st.tab === "satir" ? suz() : null;
   const q = v => `"${String(v ?? "").replace(/"/g, '""')}"`;
   const lines = st.tab === "satir"
-    ? [["IP", "SUNUCU", "PORT", "ERT UYGULAMASI", "WEBSITE", "EXE", "EXE YOLU", "HTTP.SYS", "IIS UYGULAMALARI", "VIP HAVUZU", "BAĞLANTI", "DURUM", "TESPİT EDİLEN UYGULAMA", "GÜVEN", "NASIL", "ADAYLAR"].join(";"),
-       ...l.map(r => [r.ip, r.sunucu, r.port, r.ert, r.website, r.exe, r.exeYol, r.httpSys ? "evet" : "", (r.iis || []).join(", "), (r.vip || []).join(", "), r.baglanti, DURUM[dur(r)] ?? r.durum, r.oneri, r.guven, r.not,
+    ? [["IP", "SUNUCU", "KURUM", "PORT", "ERT UYGULAMASI", "WEBSITE", "EXE", "EXE YOLU", "HTTP.SYS", "IIS UYGULAMALARI", "VIP HAVUZU", "BAĞLANTI", "DURUM", "TESPİT EDİLEN UYGULAMA", "GÜVEN", "NASIL", "ADAYLAR"].join(";"),
+       ...l.map(r => [r.ip, r.sunucu, r.kurum, r.port, r.ert, r.website, r.exe, r.exeYol, r.httpSys ? "evet" : "", (r.iis || []).join(", "), (r.vip || []).join(", "), r.baglanti, DURUM[dur(r)] ?? r.durum, r.oneri, r.guven, r.not,
          (r.adaylar || []).map(a => `${a.ad} (${a.sunucu})`).join(", ")].map(q).join(";"))]
     : [["EXE", "PORT", "ERT ADLARI", "IIS UYGULAMALARI", "SUNUCU", "ÇELİŞKİ"].join(";"),
        ...(st.veri?.sozluk || []).map(s => [s.exe, s.port, s.adlar.map(a => `${a.ad} (${a.sunucu})`).join(", "), s.iis.join(", "), s.sunucu, s.celiski ? "evet" : ""].map(q).join(";"))];
@@ -336,7 +343,7 @@ function csv() {
   a.download = st.tab === "satir" ? "servis_imzasi.csv" : "servis_imzasi_sozluk.csv"; a.click();
 }
 
-["#q", "#durum", "#veri", "#guven", "#alt", "#gen"].forEach(s => $(s).addEventListener(s === "#q" ? "input" : "change", () => { st.limit = 500; if (s === "#durum" || s === "#veri") st.durumFiltre = ""; ciz(); }));
+["#q", "#durum", "#veri", "#guven", "#alt", "#gen", "#kurum"].forEach(s => $(s).addEventListener(s === "#q" ? "input" : "change", () => { st.limit = 500; if (s === "#durum" || s === "#veri") st.durumFiltre = ""; if (s === "#kurum") st.kurum = $("#kurum").value; ciz(); }));
 $("#more").addEventListener("click", () => { st.limit += 1000; ciz(); });
 $("#csv").addEventListener("click", csv);
 document.addEventListener("click", e => {

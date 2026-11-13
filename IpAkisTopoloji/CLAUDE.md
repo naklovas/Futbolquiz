@@ -414,7 +414,10 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
   üye portu = satır portu → "havuz (/Common/ atılır) · VIP ip:port"; tabloda "VIP havuzu" kolonu, aramada ve CSV'de (VIP HAVUZU). Öneri için henüz kullanılmıyor
   (aynı havuzun diğer üyesinin ERT adı güçlü kanıt olabilir — kullanıcıya önerildi). TEST SUNUCULARI (kullanıcı: "domainden ayrıştırabiliyoruz, testlere bakmasın boşuna"):
   `Test(env, ip)` = segment Domain'inde `Eksik:TestIfadeleri` (varsayılan "test") — `Ipler(env)` tüm kapsamlarda (ip modu dahil) taramadan, satırlardan ve sözlükten
-  çıkarır; kayıtta `testSunucu` sayısı, bantta "N test sunucusu dışarıda".
+  çıkarır; kayıtta `testSunucu` sayısı, bantta "N test sunucusu dışarıda". KURUM (kullanıcı: "zb banka, zk katılım, zi iştirak"; "sunucu adına göre değil, yine domain"):
+  `Kurum(env, ip)` = segment Domain'inin öneki (`Imza:Kurumlar`, varsayılan Ziraat Bankası zb / Ziraat Katılım zk / İştirak zi; eşleşmeyen "Diğer"); `ImzaSatir.Kurum`, kayıtta
+  `kurumlar` [{ad, sunucu, bos}]; sayfada "Kurum" seçicisi tabloyu süzer ve tarama düğmelerine uygulanır (`ImzaIstek.Kurum`; bos / kalan / yeni yalnız o kurum;
+  kurumlu "yeni" önceki taramayı silmez, ekler), CSV'de KURUM.
   İLERLEME (kullanıcı: "progress bar üste, hangi sunucu hangi port, yüzde kaç"): `ImzaIs` ToplamSunucu / BitenSunucu / Adim (cb | iis) / Yuzde (grup içinde CB = yarım) /
   Grup ("ip sunucuadı (ERT portları)") / Son (son biten 12 sunucu: "ip → port exe (IIS: …)", ntoskrnl "HTTP.sys") / Kalan ("4 dk", "1 sa 5 dk"); sayfada bant
   `position: sticky` üstte, yüzdeli çubuk, şu an sorgulanan sunucu çipleri, son bitenler listesi. Sayfa: tarama bandı (ilerleme, tahmini kalan, durdur), istatistik kartları (tıkla süz), "IP + port
