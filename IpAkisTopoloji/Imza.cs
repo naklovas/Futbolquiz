@@ -210,7 +210,7 @@ ew relic", @"\solarwinds", @"\system center operations manager",
 xlog"];
     HashSet<string>? _ek;
     HashSet<string> Ek => _ek ??= cfg.GetSection("Imza:GenelExeler").GetChildren().Select(c => c.Value?.Trim().ToLowerInvariant()).OfType<string>().Where(x => x.Length > 0).ToHashSet();
-    public bool Gereksiz(string yol)
+    bool Gereksiz(string yol)
     {
         if (HttpSysEslesme.Cekirdek(yol)) return false;   // HTTP.sys (ntoskrnl / System) gerekli
         string ad = ExeAd(yol);

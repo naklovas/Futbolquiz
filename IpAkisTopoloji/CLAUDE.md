@@ -453,10 +453,6 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
   HANA / Redis…, "Veritabanı" ekli de; Oracle Data Integrator, SSRS gibi ürünler DEĞİL) sahibi aranır (`DbSahibi`): servis imzası önerisi (güçlü 70 / 55) → bu porta bağlanan TEK
   istemci uygulaması (CB, 55) → sunucuda ERT'de kayıtlı tek iş uygulaması (50) → SM (boş portu anan / tek sistem, 50) → "<sahip> Veritabanı" (katalog eşlemesiyle), gerekçede teknoloji;
   bulunamazsa öneri null + "Yok sayıldı … sahibi belirsiz". Aynı sunucuda ERT'de birebir bu ad kayıtlıysa (ör. "Redis") dokunulmaz. Prompt'a da kural.
-- **Ajan portları AI'a gitmez** (kullanıcı: "8765 sqldsimservice.exe Karmasis Dataskope SQL Agent… saçmaladı, her DB makinesinde Dataskope var"): RunTodoAsync'te
-  `AjanPortlari` — CB "- gelen port X" satırındaki tüm exe yolları ajan / genel (`AjanOf(yol)`, `ServisImzaService.Gereksiz` (artık public), `SurecAi.GenelExe`;
-  ntoskrnl hariç) ise ve sunucu o ürünün kendi sunucusu değilse (`AjanSunucusu`) AI'a sorulmadan "Altyapı: <ürün ya da exe>" güven 90, Kaynak "Kural", gerekçe
-  "Kural (AI'a sorulmadı)…". Yalnız kalan portlar AskAsync'e gider. `Eksik:AjanPortuKural`=true.
 - **"Bu sunucuda hangi uygulama çalışıyor?"** (IP kartı, Gelen portlar tablosunun üstündeki düğme; `SurecAi` Surec.cs, `POST /api/surec/ai`):
   arayüzdeki /api/surec sonucu exe başına toplanıp (PID'ler, portlar, giden, bağlanan / bağlandığı uygulamalar) AI'a gider (yeniden
   sorgulanmaz) + ERT kayıtları + segment + genel bilgiler dosyası. Kesin genel süreçler kodda ayıklanır (`GenelAd` / `GenelYol`: svchost,
