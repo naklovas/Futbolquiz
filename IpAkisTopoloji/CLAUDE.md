@@ -441,6 +441,10 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
   `ServisImzaService.KanitMetniAsync(ip, portlar)` (kayıtlı taramadan, yeni sorgu yok) → ERT eksikleri BuildAsync'te IIS logundan sonra "SERVİS İMZASI" bölümü (port başına exe +
   kaynağı, IIS uygulamaları, VIP havuzu, aynı exe:port'un başka sunuculardaki ERT adları ya da "PLATFORM SÜRECİ — exe uygulamayı belirlemez", İMZA ÖNERİSİ + güven); prompt'ta
   güçlü / orta / zayıf ağırlığı ve platform kuralı. `Eksik:ImzaKaniti`=true ile kapatılabilir. EksikService'e isteğe bağlı `ServisImzaService? imza` parametresi.
+  Karar (kullanıcı: "imza olsun, burada bulduklarımıza ek ne iletiyorsak AI'a"; "sen karar ver"): TEK AI motoru (Eksik) — ayrı imza AI'ı yok, günlük iş imza sayfasından.
+  İmza bölümü kanıtta SM'den ÖNCE (kısa; MaxKarakter kesmesin). Eksik'in kendi Carbon Black sorgusu KALDI (istemci uygulamaları, giden hedefler ve
+  "- gelen port X" satırları DbHints / PortExeHas / ProgramKontrol için gerekli; imza taraması bunları tutmuyor). imza.html "AI'a sor": seçilenlerde taranmamış
+  sunucu varsa sorar → önce `tara("ip", taranmamış)`, `st.aiBekle`'deki portlar tarama "bitti" olunca kendiliğinden `aiGonder` (durdurulursa gönderilmez).
 - **"Bu sunucuda hangi uygulama çalışıyor?"** (IP kartı, Gelen portlar tablosunun üstündeki düğme; `SurecAi` Surec.cs, `POST /api/surec/ai`):
   arayüzdeki /api/surec sonucu exe başına toplanıp (PID'ler, portlar, giden, bağlanan / bağlandığı uygulamalar) AI'a gider (yeniden
   sorgulanmaz) + ERT kayıtları + segment + genel bilgiler dosyası. Kesin genel süreçler kodda ayıklanır (`GenelAd` / `GenelYol`: svchost,

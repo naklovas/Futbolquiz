@@ -655,6 +655,10 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
                 sb.AppendLine($"- port {(yp == "" ? "(yok)" : yp)}{(PortBilgisi.Find(yp, cfg) is { } pinfo ? $" (bilinen kullanım: {pinfo.Name})" : "")}: ERT'de bu port için kayıt YOK (Carbon Black'te gelen bağlantı görüldü)");
             // Sıra önemli (kullanıcı: SM açıklamaları önemsenmiyordu): metin Eksik:MaxKarakter'de kesilir ve uzun profil (ERT, MSY, ÇSY,
             // Kahin…) başta olunca SM / CB kesiliyordu. Güçlü kanıtlar önce, komşular ve profil sonda.
+            // SERVİS İMZASI (Imza.cs; kullanıcı: "iki sayfanın güçlerini birleştirelim"): kayıtlı taramadan exe / IIS / VIP / aynı exe:port'un başka
+            // sunuculardaki ERT adları ve imza önerisi — yeni sorgu yapmaz; port başına tek satır, kısa —
+            // SM'den ÖNCE (kullanıcı: "imzada bulduklarımız çok faydalı"; metin Eksik:MaxKarakter'de kesilir, uzun SM'de sona kalırsa kesiliyordu); tarama yoksa bölüm yok (`Eksik:ImzaKaniti`=true)
+            if (imza != null && cfg.GetValue("Eksik:ImzaKaniti", true) && await imza.KanitMetniAsync(ip, miss, ct) is { } imzaMetin) sb.Append(imzaMetin);
             if (smf.TryGetValue(ip, out var smfText)) sb.Append(smfText);
             // HTTP.sys KAYDI (kullanıcı: "gerçek portları bir yere yazsak, önce oraya baksak"): sunuculardan netsh ile toplanan kesin port → exe
             // Kesin kayıt (isteğe bağlı DF_HTTPSYS_URL; DeltaFlow sunucuya bağlanmaz, yalnız okur)
@@ -666,9 +670,6 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
                 var (iisL, _) = await HttpSysEslesme.IisAsync(ip, cfg, factory.CreateClient("splunk"), ct);
                 sb.Append(HttpSysEslesme.IisMetin(iisL, miss));
             }
-            // SERVİS İMZASI (Imza.cs; kullanıcı: "iki sayfanın güçlerini birleştirelim"): kayıtlı taramadan exe / IIS / VIP / aynı exe:port'un başka
-            // sunuculardaki ERT adları ve imza önerisi — yeni sorgu yapmaz; tarama yoksa bölüm yok (`Eksik:ImzaKaniti`=true)
-            if (imza != null && cfg.GetValue("Eksik:ImzaKaniti", true) && await imza.KanitMetniAsync(ip, miss, ct) is { } imzaMetin) sb.Append(imzaMetin);
             if (cb.TryGetValue(ip, out var c))
             {
                 sb.Append(c.Text(env, ip, miss));

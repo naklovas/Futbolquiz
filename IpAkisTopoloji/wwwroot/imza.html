@@ -275,7 +275,21 @@ async function aiSor() {
   const portlar = {};
   for (const r of l) (portlar[r.ip] ??= []).includes(r.port) || portlar[r.ip].push(r.port);
   const n = Object.keys(portlar).length;
+  // Taranmamış sunucuda AI'a "SERVİS İMZASI" kanıtı gitmez → önce yalnız onlar taranır, tarama bitince AI kendiliğinden sorulur
+  const taranmamis = [...new Set(l.filter(r => r.veri === "taranmadi").map(r => r.ip))];
+  if (taranmamis.length && st.veri?.is?.durum !== "calisiyor" && st.yetki.topoloji) {
+    if (confirm(`${taranmamis.length} / ${n} sunucu servis imzasında henüz taranmamış; AI bu sunucularda exe / IIS / VIP / sözlük kanıtını göremez.\n\nTamam: önce bu sunucular taransın, tarama bitince ${l.length} port kendiliğinden AI'a sorulsun.\nİptal: taramadan şimdi AI'a sor.`)) {
+      st.aiBekle = portlar;
+      await tara("ip", taranmamis);
+      if (st.veri?.is?.durum !== "calisiyor") st.aiBekle = null;   // tarama başlamadıysa (hata / yetki) bekleme kalmasın
+      else $("#aiDurum").innerHTML = `<span class="spinner"></span> AI, tarama bitince ${l.length} port için sorulacak`;
+      return;
+    }
+  }
   if (!confirm(`${l.length} port (${n} sunucu) ERT eksikleri AI motoruna gönderilecek. Toplu yetkiniz yoksa ilk 50 sunucu işlenir. Başlatılsın mı?`)) return;
+  await aiGonder(portlar);
+}
+async function aiGonder(portlar) {
   const r = await fetch("api/eksik/calistir", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ portlar, yeniden: false }) });
   const b = await r.json().catch(() => ({}));
   if (!r.ok) { alert(b.error || `HTTP ${r.status}`); return; }
@@ -385,7 +399,15 @@ function izle() {
       const b = await (await fetch("api/imza/durum")).json();
       st.veri.is = b.is;
       // çalışırken tablo dakikada bir yenilenir (bulunanlar dolsun); bitince hemen
-      if (b.is?.durum !== "calisiyor" || Date.now() - sonYenile > 60000) { sonYenile = Date.now(); await load(); return; }
+      if (b.is?.durum !== "calisiyor" || Date.now() - sonYenile > 60000) {
+        sonYenile = Date.now(); await load();
+        // "AI'a sor" taranmamış sunucular için önce taramayı başlattıysa: tarama tamamlanınca bekleyen portlar AI'a gider (durdurulursa gitmez)
+        if (st.aiBekle && b.is?.durum !== "calisiyor") {
+          const p = st.aiBekle; st.aiBekle = null;
+          if (b.is?.durum === "bitti") await aiGonder(p); else $("#aiDurum").textContent = "Tarama tamamlanmadı; AI'a sorulmadı.";
+        }
+        return;
+      }
       $("#run").innerHTML = runHtml(); bagla();
     } catch {}
     if (st.veri?.is?.durum === "calisiyor") izle();
