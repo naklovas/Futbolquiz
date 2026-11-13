@@ -55,7 +55,7 @@ sealed class ServisImzaService(IConfiguration cfg, IHttpClientFactory factory, E
     {
         lock (_gate) if (_is?.Durum == "calisiyor") throw new InvalidOperationException("Tarama zaten çalışıyor.");
         var env = await envanter.GetAsync(false, ct);
-        var tum = env.HostIps.Where(ip => EnvanterSnapshot.TryToUInt(ip, out _)).Distinct().ToList();
+        var tum = Ipler(env).ToList();
         ImzaTarama? eski; lock (_gate) eski = _son;
         eski ??= await OkuAsync(ct);
         var t = mod == "yeni" || eski == null ? new ImzaTarama(DateTime.Now, null, CbSaat, IisDakika, [], [], [], tum.Count, user) : eski with { ToplamIp = tum.Count, Kaydeden = user };
@@ -67,7 +67,7 @@ sealed class ServisImzaService(IConfiguration cfg, IHttpClientFactory factory, E
             "kalan" => tum.Where(ip => !yapilan.Contains(ip)).ToList(),
             "bos" => tum.Where(ip => env.AppsOnIp(ip).Any(h => string.IsNullOrWhiteSpace(h.AppName) && !string.IsNullOrWhiteSpace(h.Port)
                 && !(int.TryParse(h.Port, out int pn) && pn >= Dyn))).ToList(),
-            "ip" => (ipler ?? []).Select(x => x.Trim()).Where(x => EnvanterSnapshot.TryToUInt(x, out _)).Distinct().ToList(),
+            "ip" => (ipler ?? []).Select(x => x.Trim()).Where(x => EnvanterSnapshot.TryToUInt(x, out _) && !Test(env, x)).Distinct().ToList(),
             _ => throw new InvalidOperationException("Geçersiz kapsam: " + mod)
         };
         if (liste.Count == 0) throw new InvalidOperationException(mod == "devam" ? "Bekleyen sunucu yok." : "Taranacak sunucu yok.");
@@ -213,6 +213,17 @@ xlog"];
         return HttpSysEslesme.Genel(ad, yol) || GereksizAd.Contains(ad) || Ek.Contains(ad)
             || GereksizYol.Any(g => yol.Contains(g, StringComparison.OrdinalIgnoreCase));
     }
+
+    // TEST SUNUCULARI (kullanıcı: "domainden ayrıştırabiliyoruz, testlere bakmasın boşuna"): segment Domain'inde Eksik:TestIfadeleri (varsayılan "test")
+    // geçen sunucular taranmaz, listelenmez, sözlüğe girmez (ERT eksikleriyle aynı kural)
+    bool Test(EnvanterSnapshot env, string ip)
+    {
+        var words = cfg.GetSection("Eksik:TestIfadeleri").GetChildren().Select(c => c.Value).OfType<string>().Where(w => w.Length > 0).ToList();
+        if (words.Count == 0) words = ["test"];
+        string? d = env.FindSegment(ip)?.Domain;
+        return d != null && words.Any(w => d.Contains(w, StringComparison.OrdinalIgnoreCase));
+    }
+    IEnumerable<string> Ipler(EnvanterSnapshot env) => env.HostIps.Where(ip => EnvanterSnapshot.TryToUInt(ip, out _) && !Test(env, ip)).Distinct();
 
     static string Sure2(TimeSpan t) => t.TotalMinutes < 1 ? "1 dk'dan az" : t.TotalHours < 1 ? $"{(int)t.TotalMinutes} dk" : $"{(int)t.TotalHours} sa {t.Minutes} dk";
     static string Terimler(IEnumerable<string> ips) => "(" + string.Join(" OR ", ips.Select(ip => $"TERM({ip})")) + ")";
@@ -379,7 +390,7 @@ xlog"];
         var satirlar = new List<(ImzaSatir S, HashSet<string> IisSet, string? Anahtar)>();
         bool Sistem(string? a) => a != null && a.StartsWith("Sistem Portudur", StringComparison.OrdinalIgnoreCase);
 
-        foreach (var ip in env.HostIps.Where(ip => EnvanterSnapshot.TryToUInt(ip, out _)).Distinct())
+        foreach (var ip in Ipler(env))
         {
             var ert = env.AppsOnIp(ip).Where(h => !(int.TryParse(h.Port, out int pn) && pn >= Dyn)).GroupBy(h => h.Port ?? "").ToDictionary(g => g.Key, g => g.ToList());
             veri.TryGetValue(ip, out var v);
@@ -492,9 +503,9 @@ xlog"];
         var kayit = (object)new
         {
             tarama = t != null, baslangic = t?.Baslangic, bitis = t?.Bitis, cbSaat = t?.CbSaat ?? CbSaat, iisDakika = t?.IisDakika ?? IisDakika, taranan = t?.Taranan.Count ?? 0,
-            toplamIp = env.HostIps.Count(ip => EnvanterSnapshot.TryToUInt(ip, out _)),
+            toplamIp = Ipler(env).Count(), testSunucu = env.HostIps.Count(ip => EnvanterSnapshot.TryToUInt(ip, out _) && Test(env, ip)),
             sunucu = t?.Sunucular.Count ?? 0, kaydeden = t?.Kaydeden, bekleyen = t?.Bekleyen?.Count ?? 0, kapsam = t?.Kapsam,
-            bosSunucu = env.HostIps.Count(ip => env.AppsOnIp(ip).Any(h => string.IsNullOrWhiteSpace(h.AppName) && !string.IsNullOrWhiteSpace(h.Port) && !(int.TryParse(h.Port, out int pn) && pn >= Dyn)))
+            bosSunucu = Ipler(env).Count(ip => env.AppsOnIp(ip).Any(h => string.IsNullOrWhiteSpace(h.AppName) && !string.IsNullOrWhiteSpace(h.Port) && !(int.TryParse(h.Port, out int pn) && pn >= Dyn)))
         };
         return new ImzaSonuc(null, kayit, sonuc.OrderBy(x => EnvanterSnapshot.TryToUInt(x.Ip, out uint u) ? u : 0)
             .ThenBy(x => int.TryParse(x.Port, out int p) ? p : 999999).ToList(), sozluk, t?.Mesajlar ?? [], null);

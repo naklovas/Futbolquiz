@@ -190,9 +190,10 @@ function runHtml() {
       <div class="sub">Başlangıç ${esc(tarih(is.baslangic))} · sayfa kapatılsa da tarama sunucuda sürer; 10 grupta bir kaydedilir</div></div>`;
   }
   const suzIp = [...new Set(suz().map(r => r.ip))];
-  const bilgi = !k.tarama ? `Henüz tarama yok · ERT'de ${fmt(k.toplamIp)} sunucu, adı boş portu olan ${fmt(k.bosSunucu)} sunucu.`
+  const testNot = k.testSunucu ? ` · <span title="Segment Domain'inde 'test' geçen sunucular (Eksik:TestIfadeleri) taranmaz ve listelenmez">${fmt(k.testSunucu)} test sunucusu dışarıda</span>` : "";
+  const bilgi = (!k.tarama ? `Henüz tarama yok · ERT'de ${fmt(k.toplamIp)} sunucu, adı boş portu olan ${fmt(k.bosSunucu)} sunucu.`
     : `Son tarama: ${esc(tarih(k.baslangic))}${k.bitis ? ` – ${esc(tarih(k.bitis))}` : ""} · ${esc(k.kapsam || "")} · toplam ${fmt(k.taranan)} / ${fmt(k.toplamIp)} sunucu tarandı (veri bulunan: ${fmt(k.sunucu)}) ·
-       Carbon Black son ${k.cbSaat} saat, IIS logu son ${k.iisDakika} dk${k.bekleyen ? ` · <b style="color:var(--warn)">${fmt(k.bekleyen)} sunucu bekliyor</b>` : ""}`;
+       Carbon Black son ${k.cbSaat} saat, IIS logu son ${k.iisDakika} dk${k.bekleyen ? ` · <b style="color:var(--warn)">${fmt(k.bekleyen)} sunucu bekliyor</b>` : ""}`) + testNot;
   const son = is && is.durum !== "calisiyor" ? ` · son iş: ${esc(is.asama)}${is.hata ? ` — <span style="color:var(--err)">${esc(is.hata)}</span>` : ""}` : "";
   return `<div class="run"><div>${bilgi}${son}</div>
     <div class="tools" style="margin:0">
