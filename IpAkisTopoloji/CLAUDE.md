@@ -417,7 +417,13 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
   çıkarır; kayıtta `testSunucu` sayısı, bantta "N test sunucusu dışarıda". KURUM (kullanıcı: "zb banka, zk katılım, zi iştirak"; "sunucu adına göre değil, yine domain"):
   `Kurum(env, ip)` = segment Domain'inin öneki (`Imza:Kurumlar`, varsayılan Ziraat Bankası zb / Ziraat Katılım zk / İştirak zi; eşleşmeyen "Diğer"); `ImzaSatir.Kurum`, kayıtta
   `kurumlar` [{ad, sunucu, bos}]; sayfada "Kurum" seçicisi tabloyu süzer ve tarama düğmelerine uygulanır (`ImzaIstek.Kurum`; bos / kalan / yeni yalnız o kurum;
-  kurumlu "yeni" önceki taramayı silmez, ekler), CSV'de KURUM.
+  kurumlu "yeni" önceki taramayı silmez, ekler), CSV'de KURUM. HTTP.SYS / NTOSKRNL (kullanıcı: "sözlükte ntoskrnl olanlar gelmiyor, tahminlerimiz gelse"; "IIS
+  uygulamaları için de sözlük"): HTTP.sys portunda exe sırası: DF_HTTPSYS_URL kesin kaydı → ERT adı exe yolunda (`HttpSysExe`) → DF_HTTPSYS_KORELASYON SIRA 1
+  (`HttpSysKayitService.TumTahminlerAsync`, tüm IP'ler tek sorgu, 10 dk önbellek; tablo yoksa bellekteki korelasyonlar); `ImzaSatir.ExeKaynak` (Carbon Black / ERT adı
+  exe yolunda / kesin kayıt / zaman korelasyonu / "HTTP.sys · exe bulunamadı"), korelasyonla gelen exe'de güven bir kademe düşük. Çözülemeyen ntoskrnl: IIS varsa
+  anahtar "http.sys|port" (eşleşmede IIS Jaccard ≥ 0,5 şart, orta; sözlükte "HTTP.sys (exe bilinmiyor, IIS'le)"); ayrıca sunucuda çalışan TEK bir exe aynı portla
+  sözlükteyse (ör. boş satırda zb.app.wall.exe var, başka sunucularda zb.app.wall.exe:9000 "Wall") → orta, IIS de ortaksa güçlü. IIS SÖZLÜĞÜ sekmesi (`ImzaIisSozluk`:
+  IIS uygulaması → ERT adları, portlar, çelişki). Hesap önbelleği 10 dk (tahminler değişebilir).
   İLERLEME (kullanıcı: "progress bar üste, hangi sunucu hangi port, yüzde kaç"): `ImzaIs` ToplamSunucu / BitenSunucu / Adim (cb | iis) / Yuzde (grup içinde CB = yarım) /
   Grup ("ip sunucuadı (ERT portları)") / Son (son biten 12 sunucu: "ip → port exe (IIS: …)", ntoskrnl "HTTP.sys") / Kalan ("4 dk", "1 sa 5 dk"); sayfada bant
   `position: sticky` üstte, yüzdeli çubuk, şu an sorgulanan sunucu çipleri, son bitenler listesi. Sayfa: tarama bandı (ilerleme, tahmini kalan, durdur), istatistik kartları (tıkla süz), "IP + port

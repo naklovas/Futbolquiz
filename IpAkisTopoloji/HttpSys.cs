@@ -729,6 +729,43 @@ sealed class HttpSysKayitService(IConfiguration cfg, ILogger<HttpSysKayitService
         catch (Exception ex) when (ex is not OperationCanceledException) { log.LogWarning("HTTP.sys korelasyon kaydı yazılamadı: {Hata}", ex.Message); }
     }
 
+    // ---- Servis imzası için TÜM kayıtlı tahminler (kullanıcı: "sözlükte ntoskrnl olanlar gelmiyor, tahminlerimiz gelse"): "ip|port" → (exe yolu, kaynak)
+    // DF_HTTPSYS_URL (kesin, isteğe bağlı) + DF_HTTPSYS_KORELASYON SIRA 1 (zaman korelasyonu / aynı istemci); yalnız okunur, 10 dk önbellek ----
+    (DateTime At, Dictionary<string, (string Yol, string Kaynak)> D)? _tum;
+    public async Task<Dictionary<string, (string Yol, string Kaynak)>> TumTahminlerAsync(CancellationToken ct)
+    {
+        if (_tum is { } c && DateTime.UtcNow - c.At < TimeSpan.FromMinutes(10)) return c.D;
+        var d = new Dictionary<string, (string Yol, string Kaynak)>();
+        if (Cs is { } cs)
+        {
+            async Task Oku(string sql, string kaynak)
+            {
+                try
+                {
+                    await using var conn = new Microsoft.Data.SqlClient.SqlConnection(cs);
+                    await conn.OpenAsync(ct);
+                    await using var cmd = new Microsoft.Data.SqlClient.SqlCommand(sql, conn) { CommandTimeout = 60 };
+                    await using var r = await cmd.ExecuteReaderAsync(ct);
+                    while (await r.ReadAsync(ct))
+                    {
+                        if (r.IsDBNull(0) || r.IsDBNull(1) || r.IsDBNull(2)) continue;
+                        string k = Convert.ToString(r.GetValue(0))!.Trim() + "|" + Convert.ToString(r.GetValue(1))!.Trim(), y = Convert.ToString(r.GetValue(2))!.Trim();
+                        if (y.Length > 0 && !d.ContainsKey(k)) d[k] = (y, kaynak);
+                    }
+                }
+                catch (Microsoft.Data.SqlClient.SqlException ex) when (ex.Number is 208 or 207) { /* tablo / kolon yok */ }
+                catch (Exception ex) when (ex is not OperationCanceledException) { log.LogWarning("HTTP.sys tahminleri okunamadı: {Hata}", ex.Message); }
+            }
+            await Oku($"SELECT IP, PORT, EXE_YOL FROM {UrlTablo} WITH (NOLOCK) WHERE EXE_YOL IS NOT NULL AND PORT > 0", "HTTP.sys kesin kaydı (netsh)");
+            await Oku($"SELECT IP, PORT, COALESCE(NULLIF(EXE_YOL, ''), EXE) FROM {KorTablo} WITH (NOLOCK) WHERE SIRA = 1 AND EXE IS NOT NULL", "zaman korelasyonu (kayıtlı tahmin)");
+        }
+        foreach (var (ip, res) in _kor)   // tablo yoksa bellekteki korelasyonlar
+            foreach (var p in res.Portlar) if (p.Adaylar.FirstOrDefault() is { } a && !d.ContainsKey(ip + "|" + p.Port))
+                d[ip + "|" + p.Port] = (string.IsNullOrEmpty(a.Yol) ? a.Exe : a.Yol, "zaman korelasyonu (kayıtlı tahmin)");
+        _tum = (DateTime.UtcNow, d);
+        return d;
+    }
+
     // ---- Kesin kayıt (isteğe bağlı, yalnız okunur): DF_HTTPSYS_URL ----
     public async Task<List<HttpSysKayit>> IpAsync(string ip, CancellationToken ct)
     {

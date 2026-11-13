@@ -124,7 +124,7 @@
     <div id="run"></div>
     <div id="warn"></div>
     <div class="stats" id="stats"></div>
-    <div class="tabs"><button type="button" data-tab="satir" class="on">IP + port satırları</button><button type="button" data-tab="sozluk" title="ERT'de adı dolu satırlardan çıkan eşleşmeler: exe + port → ERT adı">Sözlük (exe + port → ERT adı)</button>
+    <div class="tabs"><button type="button" data-tab="satir" class="on">IP + port satırları</button><button type="button" data-tab="sozluk" title="ERT'de adı dolu satırlardan çıkan eşleşmeler: exe + port → ERT adı">Sözlük (exe + port → ERT adı)</button><button type="button" data-tab="iis" title="ERT'de adı dolu satırların IIS logundaki uygulamaları → ERT adı (HTTP.sys / ntoskrnl portları da burada)">IIS sözlüğü (uygulama → ERT adı)</button>
       <span class="sp" style="flex:1"></span><button type="button" id="csv" hidden>Excel'e aktar</button></div>
     <div class="tools" id="tools">
       <select id="kurum" title="Segment Domain'inin önekine göre: zb = Ziraat Bankası, zk = Ziraat Katılım, zi = İştirak (Imza:Kurumlar). Tarama düğmeleri de bu seçime uyar."><option value="">Kurum: Tümü</option></select>
@@ -251,7 +251,7 @@ function satirTablo(l) {
     <td class="small">${esc(r.sunucu || "")}</td>
     <td class="mono">${esc(r.port)}${r.altyapi ? ` <span class="small muted">altyapı</span>` : ""}</td>
     <td>${r.ert ? esc(r.ert) : `<span class="muted small">${r.durum === "ertyok" ? "ERT'de satır yok" : "boş"}</span>`}${r.website ? `<div class="small muted">WEBSITE: ${esc(r.website)}</div>` : ""}</td>
-    <td>${r.exe ? `<span class="mono" title="${esc(r.exeYol || "")}">${esc(r.exe)}</span>${r.httpSys ? `<span class="hs" title="Carbon Black bu portu ntoskrnl (HTTP.sys) adına yazıyor; asıl exe ERT WEBSITE / uygulama adının exe yolunda geçmesinden bulundu">HTTP.sys</span>` : ""}`
+    <td>${r.exe ? `<span class="mono" title="${esc(r.exeYol || "")}">${esc(r.exe)}</span>${r.httpSys || r.exe === "ntoskrnl.exe" ? `<span class="hs" title="Carbon Black bu portu ntoskrnl (HTTP.sys) adına yazıyor. ${esc(r.exeKaynak || "")}">HTTP.sys</span>` : ""}${r.exeKaynak && r.exeKaynak !== "Carbon Black" ? `<div class="small muted">${esc(r.exeKaynak)}</div>` : ""}`
       : r.genelExe ? `<span class="small muted" title="Bu portu yalnız genel Windows / ajan süreci kabul ediyor (iş uygulaması değil; sözlüğe ve öneriye girmez): ${esc(r.genelExe)}">yalnız genel süreç</span>` : `<span class="muted small">—</span>`}</td>
     <td class="small">${(r.iis || []).length ? esc(r.iis.slice(0, 5).join(", ")) + (r.iis.length > 5 ? ` <span class="muted">+${r.iis.length - 5}</span>` : "") : ""}</td>
     <td class="small">${(r.vip || []).map(v => `<div title="LB havuzu · VIP adresi (vip_envanteri)">${esc(v)}</div>`).join("")}</td>
@@ -287,6 +287,19 @@ function bagla() {
   $("#stop")?.addEventListener("click", async () => { await fetch("api/imza/durdur", { method: "POST" }); });
 }
 
+function iisSozlukTablo() {
+  const q = $("#q").value.trim().toLocaleLowerCase("tr");
+  const l = (st.veri?.iisSozluk || []).filter(s => !q || [s.uygulama, ...s.portlar, ...s.adlar.map(a => a.ad)].some(x => String(x).toLocaleLowerCase("tr").includes(q)));
+  $("#head").innerHTML = `<tr><th>IIS uygulaması</th><th>ERT adı (sunucu sayısı)</th><th>Portlar</th><th class="num">Sunucu</th></tr>`;
+  const g = l.slice(0, st.limit);
+  $("#body").innerHTML = g.length ? g.map(s => `<tr><td class="mono">${esc(s.uygulama)}</td>
+    <td>${s.adlar.map((a, i) => `<span${i ? ` class="muted"` : ""}>${i ? "" : "<b>"}${esc(a.ad)}${i ? "" : "</b>"} (${a.sunucu})</span>`).join(" · ")}${s.celiski ? ` <span class="d uyumsuz" title="Aynı IIS uygulaması ERT'de farklı adlarla kayıtlı sunucularda">çelişki</span>` : ""}</td>
+    <td class="mono small">${esc(s.portlar.join(", "))}</td><td class="num">${fmt(s.sunucu)}</td></tr>`).join("")
+    : `<tr><td colspan="4" class="empty">IIS sözlüğü boş (taranan sunucularda IIS logu yok ya da ERT adı dolu satırda IIS uygulaması görülmedi).</td></tr>`;
+  $("#count").textContent = `${fmt(l.length)} IIS uygulaması · ${fmt(l.filter(s => s.celiski).length)} çelişkili`;
+  $("#more").hidden = l.length <= st.limit;
+}
+
 function ciz() {
   const v = st.veri;
   const ks = v?.kayit?.kurumlar || [], sel = $("#kurum");
@@ -296,7 +309,7 @@ function ciz() {
   $("#warn").innerHTML = v?.uyari ? `<div class="warn">${esc(v.uyari)}</div>` : "";
   $("#stats").innerHTML = istatistik((v?.satirlar || []).filter(r => ($("#alt").checked || !r.altyapi) && ($("#gen").checked || !(r.genel && r.durum === "ertyok"))));
   $("#tools").style.display = st.tab === "satir" ? "" : "none";
-  if (st.tab === "satir") satirTablo(suz()); else sozlukTablo();
+  if (st.tab === "satir") satirTablo(suz()); else if (st.tab === "iis") iisSozlukTablo(); else sozlukTablo();
   $("#msgs").innerHTML = v?.mesajlar?.length ? `<details><summary>${v.mesajlar.length} tarama uyarısı</summary>${v.mesajlar.map(m => `<div>${esc(m)}</div>`).join("")}</details>` : "";
   bagla();
   $("#secHep")?.addEventListener("change", e => { const ips = suz().map(r => r.ip); ips.forEach(ip => e.target.checked ? st.sec.add(ip) : st.sec.delete(ip)); ciz(); });
@@ -333,8 +346,8 @@ function csv() {
   const l = st.tab === "satir" ? suz() : null;
   const q = v => `"${String(v ?? "").replace(/"/g, '""')}"`;
   const lines = st.tab === "satir"
-    ? [["IP", "SUNUCU", "KURUM", "PORT", "ERT UYGULAMASI", "WEBSITE", "EXE", "EXE YOLU", "HTTP.SYS", "IIS UYGULAMALARI", "VIP HAVUZU", "BAĞLANTI", "DURUM", "TESPİT EDİLEN UYGULAMA", "GÜVEN", "NASIL", "ADAYLAR"].join(";"),
-       ...l.map(r => [r.ip, r.sunucu, r.kurum, r.port, r.ert, r.website, r.exe, r.exeYol, r.httpSys ? "evet" : "", (r.iis || []).join(", "), (r.vip || []).join(", "), r.baglanti, DURUM[dur(r)] ?? r.durum, r.oneri, r.guven, r.not,
+    ? [["IP", "SUNUCU", "KURUM", "PORT", "ERT UYGULAMASI", "WEBSITE", "EXE", "EXE YOLU", "HTTP.SYS", "EXE KAYNAĞI", "IIS UYGULAMALARI", "VIP HAVUZU", "BAĞLANTI", "DURUM", "TESPİT EDİLEN UYGULAMA", "GÜVEN", "NASIL", "ADAYLAR"].join(";"),
+       ...l.map(r => [r.ip, r.sunucu, r.kurum, r.port, r.ert, r.website, r.exe, r.exeYol, r.httpSys ? "evet" : "", r.exeKaynak, (r.iis || []).join(", "), (r.vip || []).join(", "), r.baglanti, DURUM[dur(r)] ?? r.durum, r.oneri, r.guven, r.not,
          (r.adaylar || []).map(a => `${a.ad} (${a.sunucu})`).join(", ")].map(q).join(";"))]
     : [["EXE", "PORT", "ERT ADLARI", "IIS UYGULAMALARI", "SUNUCU", "ÇELİŞKİ"].join(";"),
        ...(st.veri?.sozluk || []).map(s => [s.exe, s.port, s.adlar.map(a => `${a.ad} (${a.sunucu})`).join(", "), s.iis.join(", "), s.sunucu, s.celiski ? "evet" : ""].map(q).join(";"))];

@@ -24,18 +24,20 @@ record ImzaAday(string Ad, int Sunucu);
 // Durum = ERT tarafı (kayitli | bos | uyumsuz | ertyok); Veri = tarama tarafı (var | yok | taranmadi) — kullanıcı: tarama yokken "boş" süzgeci boş geliyordu
 record ImzaSatir(string Ip, string Port, string? Sunucu, string? Ert, string? Website, string? Exe, string? ExeYol, bool HttpSys,
     long Baglanti, int Istemci, List<string> Iis, string Durum, string? Oneri, string? Guven, string? Not, List<ImzaAday>? Adaylar, bool Altyapi, string Veri, bool Genel = false,
-    string? GenelExe = null, List<string>? Vip = null, string? Kurum = null);   // Vip: "havuz · VIP ip:port" (vip_envanteri, üye portu = satır portu)
+    string? GenelExe = null, List<string>? Vip = null, string? Kurum = null, string? ExeKaynak = null);   // Vip: "havuz · VIP ip:port" (vip_envanteri, üye portu = satır portu)
 record ImzaSozluk(string Exe, string Port, List<ImzaAday> Adlar, List<string> Iis, int Sunucu, bool Celiski);
-record ImzaSonuc(ImzaIs? Is, object? Kayit, List<ImzaSatir> Satirlar, List<ImzaSozluk> Sozluk, List<string> Mesajlar, string? Uyari);
+// IIS sözlüğü (kullanıcı: "IIS uygulamaları için de sözlük olsa"): IIS uygulama adı → ERT adları (sunucu sayısı), görüldüğü portlar
+record ImzaIisSozluk(string Uygulama, List<ImzaAday> Adlar, List<string> Portlar, int Sunucu, bool Celiski);
+record ImzaSonuc(ImzaIs? Is, object? Kayit, List<ImzaSatir> Satirlar, List<ImzaSozluk> Sozluk, List<string> Mesajlar, string? Uyari, List<ImzaIisSozluk>? IisSozluk = null);
 
-sealed class ServisImzaService(IConfiguration cfg, IHttpClientFactory factory, EnvanterService envanter, ILogger<ServisImzaService> log)
+sealed class ServisImzaService(IConfiguration cfg, IHttpClientFactory factory, EnvanterService envanter, HttpSysKayitService httpsys, ILogger<ServisImzaService> log)
 {
     static readonly System.Text.Json.JsonSerializerOptions Js = new(System.Text.Json.JsonSerializerDefaults.Web);
     readonly object _gate = new();
     ImzaIs? _is;
     CancellationTokenSource? _cts;
     ImzaTarama? _son;                       // son (bellekteki) tarama
-    (ImzaTarama T, DateTimeOffset Env, ImzaSonuc S)? _hesap;   // hesap önbelleği (tarama + envanter sürümü)
+    (ImzaTarama T, DateTimeOffset Env, ImzaSonuc S, DateTime At)? _hesap;   // hesap önbelleği (tarama + envanter sürümü)
     public string? Uyari { get; private set; }
 
     string Tablo => cfg["Imza:Tablo"] is { Length: > 0 } t && Regex.IsMatch(t, @"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*){0,2}$") ? t : "dbo.DF_SERVIS_IMZA";
@@ -369,9 +371,10 @@ xlog"];
         ImzaTarama? t; lock (_gate) t = _son;
         t ??= await OkuAsync(ct);
         var env = await envanter.GetAsync(false, ct);
-        lock (_gate) if (_hesap is { } h && ReferenceEquals(h.T, t) && h.Env == env.LoadedAt) return h.S with { Is = _is, Uyari = Uyari };
-        var s = Hesapla(t, env);
-        lock (_gate) if (t != null) _hesap = (t, env.LoadedAt, s);
+        lock (_gate) if (_hesap is { } h && ReferenceEquals(h.T, t) && h.Env == env.LoadedAt && DateTime.UtcNow - h.At < TimeSpan.FromMinutes(10)) return h.S with { Is = _is, Uyari = Uyari };
+        var tahmin = await httpsys.TumTahminlerAsync(ct);
+        var s = Hesapla(t, env, tahmin);
+        lock (_gate) if (t != null) _hesap = (t, env.LoadedAt, s, DateTime.UtcNow);
         return s with { Is = Durum, Uyari = Uyari };
     }
 
@@ -400,12 +403,13 @@ xlog"];
         return null;
     }
 
-    ImzaSonuc Hesapla(ImzaTarama? t, EnvanterSnapshot env)
+    ImzaSonuc Hesapla(ImzaTarama? t, EnvanterSnapshot env, Dictionary<string, (string Yol, string Kaynak)>? tahmin = null)
     {
         var infra = AppTopology.InfraPorts(cfg);
         var veri = (t?.Sunucular ?? []).ToDictionary(s => s.Ip);
         var taranan = (t?.Taranan ?? []).ToHashSet();
         var satirlar = new List<(ImzaSatir S, HashSet<string> IisSet, string? Anahtar)>();
+        var sunucuExe = new Dictionary<string, HashSet<string>>();   // sunucuda çalışan iş exe'leri (HTTP.sys portunu sözlükteki exe'ye bağlamak için)
         bool Sistem(string? a) => a != null && a.StartsWith("Sistem Portudur", StringComparison.OrdinalIgnoreCase);
 
         foreach (var ip in Ipler(env))
@@ -418,6 +422,7 @@ xlog"];
             var gelenGenel = gelenTum.Where(x => Gereksiz(x.Yol)).ToList();
             var yollar = gelenIs.Select(x => x.Yol).Concat((v?.Giden ?? []).Where(y => !Gereksiz(y))).Where(y => !HttpSysEslesme.Cekirdek(y))
                 .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+            sunucuExe[ip] = yollar.Select(ExeAd).ToHashSet(StringComparer.OrdinalIgnoreCase);
             var portlar = ert.Keys.Where(p => p.Length > 0).ToList();
             foreach (var p in gelenTum.Select(x => x.Port))
                 if (p != "0" && !(int.TryParse(p, out int pn) && pn >= Dyn) && !portlar.Contains(p)) portlar.Add(p);
@@ -439,11 +444,15 @@ xlog"];
                 var gel = gelenIs.Where(x => x.Port == port).OrderByDescending(x => x.Baglanti).ToList();
                 var gen = gelenGenel.Where(x => x.Port == port).OrderByDescending(x => x.Baglanti).ToList();
                 var is_ = gel.Where(x => !HttpSysEslesme.Cekirdek(x.Yol)).ToList();
-                string? yol = is_.FirstOrDefault()?.Yol; bool hs = false;
+                string? yol = is_.FirstOrDefault()?.Yol; bool hs = false; string? kaynakAd = yol != null ? "Carbon Black" : null;
                 if (yol == null && gel.Count > 0)
                 {
-                    yol = HttpSysExe(rows.SelectMany(h => new[] { h.Website, h.AppName, h.ServiceName }), yollar);
+                    // HTTP.sys portu: sırayla kesin kayıt (netsh) → ERT adı exe yolunda → kayıtlı zaman korelasyonu; hiçbiri yoksa ntoskrnl kalır
                     hs = true;
+                    (string Yol, string Kaynak)? tk = tahmin != null && tahmin.TryGetValue(ip + "|" + port, out var tv) && !string.IsNullOrEmpty(tv.Yol) ? tv : null;
+                    if (tk is { } t1 && t1.Kaynak.StartsWith("HTTP.sys kesin") && !Gereksiz(t1.Yol)) { yol = t1.Yol; kaynakAd = t1.Kaynak; }
+                    if (yol == null && HttpSysExe(rows.SelectMany(h => new[] { h.Website, h.AppName, h.ServiceName }), yollar) is { } y2) { yol = y2; kaynakAd = "ERT adı exe yolunda"; }
+                    if (yol == null && tk is { } t2 && !Gereksiz(t2.Yol)) { yol = t2.Yol; kaynakAd = t2.Kaynak; }
                     yol ??= gel[0].Yol;   // çözülemedi: ntoskrnl kalır
                 }
                 var iis = v?.Iis.FirstOrDefault(x => x.Port == port)?.Uygulamalar ?? [];
@@ -451,12 +460,13 @@ xlog"];
                 bool genel = exe == null && gen.Count > 0;   // portu yalnız gereksiz süreç kabul ediyor
                 string? genelExe = gen.Count > 0 ? string.Join(", ", gen.Select(x => ExeAd(x.Yol)).Distinct().Take(3)) : null;
                 bool alt = infra.Contains(port);
-                string? anahtar = exe == null || exe == "ntoskrnl.exe" || genel || alt ? null : exe + "|" + port;
+                // çözülemeyen HTTP.sys portu: IIS uygulamaları varsa "HTTP.sys|port" imzası (eşleşmede IIS kümesi şart)
+                string? anahtar = genel || alt || exe == null ? null : exe == "ntoskrnl.exe" ? (iis.Count > 0 ? "http.sys|" + port : null) : exe + "|" + port;
                 string durum = rows.Count == 0 ? "ertyok" : adlar.Count > 0 ? "kayitli" : "bos";
                 string veriDurum = exe != null || iis.Count > 0 || gen.Count > 0 ? "var" : taranan.Contains(ip) ? "yok" : "taranmadi";
                 var s = new ImzaSatir(ip, port, sunucuAd, adlar.Count > 0 ? string.Join(" | ", adlar) : null, website, exe, yol, hs && exe != "ntoskrnl.exe",
                     gel.Sum(x => x.Baglanti), gel.Count > 0 ? gel.Max(x => x.Istemci) : 0, iis, durum, null, null, null, null, alt, veriDurum, genel, genelExe,
-                    Vip(ip, port), kurum);
+                    Vip(ip, port), kurum, exe == "ntoskrnl.exe" ? (iis.Count > 0 ? "HTTP.sys · exe bulunamadı, IIS uygulamalarıyla eşleşir" : "HTTP.sys · exe bulunamadı") : kaynakAd);
                 satirlar.Add((s, iis.ToHashSet(StringComparer.OrdinalIgnoreCase), anahtar));
             }
         }
@@ -478,12 +488,32 @@ xlog"];
             if (anahtar != null && exeSoz.TryGetValue(anahtar, out var ec))
             {
                 c = ec.Where(x => x.S.Ip != s.Ip).ToList();
-                if (c.Count > 0 && iisSet.Count > 0)
+                if (anahtar.StartsWith("http.sys|"))
+                {
+                    c = c.Where(x => Jaccard(iisSet, x.IisSet) >= 0.5).ToList();
+                    if (c.Count > 0) { guven = "orta"; nasil = $"HTTP.sys:{s.Port} + IIS uygulamaları ortak ({string.Join(", ", iisSet.Take(3))})"; }
+                }
+                else if (c.Count > 0 && iisSet.Count > 0)
                 {
                     var g = c.Where(x => Jaccard(iisSet, x.IisSet) >= 0.5).ToList();
                     if (g.Count > 0) { c = g; guven = "güçlü"; nasil = $"{s.Exe}:{s.Port} + IIS uygulamaları ortak"; }
                 }
                 if (c.Count > 0 && guven == null) { guven = "orta"; nasil = $"aynı exe + port ({s.Exe}:{s.Port})"; }
+            }
+            if (c.Count == 0 && s.Exe == "ntoskrnl.exe" && sunucuExe.TryGetValue(s.Ip, out var se))
+            {
+                // kullanıcı örneği: boş satırda ERT adı yok → exe çözülmedi, ama sunucuda zb.app.wall.exe çalışıyor ve başka sunucularda zb.app.wall.exe:9000 "Wall"
+                var es = se.Where(e => exeSoz.ContainsKey(e + "|" + s.Port)).ToList();
+                if (es.Count == 1)
+                {
+                    c = exeSoz[es[0] + "|" + s.Port].Where(x => x.S.Ip != s.Ip).ToList();
+                    if (c.Count > 0)
+                    {
+                        bool iisOrtak = iisSet.Count > 0 && c.Any(x => Jaccard(iisSet, x.IisSet) >= 0.5);
+                        guven = iisOrtak ? "güçlü" : "orta";
+                        nasil = $"HTTP.sys:{s.Port}; sunucuda {es[0]} çalışıyor ve başka sunucularda {es[0]}:{s.Port} kayıtlı{(iisOrtak ? " + IIS uygulamaları ortak" : "")}";
+                    }
+                }
             }
             if (c.Count == 0 && iisSet.Count > 0 && s.Durum != "kayitli")
             {
@@ -504,6 +534,8 @@ xlog"];
                 continue;
             }
             if (karisik && guven == "güçlü") guven = "orta"; else if (karisik) guven = "zayıf";
+            // exe yalnız kayıtlı zaman korelasyonundan geliyorsa (kesin değil) bir kademe düşük
+            if (s.ExeKaynak?.Contains("korelasyon") == true) { guven = guven == "güçlü" ? "orta" : "zayıf"; nasil += " · exe zaman korelasyonu tahmini"; }
             sonuc.Add(s with
             {
                 Oneri = en.Ad, Guven = guven, Adaylar = ad.Take(8).ToList(),
@@ -516,9 +548,15 @@ xlog"];
             var ad = Say(kv.Value);
             var iis = kv.Value.SelectMany(x => x.IisSet).GroupBy(x => x, StringComparer.OrdinalIgnoreCase).OrderByDescending(g => g.Count()).Select(g => g.Key).Take(8).ToList();
             var p = kv.Key.Split('|');
-            return new ImzaSozluk(p[0], p[1], ad, iis, ad.Sum(a => a.Sunucu), ad.Count > 1);
+            return new ImzaSozluk(p[0] == "http.sys" ? "HTTP.sys (exe bilinmiyor, IIS'le)" : p[0], p[1], ad, iis, ad.Sum(a => a.Sunucu), ad.Count > 1);
         }).OrderByDescending(x => x.Sunucu).ThenBy(x => x.Exe).Take(5000).ToList();
 
+        // IIS SÖZLÜĞÜ: ERT'de adı dolu satırların IIS uygulamaları → ERT adı
+        var iisSozluk = kaynak.SelectMany(x => x.IisSet.Select(u => (U: u, x.S))).GroupBy(x => x.U, StringComparer.OrdinalIgnoreCase).Select(g =>
+        {
+            var ad = g.GroupBy(x => x.S.Ert!, StringComparer.OrdinalIgnoreCase).Select(a => new ImzaAday(a.Key, a.Select(x => x.S.Ip).Distinct().Count())).OrderByDescending(a => a.Sunucu).ToList();
+            return new ImzaIisSozluk(g.Key, ad, g.Select(x => x.S.Port).Distinct().OrderBy(p => int.TryParse(p, out int n) ? n : 999999).ToList(), g.Select(x => x.S.Ip).Distinct().Count(), ad.Count > 1);
+        }).OrderByDescending(x => x.Sunucu).ThenBy(x => x.Uygulama).Take(5000).ToList();
         var kayit = (object)new
         {
             tarama = t != null, baslangic = t?.Baslangic, bitis = t?.Bitis, cbSaat = t?.CbSaat ?? CbSaat, iisDakika = t?.IisDakika ?? IisDakika, taranan = t?.Taranan.Count ?? 0,
@@ -528,6 +566,6 @@ xlog"];
             bosSunucu = Ipler(env).Count(ip => env.AppsOnIp(ip).Any(h => string.IsNullOrWhiteSpace(h.AppName) && !string.IsNullOrWhiteSpace(h.Port) && !(int.TryParse(h.Port, out int pn) && pn >= Dyn)))
         };
         return new ImzaSonuc(null, kayit, sonuc.OrderBy(x => EnvanterSnapshot.TryToUInt(x.Ip, out uint u) ? u : 0)
-            .ThenBy(x => int.TryParse(x.Port, out int p) ? p : 999999).ToList(), sozluk, t?.Mesajlar ?? [], null);
+            .ThenBy(x => int.TryParse(x.Port, out int p) ? p : 999999).ToList(), sozluk, t?.Mesajlar ?? [], null, iisSozluk);
     }
 }
