@@ -448,6 +448,11 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
   KURUM ERT EKSİKLERİNDE DE (kullanıcı: "eksik kısmına da test olsun olmasın, iştirak banka katılım seçenekleri"): kurum kuralı ortak `KurumBilgi` (Imza.cs, static;
   `Imza:Kurumlar`); `EksikSatir.Kurum`, `/api/eksik?kurum=`, `EksikListe.Kurumlar` [{ad, satir, sunucu}] (test / altyapı süzgecinden sonra sayılır), `EksikCalistir.Kurum`
   (tüm boşları öner yalnız o kurum). eksik.html "Kurum" seçicisi ("Test segmentleri" kutucuğu zaten vardı).
+- **DB teknoloji adı öneri değil** (kullanıcı: "SQL Server önermesin, isim olarak X Uygulaması Veritabanı olabilir"): ERT eksikleri son kontrolü `DbTeknolojiKontrol`
+  (CokSistemKontrol'den sonra): öneri yalnız teknoloji adıysa (`DbTeknoloji`: SQL Server / MSSQL / Oracle [Database 19c] / PostgreSQL / MySQL / DB2 / MongoDB / Sybase / Teradata /
+  HANA / Redis…, "Veritabanı" ekli de; Oracle Data Integrator, SSRS gibi ürünler DEĞİL) sahibi aranır (`DbSahibi`): servis imzası önerisi (güçlü 70 / 55) → bu porta bağlanan TEK
+  istemci uygulaması (CB, 55) → sunucuda ERT'de kayıtlı tek iş uygulaması (50) → SM (boş portu anan / tek sistem, 50) → "<sahip> Veritabanı" (katalog eşlemesiyle), gerekçede teknoloji;
+  bulunamazsa öneri null + "Yok sayıldı … sahibi belirsiz". Aynı sunucuda ERT'de birebir bu ad kayıtlıysa (ör. "Redis") dokunulmaz. Prompt'a da kural.
 - **"Bu sunucuda hangi uygulama çalışıyor?"** (IP kartı, Gelen portlar tablosunun üstündeki düğme; `SurecAi` Surec.cs, `POST /api/surec/ai`):
   arayüzdeki /api/surec sonucu exe başına toplanıp (PID'ler, portlar, giden, bağlanan / bağlandığı uygulamalar) AI'a gider (yeniden
   sorgulanmaz) + ERT kayıtları + segment + genel bilgiler dosyası. Kesin genel süreçler kodda ayıklanır (`GenelAd` / `GenelYol`: svchost,

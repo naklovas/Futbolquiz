@@ -257,6 +257,46 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
         return hit ?? name;
     }
     static string Norm(string s) => new(s.ToLowerInvariant().Where(char.IsLetterOrDigit).ToArray());
+    // Yalnız veritabanı teknolojisi adı mı ("SQL Server", "MSSQL Veritabanı", "Oracle Database 19c"…) → teknolojinin adı, değilse null
+    static readonly System.Text.RegularExpressions.Regex _dbTek = new(
+        @"^(microsoft\s+)?(ms\s*-?\s*sql|sql(\s*server)?|oracle|postgre(s|sql)?|edb|mysql|mariadb|(ibm\s+)?db2|mongo\s*db|sybase(\s+ase)?|teradata|informix|(sap\s+)?hana|redis|cassandra|couchbase)"
+        + @"(\s+(server|database|db|rdbms|instance|enterprise|standard|express|exadata|ase))*(\s+\d+[a-z]*)?(\s*[-–(]?\s*(veritaban[ıi]|database|db|sunucusu|instance)\)?)?$",
+        System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+    public static string? DbTeknoloji(string? ad)
+    {
+        string a = (ad ?? "").Trim();
+        if (a.Length == 0 || !_dbTek.IsMatch(a)) return null;
+        string n = Norm(a);
+        return n.Contains("oracle") ? "Oracle" : n.Contains("postgre") || n.StartsWith("edb") ? "PostgreSQL" : n.Contains("mysql") || n.Contains("maria") ? "MySQL"
+            : n.Contains("db2") ? "DB2" : n.Contains("mongo") ? "MongoDB" : n.Contains("sybase") ? "Sybase" : n.Contains("sql") ? "SQL Server" : a;
+    }
+    // Veritabanının sahibi: (1) servis imzası önerisi, (2) bu porta bağlanan istemcilerin ERT uygulaması (Carbon Black), (3) sunucuda ERT'de kayıtlı
+    // tek iş uygulaması, (4) SM açıklamalarında boş portu anan / tek sistem. Teknoloji adı olan aday sayılmaz.
+    static (string Ad, string Kaynak, int Guven)? DbSahibi(EnvanterSnapshot env, string ip, string port, string? ev)
+    {
+        bool Iyi(string? a) => a is { Length: > 1 } && DbTeknoloji(a) == null && !env.IsSystemApp(a) && !a.StartsWith("Altyapı", StringComparison.OrdinalIgnoreCase);
+        string Kok(string a) => System.Text.RegularExpressions.Regex.Replace(a, @"\s*[-–(]?\s*(veritaban[ıi]|database|db)\)?\s*$", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase).Trim();
+        var satirlar = ev?.Split('\n') ?? [];
+        // (1) servis imzası: "- port P: … İMZA ÖNERİSİ: X (güven g"
+        if (satirlar.FirstOrDefault(l => l.StartsWith($"- port {port}: ") && l.Contains("İMZA ÖNERİSİ: ")) is { } il
+            && il.Split("İMZA ÖNERİSİ: ")[1].Split(" (güven ") is var ip2 && Iyi(Kok(ip2[0])))
+            return (Kok(ip2[0]), "servis imzası" + (ip2.Length > 1 ? " · " + ip2[1].Split(';', ')')[0] : ""), ip2.Length > 1 && ip2[1].StartsWith("güçlü") ? 70 : 55);
+        // (2) istemciler: "- gelen port P…· istemciler: A, B, LB GW, 10.x"
+        if (satirlar.FirstOrDefault(l => l.StartsWith($"- gelen port {port}") && l.Contains("· istemciler: ")) is { } cl)
+        {
+            var ist = cl.Split("· istemciler: ")[1].Split(", ").Select(x => x.Trim())
+                .Where(x => Iyi(x) && x != "LB GW" && !x.StartsWith("VIP ") && !System.Text.RegularExpressions.Regex.IsMatch(x, @"^\d+\.\d+\.")).Select(Kok).Distinct().ToList();
+            if (ist.Count == 1) return (ist[0], "bu porta bağlanan istemci uygulaması (Carbon Black)", 55);
+        }
+        // (3) aynı sunucunun ERT'deki iş uygulamaları
+        var ayni = env.AppNamesOnIp(ip).Where(Iyi).Select(Kok).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        if (ayni.Count == 1) return (ayni[0], "sunucuda ERT'de kayıtlı tek uygulama", 50);
+        // (4) SM
+        var sm = SmAdaylariOku(ev).Where(x => Iyi(x.Ad)).ToList();
+        var smSec = sm.Count == 1 ? sm[0] : sm.FirstOrDefault(x => x.Port);
+        if (smSec.Ad != null) return (Kok(smSec.Ad), "SM talep açıklaması", 50);
+        return null;
+    }
 
     // AI'ın yazdığı adı kurum içindeki uygulama adlarıyla (ERT kataloğu) karşılaştırır (kullanıcı: "içerideki uygulama isimleri kontrol
     // edilsin, yoksa serbest atsın"): birebir / harf-rakam eşitse o; değilse kelime düzeyinde tek bir açık eşleşme varsa (AI'ın kelimelerinin
@@ -1353,7 +1393,8 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
               uygulamaya aitse onu bul (bu porta bağlanan istemci uygulamalar, aynı sunucunun diğer portları, benzer adlı sunucular,
               SM talepleri, sunucu adındaki uygulama kısaltması) ve "uygulama" alanına yalnız UYGULAMA adını, "veritabani": true
               yaz (kod "<uygulama> Veritabanı" yapar). Gerekçede teknolojiyi belirt (ör. "1433 SQL Server; istemcileri KREDİ").
-              Sahibi bulunamazsa uygulama null, gerekçede "SQL Server veritabanı, sahibi belirsiz" yaz.
+              Sahibi bulunamazsa uygulama null, gerekçede "SQL Server veritabanı, sahibi belirsiz" yaz. "uygulama" alanına ASLA yalnız
+              "SQL Server", "Microsoft SQL Server Veritabanı", "Oracle", "PostgreSQL" gibi teknoloji adı yazma (kod bunları yok sayar).
             - "SM AÇIKLAMALARINDA ADI GEÇEN SİSTEMLER" satırı varsa bu sunucunun uygulaması büyük olasılıkla oradaki İLK sistemdir; exe yolu
               açıkça başka bir uygulamayı göstermiyorsa onu seç. "KISA AÇIKLAMALARI" da (BRIEF_DESCRIPTION) aynı derecede güçlüdür.
             - "BU SUNUCUYU ANLATAN TALEP AÇIKLAMALARI" satırları talep sahibinin bu sunucu için yazdığı açıklamalardır (HEDEF ise
@@ -1482,7 +1523,33 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
         }
         ProgramKontrol();
         CokSistemKontrol();
+        DbTeknolojiKontrol();
         return outp;
+
+        // Öneri yalnız veritabanı teknolojisiyse (kullanıcı: "SQL Server önermesin, isim olarak X Uygulaması Veritabanı olabilir"): "SQL Server",
+        // "Microsoft SQL Server Veritabanı", "Oracle" gibi ad uygulamayı söylemez → sahibi aranır, "<sahip> Veritabanı" yazılır; bulunamazsa öneri yok
+        void DbTeknolojiKontrol()
+        {
+            foreach (var (ip, ports) in todo)
+            {
+                string? ev = texts.GetValueOrDefault(ip);
+                foreach (var port in ports)
+                {
+                    if (outp.GetValueOrDefault((ip, port)) is not { Uygulama: { } u } o || DbTeknoloji(u) is not { } tek) continue;
+                    // aynı sunucuda ERT'de bu adla kayıt varsa (ör. Redis kümesi "Redis") ad kurumun kendi kaydıdır, dokunulmaz
+                    string uk = Norm(System.Text.RegularExpressions.Regex.Replace(u, @"\s*(veritaban[ıi]|database|db)\s*$", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase));
+                    if (env.AppNamesOnIp(ip).Any(n => Norm(n) == uk)) continue;
+                    if (DbSahibi(env, ip, port, ev) is { } sh)
+                    {
+                        string ad = CatalogMatch(env, sh.Ad, out bool yeni, out var katNot, ip, ev) + " Veritabanı";
+                        outp[(ip, port)] = o with { Uygulama = Cut(ad, 200), Yeni = yeni, Guven = sh.Guven,
+                            Gerekce = Cut($"{tek} veritabanı; sahibi: {sh.Ad} ({sh.Kaynak}). AI: '{u}' — {o.Gerekce}", 600) + (katNot != null ? $" [{katNot}]" : "") };
+                    }
+                    else outp[(ip, port)] = o with { Uygulama = null, Yeni = false, Guven = 0,
+                        Gerekce = Cut($"Yok sayıldı: AI '{u}' önerdi ama bu yalnız teknoloji adı ({tek} veritabanı, sahibi belirsiz). AI gerekçesi: {o.Gerekce}", 600) };
+                }
+            }
+        }
 
         // Birden çok sistem anılan sunucuda port kanıtı olmayan öneri (kullanıcı: "Ziraat pos" 5 porta, kanıtı olan port Bansoft çıktı):
         // güven en çok 40 ve gerekçeye not; port kanıtı = ZT_HEDEFPORT talebi, açıklamada IP:port, portu kabul eden exe
