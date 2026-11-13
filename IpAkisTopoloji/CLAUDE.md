@@ -434,6 +434,13 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
   `position: sticky` üstte, yüzdeli çubuk, şu an sorgulanan sunucu çipleri, son bitenler listesi. Sayfa: tarama bandı (ilerleme, tahmini kalan, durdur), istatistik kartları (tıkla süz), "IP + port
   satırları" | "Sözlük" sekmeleri, arama / durum / güven / altyapı süzgeçleri, ilk 500 + "daha fazla", CSV (Yetki:Disari). Sahte envanter (DF_FAKE_ENV yalnız scratch kopyada) +
   sahte Splunk ile uçtan uca test edildi (Wall güçlü, HSM uyumsuz, foo ertyok).
+  PLATFORM SÜREÇLERİ (kullanıcı: "sqlservr.exe:1433'te 26 sunucu 24 farklı ad, 2 sunucuda geçen yapıştırılmaz, AI'a bırakalım"): exe|port ≥ `Imza:PlatformAd`=4
+  farklı adla ve en sık ad < %50 ise `Platform` (satır + sözlük) → exe'den öneri yok; aynı sunucuda tek başka uygulama varsa "zayıf · AI ile doğrulayın", yoksa not "AI'a bırakın".
+  EKSİK ↔ İMZA BİRLEŞİMİ (kullanıcı: "Eksik sayfasıyla ikisinin güçlerini birleştirelim"): imza.html "AI önerisi" kolonu `/api/eksik/oneriler` (aynı DF_ERT_UYGULAMA_ONERI kaydı),
+  "🤖 AI'a sor" seçili / süzülen boş satırları `/api/eksik/calistir {portlar}` ile sorar, `/api/eksik/durum` izlenir; süzgeçler "platform", "AI önerisi yok". Ters yön:
+  `ServisImzaService.KanitMetniAsync(ip, portlar)` (kayıtlı taramadan, yeni sorgu yok) → ERT eksikleri BuildAsync'te IIS logundan sonra "SERVİS İMZASI" bölümü (port başına exe +
+  kaynağı, IIS uygulamaları, VIP havuzu, aynı exe:port'un başka sunuculardaki ERT adları ya da "PLATFORM SÜRECİ — exe uygulamayı belirlemez", İMZA ÖNERİSİ + güven); prompt'ta
+  güçlü / orta / zayıf ağırlığı ve platform kuralı. `Eksik:ImzaKaniti`=true ile kapatılabilir. EksikService'e isteğe bağlı `ServisImzaService? imza` parametresi.
 - **"Bu sunucuda hangi uygulama çalışıyor?"** (IP kartı, Gelen portlar tablosunun üstündeki düğme; `SurecAi` Surec.cs, `POST /api/surec/ai`):
   arayüzdeki /api/surec sonucu exe başına toplanıp (PID'ler, portlar, giden, bağlanan / bağlandığı uygulamalar) AI'a gider (yeniden
   sorgulanmaz) + ERT kayıtları + segment + genel bilgiler dosyası. Kesin genel süreçler kodda ayıklanır (`GenelAd` / `GenelYol`: svchost,

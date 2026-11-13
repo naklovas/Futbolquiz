@@ -367,6 +367,40 @@ xlog"];
     }
 
     // ---------------- Eşleşme ----------------
+    // ERT eksikleri AI'ına kanıt (kullanıcı: "Eksik ile imza sayfasının güçlerini birleştirelim"): sunucunun boş portları için servis imzası
+    // bulguları — exe (kaynağıyla), IIS uygulamaları, VIP havuzu, imza önerisi + güven, aynı exe:port'un sözlükteki adları, platform uyarısı.
+    // Tarama yoksa / sunucu taranmamışsa null (tarama tetiklemez, yalnız kayıtlı sonucu okur).
+    public async Task<string?> KanitMetniAsync(string ip, IEnumerable<string> portlar, CancellationToken ct)
+    {
+        ImzaSonuc s;
+        try { s = await SonucAsync(ct); } catch (Exception ex) when (ex is not OperationCanceledException) { log.LogWarning(ex, "Servis imzası kanıtı okunamadı"); return null; }
+        var ps = portlar.ToHashSet();
+        var satir = s.Satirlar.Where(r => r.Ip == ip && ps.Contains(r.Port)).OrderBy(r => int.TryParse(r.Port, out var n) ? n : 0).ToList();
+        if (satir.Count == 0) return null;
+        var soz = s.Sozluk.GroupBy(z => z.Exe.ToLowerInvariant() + "|" + z.Port).ToDictionary(g => g.Key, g => g.First());
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine("SERVİS İMZASI (DeltaFlow taraması: Carbon Black son " + cfg.GetValue("Imza:CbSaat", 72) + " saat + IIS logu + VIP havuzu; aynı exe:port'un başka sunuculardaki ERT adları):");
+        foreach (var r in satir)
+        {
+            var p = new List<string>();
+            if (r.Exe != null) p.Add($"portu kabul eden exe {r.Exe}{(r.ExeYol != null && r.ExeYol != r.Exe ? $" ({r.ExeYol})" : "")}{(r.ExeKaynak is { } ek && ek != "Carbon Black" ? $" [kaynak: {ek}]" : "")}");
+            else if (r.HttpSys) p.Add("HTTP.sys (ntoskrnl) — asıl exe bulunamadı");
+            else if (r.GenelExe != null) p.Add($"yalnız genel süreç ({r.GenelExe}) — iş uygulaması değil");
+            else if (r.Veri == "yok") p.Add("taramada bu portta trafik görülmedi");
+            else if (r.Veri == "taranmadi") p.Add("sunucu henüz taranmadı");
+            if (r.Iis.Count > 0) p.Add("IIS uygulamaları: " + string.Join(", ", r.Iis.Take(8)));
+            if (r.Vip is { Count: > 0 }) p.Add("VIP havuzu: " + string.Join("; ", r.Vip.Take(3)));
+            if (r.Exe != null && soz.TryGetValue(r.Exe.ToLowerInvariant() + "|" + r.Port, out var z) && z.Adlar.Count > 0)
+                p.Add(z.Platform
+                    ? $"PLATFORM SÜRECİ: {r.Exe}:{r.Port} başka sunucularda {z.Adlar.Count}+ farklı uygulamada (ör. {string.Join(", ", z.Adlar.Take(3).Select(a => a.Ad))}) — exe uygulamayı BELİRLEMEZ"
+                    : $"aynı {r.Exe}:{r.Port} başka sunucularda ERT'de: " + string.Join(", ", z.Adlar.Take(4).Select(a => $"{a.Ad} ({a.Sunucu} sunucu)")));
+            if (r.Oneri != null) p.Add($"İMZA ÖNERİSİ: {r.Oneri} (güven {r.Guven}{(r.Not != null ? "; " + r.Not : "")})");
+            else if (r.Not != null) p.Add("not: " + r.Not);
+            if (p.Count > 0) sb.AppendLine($"- port {r.Port}: " + string.Join(" · ", p));
+        }
+        return sb.ToString();
+    }
+
     public async Task<ImzaSonuc> SonucAsync(CancellationToken ct)
     {
         ImzaTarama? t; lock (_gate) t = _son;

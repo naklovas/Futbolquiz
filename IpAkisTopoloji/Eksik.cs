@@ -25,7 +25,7 @@ record EksikCalistir(List<string>? Ips, bool Hepsi, bool Yeniden, int? Saat, boo
 record EksikKarar(string? Ip, string? Port, string? Karar, string? Uygulama);
 
 sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, EnvanterService envanter, IslevService islev,
-    NessusService nessus, ILogger<EksikService> log, HttpSysKayitService? httpSysKayit = null)
+    NessusService nessus, ILogger<EksikService> log, HttpSysKayitService? httpSysKayit = null, ServisImzaService? imza = null)
 {
     public const string Onay = "Onaylandı", Red = "Reddedildi", Ai = "AI", Elle = "Elle";
     readonly object _gate = new();
@@ -666,6 +666,9 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
                 var (iisL, _) = await HttpSysEslesme.IisAsync(ip, cfg, factory.CreateClient("splunk"), ct);
                 sb.Append(HttpSysEslesme.IisMetin(iisL, miss));
             }
+            // SERVİS İMZASI (Imza.cs; kullanıcı: "iki sayfanın güçlerini birleştirelim"): kayıtlı taramadan exe / IIS / VIP / aynı exe:port'un başka
+            // sunuculardaki ERT adları ve imza önerisi — yeni sorgu yapmaz; tarama yoksa bölüm yok (`Eksik:ImzaKaniti`=true)
+            if (imza != null && cfg.GetValue("Eksik:ImzaKaniti", true) && await imza.KanitMetniAsync(ip, miss, ct) is { } imzaMetin) sb.Append(imzaMetin);
             if (cb.TryGetValue(ip, out var c))
             {
                 sb.Append(c.Text(env, ip, miss));
@@ -1319,7 +1322,7 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
             yazılmış uygulama alanı varsa çok güçlü; aynı satırdaki WEBSITE (IIS site adı) ve SERVICENAME; aynı sunucunun diğer portlarındaki uygulamalar; VIP ve havuz
             komşuları; BENZER ADLI SUNUCULARIN (aynı ad, farklı numara) uygulamaları; aynı segmentte aynı portu kullanan
             sunucuların uygulamaları; bu porta bağlanan istemci uygulamalar ve exe'nin bağlandığı yerler; sanal sunucu notları;
-            iş istekleri; sunucu adındaki kısaltmalar (ör. "atm", "sql", "web"). ntoskrnl.exe görünüyorsa port HTTP.sys üzerindendir ("IIS ERİŞİM LOGU" satırı varsa port KESİN o IIS sitesinindir ve URI'deki uygulama adı en güçlü kanıttır; "HTTP.SYS KAYDI" satırı varsa o portu dinleyen süreç KESİN odur — exe yolu / IIS havuzu adı uygulamayı gösterir, en güçlü kanıtlardan say;
+            iş istekleri; sunucu adındaki kısaltmalar (ör. "atm", "sql", "web"). ntoskrnl.exe görünüyorsa port HTTP.sys üzerindendir ("IIS ERİŞİM LOGU" satırı varsa port KESİN o IIS sitesinindir ve URI'deki uygulama adı en güçlü kanıttır; "HTTP.SYS KAYDI" satırı varsa o portu dinleyen süreç KESİN odur — exe yolu / IIS havuzu adı uygulamayı gösterir, en güçlü kanıtlardan say; "SERVİS İMZASI" bölümünde "İMZA ÖNERİSİ … güçlü" (aynı VIP havuzunun diğer üyeleri ya da aynı exe:port + aynı IIS uygulamaları başka sunucularda bu adla kayıtlı) güçlü kanıttır, "orta" orta, "zayıf" zayıf ipucudur; "PLATFORM SÜRECİ" yazan exe (sqlservr.exe:1433 gibi) uygulamayı BELİRLEMEZ — o portta SM talepleri, VIP, aynı sunucunun diğer uygulamaları ve sunucu adına bak;
             "HTTP.SYS PORT → EXE TAHMİNİ" satırındaki EN OLASI exe orta güçte kanıttır); asıl uygulama aynı sunucudaki ve adı WEBSITE ile
             örtüşen exe'dir.
 
