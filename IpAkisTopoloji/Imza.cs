@@ -24,7 +24,7 @@ record ImzaAday(string Ad, int Sunucu);
 // Durum = ERT tarafı (kayitli | bos | uyumsuz | ertyok); Veri = tarama tarafı (var | yok | taranmadi) — kullanıcı: tarama yokken "boş" süzgeci boş geliyordu
 record ImzaSatir(string Ip, string Port, string? Sunucu, string? Ert, string? Website, string? Exe, string? ExeYol, bool HttpSys,
     long Baglanti, int Istemci, List<string> Iis, string Durum, string? Oneri, string? Guven, string? Not, List<ImzaAday>? Adaylar, bool Altyapi, string Veri, bool Genel = false,
-    string? GenelExe = null);
+    string? GenelExe = null, List<string>? Vip = null);   // Vip: "havuz · VIP ip:port" (vip_envanteri, üye portu = satır portu)
 record ImzaSozluk(string Exe, string Port, List<ImzaAday> Adlar, List<string> Iis, int Sunucu, bool Celiski);
 record ImzaSonuc(ImzaIs? Is, object? Kayit, List<ImzaSatir> Satirlar, List<ImzaSozluk> Sozluk, List<string> Mesajlar, string? Uyari);
 
@@ -393,6 +393,13 @@ xlog"];
             foreach (var p in gelenTum.Select(x => x.Port))
                 if (p != "0" && !(int.TryParse(p, out int pn) && pn >= Dyn) && !portlar.Contains(p)) portlar.Add(p);
             foreach (var iisP in v?.Iis.Select(x => x.Port) ?? []) if (!portlar.Contains(iisP)) portlar.Add(iisP);
+            var uyelik = env.MemberOf(ip);
+            List<string>? Vip(string ip0, string port0)
+            {
+                var l = uyelik.Where(m => m.Port == port0).Select(m => $"{Regex.Replace(m.Pool ?? "", "^/Common/", "", RegexOptions.IgnoreCase)} · {m.LbIp}{(string.IsNullOrEmpty(m.LbPort) ? "" : ":" + m.LbPort)}")
+                    .Distinct().Take(6).ToList();
+                return l.Count > 0 ? l : null;
+            }
             string? sunucuAd = ert.Values.SelectMany(x => x).Select(h => h.UnixName).FirstOrDefault(x => !string.IsNullOrWhiteSpace(x));
             foreach (var port in portlar)
             {
@@ -418,7 +425,8 @@ xlog"];
                 string durum = rows.Count == 0 ? "ertyok" : adlar.Count > 0 ? "kayitli" : "bos";
                 string veriDurum = exe != null || iis.Count > 0 || gen.Count > 0 ? "var" : taranan.Contains(ip) ? "yok" : "taranmadi";
                 var s = new ImzaSatir(ip, port, sunucuAd, adlar.Count > 0 ? string.Join(" | ", adlar) : null, website, exe, yol, hs && exe != "ntoskrnl.exe",
-                    gel.Sum(x => x.Baglanti), gel.Count > 0 ? gel.Max(x => x.Istemci) : 0, iis, durum, null, null, null, null, alt, veriDurum, genel, genelExe);
+                    gel.Sum(x => x.Baglanti), gel.Count > 0 ? gel.Max(x => x.Istemci) : 0, iis, durum, null, null, null, null, alt, veriDurum, genel, genelExe,
+                    Vip(ip, port));
                 satirlar.Add((s, iis.ToHashSet(StringComparer.OrdinalIgnoreCase), anahtar));
             }
         }

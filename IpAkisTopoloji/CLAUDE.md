@@ -410,7 +410,9 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
   TSM / Networker, Tanium / Qualys / Nessus / BigFix, CyberArk / BeyondTrust / Kron / TeamViewer / AnyDesk / VNC, dsasql / sqldsimservice / DLP / Guardium, VMware Tools…)
   + `GereksizYol` (üretici klasörleri) + `Imza:GenelExeler`; ntoskrnl / System ve w3wp ASLA gereksiz değil. Taramada gereksizler `ImzaSunucu.Genel`'e ayrılır (giden
   listesine hiç girmez), hesapta eski kayıtlar da ayrılır: port yalnız gereksiz süreçteyse exe BOŞ, `GenelExe` (ad) + `Genel=true` → hücrede "yalnız genel süreç",
-  ERT'de kaydı yoksa varsayılan gizli; sözlüğe / öneriye / HTTP.sys yol eşleşmesine girmez, "son biten" listesine yazılmaz.
+  ERT'de kaydı yoksa varsayılan gizli; sözlüğe / öneriye / HTTP.sys yol eşleşmesine girmez, "son biten" listesine yazılmaz. VIP HAVUZU (kullanıcı: "vip havuzunu da getirir misin"): `ImzaSatir.Vip` = env.MemberOf(ip) içinde
+  üye portu = satır portu → "havuz (/Common/ atılır) · VIP ip:port"; tabloda "VIP havuzu" kolonu, aramada ve CSV'de (VIP HAVUZU). Öneri için henüz kullanılmıyor
+  (aynı havuzun diğer üyesinin ERT adı güçlü kanıt olabilir — kullanıcıya önerildi).
   İLERLEME (kullanıcı: "progress bar üste, hangi sunucu hangi port, yüzde kaç"): `ImzaIs` ToplamSunucu / BitenSunucu / Adim (cb | iis) / Yuzde (grup içinde CB = yarım) /
   Grup ("ip sunucuadı (ERT portları)") / Son (son biten 12 sunucu: "ip → port exe (IIS: …)", ntoskrnl "HTTP.sys") / Kalan ("4 dk", "1 sa 5 dk"); sayfada bant
   `position: sticky` üstte, yüzdeli çubuk, şu an sorgulanan sunucu çipleri, son bitenler listesi. Sayfa: tarama bandı (ilerleme, tahmini kalan, durdur), istatistik kartları (tıkla süz), "IP + port
