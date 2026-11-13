@@ -1285,6 +1285,28 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
         await RunTodoAsync(todo, env, hours, ct);
     }
 
+    // Boş portu kabul eden süreçlerin HEPSİ ajan / genel süreç (Servis imzası gereksiz listesi, SurecAi.GenelExe ya da ajan ürünü yolunda) → port → kural önerisi
+    Dictionary<string, EksikOneri> AjanPortlari(EnvanterSnapshot env, string ip, List<string> ports, string? ev)
+    {
+        var res = new Dictionary<string, EksikOneri>();
+        if (ev == null || !cfg.GetValue("Eksik:AjanPortuKural", true)) return res;
+        foreach (var port in ports)
+        {
+            if (ev.Split('\n').FirstOrDefault(l => l.StartsWith($"- gelen port {port}:") || l.StartsWith($"- gelen port {port} (")) is not { } line) continue;
+            var yollar = System.Text.RegularExpressions.Regex.Matches(line.Split(" · ")[0], @"\[([^\]]+)\]").Select(m => m.Groups[1].Value).ToList();
+            if (yollar.Count == 0 || yollar.Any(HttpSysEslesme.Cekirdek)) continue;
+            bool Ajan(string y) => AjanOf(y) != null || (imza?.Gereksiz(y) ?? false) || SurecAi.GenelExe(y.Split('\\', '/').Last(), y);
+            if (!yollar.All(Ajan)) continue;
+            string? urun = yollar.Select(AjanOf).OfType<string>().FirstOrDefault();
+            if (urun != null && AjanSunucusu(env, ip, urun, ev)) continue;   // ürünün kendi sunucusu: AI karar versin
+            string exe = string.Join(", ", yollar.Select(y => y.Split('\\', '/').Last()).Distinct(StringComparer.OrdinalIgnoreCase));
+            res[port] = new EksikOneri("Altyapı: " + (urun ?? exe), false, 90,
+                $"Kural (AI'a sorulmadı): port {port}'u yalnız {exe} kabul ediyor ({string.Join("; ", yollar.Take(2))}) — {(urun != null ? urun + " ajanı / aracı" : "genel sistem / ajan süreci")}, iş uygulaması değil.",
+                Ai, "Kural", DateTime.Now);
+        }
+        return res;
+    }
+
     async Task RunTodoAsync(Dictionary<string, List<string>> todo, EnvanterSnapshot env, int hours, CancellationToken ct)
     {
         // Sunucu sunucu (kullanıcı: 20'lik toplu kanıt toplama SM tablosuyla çok uzadı): her sunucunun kanıtı toplanır, hemen AI'a
@@ -1299,10 +1321,14 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
             {
                 var texts = await BuildAsync([ip], todo, env, hours, ct);
                 lock (_gate) _kanit[ip] = texts.GetValueOrDefault(ip) ?? "";
-                var got = await AskAsync([ip], todo, texts, env, ct);
+                // AJAN PORTLARI (kullanıcı: "8765 sqldsimservice.exe Dataskope SQL Agent… saçmaladı, her DB makinesinde Dataskope var"): boş portu YALNIZ
+                // ajan / genel süreç kabul ediyorsa AI'a sorulmaz, kuralla "Altyapı: <ürün>" yazılır (ürünün kendi sunucusu hariç)
+                var ajanPort = AjanPortlari(env, ip, todo[ip], texts.GetValueOrDefault(ip));
+                var sor = todo[ip].Where(p => !ajanPort.ContainsKey(p)).ToList();
+                var got = sor.Count == 0 ? [] : await AskAsync([ip], new Dictionary<string, List<string>> { [ip] = sor }, texts, env, ct);
                 foreach (var port in todo[ip])
                 {
-                    var o = got.GetValueOrDefault((ip, port)) ?? new EksikOneri(null, false, 0, "AI bu port için cevap vermedi.", Ai, "AI", DateTime.Now);
+                    var o = ajanPort.GetValueOrDefault(port) ?? got.GetValueOrDefault((ip, port)) ?? new EksikOneri(null, false, 0, "AI bu port için cevap vermedi.", Ai, "AI", DateTime.Now);
                     await SaveAsync(ip, port, o, texts.GetValueOrDefault(ip), ct);
                 }
             }
