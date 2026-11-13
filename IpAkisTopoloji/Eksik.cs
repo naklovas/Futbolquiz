@@ -13,15 +13,17 @@ using Microsoft.Data.SqlClient;
 // ---------------------------------------------------------------------------
 record EksikOneri(string? Uygulama, bool Yeni, int Guven, string? Gerekce, string Durum, string? Kaynak, DateTime Tarih);
 record EksikSatir(string Ip, string Port, string? Hostname, string? Segment, string? Website, string? Servis, string? Muhafiz,
-    string? Birim, List<string> Diger, bool Altyapi, EksikOneri? Oneri, bool Test = false, bool AtanmamisUyg = false);
+    string? Birim, List<string> Diger, bool Altyapi, EksikOneri? Oneri, bool Test = false, bool AtanmamisUyg = false, string? Kurum = null);
 // AtanmamisUyg: öneri ERT ana kaydında olup hiçbir sunucuya atanmamış uygulama (envanterde sunucu ataması eksik)
 record EksikListe(List<EksikSatir> Satirlar, int Toplam, int TumSatir, int TumIp, int Onerili, int Onayli, IslevDurum Durum,
     bool Yazabilir, string? Uyari, bool TopluYetki = false, string? Bilgi = null, string? Surum = null,
-    int Atanmamis = 0, int KatalogDisi = 0, int KatalogDisiIp = 0);
+    int Atanmamis = 0, int KatalogDisi = 0, int KatalogDisiIp = 0, List<EksikKurum>? Kurumlar = null);
+// Kurum seçicisi: kurum başına boş satır / sunucu (test ve altyapı süzgecinden sonra)
+record EksikKurum(string Ad, int Satir, int Sunucu);
 // Max: bu çalıştırmada en çok kaç sunucu (boş = Eksik:MaxIp; 0 = sınırsız)
 record EksikCalistir(List<string>? Ips, bool Hepsi, bool Yeniden, int? Saat, bool Test = false, int? Max = null,
     Dictionary<string, List<string>>? Portlar = null,    // Portlar: IP → port (segment tarama; ERT'de adı boş ya da hiç kaydı olmayan portlar)
-    bool KatalogDisi = false);   // KatalogDisi: durumu AI olup önerisi ERT kataloğunda bulunamayan (yeni ad) portları yeniden sor
+    bool KatalogDisi = false, string? Kurum = null);   // Kurum: yalnız bu kurumun (segment Domain öneki) sunucuları; KatalogDisi: durumu AI olup önerisi ERT kataloğunda bulunamayan (yeni ad) portları yeniden sor
 record EksikKarar(string? Ip, string? Port, string? Karar, string? Uygulama);
 
 sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, EnvanterService envanter, IslevService islev,
@@ -76,7 +78,7 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
 
     // sirala: ip | port | sunucu | segment | oneri | guven | durum (yon: azalan)
     public async Task<EksikListe> ListAsync(string? ara, string? durum, bool altyapi, int sayfa, int boyut, bool yazabilir, CancellationToken ct,
-        bool test = false, string? sirala = null, bool azalan = false)
+        bool test = false, string? sirala = null, bool azalan = false, string? kurum = null)
     {
         var env = await envanter.GetAsync(false, ct);
         var infra = AppTopology.InfraPorts(cfg);
@@ -88,11 +90,14 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
             oneri.TryGetValue((m.Ip, m.Port), out var o);
             return new EksikSatir(m.Ip, m.Port, hosts.Select(h => h.UnixName).OfType<string>().FirstOrDefault(), env.FindSegment(m.Ip)?.Label,
                 m.Row.Website, m.Row.ServiceName, m.Row.VarlikMuhafizi ?? hosts.Select(h => h.VarlikMuhafizi).OfType<string>().FirstOrDefault(),
-                m.Row.SunucuIsletenBirim, env.AppNamesOnIp(m.Ip).Take(4).ToList(), infra.Contains(m.Port), o, IsTest(env, m.Ip), AtanmamisOneri(env, o));
+                m.Row.SunucuIsletenBirim, env.AppNamesOnIp(m.Ip).Take(4).ToList(), infra.Contains(m.Port), o, IsTest(env, m.Ip), AtanmamisOneri(env, o), KurumBilgi.Of(cfg, env, m.Ip));
         }).ToList();
         string? q = ara?.Trim();
         bool Has(string? v) => v != null && v.Contains(q!, StringComparison.CurrentCultureIgnoreCase);
-        var f = rows.Where(r => altyapi || !r.Altyapi).Where(r => test || !r.Test)
+        var kapsam = rows.Where(r => altyapi || !r.Altyapi).Where(r => test || !r.Test).ToList();
+        var kurumlar = KurumBilgi.Adlar(cfg).Select(k => new EksikKurum(k, kapsam.Count(r => r.Kurum == k), kapsam.Where(r => r.Kurum == k).Select(r => r.Ip).Distinct().Count()))
+            .Where(k => k.Satir > 0 || k.Ad != "Diğer").ToList();
+        var f = kapsam.Where(r => string.IsNullOrEmpty(kurum) || r.Kurum == kurum)
             .Where(r => string.IsNullOrEmpty(q) || Has(r.Ip) || Has(r.Port) || Has(r.Hostname) || Has(r.Website) || Has(r.Servis)
                         || Has(r.Muhafiz) || Has(r.Segment) || Has(r.Oneri?.Uygulama) || Has(r.Oneri?.Gerekce) || r.Diger.Any(Has))
             .Where(r => durum switch
@@ -128,7 +133,7 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
         try { bilgi = Bilgi().Durum; } catch (Exception ex) { bilgi = "genel bilgi dosyası okunamadı: " + ex.Message; }
         return new EksikListe(f.Skip((page - 1) * size).Take(size).ToList(), f.Count, rows.Count, rows.Select(r => r.Ip).Distinct().Count(),
             rows.Count(r => r.Oneri != null), rows.Count(r => r.Oneri?.Durum is Onay or Elle), Durum, yazabilir, _uyari, false, bilgi, Surum,
-            rows.Count(r => r.AtanmamisUyg), rows.Count(r => KatalogDisi(r.Oneri)), rows.Where(r => KatalogDisi(r.Oneri)).Select(r => r.Ip).Distinct().Count());
+            rows.Count(r => r.AtanmamisUyg), rows.Count(r => KatalogDisi(r.Oneri)), rows.Where(r => KatalogDisi(r.Oneri)).Select(r => r.Ip).Distinct().Count(), kurumlar);
     }
 
     // Öneri sunucuya atanmamış bir katalog uygulaması mı (" Veritabanı" eki atılarak)
@@ -1226,6 +1231,7 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
         var cands = Missing(env, Dyn).Where(m => !infra.Contains(m.Port))
             .Where(m => wanted == null || wanted.Contains(m.Ip))
             .Where(m => wanted != null || req.Test || !IsTest(env, m.Ip))   // test segmentleri yalnız seçilirse
+            .Where(m => wanted != null || string.IsNullOrEmpty(req.Kurum) || KurumBilgi.Of(cfg, env, m.Ip) == req.Kurum)   // kurum seçiliyse yalnız o kurum
             .Where(m => !have.TryGetValue((m.Ip, m.Port), out var o) || (o.Durum is not (Onay or Elle) && (req.Yeniden || wanted != null)))
             .GroupBy(m => m.Ip).OrderByDescending(g => g.Count()).ToList();
         int allIps = cands.Count, allPorts = cands.Sum(g => g.Count());

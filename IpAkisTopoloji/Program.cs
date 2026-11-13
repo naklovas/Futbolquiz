@@ -762,12 +762,12 @@ app.MapGet("/api/islev/topoloji", async (string etiket, string? tenant, string? 
 app.MapGet("/api/islev/durum", (IslevService islev) => Results.Ok(islev.Durum));
 
 // ERT eksikleri (Eksik.cs, wwwroot/eksik.html): APPNAME'i boş (IP, port) satırlarına AI'dan uygulama önerisi; ERT'ye yazılmaz.
-app.MapGet("/api/eksik", async (string? ara, string? durum, bool? altyapi, bool? test, string? sirala, string? yon, int? sayfa, int? boyut, HttpContext ctx,
+app.MapGet("/api/eksik", async (string? ara, string? durum, bool? altyapi, bool? test, string? sirala, string? yon, int? sayfa, int? boyut, string? kurum, HttpContext ctx,
     IConfiguration cfg, EksikService eksik, CancellationToken ct) =>
 {
     try
     {
-        var l = await eksik.ListAsync(ara, durum, altyapi ?? false, sayfa ?? 1, boyut ?? 200, EtiketService.CanWrite(cfg, ctx), ct, test ?? false, sirala, yon == "desc");
+        var l = await eksik.ListAsync(ara, durum, altyapi ?? false, sayfa ?? 1, boyut ?? 200, EtiketService.CanWrite(cfg, ctx), ct, test ?? false, sirala, yon == "desc", kurum);
         return Results.Ok(l with { TopluYetki = Yetki.Var(cfg, ctx, Yetki.Toplu) });
     }
     catch (Exception ex) { return Results.Json(new { error = ex.Message }, statusCode: 502); }

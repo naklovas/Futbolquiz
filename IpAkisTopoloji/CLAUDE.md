@@ -445,6 +445,9 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
   İmza bölümü kanıtta SM'den ÖNCE (kısa; MaxKarakter kesmesin). Eksik'in kendi Carbon Black sorgusu KALDI (istemci uygulamaları, giden hedefler ve
   "- gelen port X" satırları DbHints / PortExeHas / ProgramKontrol için gerekli; imza taraması bunları tutmuyor). imza.html "AI'a sor": seçilenlerde taranmamış
   sunucu varsa sorar → önce `tara("ip", taranmamış)`, `st.aiBekle`'deki portlar tarama "bitti" olunca kendiliğinden `aiGonder` (durdurulursa gönderilmez).
+  KURUM ERT EKSİKLERİNDE DE (kullanıcı: "eksik kısmına da test olsun olmasın, iştirak banka katılım seçenekleri"): kurum kuralı ortak `KurumBilgi` (Imza.cs, static;
+  `Imza:Kurumlar`); `EksikSatir.Kurum`, `/api/eksik?kurum=`, `EksikListe.Kurumlar` [{ad, satir, sunucu}] (test / altyapı süzgecinden sonra sayılır), `EksikCalistir.Kurum`
+  (tüm boşları öner yalnız o kurum). eksik.html "Kurum" seçicisi ("Test segmentleri" kutucuğu zaten vardı).
 - **"Bu sunucuda hangi uygulama çalışıyor?"** (IP kartı, Gelen portlar tablosunun üstündeki düğme; `SurecAi` Surec.cs, `POST /api/surec/ai`):
   arayüzdeki /api/surec sonucu exe başına toplanıp (PID'ler, portlar, giden, bağlanan / bağlandığı uygulamalar) AI'a gider (yeniden
   sorgulanmaz) + ERT kayıtları + segment + genel bilgiler dosyası. Kesin genel süreçler kodda ayıklanır (`GenelAd` / `GenelYol`: svchost,

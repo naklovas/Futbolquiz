@@ -233,18 +233,8 @@ xlog"];
     // KURUM (kullanıcı: "zb ile başlayanlar banka, zi ile başlayanlar iştirak, zk ile başlayan katılım bankası"; "sunucu adına göre değil, yine domain bilgisi"):
     // segment Domain'inin (KonsolideSegmentler4.Domain) önekinden;
     // Imza:Kurumlar {"Banka": ["zb"], …} ile değişir; eşleşmeyen "Diğer"
-    Dictionary<string, string[]>? _kurumlar;
-    Dictionary<string, string[]> Kurumlar => _kurumlar ??= cfg.GetSection("Imza:Kurumlar").GetChildren()
-        .Select(c => (c.Key, c.GetChildren().Select(x => x.Value).OfType<string>().Where(x => x.Length > 0).Select(x => x.ToLowerInvariant()).ToArray()))
-        .Where(x => x.Item2.Length > 0).ToDictionary(x => x.Key, x => x.Item2) is { Count: > 0 } d ? d
-        : new() { ["Ziraat Bankası"] = ["zb"], ["Ziraat Katılım"] = ["zk"], ["İştirak"] = ["zi"] };
-    public IEnumerable<string> KurumAdlari => Kurumlar.Keys.Append("Diğer");
-    string Kurum(EnvanterSnapshot env, string ip)
-    {
-        string ad = (env.FindSegment(ip)?.Domain ?? "").Trim().ToLowerInvariant();
-        foreach (var (k, onekler) in Kurumlar) if (onekler.Any(o => ad.StartsWith(o))) return k;
-        return "Diğer";
-    }
+    public IEnumerable<string> KurumAdlari => KurumBilgi.Adlar(cfg);
+    string Kurum(EnvanterSnapshot env, string ip) => KurumBilgi.Of(cfg, env, ip);
 
     static string Sure2(TimeSpan t) => t.TotalMinutes < 1 ? "1 dk'dan az" : t.TotalHours < 1 ? $"{(int)t.TotalMinutes} dk" : $"{(int)t.TotalHours} sa {t.Minutes} dk";
     static string Terimler(IEnumerable<string> ips) => "(" + string.Join(" OR ", ips.Select(ip => $"TERM({ip})")) + ")";
@@ -666,5 +656,23 @@ xlog"];
         };
         return new ImzaSonuc(null, kayit, sonuc.OrderBy(x => EnvanterSnapshot.TryToUInt(x.Ip, out uint u) ? u : 0)
             .ThenBy(x => int.TryParse(x.Port, out int p) ? p : 999999).ToList(), sozluk, t?.Mesajlar ?? [], null, iisSozluk);
+    }
+}
+
+// Kurum = segment Domain'inin öneki (kullanıcı: "domain zb ile başlıyorsa Ziraat Bankası, zk Ziraat Katılım, zi İştirak"; sunucu adına göre DEĞİL).
+// Servis imzası ve ERT eksikleri ortak kullanır. `Imza:Kurumlar` {"Ziraat Bankası": ["zb"], …} ile değişir; eşleşmeyen "Diğer".
+static class KurumBilgi
+{
+    static Dictionary<string, string[]>? _k;
+    static Dictionary<string, string[]> Onekler(IConfiguration cfg) => _k ??= cfg.GetSection("Imza:Kurumlar").GetChildren()
+        .Select(c => (c.Key, c.GetChildren().Select(x => x.Value).OfType<string>().Where(x => x.Length > 0).Select(x => x.ToLowerInvariant()).ToArray()))
+        .Where(x => x.Item2.Length > 0).ToDictionary(x => x.Key, x => x.Item2) is { Count: > 0 } d ? d
+        : new() { ["Ziraat Bankası"] = ["zb"], ["Ziraat Katılım"] = ["zk"], ["İştirak"] = ["zi"] };
+    public static IEnumerable<string> Adlar(IConfiguration cfg) => Onekler(cfg).Keys.Append("Diğer");
+    public static string Of(IConfiguration cfg, EnvanterSnapshot env, string ip)
+    {
+        string ad = (env.FindSegment(ip)?.Domain ?? "").Trim().ToLowerInvariant();
+        foreach (var (k, onekler) in Onekler(cfg)) if (onekler.Any(o => ad.StartsWith(o))) return k;
+        return "Diğer";
     }
 }
