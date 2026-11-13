@@ -12,7 +12,8 @@ using System.Text.RegularExpressions;
 
 record ImzaPort(string Port, string Yol, long Baglanti, int Istemci);
 record ImzaIis(string Port, List<string> Uygulamalar, long Istek);
-record ImzaSunucu(string Ip, List<ImzaPort> Gelen, List<string> Giden, List<ImzaIis> Iis);
+// Genel: yalnız gereksiz (genel Windows / ajan) süreçlerin kabul ettiği portlar — exe olarak gösterilmez, sözlüğe girmez (kullanıcı: "gereksizleri almayalım, exe olarak da koymasın")
+record ImzaSunucu(string Ip, List<ImzaPort> Gelen, List<string> Giden, List<ImzaIis> Iis, List<ImzaPort>? Genel = null);
 record ImzaTarama(DateTime Baslangic, DateTime? Bitis, double CbSaat, double IisDakika, List<ImzaSunucu> Sunucular, List<string> Taranan,
     List<string> Mesajlar, int ToplamIp, string? Kaydeden, List<string>? Bekleyen = null, string? Kapsam = null);
 // İlerleme (kullanıcı: "progress bar üste, hangi sunucu hangi port yazsın, yüzde kaç"): ToplamSunucu / BitenSunucu, Adim (cb | iis), Yuzde,
@@ -22,7 +23,8 @@ record ImzaIs(string Durum, int Toplam, int Biten, string Asama, DateTime Baslan
 record ImzaAday(string Ad, int Sunucu);
 // Durum = ERT tarafı (kayitli | bos | uyumsuz | ertyok); Veri = tarama tarafı (var | yok | taranmadi) — kullanıcı: tarama yokken "boş" süzgeci boş geliyordu
 record ImzaSatir(string Ip, string Port, string? Sunucu, string? Ert, string? Website, string? Exe, string? ExeYol, bool HttpSys,
-    long Baglanti, int Istemci, List<string> Iis, string Durum, string? Oneri, string? Guven, string? Not, List<ImzaAday>? Adaylar, bool Altyapi, string Veri, bool Genel = false);
+    long Baglanti, int Istemci, List<string> Iis, string Durum, string? Oneri, string? Guven, string? Not, List<ImzaAday>? Adaylar, bool Altyapi, string Veri, bool Genel = false,
+    string? GenelExe = null);
 record ImzaSozluk(string Exe, string Port, List<ImzaAday> Adlar, List<string> Iis, int Sunucu, bool Celiski);
 record ImzaSonuc(ImzaIs? Is, object? Kayit, List<ImzaSatir> Satirlar, List<ImzaSozluk> Sozluk, List<string> Mesajlar, string? Uyari);
 
@@ -116,11 +118,12 @@ sealed class ServisImzaService(IConfiguration cfg, IHttpClientFactory factory, E
                     var gelen = cb.Gelen.GetValueOrDefault(ip) ?? [];
                     var giden = cb.Giden.GetValueOrDefault(ip) ?? [];
                     var ii = iis.GetValueOrDefault(ip) ?? [];
-                    if (gelen.Count + giden.Count + ii.Count > 0) sunucular[ip] = new ImzaSunucu(ip, gelen, giden, ii);
+                    var gn = cb.Genel.GetValueOrDefault(ip);
+                    if (gelen.Count + giden.Count + ii.Count + (gn?.Count ?? 0) > 0) sunucular[ip] = new ImzaSunucu(ip, gelen, giden, ii, gn);
                     else sunucular.Remove(ip);
                     taranan.Add(ip);
                     // son biten sunucular: port → exe (genel / çekirdek dahil, kısa), IIS portları
-                    var pe = gelen.Where(x => x.Port != "0").GroupBy(x => x.Port).OrderBy(g => int.TryParse(g.Key, out int n) ? n : 999999)
+                    var pe = gelen.Where(x => x.Port != "0" && !Gereksiz(x.Yol)).GroupBy(x => x.Port).OrderBy(g => int.TryParse(g.Key, out int n) ? n : 999999)
                         .Select(g => { var iu = ii.FirstOrDefault(x => x.Port == g.Key); string e = ExeAd(g.OrderByDescending(x => x.Baglanti).First().Yol);
                             return $"{g.Key} {(HttpSysEslesme.Cekirdek(e) ? "HTTP.sys" : e)}{(iu != null ? $" (IIS: {string.Join(", ", iu.Uygulamalar.Take(3))})" : "")}"; }).ToList();
                     foreach (var x in ii) if (!pe.Any(q => q.StartsWith(x.Port + " "))) pe.Add($"{x.Port} IIS: {string.Join(", ", x.Uygulamalar.Take(3))}");
@@ -151,11 +154,71 @@ sealed class ServisImzaService(IConfiguration cfg, IHttpClientFactory factory, E
         }
     }
 
+    // GEREKSİZ EXE'LER (kullanıcı: "gereksiz exe listesini sen hazırla, gereksizleri almayalım, exe olarak da koymasın"):
+    // HttpSysEslesme.Genel (svchost, lsass… + \windows\system32\ / syswow64 / ajan klasörleri; w3wp ve ntoskrnl hariç) + aşağıdaki ajan / araç listesi
+    // + Imza:GenelExeler. ntoskrnl / System (HTTP.sys) ve w3wp (IIS) asla gereksiz sayılmaz.
+    static readonly HashSet<string> GereksizAd = new(StringComparer.OrdinalIgnoreCase)
+    {
+        // Windows
+        "system", "registry", "lsaiso.exe", "fontdrvhost.exe", "sihost.exe", "ctfmon.exe", "searchindexer.exe", "searchprotocolhost.exe", "searchfilterhost.exe",
+        "taskhost.exe", "taskeng.exe", "dllhost.exe", "msdtc.exe", "vds.exe", "vssvc.exe", "trustedinstaller.exe", "tiworker.exe", "wuauclt.exe", "musnotification.exe",
+        "sppsvc.exe", "smartscreen.exe", "securityhealthservice.exe", "rundll32.exe", "regsvr32.exe", "mmc.exe", "cmd.exe", "powershell.exe", "pwsh.exe", "wsmprovhost.exe",
+        "winrshost.exe", "mstsc.exe", "tasklist.exe", "net.exe", "net1.exe", "ping.exe", "nslookup.exe", "certutil.exe", "w32tm.exe", "dfsrs.exe", "dns.exe", "ismserv.exe",
+        "msiexec.exe", "mpcmdrun.exe", "nissrv.exe", "mssense.exe", "sensecncproxy.exe", "senseir.exe", "msmpeng.exe", "mpdefendercoreservice.exe",
+        // Carbon Black / VMware Carbon Black
+        "cb.exe", "repmgr.exe", "repux.exe", "repwsc.exe", "cbcomms.exe", "cbdefense.exe", "parity.exe",
+        // Trend Micro / Apex One / Deep Security
+        "ntrtscan.exe", "tmlisten.exe", "pccntmon.exe", "tmbmsrv.exe", "tmccsf.exe", "tmpfw.exe", "coreserviceshell.exe", "coreframeworkhost.exe", "ds_agent.exe",
+        "dsa.exe", "amsp_logserver.exe", "tmwscsvc.exe",
+        // Symantec / McAfee / Trellix / Sophos / CrowdStrike / SentinelOne
+        "ccsvchst.exe", "smc.exe", "smcgui.exe", "sepwscsvc64.exe", "mcshield.exe", "masvc.exe", "macmnsvc.exe", "mfemms.exe", "mfeesp.exe", "xagt.exe",
+        "sophosfs.exe", "savservice.exe", "csfalconservice.exe", "sentinelagent.exe",
+        // Splunk / Elastic / Fluent
+        "splunkd.exe", "splunk-winevtlog.exe", "splunk-perfmon.exe", "splunk-admon.exe", "splunk-netmon.exe", "splunk-powershell.exe", "splunk-regmon.exe",
+        "splunk-monitornohandle.exe", "splunk-winhostinfo.exe", "splunk-winprintmon.exe", "btool.exe", "winlogbeat.exe", "filebeat.exe", "metricbeat.exe", "fluent-bit.exe",
+        // İzleme: SCOM, SCCM, Zabbix, Nagios / NSClient, SiteScope, SolarWinds, PRTG, Dynatrace, AppDynamics, Datadog, New Relic
+        "healthservice.exe", "monitoringhost.exe", "ccmexec.exe", "ccmrepairagent.exe", "cmrcservice.exe", "zabbix_agentd.exe", "zabbix_agent2.exe", "nscp.exe",
+        "sitescope.exe", "swiagent.exe", "solarwinds.agent.service.exe", "prtg probe.exe", "oneagentwatchdog.exe", "oneagentos.exe", "oneagenthelper.exe",
+        "appdynamics.agent.coordinator.exe", "datadog-agent.exe", "trace-agent.exe", "process-agent.exe", "newrelic-infra.exe",
+        // Yedekleme: Veeam, Commvault, NetBackup, TSM / Spectrum Protect, Networker, Data Protector
+        "veeam.backup.service.exe", "veeamagent.exe", "veeamtransportsvc.exe", "veeamdeploymentsvc.exe", "cvd.exe", "clmgrs.exe", "evmgrc.exe", "bpinetd.exe", "bpcd.exe",
+        "vnetd.exe", "pbx_exchange.exe", "dsmcad.exe", "dsmc.exe", "dsmagent.exe", "nsrexecd.exe", "omnicheck.exe", "omniinet.exe",
+        // Envanter / zafiyet / yönetim ajanları: Tanium, Qualys, Nessus, Ivanti, ManageEngine, BigFix, Lansweeper, Rapid7
+        "taniumclient.exe", "qualysagent.exe", "nessus-agent-module.exe", "nessusd.exe", "nessus-service.exe", "ivanti.exe", "dcagentservice.exe", "besclient.exe",
+        "lsagent.exe", "ir_agent.exe",
+        // PAM / erişim / uzak destek: CyberArk, BeyondTrust, Kron, TeamViewer, AnyDesk, VNC
+        "cyberark.exe", "pmservice.exe", "bomgar-scc.exe", "kron.exe", "teamviewer_service.exe", "teamviewer.exe", "anydesk.exe", "winvnc.exe", "tvnserver.exe",
+        // DLP / veri güvenliği / DB denetim ajanları (kullanıcı: dsasql.exe, sqldsimservice.exe)
+        "dsasql.exe", "sqldsimservice.exe", "fppsvc.exe", "wepsvc.exe", "dgagent.exe", "edpa.exe", "dlpagent.exe", "guardium_stap.exe", "stap.exe",
+        // Sanallaştırma araçları
+        "vmtoolsd.exe", "vm3dservice.exe", "vgauthservice.exe", "vmwaretray.exe", "xenservice.exe", "vmms.exe", "vmcompute.exe",
+        // Microsoft ajanları
+        "omsagent.exe", "azuremonitoragent.exe", "mmaagent.exe", "wmiapsrv.exe", "wmiadap.exe"
+    };
+    static readonly string[] GereksizYol = [@"eeam", @"\commvault", @"eritas
+etbackup", @"	ivoli	sm", @"\legato
+sr", @"\emc networker", @"	anium",
+        @"\qualys", @"	enable", @"\dynatrace", @"ppdynamics", @"\datadog", @"
+ew relic", @"\solarwinds", @"\system center operations manager",
+        @"\microsoft monitoring agent", @"\ccm", @"\symantec", @"\mcafee", @"	rellix", @"\sophos", @"\crowdstrike", @"\sentinelone", @"\cyberark",
+        @"eyondtrust", @"	eamviewer", @"nydesk", @"orcepoint", @"\websense", @"\elasticeats", @"ilebeat", @"\winlogbeat", @"
+xlog"];
+    HashSet<string>? _ek;
+    HashSet<string> Ek => _ek ??= cfg.GetSection("Imza:GenelExeler").GetChildren().Select(c => c.Value?.Trim().ToLowerInvariant()).OfType<string>().Where(x => x.Length > 0).ToHashSet();
+    bool Gereksiz(string yol)
+    {
+        if (HttpSysEslesme.Cekirdek(yol)) return false;   // HTTP.sys (ntoskrnl / System) gerekli
+        string ad = ExeAd(yol);
+        if (ad == "w3wp.exe") return false;               // IIS uygulama havuzu
+        return HttpSysEslesme.Genel(ad, yol) || GereksizAd.Contains(ad) || Ek.Contains(ad)
+            || GereksizYol.Any(g => yol.Contains(g, StringComparison.OrdinalIgnoreCase));
+    }
+
     static string Sure2(TimeSpan t) => t.TotalMinutes < 1 ? "1 dk'dan az" : t.TotalHours < 1 ? $"{(int)t.TotalMinutes} dk" : $"{(int)t.TotalHours} sa {t.Minutes} dk";
     static string Terimler(IEnumerable<string> ips) => "(" + string.Join(" OR ", ips.Select(ip => $"TERM({ip})")) + ")";
     static string Liste(IEnumerable<string> ips) => string.Join(",", ips.Select(ip => $"\"{ip}\""));
 
-    async Task<(Dictionary<string, List<ImzaPort>> Gelen, Dictionary<string, List<string>> Giden)> CbAsync(string[] ips, List<string> mesaj, CancellationToken ct)
+    async Task<(Dictionary<string, List<ImzaPort>> Gelen, Dictionary<string, List<string>> Giden, Dictionary<string, List<ImzaPort>> Genel)> CbAsync(string[] ips, List<string> mesaj, CancellationToken ct)
     {
         var s = cfg.GetSection("Splunk");
         string index = s["Index"] ?? "carbonblack", sourcetype = s["Sourcetype"] ?? "bit9:carbonblack:json";
@@ -164,7 +227,7 @@ sealed class ServisImzaService(IConfiguration cfg, IHttpClientFactory factory, E
             | eval yon=if(lower(direction)=="outbound", "out", "in"), yol=coalesce(process_path, process_name, "-"), lp=if(yon=="in", coalesce(local_port, "0"), "-")
             | stats count dc(remote_ip) as ist by local_ip yon lp yol
             """;
-        var gelen = new Dictionary<string, List<ImzaPort>>(); var giden = new Dictionary<string, List<string>>();
+        var gelen = new Dictionary<string, List<ImzaPort>>(); var giden = new Dictionary<string, List<string>>(); var genel = new Dictionary<string, List<ImzaPort>>();
         var end = DateTimeOffset.Now;
         try
         {
@@ -175,13 +238,15 @@ sealed class ServisImzaService(IConfiguration cfg, IHttpClientFactory factory, E
                 string ip = r.GetValueOrDefault("local_ip") ?? "", yol = r.GetValueOrDefault("yol") ?? "-", lp = r.GetValueOrDefault("lp") ?? "-";
                 if (ip.Length == 0 || yol == "-") continue;
                 long.TryParse(r.GetValueOrDefault("count"), out long n); int.TryParse(r.GetValueOrDefault("ist"), out int ist);
-                if (r.GetValueOrDefault("yon") == "out") { (giden.TryGetValue(ip, out var l) ? l : giden[ip] = []).Add(yol); continue; }
-                (gelen.TryGetValue(ip, out var g) ? g : gelen[ip] = []).Add(new ImzaPort(lp == "" ? "0" : lp, yol, n, ist));
+                bool gr = Gereksiz(yol);
+                if (r.GetValueOrDefault("yon") == "out") { if (!gr) (giden.TryGetValue(ip, out var l) ? l : giden[ip] = []).Add(yol); continue; }
+                var hedef = gr ? genel : gelen;
+                (hedef.TryGetValue(ip, out var g) ? g : hedef[ip] = []).Add(new ImzaPort(lp == "" ? "0" : lp, yol, n, ist));
             }
         }
         catch (Exception ex) when (ex is not OperationCanceledException) { mesaj.Add($"Carbon Black {ips[0]} … grubu: {ex.Message}"); }
         foreach (var k in giden.Keys.ToList()) giden[k] = giden[k].Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-        return (gelen, giden);
+        return (gelen, giden, genel);
     }
 
     async Task<Dictionary<string, List<ImzaIis>>> IisAsync(string[] ips, List<string> mesaj, CancellationToken ct)
@@ -309,8 +374,6 @@ sealed class ServisImzaService(IConfiguration cfg, IHttpClientFactory factory, E
     ImzaSonuc Hesapla(ImzaTarama? t, EnvanterSnapshot env)
     {
         var infra = AppTopology.InfraPorts(cfg);
-        // Genel süreçlere ek olarak ajan / izleme exe'leri (kullanıcı: "dsasql.exe … bir sürü svchost geldi"): Imza:GenelExeler (ör. ["dsasql.exe"])
-        var ajan = cfg.GetSection("Imza:GenelExeler").GetChildren().Select(c => c.Value?.Trim().ToLowerInvariant()).OfType<string>().Where(x => x.Length > 0).ToHashSet();
         var veri = (t?.Sunucular ?? []).ToDictionary(s => s.Ip);
         var taranan = (t?.Taranan ?? []).ToHashSet();
         var satirlar = new List<(ImzaSatir S, HashSet<string> IisSet, string? Anahtar)>();
@@ -320,10 +383,14 @@ sealed class ServisImzaService(IConfiguration cfg, IHttpClientFactory factory, E
         {
             var ert = env.AppsOnIp(ip).Where(h => !(int.TryParse(h.Port, out int pn) && pn >= Dyn)).GroupBy(h => h.Port ?? "").ToDictionary(g => g.Key, g => g.ToList());
             veri.TryGetValue(ip, out var v);
-            var yollar = (v?.Gelen.Select(x => x.Yol) ?? []).Concat(v?.Giden ?? []).Where(y => !HttpSysEslesme.Cekirdek(y) && !HttpSysEslesme.Genel(ExeAd(y), y))
+            // eski kayıtlarda gereksizler Gelen / Giden içinde olabilir: burada da ayrılır
+            var gelenTum = (v?.Gelen ?? []).Concat(v?.Genel ?? []).ToList();
+            var gelenIs = gelenTum.Where(x => !Gereksiz(x.Yol)).ToList();
+            var gelenGenel = gelenTum.Where(x => Gereksiz(x.Yol)).ToList();
+            var yollar = gelenIs.Select(x => x.Yol).Concat((v?.Giden ?? []).Where(y => !Gereksiz(y))).Where(y => !HttpSysEslesme.Cekirdek(y))
                 .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
             var portlar = ert.Keys.Where(p => p.Length > 0).ToList();
-            foreach (var p in v?.Gelen.Select(x => x.Port) ?? [])
+            foreach (var p in gelenTum.Select(x => x.Port))
                 if (p != "0" && !(int.TryParse(p, out int pn) && pn >= Dyn) && !portlar.Contains(p)) portlar.Add(p);
             foreach (var iisP in v?.Iis.Select(x => x.Port) ?? []) if (!portlar.Contains(iisP)) portlar.Add(iisP);
             string? sunucuAd = ert.Values.SelectMany(x => x).Select(h => h.UnixName).FirstOrDefault(x => !string.IsNullOrWhiteSpace(x));
@@ -332,7 +399,8 @@ sealed class ServisImzaService(IConfiguration cfg, IHttpClientFactory factory, E
                 var rows = ert.GetValueOrDefault(port) ?? [];
                 var adlar = rows.Select(h => h.AppName).Where(a => !string.IsNullOrWhiteSpace(a)).Select(a => a!.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
                 string? website = rows.Select(h => h.Website).FirstOrDefault(x => !string.IsNullOrWhiteSpace(x));
-                var gel = (v?.Gelen ?? []).Where(x => x.Port == port).OrderByDescending(x => x.Baglanti).ToList();
+                var gel = gelenIs.Where(x => x.Port == port).OrderByDescending(x => x.Baglanti).ToList();
+                var gen = gelenGenel.Where(x => x.Port == port).OrderByDescending(x => x.Baglanti).ToList();
                 var is_ = gel.Where(x => !HttpSysEslesme.Cekirdek(x.Yol)).ToList();
                 string? yol = is_.FirstOrDefault()?.Yol; bool hs = false;
                 if (yol == null && gel.Count > 0)
@@ -343,13 +411,14 @@ sealed class ServisImzaService(IConfiguration cfg, IHttpClientFactory factory, E
                 }
                 var iis = v?.Iis.FirstOrDefault(x => x.Port == port)?.Uygulamalar ?? [];
                 string? exe = yol == null ? null : HttpSysEslesme.Cekirdek(yol) ? "ntoskrnl.exe" : ExeAd(yol);
-                bool genel = exe != null && exe != "ntoskrnl.exe" && (HttpSysEslesme.Genel(exe, yol!) || ajan.Contains(exe));
+                bool genel = exe == null && gen.Count > 0;   // portu yalnız gereksiz süreç kabul ediyor
+                string? genelExe = gen.Count > 0 ? string.Join(", ", gen.Select(x => ExeAd(x.Yol)).Distinct().Take(3)) : null;
                 bool alt = infra.Contains(port);
                 string? anahtar = exe == null || exe == "ntoskrnl.exe" || genel || alt ? null : exe + "|" + port;
                 string durum = rows.Count == 0 ? "ertyok" : adlar.Count > 0 ? "kayitli" : "bos";
-                string veriDurum = exe != null || iis.Count > 0 ? "var" : taranan.Contains(ip) ? "yok" : "taranmadi";
+                string veriDurum = exe != null || iis.Count > 0 || gen.Count > 0 ? "var" : taranan.Contains(ip) ? "yok" : "taranmadi";
                 var s = new ImzaSatir(ip, port, sunucuAd, adlar.Count > 0 ? string.Join(" | ", adlar) : null, website, exe, yol, hs && exe != "ntoskrnl.exe",
-                    gel.Sum(x => x.Baglanti), gel.Count > 0 ? gel.Max(x => x.Istemci) : 0, iis, durum, null, null, null, null, alt, veriDurum, genel);
+                    gel.Sum(x => x.Baglanti), gel.Count > 0 ? gel.Max(x => x.Istemci) : 0, iis, durum, null, null, null, null, alt, veriDurum, genel, genelExe);
                 satirlar.Add((s, iis.ToHashSet(StringComparer.OrdinalIgnoreCase), anahtar));
             }
         }

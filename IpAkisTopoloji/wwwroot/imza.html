@@ -140,7 +140,7 @@
       <select id="veri" title="Tarama tarafı"><option value="">Tarama: tümü</option><option value="var">Veri bulundu</option><option value="yok">Tarandı, veri yok</option><option value="taranmadi">Henüz taranmadı</option></select>
       <select id="guven"><option value="">Tüm güvenler</option><option value="güçlü">Güçlü</option><option value="orta">Orta</option><option value="zayıf">Zayıf</option></select>
       <label title="RDP, SMB, DNS, WinRM gibi altyapı portları (sözlüğe ve öneriye girmez)"><input type="checkbox" id="alt"> Altyapı portları</label>
-      <label title="ERT'de kaydı olmayan ve exe'si genel Windows / ajan süreci olan satırlar (svchost, lsass, splunkd, Imza:GenelExeler…); sözlüğe ve öneriye girmez"><input type="checkbox" id="gen"> Genel süreçler</label>
+      <label title="ERT'de kaydı olmayan ve portunu yalnız genel Windows / ajan süreci kabul eden satırlar (svchost, lsass, splunkd, antivirüs, yedekleme, izleme ajanları, Imza:GenelExeler…); exe olarak yazılmaz, sözlüğe ve öneriye girmez"><input type="checkbox" id="gen"> Genel süreçler</label>
     </div>
     <div class="grid"><table>
       <thead id="head"></thead>
@@ -247,7 +247,8 @@ function satirTablo(l) {
     <td class="small">${esc(r.sunucu || "")}</td>
     <td class="mono">${esc(r.port)}${r.altyapi ? ` <span class="small muted">altyapı</span>` : ""}</td>
     <td>${r.ert ? esc(r.ert) : `<span class="muted small">${r.durum === "ertyok" ? "ERT'de satır yok" : "boş"}</span>`}${r.website ? `<div class="small muted">WEBSITE: ${esc(r.website)}</div>` : ""}</td>
-    <td>${r.exe ? `<span class="mono" title="${esc(r.exeYol || "")}">${esc(r.exe)}</span>${r.genel ? ` <span class="small muted" title="Genel Windows / ajan süreci; sözlüğe ve öneriye girmez">genel</span>` : ""}${r.httpSys ? `<span class="hs" title="Carbon Black bu portu ntoskrnl (HTTP.sys) adına yazıyor; asıl exe ERT WEBSITE / uygulama adının exe yolunda geçmesinden bulundu">HTTP.sys</span>` : ""}` : `<span class="muted small">—</span>`}</td>
+    <td>${r.exe ? `<span class="mono" title="${esc(r.exeYol || "")}">${esc(r.exe)}</span>${r.httpSys ? `<span class="hs" title="Carbon Black bu portu ntoskrnl (HTTP.sys) adına yazıyor; asıl exe ERT WEBSITE / uygulama adının exe yolunda geçmesinden bulundu">HTTP.sys</span>` : ""}`
+      : r.genelExe ? `<span class="small muted" title="Bu portu yalnız genel Windows / ajan süreci kabul ediyor (iş uygulaması değil; sözlüğe ve öneriye girmez): ${esc(r.genelExe)}">yalnız genel süreç</span>` : `<span class="muted small">—</span>`}</td>
     <td class="small">${(r.iis || []).length ? esc(r.iis.slice(0, 5).join(", ")) + (r.iis.length > 5 ? ` <span class="muted">+${r.iis.length - 5}</span>` : "") : ""}</td>
     <td class="num">${r.baglanti ? fmt(r.baglanti) : ""}</td>
     <td><span class="d ${r.durum}">${DURUM[dur(r)] ?? r.durum}</span>${VERI[r.veri] ? `<div class="small muted">${VERI[r.veri]}</div>` : ""}</td>

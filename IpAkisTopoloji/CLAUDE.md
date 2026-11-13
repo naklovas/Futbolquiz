@@ -404,7 +404,13 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
   tarama tarafı ayrı `Veri` (var | yok | taranmadi) — tarama yokken "boş" süzgeci boş geliyordu. Öneri için referans (ERT'de adı dolu, aynı exe'li) sunucuların da
   taranmış olması gerekir; yalnız boşlar taranırsa sözlük o sunuculardaki dolu portlardan çıkar → sonra "Taranmamışları tara". GENEL SÜREÇLER (kullanıcı: "dsasql.exe … bir sürü svchost geldi"; dsasql.exe SQL Server
   değil — sqlservr.exe; büyük ihtimalle DB izleme / denetim ajanı): `ImzaSatir.Genel` (SurecAi.GenelExe ya da `Imza:GenelExeler` listesi); ERT'de kaydı olmayan
-  genel satırlar varsayılan gizli ("Genel süreçler" kutucuğu), exe yanında "genel" notu; zaten sözlüğe / öneriye girmiyordu. w3wp.exe genel sayılmaz (`HttpSysEslesme.Genel`).
+  genel satırlar varsayılan gizli ("Genel süreçler" kutucuğu), exe yanında "genel" notu; zaten sözlüğe / öneriye girmiyordu. w3wp.exe genel sayılmaz (`HttpSysEslesme.Genel`). GEREKSİZ EXE LİSTESİ (kullanıcı: "listeyi sen hazırla, gereksizleri almayalım, exe olarak da
+  koymasın"): `ServisImzaService.Gereksiz(yol)` = HttpSysEslesme.Genel + `GereksizAd` (Windows araçları, Carbon Black, Trend, Symantec / McAfee / Trellix / Sophos /
+  CrowdStrike / SentinelOne, Splunk / Beats, SCOM / SCCM / Zabbix / NSClient / SiteScope / SolarWinds / Dynatrace / AppDynamics / Datadog, Veeam / Commvault / NetBackup /
+  TSM / Networker, Tanium / Qualys / Nessus / BigFix, CyberArk / BeyondTrust / Kron / TeamViewer / AnyDesk / VNC, dsasql / sqldsimservice / DLP / Guardium, VMware Tools…)
+  + `GereksizYol` (üretici klasörleri) + `Imza:GenelExeler`; ntoskrnl / System ve w3wp ASLA gereksiz değil. Taramada gereksizler `ImzaSunucu.Genel`'e ayrılır (giden
+  listesine hiç girmez), hesapta eski kayıtlar da ayrılır: port yalnız gereksiz süreçteyse exe BOŞ, `GenelExe` (ad) + `Genel=true` → hücrede "yalnız genel süreç",
+  ERT'de kaydı yoksa varsayılan gizli; sözlüğe / öneriye / HTTP.sys yol eşleşmesine girmez, "son biten" listesine yazılmaz.
   İLERLEME (kullanıcı: "progress bar üste, hangi sunucu hangi port, yüzde kaç"): `ImzaIs` ToplamSunucu / BitenSunucu / Adim (cb | iis) / Yuzde (grup içinde CB = yarım) /
   Grup ("ip sunucuadı (ERT portları)") / Son (son biten 12 sunucu: "ip → port exe (IIS: …)", ntoskrnl "HTTP.sys") / Kalan ("4 dk", "1 sa 5 dk"); sayfada bant
   `position: sticky` üstte, yüzdeli çubuk, şu an sorgulanan sunucu çipleri, son bitenler listesi. Sayfa: tarama bandı (ilerleme, tahmini kalan, durdur), istatistik kartları (tıkla süz), "IP + port
