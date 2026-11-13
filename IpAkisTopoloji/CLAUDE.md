@@ -460,6 +460,11 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
   `KurumUyar`: banka sunucusuna yalnız parantezsiz, ZK / DIB sunucusuna yalnız o önekli; belirsiz sunucuda (İştirak / Diğer) süzme yok; aynı sunucuda ERT'de kayıtlı ad hep uyar.
   Uygulandığı yerler: `Candidates` (aday listesi), `CatalogMatch0` katalog havuzu, `CatalogMatch` sarmalayıcısı (eşleşen ad kuruma uymuyorsa aynı adın kurum kaydı
   ([ZK] Kredi ↔ Kredi), yoksa önek atılmış serbest ad + not); prompt kuralı. `Eksik:KurumOnekKurali`=true.
+- **DB teknoloji kontrolü düzeltmesi** (kullanıcı ekranı, "saçmalık": 8765 sqldsimservice.exe = Karmasis Dataskope SQL Agent, AI "Microsoft SQL Server" dedi, DbSahibi
+  istemci "Dataskope"yu sahip sayıp "Dataskope Veritabanı" yazdı): `DbTeknolojiKontrol` önce portu kabul eden exe yollarına bakar — ajan ürünüyse (AjanOf, DB süreci değil,
+  ürünün kendi sunucusu değil) "Altyapı: <ürün>"; port DB portu / DB süreci değilse öneri null ("veritabanı portu değil"); yalnız DB portunda sahip aranır. `DbSahibi` artık
+  instance, ajan adlarını sahip saymaz. `AdTemizle` (katalogda birebir olmayan AI adlarında): "(null)" / sondaki "-null" ve sondaki "sunucu(su)* / sunucuları / server /
+  production / prod / canlı / database / db" kelimeleri atılır (ör. "Kredi Kartı production database sunucususu-null(null)" → "Kredi Kartı" → + " Veritabanı").
 - **"Bu sunucuda hangi uygulama çalışıyor?"** (IP kartı, Gelen portlar tablosunun üstündeki düğme; `SurecAi` Surec.cs, `POST /api/surec/ai`):
   arayüzdeki /api/surec sonucu exe başına toplanıp (PID'ler, portlar, giden, bağlanan / bağlandığı uygulamalar) AI'a gider (yeniden
   sorgulanmaz) + ERT kayıtları + segment + genel bilgiler dosyası. Kesin genel süreçler kodda ayıklanır (`GenelAd` / `GenelYol`: svchost,

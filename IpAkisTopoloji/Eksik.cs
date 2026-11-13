@@ -272,9 +272,21 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
     }
     // Veritabanının sahibi: (1) servis imzası önerisi, (2) bu porta bağlanan istemcilerin ERT uygulaması (Carbon Black), (3) sunucuda ERT'de kayıtlı
     // tek iş uygulaması, (4) SM açıklamalarında boş portu anan / tek sistem. Teknoloji adı olan aday sayılmaz.
-    static (string Ad, string Kaynak, int Guven)? DbSahibi(EnvanterSnapshot env, string ip, string port, string? ev)
+    // AI'ın SM açıklamasından kopyaladığı adı sadeleştirir: "null" / "(null)" artıkları, sondaki "sunucusu / sunucuları / server / production / prod /
+    // database / db" kelimeleri (bunlar "Veritabanı" ekiyle ayrıca yazılır)
+    static string AdTemizle(string ad)
     {
-        bool Iyi(string? a) => a is { Length: > 1 } && DbTeknoloji(a) == null && !env.IsSystemApp(a) && !a.StartsWith("Altyapı", StringComparison.OrdinalIgnoreCase);
+        var ic = System.Text.RegularExpressions.RegexOptions.IgnoreCase;
+        string a = System.Text.RegularExpressions.Regex.Replace(ad, @"\s*\(\s*null\s*\)", "", ic);
+        a = System.Text.RegularExpressions.Regex.Replace(a, @"[-–_\s]+null$", "", ic).Trim(' ', '-', '–', '_', ',', '.');
+        var kuyruk = new System.Text.RegularExpressions.Regex(@"[\s\-–_]+(sunucu(su)*|sunucular[ıi]|server|servers|production|prod|canl[ıi]|database|db)$", ic);
+        for (int i = 0; i < 4 && kuyruk.IsMatch(a); i++) a = kuyruk.Replace(a, "").Trim();
+        return a.Length >= 2 ? a : ad;
+    }
+    (string Ad, string Kaynak, int Guven)? DbSahibi(EnvanterSnapshot env, string ip, string port, string? ev)
+    {
+        // ajan / araç ürünü (Dataskope, SiteScope…) veritabanının sahibi olamaz (kullanıcı: 8765'e "Dataskope Veritabanı" yazıldı — "saçmalık")
+        bool Iyi(string? a) => a is { Length: > 1 } && DbTeknoloji(a) == null && AjanOf(a) == null && !env.IsSystemApp(a) && !a.StartsWith("Altyapı", StringComparison.OrdinalIgnoreCase);
         string Kok(string a) => System.Text.RegularExpressions.Regex.Replace(a, @"\s*[-–(]?\s*(veritaban[ıi]|database|db)\)?\s*$", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase).Trim();
         var satirlar = ev?.Split('\n') ?? [];
         // (1) servis imzası: "- port P: … İMZA ÖNERİSİ: X (güven g"
@@ -1581,6 +1593,23 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
                     // aynı sunucuda ERT'de bu adla kayıt varsa (ör. Redis kümesi "Redis") ad kurumun kendi kaydıdır, dokunulmaz
                     string uk = Norm(System.Text.RegularExpressions.Regex.Replace(u, @"\s*(veritaban[ıi]|database|db)\s*$", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase));
                     if (env.AppNamesOnIp(ip).Any(n => Norm(n) == uk)) continue;
+                    // Portu kabul eden exe bir ajan / araçsa (kullanıcı: 8765 sqldsimservice.exe = Karmasis Dataskope SQL Agent; AI "Microsoft SQL Server" dedi,
+                    // kod "Dataskope Veritabanı" yaptı — doğrusu "Altyapı: Dataskope"): veritabanı değil, ajan portu
+                    var portYol = (ev?.Split('\n').FirstOrDefault(l => l.StartsWith($"- gelen port {port}:") || l.StartsWith($"- gelen port {port} (")) is { } pl
+                        ? System.Text.RegularExpressions.Regex.Matches(pl.Split(" · ")[0], @"\[([^\]]+)\]").Select(m => m.Groups[1].Value).ToList() : []);
+                    if (portYol.Select(AjanOf).OfType<string>().FirstOrDefault() is { } ajanP && DbSurec(string.Join(" ", portYol)) == null && !AjanSunucusu(env, ip, ajanP, ev))
+                    {
+                        outp[(ip, port)] = o with { Uygulama = "Altyapı: " + ajanP, Yeni = false, Guven = Math.Max(o.Guven, 80),
+                            Gerekce = Cut($"Portu kabul eden {string.Join(", ", portYol.Select(y => y.Split('\\', '/').Last()).Distinct())} {ajanP} ajanı / aracı; AI '{u}' (teknoloji adı) yazmıştı. AI gerekçesi: {o.Gerekce}", 600) };
+                        continue;
+                    }
+                    if (!DbPort(ev, port, out _))
+                    {
+                        // veritabanı portu / süreci değil: teknoloji adı burada bir şey söylemez
+                        outp[(ip, port)] = o with { Uygulama = null, Yeni = false, Guven = 0,
+                            Gerekce = Cut($"Yok sayıldı: AI '{u}' önerdi ama port {port} veritabanı portu değil ve portu kabul eden süreç veritabanı süreci değil. AI gerekçesi: {o.Gerekce}", 600) };
+                        continue;
+                    }
                     if (DbSahibi(env, ip, port, ev) is { } sh)
                     {
                         string ad = CatalogMatch(env, sh.Ad, out bool yeni, out var katNot, ip, ev) + " Veritabanı";
@@ -1686,6 +1715,9 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
                 var dbRx = new System.Text.RegularExpressions.Regex(@"\s*[-–(]?\s*(veritaban[ıi]|database|db)\)?\s*$", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
                 bool db = e.TryGetProperty("veritabani", out var vt) && vt.ValueKind == JsonValueKind.True || DbPort(texts.GetValueOrDefault(ip), port, out _)
                           || dbRx.IsMatch(app);
+                // SM metnindeki boş alan artıkları ("…sunucususu-null(null)") ve "… production database sunucusu" kuyruğu ad değildir (kullanıcı ekranı)
+                Snap(env, app, out bool katYok);
+                if (katYok) app = AdTemizle(app);   // katalogda birebir olan ada dokunulmaz
                 app = CatalogMatch(env, dbRx.Replace(app, "").Trim() is { Length: > 0 } core ? core : app, out yeni, out var katNot, ip, texts.GetValueOrDefault(ip));
                 if (db) app += " Veritabanı";
                 if (katNot != null) gerekce = $"{gerekce} [{katNot}]";
