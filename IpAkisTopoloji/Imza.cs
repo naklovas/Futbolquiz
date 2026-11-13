@@ -24,8 +24,9 @@ record ImzaAday(string Ad, int Sunucu);
 // Durum = ERT tarafı (kayitli | bos | uyumsuz | ertyok); Veri = tarama tarafı (var | yok | taranmadi) — kullanıcı: tarama yokken "boş" süzgeci boş geliyordu
 record ImzaSatir(string Ip, string Port, string? Sunucu, string? Ert, string? Website, string? Exe, string? ExeYol, bool HttpSys,
     long Baglanti, int Istemci, List<string> Iis, string Durum, string? Oneri, string? Guven, string? Not, List<ImzaAday>? Adaylar, bool Altyapi, string Veri, bool Genel = false,
-    string? GenelExe = null, List<string>? Vip = null, string? Kurum = null, string? ExeKaynak = null);   // Vip: "havuz · VIP ip:port" (vip_envanteri, üye portu = satır portu)
-record ImzaSozluk(string Exe, string Port, List<ImzaAday> Adlar, List<string> Iis, int Sunucu, bool Celiski);
+    string? GenelExe = null, List<string>? Vip = null, string? Kurum = null, string? ExeKaynak = null, bool Platform = false);
+// Platform: exe:port uygulamayı belirlemiyor (sqlservr.exe:1433 gibi onlarca farklı uygulama) → exe'den öneri yok, AI'a bırakılır   // Vip: "havuz · VIP ip:port" (vip_envanteri, üye portu = satır portu)
+record ImzaSozluk(string Exe, string Port, List<ImzaAday> Adlar, List<string> Iis, int Sunucu, bool Celiski, bool Platform = false);
 // IIS sözlüğü (kullanıcı: "IIS uygulamaları için de sözlük olsa"): IIS uygulama adı → ERT adları (sunucu sayısı), görüldüğü portlar
 record ImzaIisSozluk(string Uygulama, List<ImzaAday> Adlar, List<string> Portlar, int Sunucu, bool Celiski);
 record ImzaSonuc(ImzaIs? Is, object? Kayit, List<ImzaSatir> Satirlar, List<ImzaSozluk> Sozluk, List<string> Mesajlar, string? Uyari, List<ImzaIisSozluk>? IisSozluk = null);
@@ -507,9 +508,20 @@ xlog"];
             return null;
         }
 
+        // PLATFORM SÜREÇLERİ (kullanıcı: "sqlservr.exe üzerinde bir sürü uygulama var, 2 sunucuda geçeni yapıştırmış; başka ilişki tipinden çıkarmalı, belki AI"):
+        // exe:port sözlükte ≥ Imza:PlatformAd (4) farklı ada dağılıyor ve en sık ad %50'nin altındaysa exe uygulamayı belirlemiyor
+        int platformAd = Math.Max(2, cfg.GetValue("Imza:PlatformAd", 4));
+        var platform = exeSoz.Where(kv => { var a = Say(kv.Value); int tp = a.Sum(x => x.Sunucu); return a.Count >= platformAd && a[0].Sunucu * 2 < tp; })
+            .Select(kv => kv.Key).ToHashSet();
+        // aynı sunucunun diğer portlarında kayıtlı TEK uygulama (sistem portu hariç) — platform portunda ikinci ilişki
+        var sunucuTekAd = satirlar.Where(x => x.S.Durum == "kayitli" && !x.S.Altyapi && !Sistem(x.S.Ert)).GroupBy(x => x.S.Ip)
+            .Select(g => (g.Key, Adlar: g.SelectMany(x => x.S.Ert!.Split(" | ")).Distinct(StringComparer.OrdinalIgnoreCase).ToList()))
+            .Where(x => x.Adlar.Count == 1).ToDictionary(x => x.Key, x => x.Adlar[0]);
+
         var sonuc = new List<ImzaSatir>(satirlar.Count);
-        foreach (var (s, iisSet, anahtar) in satirlar)
+        foreach (var (s0, iisSet, anahtar) in satirlar)
         {
+            var s = anahtar != null && platform.Contains(anahtar) ? s0 with { Platform = true } : s0;
             if (!s.Altyapi && VipAdlari(s.Ip, s.Port) is { } va)
             {
                 var en0 = va.Ad[0]; int top0 = va.Ad.Sum(a => a.Sunucu);
@@ -529,6 +541,15 @@ xlog"];
             if (s.Altyapi || s.Veri != "var") { sonuc.Add(s); continue; }
             List<(ImzaSatir S, HashSet<string> IisSet, string? Anahtar)> c = [];
             string? guven = null, nasil = null;
+            if (s.Platform)
+            {
+                int farkli = Say(exeSoz[anahtar!]).Count;
+                if (s.Durum is "bos" or "ertyok" && sunucuTekAd.TryGetValue(s.Ip, out var tekAd))
+                    sonuc.Add(s with { Oneri = tekAd, Guven = "zayıf", Adaylar = [new ImzaAday(tekAd, 1)],
+                        Not = $"platform süreci ({s.Exe}:{s.Port}, sözlükte {farkli} farklı uygulama) — aynı sunucuda kayıtlı tek uygulama '{tekAd}'; AI ile doğrulayın" });
+                else sonuc.Add(s with { Not = s.Durum == "kayitli" ? null : $"platform süreci ({s.Exe}:{s.Port}, sözlükte {farkli} farklı uygulama) — exe uygulamayı belirlemiyor, AI'a bırakın" });
+                continue;
+            }
             if (anahtar != null && exeSoz.TryGetValue(anahtar, out var ec))
             {
                 c = ec.Where(x => x.S.Ip != s.Ip).ToList();
@@ -592,7 +613,7 @@ xlog"];
             var ad = Say(kv.Value);
             var iis = kv.Value.SelectMany(x => x.IisSet).GroupBy(x => x, StringComparer.OrdinalIgnoreCase).OrderByDescending(g => g.Count()).Select(g => g.Key).Take(8).ToList();
             var p = kv.Key.Split('|');
-            return new ImzaSozluk(p[0] == "http.sys" ? "HTTP.sys (exe bilinmiyor, IIS'le)" : p[0], p[1], ad, iis, ad.Sum(a => a.Sunucu), ad.Count > 1);
+            return new ImzaSozluk(p[0] == "http.sys" ? "HTTP.sys (exe bilinmiyor, IIS'le)" : p[0], p[1], ad, iis, ad.Sum(a => a.Sunucu), ad.Count > 1, platform.Contains(kv.Key));
         }).OrderByDescending(x => x.Sunucu).ThenBy(x => x.Exe).Take(5000).ToList();
 
         // IIS SÖZLÜĞÜ: ERT'de adı dolu satırların IIS uygulamaları → ERT adı

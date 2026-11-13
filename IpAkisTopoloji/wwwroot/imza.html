@@ -137,9 +137,13 @@
         <option value="uyumsuz">ERT farklı (uyumsuz)</option>
         <option value="ertyok">ERT'de kaydı yok</option>
         <option value="kayitli">ERT'de kayıtlı</option>
+        <option value="platform" title="sqlservr.exe gibi exe'si uygulamayı belirlemeyen, öneri çıkmayan boş satırlar">Platform süreci · AI'a bırakılacak</option>
+        <option value="aiyok" title="Boş / ERT'de yok, öneri yok ve henüz AI önerisi de yok">Öneri yok · AI'a sorulmamış</option>
       </select>
       <select id="veri" title="Tarama tarafı"><option value="">Tarama: tümü</option><option value="var">Veri bulundu</option><option value="yok">Tarandı, veri yok</option><option value="taranmadi">Henüz taranmadı</option></select>
       <select id="guven"><option value="">Tüm güvenler</option><option value="güçlü">Güçlü</option><option value="orta">Orta</option><option value="zayıf">Zayıf</option></select>
+      <button type="button" id="aiSor" title="Süzgece uyan, adı boş / ERT'de kaydı olmayan ve AI önerisi henüz olmayan portları ERT eksikleri AI motoruna gönderir (SM talepleri, Carbon Black, Nessus, katalog kanıtlarıyla; sonuç DF_ERT_UYGULAMA_ONERI'ye, ERT'ye yazılmaz)">🤖 AI'a sor</button>
+      <span id="aiDurum" class="small muted"></span>
       <label title="RDP, SMB, DNS, WinRM gibi altyapı portları (sözlüğe ve öneriye girmez)"><input type="checkbox" id="alt"> Altyapı portları</label>
       <label title="ERT'de kaydı olmayan ve portunu yalnız genel Windows / ajan süreci kabul eden satırlar (svchost, lsass, splunkd, antivirüs, yedekleme, izleme ajanları, Imza:GenelExeler…); exe olarak yazılmaz, sözlüğe ve öneriye girmez"><input type="checkbox" id="gen"> Genel süreçler</label>
     </div>
@@ -156,7 +160,8 @@ const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const fmt = n => Number(n || 0).toLocaleString("tr-TR");
 const tarih = d => d ? String(d).slice(0, 16).replace("T", " ") : "";
-const st = { veri: null, tab: "satir", limit: 500, yetki: {}, durumFiltre: "", sec: new Set(), kurum: "" };
+const st = { veri: null, tab: "satir", limit: 500, yetki: {}, durumFiltre: "", sec: new Set(), kurum: "", ai: {} };
+const aiO = r => st.ai[r.ip]?.[r.port];
 const DURUM = { kayitli: "ERT'de kayıtlı", bos: "boş", oneri: "boş · öneri var", uyumsuz: "ERT farklı", ertyok: "ERT'de kaydı yok" };
 const VERI = { yok: "tarandı · veri yok", taranmadi: "taranmadı" };
 const gKls = g => g === "güçlü" ? "guclu" : g === "zayıf" ? "zayif" : "orta";
@@ -171,6 +176,7 @@ async function load() {
   } catch (e) { $("#body").innerHTML = `<tr><td class="empty" style="color:var(--err)">Alınamadı: ${esc(e.message)}</td></tr>`; return; }
   ciz();
   if (st.veri.is?.durum === "calisiyor") izle();
+  loadAi(); aiIzle();
 }
 
 function runHtml() {
@@ -229,7 +235,8 @@ function suz() {
   let d = $("#durum").value, vf = $("#veri").value; const ku = st.kurum;
   if (st.durumFiltre.startsWith("v:")) vf = vf || st.durumFiltre.slice(2); else d = d || st.durumFiltre;
   return v.satirlar.filter(r => (!ku || r.kurum === ku) && (alt || !r.altyapi) && (gen || !(r.genel && r.durum === "ertyok"))
-    && (!d || (d === "bostum" ? r.durum === "bos" : d === "oneri" ? r.durum === "bos" && r.oneri : d === "bos" ? r.durum === "bos" && !r.oneri : r.durum === d))
+    && (!d || (d === "bostum" ? r.durum === "bos" : d === "oneri" ? r.durum === "bos" && r.oneri : d === "bos" ? r.durum === "bos" && !r.oneri
+        : d === "platform" ? r.platform && !r.oneri && r.durum !== "kayitli" : d === "aiyok" ? (r.durum === "bos" || r.durum === "ertyok") && !r.oneri && !aiO(r) : r.durum === d))
     && (!vf || r.veri === vf)
     && (!g || r.guven === g)
     && (!q || [r.ip, r.port, r.sunucu, r.ert, r.website, r.exe, r.exeYol, r.oneri, r.not, ...(r.iis || []), ...(r.vip || [])].some(x => String(x ?? "").toLocaleLowerCase("tr").includes(q))));
@@ -242,8 +249,52 @@ function oneriHucre(r) {
     <div class="small muted" style="max-width:440px">${esc(r.not)}</div></div>`;
 }
 
+function aiHucre(r) {
+  const o = aiO(r);
+  if (!o) return "";
+  if (!o.uygulama) return `<span class="small muted" title="${esc(o.gerekce || "")}">AI bulamadı</span>`;
+  const ok = o.durum === "Onaylandı" || o.durum === "Elle";
+  return `<div title="${esc(o.gerekce || "")}"><b style="color:${ok ? "var(--ok)" : "var(--in)"}">${esc(o.uygulama)}</b>
+    <div class="small muted">${ok ? esc(o.durum.toLowerCase()) : `AI · %${o.guven}`}${o.durum === "Reddedildi" ? " · reddedildi" : ""} · <a href="eksik.html" target="_blank" rel="noopener">karar ↗</a></div></div>`;
+}
+async function loadAi() {
+  const ips = [...new Set((st.veri?.satirlar || []).filter(r => r.durum === "bos" || r.durum === "ertyok").map(r => r.ip))];
+  if (!ips.length) return;
+  try {
+    const r = await fetch("api/eksik/oneriler", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ips }) });
+    if (r.ok) { st.ai = await r.json() || {}; if (st.tab === "satir") satirTablo(suz()); }
+  } catch {}
+}
+function aiAdaylar() {
+  return suz().filter(r => (r.durum === "bos" || r.durum === "ertyok") && !r.altyapi && !r.genel && r.port !== "0" && !aiO(r));
+}
+async function aiSor() {
+  if (!st.yetki.yazma) { alert("Yetkiniz yok (DokuPanel: Yetki:Yazma)."); return; }
+  const l = aiAdaylar();
+  if (!l.length) { alert("Süzgece uyan, AI önerisi olmayan boş satır yok. (Önce süzün: ör. Durum = Platform süreci · AI'a bırakılacak)"); return; }
+  const portlar = {};
+  for (const r of l) (portlar[r.ip] ??= []).includes(r.port) || portlar[r.ip].push(r.port);
+  const n = Object.keys(portlar).length;
+  if (!confirm(`${l.length} port (${n} sunucu) ERT eksikleri AI motoruna gönderilecek. Toplu yetkiniz yoksa ilk 50 sunucu işlenir. Başlatılsın mı?`)) return;
+  const r = await fetch("api/eksik/calistir", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ portlar, yeniden: false }) });
+  const b = await r.json().catch(() => ({}));
+  if (!r.ok) { alert(b.error || `HTTP ${r.status}`); return; }
+  aiIzle();
+}
+let aiTimer = null;
+async function aiIzle() {
+  clearTimeout(aiTimer);
+  try {
+    const d = await (await fetch("api/eksik/durum")).json();
+    $("#aiDurum").innerHTML = d.calisiyor ? `<span class="spinner"></span> AI: ${esc(d.asama || "")} (${d.biten} / ${d.toplam}) <a href="#" id="aiDur">durdur</a>` : (d.mesaj ? esc(d.mesaj) : "");
+    $("#aiDur")?.addEventListener("click", async e => { e.preventDefault(); await fetch("api/eksik/durdur", { method: "POST" }); });
+    await loadAi();
+    if (d.calisiyor) aiTimer = setTimeout(aiIzle, 3000);
+  } catch {}
+}
+
 function satirTablo(l) {
-  $("#head").innerHTML = `<tr><th style="width:28px"><input type="checkbox" id="secHep" title="Süzülen satırların hepsini seç / bırak"${l.length && l.every(r => st.sec.has(r.ip)) ? " checked" : ""}></th><th>IP</th><th>Sunucu</th><th>Port</th><th>ERT uygulaması</th><th>Exe (Carbon Black)</th><th>IIS uygulamaları</th><th>VIP havuzu</th><th class="num">Bağlantı</th><th>Durum</th><th>Tespit edilen uygulama</th></tr>`;
+  $("#head").innerHTML = `<tr><th style="width:28px"><input type="checkbox" id="secHep" title="Süzülen satırların hepsini seç / bırak"${l.length && l.every(r => st.sec.has(r.ip)) ? " checked" : ""}></th><th>IP</th><th>Sunucu</th><th>Port</th><th>ERT uygulaması</th><th>Exe (Carbon Black)</th><th>IIS uygulamaları</th><th>VIP havuzu</th><th class="num">Bağlantı</th><th>Durum</th><th>Tespit edilen uygulama</th><th title="ERT eksikleri AI motorunun önerisi (DF_ERT_UYGULAMA_ONERI)">AI önerisi</th></tr>`;
   const g = l.slice(0, st.limit);
   $("#body").innerHTML = g.length ? g.map(r => `<tr${r.altyapi ? ` class="alt"` : ""}>
     <td><input type="checkbox" data-sec="${esc(r.ip)}"${st.sec.has(r.ip) ? " checked" : ""}></td>
@@ -251,14 +302,14 @@ function satirTablo(l) {
     <td class="small">${esc(r.sunucu || "")}</td>
     <td class="mono">${esc(r.port)}${r.altyapi ? ` <span class="small muted">altyapı</span>` : ""}</td>
     <td>${r.ert ? esc(r.ert) : `<span class="muted small">${r.durum === "ertyok" ? "ERT'de satır yok" : "boş"}</span>`}${r.website ? `<div class="small muted">WEBSITE: ${esc(r.website)}</div>` : ""}</td>
-    <td>${r.exe ? `<span class="mono" title="${esc(r.exeYol || "")}">${esc(r.exe)}</span>${r.httpSys || r.exe === "ntoskrnl.exe" ? `<span class="hs" title="Carbon Black bu portu ntoskrnl (HTTP.sys) adına yazıyor. ${esc(r.exeKaynak || "")}">HTTP.sys</span>` : ""}${r.exeKaynak && r.exeKaynak !== "Carbon Black" ? `<div class="small muted">${esc(r.exeKaynak)}</div>` : ""}`
+    <td>${r.exe ? `<span class="mono" title="${esc(r.exeYol || "")}">${esc(r.exe)}</span>${r.httpSys || r.exe === "ntoskrnl.exe" ? `<span class="hs" title="Carbon Black bu portu ntoskrnl (HTTP.sys) adına yazıyor. ${esc(r.exeKaynak || "")}">HTTP.sys</span>` : ""}${r.platform ? ` <span class="d" title="Bu exe:port sözlükte çok sayıda farklı uygulamada görülüyor (veritabanı / uygulama sunucusu platformu); exe uygulamayı belirlemez">platform</span>` : ""}${r.exeKaynak && r.exeKaynak !== "Carbon Black" ? `<div class="small muted">${esc(r.exeKaynak)}</div>` : ""}`
       : r.genelExe ? `<span class="small muted" title="Bu portu yalnız genel Windows / ajan süreci kabul ediyor (iş uygulaması değil; sözlüğe ve öneriye girmez): ${esc(r.genelExe)}">yalnız genel süreç</span>` : `<span class="muted small">—</span>`}</td>
     <td class="small">${(r.iis || []).length ? esc(r.iis.slice(0, 5).join(", ")) + (r.iis.length > 5 ? ` <span class="muted">+${r.iis.length - 5}</span>` : "") : ""}</td>
     <td class="small">${(r.vip || []).map(v => `<div title="LB havuzu · VIP adresi (vip_envanteri)">${esc(v)}</div>`).join("")}</td>
     <td class="num">${r.baglanti ? fmt(r.baglanti) : ""}</td>
     <td><span class="d ${r.durum}">${DURUM[dur(r)] ?? r.durum}</span>${VERI[r.veri] ? `<div class="small muted">${VERI[r.veri]}</div>` : ""}</td>
-    <td>${oneriHucre(r)}</td></tr>`).join("")
-    : `<tr><td colspan="11" class="empty">${st.veri?.kayit ? "Filtreye uyan satır yok." : "Henüz tarama yok."}</td></tr>`;
+    <td>${oneriHucre(r)}</td><td>${aiHucre(r)}</td></tr>`).join("")
+    : `<tr><td colspan="12" class="empty">${st.veri?.kayit ? "Filtreye uyan satır yok." : "Henüz tarama yok."}</td></tr>`;
   $("#count").textContent = `${fmt(l.length)} satır${l.length > st.limit ? ` · ilk ${fmt(st.limit)} gösteriliyor` : ""}`;
   $("#more").hidden = l.length <= st.limit;
 }
@@ -269,7 +320,7 @@ function sozlukTablo() {
   $("#head").innerHTML = `<tr><th>Exe</th><th>Port</th><th>ERT adı (sunucu sayısı)</th><th>IIS uygulamaları</th><th class="num">Sunucu</th></tr>`;
   const g = l.slice(0, st.limit);
   $("#body").innerHTML = g.length ? g.map(s => `<tr><td class="mono">${esc(s.exe)}</td><td class="mono">${esc(s.port)}</td>
-    <td>${s.adlar.map((a, i) => `<span${i ? ` class="muted"` : ""}>${i ? "" : "<b>"}${esc(a.ad)}${i ? "" : "</b>"} (${a.sunucu})</span>`).join(" · ")}${s.celiski ? ` <span class="d uyumsuz" title="Aynı exe + port ERT'de farklı adlarla kayıtlı">çelişki</span>` : ""}</td>
+    <td>${s.adlar.map((a, i) => `<span${i ? ` class="muted"` : ""}>${i ? "" : "<b>"}${esc(a.ad)}${i ? "" : "</b>"} (${a.sunucu})</span>`).join(" · ")}${s.platform ? ` <span class="d" title="Exe:port çok sayıda farklı uygulamada; öneri için kullanılmaz">platform</span>` : s.celiski ? ` <span class="d uyumsuz" title="Aynı exe + port ERT'de farklı adlarla kayıtlı">çelişki</span>` : ""}</td>
     <td class="small">${esc(s.iis.join(", "))}</td><td class="num">${fmt(s.sunucu)}</td></tr>`).join("")
     : `<tr><td colspan="5" class="empty">Sözlük boş (tarama yok ya da ERT'de adı dolu satırda exe görülmedi).</td></tr>`;
   $("#count").textContent = `${fmt(l.length)} imza · ${fmt(l.filter(s => s.celiski).length)} çelişkili`;
@@ -346,9 +397,9 @@ function csv() {
   const l = st.tab === "satir" ? suz() : null;
   const q = v => `"${String(v ?? "").replace(/"/g, '""')}"`;
   const lines = st.tab === "satir"
-    ? [["IP", "SUNUCU", "KURUM", "PORT", "ERT UYGULAMASI", "WEBSITE", "EXE", "EXE YOLU", "HTTP.SYS", "EXE KAYNAĞI", "IIS UYGULAMALARI", "VIP HAVUZU", "BAĞLANTI", "DURUM", "TESPİT EDİLEN UYGULAMA", "GÜVEN", "NASIL", "ADAYLAR"].join(";"),
+    ? [["IP", "SUNUCU", "KURUM", "PORT", "ERT UYGULAMASI", "WEBSITE", "EXE", "EXE YOLU", "HTTP.SYS", "EXE KAYNAĞI", "IIS UYGULAMALARI", "VIP HAVUZU", "BAĞLANTI", "DURUM", "TESPİT EDİLEN UYGULAMA", "GÜVEN", "NASIL", "ADAYLAR", "PLATFORM", "AI ÖNERİSİ", "AI GÜVEN", "AI DURUM", "AI GEREKÇE"].join(";"),
        ...l.map(r => [r.ip, r.sunucu, r.kurum, r.port, r.ert, r.website, r.exe, r.exeYol, r.httpSys ? "evet" : "", r.exeKaynak, (r.iis || []).join(", "), (r.vip || []).join(", "), r.baglanti, DURUM[dur(r)] ?? r.durum, r.oneri, r.guven, r.not,
-         (r.adaylar || []).map(a => `${a.ad} (${a.sunucu})`).join(", ")].map(q).join(";"))]
+         (r.adaylar || []).map(a => `${a.ad} (${a.sunucu})`).join(", "), r.platform ? "evet" : "", aiO(r)?.uygulama, aiO(r)?.guven, aiO(r)?.durum, aiO(r)?.gerekce].map(q).join(";"))]
     : [["EXE", "PORT", "ERT ADLARI", "IIS UYGULAMALARI", "SUNUCU", "ÇELİŞKİ"].join(";"),
        ...(st.veri?.sozluk || []).map(s => [s.exe, s.port, s.adlar.map(a => `${a.ad} (${a.sunucu})`).join(", "), s.iis.join(", "), s.sunucu, s.celiski ? "evet" : ""].map(q).join(";"))];
   const a = document.createElement("a");
@@ -359,6 +410,7 @@ function csv() {
 ["#q", "#durum", "#veri", "#guven", "#alt", "#gen", "#kurum"].forEach(s => $(s).addEventListener(s === "#q" ? "input" : "change", () => { st.limit = 500; if (s === "#durum" || s === "#veri") st.durumFiltre = ""; if (s === "#kurum") st.kurum = $("#kurum").value; ciz(); }));
 $("#more").addEventListener("click", () => { st.limit += 1000; ciz(); });
 $("#csv").addEventListener("click", csv);
+$("#aiSor").addEventListener("click", aiSor);
 document.addEventListener("click", e => {
   const t = e.target.closest("[data-tab]");
   if (t) { st.tab = t.dataset.tab; document.querySelectorAll("[data-tab]").forEach(b => b.classList.toggle("on", b === t)); st.limit = 500; ciz(); return; }
