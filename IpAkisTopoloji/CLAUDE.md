@@ -455,8 +455,9 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
   bulunamazsa öneri null + "Yok sayıldı … sahibi belirsiz". Aynı sunucuda ERT'de birebir bu ad kayıtlıysa (ör. "Redis") dokunulmaz. Prompt'a da kural.
 - **Kurum öneki** (kullanıcı: "başında ZK olanlar Ziraat Katılım, DIB olanlar Ziraat Dinamik; öneksizler banka — bakılmadığı için banka uygulamalarını ZK / DIB
   sunucularıyla eşleştiriyor"): `Eksik:UygulamaOnekleri` (varsayılan {"ZK": ["zk"], "DIB": ["dib"]}: önek → sunucunun segment Domain'i ya da (≥3 harfli önekte) sunucu adı
-  bununla başlar). `UygOnek` ("[ZK] X", "[ZK]X", "ZK X", "DIB-X"; ZB / tanımsız = "" banka), `SunucuGrup` (önek grubu / Domain zb… = banka "" / belirsiz null),
-  `KurumUyar`: banka sunucusuna yalnız öneksiz, ZK / DIB sunucusuna yalnız o önekli; belirsiz sunucuda (İştirak / Diğer) süzme yok; aynı sunucuda ERT'de kayıtlı ad hep uyar.
+  bununla başlar). `UygOnek`: önek HER ZAMAN köşeli parantezli (kullanıcı: "hepsi [ZK], [DIB]…") — "[ZK] X" → ZK, parantezsiz = "" banka (ZB.Wall, SAS Scoring
+  banka sayılır); tanımsız parantezli önek de banka değil. `SunucuGrup` (önek grubu / Domain zb… = banka "" / belirsiz null),
+  `KurumUyar`: banka sunucusuna yalnız parantezsiz, ZK / DIB sunucusuna yalnız o önekli; belirsiz sunucuda (İştirak / Diğer) süzme yok; aynı sunucuda ERT'de kayıtlı ad hep uyar.
   Uygulandığı yerler: `Candidates` (aday listesi), `CatalogMatch0` katalog havuzu, `CatalogMatch` sarmalayıcısı (eşleşen ad kuruma uymuyorsa aynı adın kurum kaydı
   ([ZK] Kredi ↔ Kredi), yoksa önek atılmış serbest ad + not); prompt kuralı. `Eksik:KurumOnekKurali`=true.
 - **"Bu sunucuda hangi uygulama çalışıyor?"** (IP kartı, Gelen portlar tablosunun üstündeki düğme; `SurecAi` Surec.cs, `POST /api/surec/ai`):

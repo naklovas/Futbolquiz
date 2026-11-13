@@ -371,21 +371,18 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
     // KURUM ÖNEKİ (kullanıcı: "başında ZK olanlar Ziraat Katılım, DIB olanlar Ziraat Dinamik; öneksizler banka uygulaması — bakılmadığı için banka
     // uygulamalarını ZK / DIB sunucularıyla, ZK / DIB uygulamalarını banka sunucularıyla eşleştiriyor"): uygulama adının öneki ↔ sunucunun kurumu.
     // `Eksik:UygulamaOnekleri` {"ZK": ["zk"], "DIB": ["dib"]} = önek → sunucunun segment Domain'i ya da sunucu adı bu öneklerden biriyle başlar.
-    // Banka sunucusu (Domain zb…, başka önek grubuna girmeyen) → yalnız öneksiz uygulamalar; ZK / DIB sunucusu → yalnız o önekli uygulamalar;
+    // Banka sunucusu (Domain zb…, başka önek grubuna girmeyen) → yalnız parantezsiz uygulamalar; ZK / DIB sunucusu → yalnız [ZK] / [DIB] uygulamalar;
     // kurumu belirsiz sunucuda (İştirak / Diğer) süzme yok. Aynı sunucuda ERT'de zaten kayıtlı adlar her zaman uyar.
     Dictionary<string, string[]>? _onek;
     Dictionary<string, string[]> UygOnekleri => _onek ??= cfg.GetSection("Eksik:UygulamaOnekleri").GetChildren()
         .Select(c => (Key: c.Key.ToUpperInvariant(), V: c.GetChildren().Select(x => x.Value).OfType<string>().Where(x => x.Length > 0).Select(x => x.ToLowerInvariant()).ToArray()))
         .Where(x => x.V.Length > 0).ToDictionary(x => x.Key, x => x.V) is { Count: > 0 } d ? d
         : new() { ["ZK"] = ["zk"], ["DIB"] = ["dib"] };
-    // adın kurum öneki ("[ZK] SAS…", "ZK SAS", "ZK-…", "DIB_…"); ZB / öneksiz = "" (banka)
-    string UygOnek(string ad)
-    {
-        var m = System.Text.RegularExpressions.Regex.Match(ad.Trim(), @"^(?:\[([A-Za-z]{2,4})\]|([A-Za-z]{2,4})(?:[\s_\-.]|$))");
-        string o = m.Success ? (m.Groups[1].Success ? m.Groups[1].Value : m.Groups[2].Value).ToUpperInvariant() : "";
-        return UygOnekleri.ContainsKey(o) ? o : "";
-    }
-    static readonly System.Text.RegularExpressions.Regex _onekAt = new(@"^(?:\[[A-Za-z]{2,4}\][\s_\-.]*|[A-Za-z]{2,4}[\s_\-.]+)", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+    // adın kurum öneki: HER ZAMAN köşeli parantezli (kullanıcı: "hepsi köşeli parantezli [ZK], [DIB]…") — "[ZK] SAS…" → ZK; parantezsiz = "" (banka).
+    // Tanımsız parantezli önek de ([XY]) banka değildir: banka sunucusuna önerilmez.
+    static string UygOnek(string ad) => System.Text.RegularExpressions.Regex.Match(ad.Trim(), @"^\[\s*([A-Za-zÇĞİÖŞÜçğıöşü]{1,6})\s*\]") is { Success: true } m
+        ? m.Groups[1].Value.ToUpperInvariant() : "";
+    static readonly System.Text.RegularExpressions.Regex _onekAt = new(@"^\[[^\]]{1,8}\][\s_\-.]*", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
     // sunucunun grubu: önek grubu ("ZK" / "DIB"), banka (""), belirsiz (null)
     string? SunucuGrup(EnvanterSnapshot env, string ip)
     {
@@ -1418,8 +1415,8 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
 
             Kurallar:
             - Uygulama adını mümkünse "ADAY UYGULAMALAR" listesinden HARFİ HARFİNE seç ("yeni": false).
-              KURUM ÖNEKİ: uygulama adının başındaki "[ZK]" / "ZK" Ziraat Katılım, "DIB" Ziraat Dinamik uygulamasıdır; öneksiz adlar banka (Ziraat Bankası)
-              uygulamasıdır. Banka sunucusuna (Domain zb…) önekli, ZK / DIB sunucusuna öneksiz ya da başka önekli uygulama ÖNERME (kod da süzer).
+              KURUM ÖNEKİ: uygulama adının başındaki köşeli parantezli önek kurumu gösterir: "[ZK] …" Ziraat Katılım, "[DIB] …" Ziraat Dinamik; parantezsiz
+              adlar banka (Ziraat Bankası) uygulamasıdır. Banka sunucusuna (Domain zb…) [..] önekli, ZK / DIB sunucusuna parantezsiz ya da başka önekli uygulama ÖNERME (kod da süzer).
                             Genel ürün adı (ör. "SAS") YAZMA; adaylarda aynı ürünün birden çok kaydı varsa (ZT SAS Enterprise Miner, [ZK] SAS IFRS TFRS9…)
               sunucuya uyanı seç: kurum öneki sunucu adının başıyla aynı olan ([ZK] ↔ zkprod…), BENZER ADLI SUNUCULARDA / aynı sunucunun
               diğer portlarında kayıtlı olan, adındaki ayırt edici kelime kanıtta ya da sunucu adında geçen.
