@@ -100,6 +100,13 @@
   .tabs { display:flex; gap:6px; margin: 4px 0 12px; }
   .tabs button.on { background: var(--in); border-color: var(--in); color:#fff; }
   .hs { font-size: 10.5px; color: var(--in); border: 1px solid var(--in); border-radius: 4px; padding: 0 4px; margin-left: 4px; }
+  #run { position: sticky; top: 0; z-index: 5; background: var(--panel); padding-top: 2px; }
+  .pbar { position: relative; height: 22px; border-radius: 6px; background: var(--line); overflow: hidden; }
+  .pbar i { position: absolute; inset: 0 auto 0 0; background: var(--in); transition: width .6s; }
+  .pbar span { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 12.5px; color: var(--text); mix-blend-mode: normal; text-shadow: 0 0 3px var(--panel); }
+  .grp { display: flex; flex-wrap: wrap; gap: 4px; max-height: 64px; overflow: auto; }
+  .grp span { font-size: 11.5px; border: 1px solid var(--line); border-radius: 4px; padding: 0 6px; background: var(--panel); font-family: Consolas, ui-monospace, monospace; }
+  .sonl { font-size: 11.5px; font-family: Consolas, ui-monospace, monospace; color: var(--muted); max-height: 92px; overflow: auto; }
   .stat { cursor: pointer; } .stat.on { border-color: var(--in); box-shadow: 0 0 0 1px var(--in) inset; }
 </style>
 </head>
@@ -170,10 +177,17 @@ function runHtml() {
   const yetki = st.yetki.topoloji;
   const btn = (id, t, title, prim) => `<button id="${id}" type="button"${prim ? ` class="primary"` : ""}${yetki ? "" : " disabled"} title="${esc(yetki ? title : "Yetkiniz yok (DokuPanel: Yetki:Topoloji)")}">${t}</button>`;
   if (is?.durum === "calisiyor") {
-    const yuz = is.toplam ? Math.round(is.biten * 100 / is.toplam) : 0;
-    return `<div class="run"><div><span class="spinner"></span> <b>Taranıyor</b> · ${esc(is.asama)} · ${fmt(is.sunucu)} sunucuda veri
-      <button id="stop" type="button" style="margin-left:10px">Durdur</button></div><div class="bar"><i style="width:${yuz}%"></i></div>
-      <div class="sub">Grup ${fmt(is.biten)} / ${fmt(is.toplam)} · başlangıç ${esc(tarih(is.baslangic))} · sayfa kapatılsa da tarama sunucuda sürer; 10 grupta bir kaydedilir</div></div>`;
+    const yuz = is.yuzde ?? (is.toplam ? Math.round(is.biten * 100 / is.toplam) : 0);
+    const adim = is.adim === "iis" ? "IIS logu sorgulanıyor" : is.adim === "cb" ? "Carbon Black sorgulanıyor" : "başlıyor";
+    const grup = is.grup || [];
+    return `<div class="run">
+      <div style="display:flex;gap:10px;align-items:center"><span class="spinner"></span><b>Taranıyor</b>
+        <span>${fmt(is.bitenSunucu)} / ${fmt(is.toplamSunucu)} sunucu · grup ${fmt(Math.min(is.biten + 1, is.toplam))} / ${fmt(is.toplam)} · ${adim}${is.kalan ? ` · tahmini kalan ${esc(is.kalan)}` : ""} · ${fmt(is.sunucu)} sunucuda veri</span>
+        <span class="sp" style="flex:1"></span><button id="stop" type="button">Durdur</button></div>
+      <div class="pbar"><i style="width:${yuz}%"></i><span>%${String(yuz).replace(".", ",")}</span></div>
+      ${grup.length ? `<div><div class="sub" style="margin-bottom:3px">Şu an sorgulanan ${grup.length} sunucu (ERT portları):</div><div class="grp">${grup.map(g => `<span>${esc(g)}</span>`).join("")}</div></div>` : ""}
+      ${is.son?.length ? `<div><div class="sub" style="margin-bottom:2px">Son biten sunucular (port → exe):</div><div class="sonl">${is.son.map(x => `<div>${esc(x)}</div>`).join("")}</div></div>` : ""}
+      <div class="sub">Başlangıç ${esc(tarih(is.baslangic))} · sayfa kapatılsa da tarama sunucuda sürer; 10 grupta bir kaydedilir</div></div>`;
   }
   const suzIp = [...new Set(suz().map(r => r.ip))];
   const bilgi = !k.tarama ? `Henüz tarama yok · ERT'de ${fmt(k.toplamIp)} sunucu, adı boş portu olan ${fmt(k.bosSunucu)} sunucu.`

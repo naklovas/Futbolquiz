@@ -15,7 +15,10 @@ record ImzaIis(string Port, List<string> Uygulamalar, long Istek);
 record ImzaSunucu(string Ip, List<ImzaPort> Gelen, List<string> Giden, List<ImzaIis> Iis);
 record ImzaTarama(DateTime Baslangic, DateTime? Bitis, double CbSaat, double IisDakika, List<ImzaSunucu> Sunucular, List<string> Taranan,
     List<string> Mesajlar, int ToplamIp, string? Kaydeden, List<string>? Bekleyen = null, string? Kapsam = null);
-record ImzaIs(string Durum, int Toplam, int Biten, string Asama, DateTime Baslangic, DateTime? Bitis, string? Hata, string? Kaydeden, int Sunucu);
+// İlerleme (kullanıcı: "progress bar üste, hangi sunucu hangi port yazsın, yüzde kaç"): ToplamSunucu / BitenSunucu, Adim (cb | iis), Yuzde,
+// Grup = şu an sorgulanan sunucular ("ip (ERT portları)"), Son = son biten sunucularda bulunan port → exe
+record ImzaIs(string Durum, int Toplam, int Biten, string Asama, DateTime Baslangic, DateTime? Bitis, string? Hata, string? Kaydeden, int Sunucu,
+    int ToplamSunucu = 0, int BitenSunucu = 0, string? Adim = null, double Yuzde = 0, List<string>? Grup = null, List<string>? Son = null, string? Kalan = null);
 record ImzaAday(string Ad, int Sunucu);
 // Durum = ERT tarafı (kayitli | bos | uyumsuz | ertyok); Veri = tarama tarafı (var | yok | taranmadi) — kullanıcı: tarama yokken "boş" süzgeci boş geliyordu
 record ImzaSatir(string Ip, string Port, string? Sunucu, string? Ert, string? Website, string? Exe, string? ExeYol, bool HttpSys,
@@ -71,15 +74,21 @@ sealed class ServisImzaService(IConfiguration cfg, IHttpClientFactory factory, E
         t = t with { Bekleyen = liste, Kapsam = kapsam, Bitis = null };
         var parcalar = liste.Chunk(Parca).ToList();
         var cts = new CancellationTokenSource();
-        var is_ = new ImzaIs("calisiyor", parcalar.Count, 0, $"{kapsam}: {liste.Count} sunucu sırada", DateTime.Now, null, null, user, t.Sunucular.Count);
+        var is_ = new ImzaIs("calisiyor", parcalar.Count, 0, $"{kapsam}: {liste.Count} sunucu sırada", DateTime.Now, null, null, user, t.Sunucular.Count, liste.Count);
         lock (_gate) { _is = is_; _cts = cts; _son = t; _hesap = null; }
-        _ = Task.Run(() => CalisAsync(t, parcalar, user, cts.Token));
+        string Etiket(string ip)
+        {
+            var ps = env.AppsOnIp(ip).Select(h => h.Port).Where(x => !string.IsNullOrWhiteSpace(x)).Distinct().OrderBy(x => int.TryParse(x, out int n) ? n : 999999).ToList();
+            string ad = env.AppsOnIp(ip).Select(h => h.UnixName).FirstOrDefault(x => !string.IsNullOrWhiteSpace(x)) ?? "";
+            return $"{ip}{(ad.Length > 0 ? " " + ad : "")} ({(ps.Count == 0 ? "ERT portu yok" : string.Join(", ", ps.Take(8)) + (ps.Count > 8 ? $" +{ps.Count - 8}" : ""))})";
+        }
+        _ = Task.Run(() => CalisAsync(t, parcalar, user, Etiket, cts.Token));
         return is_;
     }
 
     void Set(Func<ImzaIs, ImzaIs> f) { lock (_gate) if (_is != null) _is = f(_is); }
 
-    async Task CalisAsync(ImzaTarama t, List<string[]> parcalar, string user, CancellationToken ct)
+    async Task CalisAsync(ImzaTarama t, List<string[]> parcalar, string user, Func<string, string> etiket, CancellationToken ct)
     {
         var sunucular = t.Sunucular.ToDictionary(s => s.Ip);
         var taranan = t.Taranan.ToHashSet();
@@ -87,16 +96,20 @@ sealed class ServisImzaService(IConfiguration cfg, IHttpClientFactory factory, E
         var mesaj = t.Mesajlar.ToList();
         var sw = System.Diagnostics.Stopwatch.StartNew();
         ImzaTarama Anlik(DateTime? bitis) => t with { Sunucular = sunucular.Values.ToList(), Taranan = taranan.ToList(), Bekleyen = bekleyen.ToList(), Mesajlar = mesaj.Distinct().TakeLast(40).ToList(), Bitis = bitis };
+        int toplamSunucu = parcalar.Sum(x => x.Length), bitenSunucu = 0;
+        var sonlar = new List<string>();
         try
         {
             for (int i = 0; i < parcalar.Count; i++)
             {
                 ct.ThrowIfCancellationRequested();
                 var p = parcalar[i];
-                string kalanSure = i > 0 ? $" · tahmini kalan {TimeSpan.FromSeconds(sw.Elapsed.TotalSeconds / i * (parcalar.Count - i)):hh\\:mm}" : "";
-                Set(x => x with { Biten = i, Asama = $"{i + 1} / {parcalar.Count}. grup: Carbon Black ({p[0]} … {p.Length} sunucu){kalanSure}" });
+                string? kalan = bitenSunucu > 0 ? Sure2(TimeSpan.FromSeconds(sw.Elapsed.TotalSeconds / bitenSunucu * (toplamSunucu - bitenSunucu))) : null;
+                var grup = p.Select(etiket).ToList();
+                double Yuzde(double adim) => toplamSunucu == 0 ? 100 : Math.Round((bitenSunucu + p.Length * adim) * 100.0 / toplamSunucu, 1);
+                Set(x => x with { Biten = i, Asama = $"{i + 1} / {parcalar.Count}. grup · Carbon Black sorgulanıyor", Adim = "cb", Grup = grup, BitenSunucu = bitenSunucu, Yuzde = Yuzde(0), Kalan = kalan });
                 var cb = await CbAsync(p, mesaj, ct);
-                Set(x => x with { Asama = $"{i + 1} / {parcalar.Count}. grup: IIS logu ({p.Length} sunucu){kalanSure}" });
+                Set(x => x with { Asama = $"{i + 1} / {parcalar.Count}. grup · IIS logu sorgulanıyor", Adim = "iis", Yuzde = Yuzde(0.5) });
                 var iis = await IisAsync(p, mesaj, ct);
                 foreach (var ip in p)
                 {
@@ -106,16 +119,24 @@ sealed class ServisImzaService(IConfiguration cfg, IHttpClientFactory factory, E
                     if (gelen.Count + giden.Count + ii.Count > 0) sunucular[ip] = new ImzaSunucu(ip, gelen, giden, ii);
                     else sunucular.Remove(ip);
                     taranan.Add(ip);
+                    // son biten sunucular: port → exe (genel / çekirdek dahil, kısa), IIS portları
+                    var pe = gelen.Where(x => x.Port != "0").GroupBy(x => x.Port).OrderBy(g => int.TryParse(g.Key, out int n) ? n : 999999)
+                        .Select(g => { var iu = ii.FirstOrDefault(x => x.Port == g.Key); string e = ExeAd(g.OrderByDescending(x => x.Baglanti).First().Yol);
+                            return $"{g.Key} {(HttpSysEslesme.Cekirdek(e) ? "HTTP.sys" : e)}{(iu != null ? $" (IIS: {string.Join(", ", iu.Uygulamalar.Take(3))})" : "")}"; }).ToList();
+                    foreach (var x in ii) if (!pe.Any(q => q.StartsWith(x.Port + " "))) pe.Add($"{x.Port} IIS: {string.Join(", ", x.Uygulamalar.Take(3))}");
+                    sonlar.Insert(0, $"{ip} → {(pe.Count == 0 ? "veri yok" : string.Join(" · ", pe.Take(6)) + (pe.Count > 6 ? $" +{pe.Count - 6}" : ""))}");
                 }
+                if (sonlar.Count > 12) sonlar.RemoveRange(12, sonlar.Count - 12);
+                bitenSunucu += p.Length;
                 var bitti = p.ToHashSet(); bekleyen.RemoveAll(bitti.Contains);
-                Set(x => x with { Biten = i + 1, Sunucu = sunucular.Count });
+                Set(x => x with { Biten = i + 1, Sunucu = sunucular.Count, BitenSunucu = bitenSunucu, Yuzde = toplamSunucu == 0 ? 100 : Math.Round(bitenSunucu * 100.0 / toplamSunucu, 1), Son = sonlar.ToList() });
                 lock (_gate) { _son = Anlik(null); _hesap = null; }
                 if ((i + 1) % 10 == 0) await YazAsync(Anlik(null), user);   // uzun işte ara kayıt (uygulama yeniden başlarsa "devam et")
             }
             var son = Anlik(DateTime.Now);
             lock (_gate) { _son = son; _hesap = null; }
             await YazAsync(son, user);
-            Set(x => x with { Durum = "bitti", Biten = x.Toplam, Asama = $"Bitti · {sunucular.Count} sunucuda veri", Bitis = DateTime.Now });
+            Set(x => x with { Durum = "bitti", Biten = x.Toplam, Asama = $"Bitti · {sunucular.Count} sunucuda veri", Bitis = DateTime.Now, Yuzde = 100, Grup = null });
         }
         catch (OperationCanceledException)
         {
@@ -130,6 +151,7 @@ sealed class ServisImzaService(IConfiguration cfg, IHttpClientFactory factory, E
         }
     }
 
+    static string Sure2(TimeSpan t) => t.TotalMinutes < 1 ? "1 dk'dan az" : t.TotalHours < 1 ? $"{(int)t.TotalMinutes} dk" : $"{(int)t.TotalHours} sa {t.Minutes} dk";
     static string Terimler(IEnumerable<string> ips) => "(" + string.Join(" OR ", ips.Select(ip => $"TERM({ip})")) + ")";
     static string Liste(IEnumerable<string> ips) => string.Join(",", ips.Select(ip => $"\"{ip}\""));
 
