@@ -479,9 +479,47 @@ xlog"];
             l.GroupBy(x => x.S.Ert!, StringComparer.OrdinalIgnoreCase).Select(g => new ImzaAday(g.Key, g.Select(x => x.S.Ip).Distinct().Count()))
                 .OrderByDescending(a => a.Sunucu).ToList();
 
+        // VIP HAVUZU (kullanıcı: "aynı şekilde vip havuzu da kapsanacak mı"): aynı LB havuzunun (VIP ip:port + havuz adı) diğer üyelerinin aynı üye portundaki
+        // ERT adı — en güçlü kanıt, tarama gerektirmez (envanterden)
+        var havuz = new Dictionary<string, List<(string Ip, string Port)>>(StringComparer.OrdinalIgnoreCase);
+        string HKey(VipMember m) => $"{m.LbIp}|{m.LbPort}|{m.Pool}";
+        foreach (var ip in Ipler(env))
+            foreach (var m in env.MemberOf(ip))
+                if (!string.IsNullOrEmpty(m.Port)) (havuz.TryGetValue(HKey(m), out var hl) ? hl : havuz[HKey(m)] = []).Add((ip, m.Port!));
+        List<string> ErtAdlari(string ip, string port) => env.AppsOnIp(ip).Where(h => h.Port == port).Select(h => h.AppName?.Trim()).OfType<string>()
+            .Where(a => a.Length > 0 && !Sistem(a)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        (List<ImzaAday> Ad, string Havuz)? VipAdlari(string ip, string port)
+        {
+            foreach (var m in env.MemberOf(ip).Where(m => m.Port == port))
+            {
+                if (!havuz.TryGetValue(HKey(m), out var uy)) continue;
+                var ad = uy.Where(u => u.Ip != ip).SelectMany(u => ErtAdlari(u.Ip, u.Port).Take(1).Select(a => (A: a, u.Ip)))
+                    .GroupBy(x => x.A, StringComparer.OrdinalIgnoreCase).Select(g => new ImzaAday(g.Key, g.Select(x => x.Ip).Distinct().Count()))
+                    .OrderByDescending(x => x.Sunucu).ToList();
+                if (ad.Count > 0) return (ad, $"{Regex.Replace(m.Pool ?? "", "^/Common/", "", RegexOptions.IgnoreCase)} · {m.LbIp}{(string.IsNullOrEmpty(m.LbPort) ? "" : ":" + m.LbPort)}");
+            }
+            return null;
+        }
+
         var sonuc = new List<ImzaSatir>(satirlar.Count);
         foreach (var (s, iisSet, anahtar) in satirlar)
         {
+            if (!s.Altyapi && VipAdlari(s.Ip, s.Port) is { } va)
+            {
+                var en0 = va.Ad[0]; int top0 = va.Ad.Sum(a => a.Sunucu);
+                bool kar0 = va.Ad.Count > 1 && en0.Sunucu < top0 * 0.6;
+                string not0 = $"aynı VIP havuzu ({va.Havuz}) → diğer üyelerden {en0.Sunucu} sunucuda '{en0.Ad}'" + (va.Ad.Count > 1 ? $" ({va.Ad.Count} farklı ad{(kar0 ? " — net çoğunluk yok" : "")})" : "");
+                if (s.Durum is "bos" or "ertyok")
+                {
+                    sonuc.Add(s with { Oneri = en0.Ad, Guven = kar0 ? "orta" : "güçlü", Adaylar = va.Ad.Take(8).ToList(), Not = not0 });
+                    continue;
+                }
+                if (s.Durum == "kayitli" && !kar0 && !va.Ad.Any(a => s.Ert!.Split(" | ").Any(e => string.Equals(a.Ad, e, StringComparison.OrdinalIgnoreCase))))
+                {
+                    sonuc.Add(s with { Durum = "uyumsuz", Oneri = en0.Ad, Guven = "güçlü", Adaylar = va.Ad.Take(8).ToList(), Not = not0 + " — bu sunucuda farklı kayıtlı" });
+                    continue;
+                }
+            }
             if (s.Altyapi || s.Veri != "var") { sonuc.Add(s); continue; }
             List<(ImzaSatir S, HashSet<string> IisSet, string? Anahtar)> c = [];
             string? guven = null, nasil = null;

@@ -411,8 +411,7 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
   + `GereksizYol` (üretici klasörleri) + `Imza:GenelExeler`; ntoskrnl / System ve w3wp ASLA gereksiz değil. Taramada gereksizler `ImzaSunucu.Genel`'e ayrılır (giden
   listesine hiç girmez), hesapta eski kayıtlar da ayrılır: port yalnız gereksiz süreçteyse exe BOŞ, `GenelExe` (ad) + `Genel=true` → hücrede "yalnız genel süreç",
   ERT'de kaydı yoksa varsayılan gizli; sözlüğe / öneriye / HTTP.sys yol eşleşmesine girmez, "son biten" listesine yazılmaz. VIP HAVUZU (kullanıcı: "vip havuzunu da getirir misin"): `ImzaSatir.Vip` = env.MemberOf(ip) içinde
-  üye portu = satır portu → "havuz (/Common/ atılır) · VIP ip:port"; tabloda "VIP havuzu" kolonu, aramada ve CSV'de (VIP HAVUZU). Öneri için henüz kullanılmıyor
-  (aynı havuzun diğer üyesinin ERT adı güçlü kanıt olabilir — kullanıcıya önerildi). TEST SUNUCULARI (kullanıcı: "domainden ayrıştırabiliyoruz, testlere bakmasın boşuna"):
+  üye portu = satır portu → "havuz (/Common/ atılır) · VIP ip:port"; tabloda "VIP havuzu" kolonu, aramada ve CSV'de (VIP HAVUZU). Öneride de kullanılıyor (aşağıda VIP HAVUZU ÖNERİSİ). TEST SUNUCULARI (kullanıcı: "domainden ayrıştırabiliyoruz, testlere bakmasın boşuna"):
   `Test(env, ip)` = segment Domain'inde `Eksik:TestIfadeleri` (varsayılan "test") — `Ipler(env)` tüm kapsamlarda (ip modu dahil) taramadan, satırlardan ve sözlükten
   çıkarır; kayıtta `testSunucu` sayısı, bantta "N test sunucusu dışarıda". KURUM (kullanıcı: "zb banka, zk katılım, zi iştirak"; "sunucu adına göre değil, yine domain"):
   `Kurum(env, ip)` = segment Domain'inin öneki (`Imza:Kurumlar`, varsayılan Ziraat Bankası zb / Ziraat Katılım zk / İştirak zi; eşleşmeyen "Diğer"); `ImzaSatir.Kurum`, kayıtta
@@ -423,7 +422,11 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
   exe yolunda / kesin kayıt / zaman korelasyonu / "HTTP.sys · exe bulunamadı"), korelasyonla gelen exe'de güven bir kademe düşük. Çözülemeyen ntoskrnl: IIS varsa
   anahtar "http.sys|port" (eşleşmede IIS Jaccard ≥ 0,5 şart, orta; sözlükte "HTTP.sys (exe bilinmiyor, IIS'le)"); ayrıca sunucuda çalışan TEK bir exe aynı portla
   sözlükteyse (ör. boş satırda zb.app.wall.exe var, başka sunucularda zb.app.wall.exe:9000 "Wall") → orta, IIS de ortaksa güçlü. IIS SÖZLÜĞÜ sekmesi (`ImzaIisSozluk`:
-  IIS uygulaması → ERT adları, portlar, çelişki). Hesap önbelleği 10 dk (tahminler değişebilir).
+  IIS uygulaması → ERT adları, portlar, çelişki). Hesap önbelleği 10 dk (tahminler değişebilir). VIP HAVUZU ÖNERİSİ (kullanıcı: "aynı şekilde vip havuzu da kapsanacak mı"):
+  önerilerden ÖNCE ve TARAMADAN BAĞIMSIZ (envanter): satırın IP:port'u bir havuzun üyesiyse (anahtar VIP ip | VIP port | havuz adı) diğer üyelerin aynı üye portundaki
+  ERT adları (sistem portu hariç, üye başına ilk ad) → boş / ERT'de yok satıra öneri "güçlü" (%60 altı çoğunlukta "orta"), not "aynı VIP havuzu (havuz · VIP) → …";
+  ERT dolu ama havuzun açık çoğunluğu başka adla → "uyumsuz" (ad listesi " | " ile bölünüp karşılaştırılır). Sahte veriyle: HSM havuzu, boş üye "HSM Provizyon güçlü",
+  "Kredi Kartı Başvuru" kayıtlı üye uyumsuz — tarama yokken.
   İLERLEME (kullanıcı: "progress bar üste, hangi sunucu hangi port, yüzde kaç"): `ImzaIs` ToplamSunucu / BitenSunucu / Adim (cb | iis) / Yuzde (grup içinde CB = yarım) /
   Grup ("ip sunucuadı (ERT portları)") / Son (son biten 12 sunucu: "ip → port exe (IIS: …)", ntoskrnl "HTTP.sys") / Kalan ("4 dk", "1 sa 5 dk"); sayfada bant
   `position: sticky` üstte, yüzdeli çubuk, şu an sorgulanan sunucu çipleri, son bitenler listesi. Sayfa: tarama bandı (ilerleme, tahmini kalan, durdur), istatistik kartları (tıkla süz), "IP + port
