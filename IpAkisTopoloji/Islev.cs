@@ -39,7 +39,8 @@ record SmKayit(string No, string? Tarih, string? Tur, string? Baslik, string? Ac
 record IslevProfil(string Ip, string Metin, List<string> Msy, List<string> Csy, List<string> Kahin, List<SmKayit> Kurulum,
     List<SmKayit> Talepler, List<string> Hatalar, IslevDetay? Detay, string? Kume);
 
-sealed class IslevService(IConfiguration cfg, IHttpClientFactory factory, EnvanterService envanter, ILogger<IslevService> log)
+sealed class IslevService(IConfiguration cfg, IHttpClientFactory factory, EnvanterService envanter, ILogger<IslevService> log,
+    ServisImzaService? imza = null, NessusService? nessus = null)
 {
     static readonly Regex SafeName = new(@"^[A-Za-z_][A-Za-z0-9_]*$");
     static readonly Regex SafeTable = new(@"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*){0,2}$");
@@ -326,7 +327,7 @@ sealed class IslevService(IConfiguration cfg, IHttpClientFactory factory, Envant
             var targets = ips.Where(ip => !(res.TryGetValue(ip, out var x) && x.Detay?.Kaynak?.StartsWith("Elle") == true))
                 .Where(ip => hepsi || !res.TryGetValue(ip, out var x) || x.Detay?.Islev == null).ToList();
             Set(d => d with { Asama = "Veriler toplanıyor (ERT, MSY, ÇSY, Kahin, SM)", Toplam = targets.Count, Biten = 0 });
-            var profiles = await ProfilesAsync(targets, env, ct);
+            var profiles = await YazilimEkleAsync(await ProfilesAsync(targets, env, ct), ct);
 
             Set(d => d with { Asama = "AI sınıflandırıyor" });
             int paket = Math.Clamp(cfg.GetValue("Islev:Paket", 4), 1, 10);
@@ -385,6 +386,12 @@ sealed class IslevService(IConfiguration cfg, IHttpClientFactory factory, Envant
             Her sunucu için verilen kanıtlara (envanter, uygulama ve port kayıtları, VIP, sanal sunucu notları, kurulum talepleri,
             iş istekleri) bakarak sunucunun İŞLEVİNİ belirle. Port numarasından çok iş isteklerindeki açıklamalara ve uygulama
             adlarına ağırlık ver. Kanıt yetersizse islev "Belirsiz" ve güveni düşük yaz; uydurma.
+            "ÇALIŞAN YAZILIMLAR" bölümü sunucuda GERÇEKTEN çalışan programlardır (Carbon Black) ve işlevi en doğrudan gösterir:
+            ör. sas.exe = analitik / raporlama, pmserver / odi / dtexec (SSIS) = ETL, sqlservr / oracle = veritabanı, w3wp + IIS
+            uygulamaları = web / servis katmanı, MQ = mesajlaşma, Control-M = iş zamanlama. "= <ürün>" etiketi bilinen üründür.
+            "[TAHMİN, kesin değil]" işaretli exe yalnız ipucudur. Genel Windows / ajan süreçleri (svchost, antivirüs, yedekleme, izleme
+            ajanları, tarayıcılar) listeye konmaz ve işlevi belirlemez. "NESSUS" bölümündeki servisler / DB instance'ları da kesin kanıttır.
+            Çalışan yazılımlar envanter adlarıyla çelişirse yazılıma güven ve gerekçede belirt.
 
             "islev" alanına AŞAĞIDAKİ LİSTEDEN BİRİNİ, yazımını HARFİ HARFİNE koruyarak yaz. Hiçbiri gerçekten uymuyorsa
             "Diğer: <2–3 kelimelik ad>" yaz. Ayrıntıyı "rol" alanına koy.
@@ -572,9 +579,34 @@ sealed class IslevService(IConfiguration cfg, IHttpClientFactory factory, Envant
     public async Task<IslevProfil> ProfileAsync(string ip, CancellationToken ct)
     {
         var env = await envanter.GetAsync(false, ct);
-        var p = (await ProfilesAsync([ip], env, ct))[ip];
+        var p = (await YazilimEkleAsync(await ProfilesAsync([ip], env, ct), ct))[ip];
         var (res, _) = await ResultsAsync(false, ct);
         return res.TryGetValue(ip, out var x) ? p with { Detay = x.Detay, Kume = x.Kume } : p;
+    }
+
+    // ÇALIŞAN YAZILIMLAR (kullanıcı: "işlev belirlerken exe ve servis detayları işe yaramaz mı" → "evet yap"): yalnız işlev AI'ına giden profile eklenir
+    // (ERT eksikleri kendi CB / imza / Nessus bölümlerini ayrıca yazıyor). Kaynaklar: servis imzası kayıtlı taraması (yeni CB sorgusu yok) + Nessus (önbellekli).
+    // Bölüm profilin BAŞINA (sunucu başlığından hemen sonra) konur; Islev:MaxKarakter kesmesin. `Islev:YazilimKaniti`=true ile kapatılabilir.
+    async Task<Dictionary<string, IslevProfil>> YazilimEkleAsync(Dictionary<string, IslevProfil> profiller, CancellationToken ct)
+    {
+        if (!cfg.GetValue("Islev:YazilimKaniti", true) || (imza == null && nessus == null) || profiller.Count == 0) return profiller;
+        Dictionary<string, NessusSunucu> nes = [];
+        if (nessus != null)
+            try { nes = await nessus.SunucularAsync(profiller.Keys, null, ct); }
+            catch (Exception ex) when (ex is not OperationCanceledException) { log.LogWarning("İşlev: Nessus okunamadı: {Hata}", ex.Message); }
+        int nesMax = Math.Clamp(cfg.GetValue("Islev:NessusMaxKarakter", 1200), 300, 6000);
+        var sonuc = new Dictionary<string, IslevProfil>();
+        foreach (var (ip, p) in profiller)
+        {
+            var ek = new StringBuilder();
+            if (imza != null && await imza.SunucuOzetiAsync(ip, ct) is { } oz) ek.Append(oz);
+            if (nes.TryGetValue(ip, out var n) && NessusService.Metin(n, nesMax) is { Length: > 0 } nm) ek.AppendLine("NESSUS (servisler, DB instance, teknoloji):").AppendLine(nm.TrimEnd());
+            if (ek.Length == 0) { sonuc[ip] = p; continue; }
+            int i = p.Metin.IndexOf('\n');   // başlık satırından ("### Sunucu …") hemen sonra
+            string metin = i < 0 ? p.Metin + "\n" + ek : p.Metin[..(i + 1)] + ek + p.Metin[(i + 1)..];
+            sonuc[ip] = p with { Metin = metin };
+        }
+        return sonuc;
     }
 
     sealed class Bag

@@ -360,6 +360,37 @@ xlog"];
     // ERT eksikleri AI'ına kanıt (kullanıcı: "Eksik ile imza sayfasının güçlerini birleştirelim"): sunucunun boş portları için servis imzası
     // bulguları — exe (kaynağıyla), IIS uygulamaları, VIP havuzu, imza önerisi + güven, aynı exe:port'un sözlükteki adları, platform uyarısı.
     // Tarama yoksa / sunucu taranmamışsa null (tarama tetiklemez, yalnız kayıtlı sonucu okur).
+    // İŞLEV HARİTASI için sunucu özeti (kullanıcı: "işlev belirlerken exe ve servis detayları işe yaramaz mı" → "evet yap"): kayıtlı taramadan
+    // dinlediği portlar → exe (bilinen ürün etiketiyle; tahmini exe işaretli), IIS uygulamaları, dışarı bağlanan iş exe'leri. Genel / ajan süreçleri yok.
+    // Sunucu taranmamışsa null.
+    public async Task<string?> SunucuOzetiAsync(string ip, CancellationToken ct)
+    {
+        ImzaSonuc s; ImzaTarama? t;
+        try { s = await SonucAsync(ct); lock (_gate) t = _son; t ??= await OkuAsync(ct); }
+        catch (Exception ex) when (ex is not OperationCanceledException) { log.LogWarning(ex, "Servis imzası özeti okunamadı"); return null; }
+        if (t == null || !t.Taranan.Contains(ip)) return null;
+        var satir = s.Satirlar.Where(r => r.Ip == ip && !r.Genel && (r.Exe != null || r.Iis.Count > 0))
+            .OrderBy(r => int.TryParse(r.Port, out var n) ? n : 0).Take(20).ToList();
+        string Etiket(string? yol) => yol != null && EksikService.BilinenUrun(yol) is { } u ? $" = {u}" : "";
+        var parca = satir.Select(r =>
+        {
+            bool tahmin = r.ExeKaynak?.Contains("korelasyon") == true;
+            string exe = r.Exe == null ? "" : r.Exe == "ntoskrnl.exe" ? "HTTP.sys (exe bilinmiyor)" : $"{r.Exe}{Etiket(r.ExeYol)}{(tahmin ? " [TAHMİN, kesin değil]" : "")}";
+            string iis = r.Iis.Count > 0 ? $"IIS: {string.Join(", ", r.Iis.Take(6))}" : "";
+            return $"{r.Port} → {string.Join(" · ", new[] { exe, iis }.Where(x => x.Length > 0))}";
+        }).ToList();
+        var sun = t.Sunucular.FirstOrDefault(x => x.Ip == ip);
+        var dinleyen = satir.Select(r => r.ExeYol).OfType<string>().ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var giden = (sun?.Giden ?? []).Where(y => !Gereksiz(y) && !HttpSysEslesme.Cekirdek(y) && !dinleyen.Contains(y))
+            .Select(y => $"{ExeAd(y)}{Etiket(y)}").Distinct().Take(10).ToList();
+        if (parca.Count == 0 && giden.Count == 0) return "ÇALIŞAN YAZILIMLAR (Carbon Black taraması): bu sunucuda iş süreci görülmedi (yalnız genel / ajan süreçleri ya da trafik yok).\n";
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine($"ÇALIŞAN YAZILIMLAR (Carbon Black son {t.CbSaat:0} saat + IIS logu; genel Windows / ajan süreçleri hariç):");
+        if (parca.Count > 0) sb.AppendLine("- dinlediği portlar: " + string.Join("; ", parca));
+        if (giden.Count > 0) sb.AppendLine("- yalnız dışarı bağlanan iş programları: " + string.Join(", ", giden));
+        return sb.ToString();
+    }
+
     public async Task<string?> KanitMetniAsync(string ip, IEnumerable<string> portlar, CancellationToken ct)
     {
         ImzaSonuc s;

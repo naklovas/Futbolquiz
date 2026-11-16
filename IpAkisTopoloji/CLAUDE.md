@@ -484,6 +484,14 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
   bölünür, `AileGenel` agent / service / server / grp / pool / vip / web… ve GenelKelime atılır) en az YARISI katalog adında tam kelime (KelimeEs) olmalı
   (SAS ALM → [ZK] SAS IFRS TFRS9 ve ReeskService → Merkez Bankası Reeskont Kredisi kalır). Ajan listesine Opsware / Server Automation. VIP HAVUZ ADI: AI'ın serbest
   adı sunucunun VIP havuz adından (Grp / pool eki atılmış) türetilmişse güven ≤ 40 + not; prompt'ta "havuz adı uygulama adı değildir".
+- **İşlev haritasına çalışan yazılımlar** (kullanıcı: "işlev belirlerken bu exe ve servis detayları işe yaramaz mı" → "evet yap"): IslevService'e isteğe bağlı
+  `ServisImzaService? imza`, `NessusService? nessus` (DI döngüsü yok: ikisi de Islev'e bağlı değil). `YazilimEkleAsync` yalnız işlev AI'ına giden profile (RunAsync ve
+  `/api/islev/profil` → ProfileAsync) başlık satırından hemen sonra ekler — ProfilesAsync'in kendisi değişmedi (ERT eksikleri kendi CB / imza / Nessus bölümlerini yazıyor).
+  `ServisImzaService.SunucuOzetiAsync(ip)`: kayıtlı taramadan (yeni CB sorgusu yok) "ÇALIŞAN YAZILIMLAR": dinlediği portlar → exe (`= <BilinenUrun>` etiketi, korelasyon exe'si
+  "[TAHMİN, kesin değil]", çözülemeyen ntoskrnl "HTTP.sys (exe bilinmiyor)") + IIS uygulamaları; yalnız dışarı bağlanan iş exe'leri; genel / ajan süreçleri yok; taranmamışsa
+  bölüm yok. + "NESSUS" (`NessusService.Metin`, `Islev:NessusMaxKarakter`=1200). Prompt: çalışan yazılım işlevi en doğrudan gösterir (sas = analitik, pmserver / odi / SSIS =
+  ETL, sqlservr / oracle = DB, w3wp + IIS = web, MQ, Control-M…), tahmin yalnız ipucu, envanterle çelişirse yazılıma güven. `Islev:YazilimKaniti`=true ile kapatılır.
+  ERT eksiklerinin onaylı önerileri EKLENMEDİ (EksikService IslevService'e bağlı → döngü).
 - **"Bu sunucuda hangi uygulama çalışıyor?"** (IP kartı, Gelen portlar tablosunun üstündeki düğme; `SurecAi` Surec.cs, `POST /api/surec/ai`):
   arayüzdeki /api/surec sonucu exe başına toplanıp (PID'ler, portlar, giden, bağlanan / bağlandığı uygulamalar) AI'a gider (yeniden
   sorgulanmaz) + ERT kayıtları + segment + genel bilgiler dosyası. Kesin genel süreçler kodda ayıklanır (`GenelAd` / `GenelYol`: svchost,
