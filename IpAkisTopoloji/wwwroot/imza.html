@@ -249,6 +249,8 @@ function oneriHucre(r) {
     <div class="small muted" style="max-width:440px">${esc(r.not)}</div></div>`;
 }
 
+// AI tarama anı: gün.ay.yıl saat:dakika:saniye
+const tamTarih = d => { const t = new Date(d); if (isNaN(t)) return String(d); const p = n => String(n).padStart(2, "0"); return `${p(t.getDate())}.${p(t.getMonth() + 1)}.${t.getFullYear()} ${p(t.getHours())}:${p(t.getMinutes())}:${p(t.getSeconds())}`; };
 function aiHucre(r) {
   const o = aiO(r);
   if (!o) return "";
@@ -308,7 +310,7 @@ async function aiIzle() {
 }
 
 function satirTablo(l) {
-  $("#head").innerHTML = `<tr><th style="width:28px"><input type="checkbox" id="secHep" title="Süzülen satırların hepsini seç / bırak"${l.length && l.every(r => st.sec.has(r.ip)) ? " checked" : ""}></th><th>IP</th><th>Sunucu</th><th>Port</th><th>ERT uygulaması</th><th>Exe (Carbon Black)</th><th>IIS uygulamaları</th><th>VIP havuzu</th><th class="num">Bağlantı</th><th>Durum</th><th>Tespit edilen uygulama</th><th title="ERT eksikleri AI motorunun önerisi (DF_ERT_UYGULAMA_ONERI)">AI önerisi</th></tr>`;
+  $("#head").innerHTML = `<tr><th style="width:28px"><input type="checkbox" id="secHep" title="Süzülen satırların hepsini seç / bırak"${l.length && l.every(r => st.sec.has(r.ip)) ? " checked" : ""}></th><th>IP</th><th>Sunucu</th><th>Port</th><th>ERT uygulaması</th><th>Exe (Carbon Black)</th><th>IIS uygulamaları</th><th>VIP havuzu</th><th class="num">Bağlantı</th><th>Durum</th><th>Tespit edilen uygulama</th><th title="ERT eksikleri AI motorunun önerisi (DF_ERT_UYGULAMA_ONERI)">AI önerisi</th><th title="AI'ın bu portu en son taradığı an">AI tarama</th></tr>`;
   const g = l.slice(0, st.limit);
   $("#body").innerHTML = g.length ? g.map(r => `<tr${r.altyapi ? ` class="alt"` : ""}>
     <td><input type="checkbox" data-sec="${esc(r.ip)}"${st.sec.has(r.ip) ? " checked" : ""}></td>
@@ -322,8 +324,8 @@ function satirTablo(l) {
     <td class="small">${(r.vip || []).map(v => `<div title="LB havuzu · VIP adresi (vip_envanteri)">${esc(v)}</div>`).join("")}</td>
     <td class="num">${r.baglanti ? fmt(r.baglanti) : ""}</td>
     <td><span class="d ${r.durum}">${DURUM[dur(r)] ?? r.durum}</span>${VERI[r.veri] ? `<div class="small muted">${VERI[r.veri]}</div>` : ""}</td>
-    <td>${oneriHucre(r)}</td><td>${aiHucre(r)}</td></tr>`).join("")
-    : `<tr><td colspan="12" class="empty">${st.veri?.kayit ? "Filtreye uyan satır yok." : "Henüz tarama yok."}</td></tr>`;
+    <td>${oneriHucre(r)}</td><td>${aiHucre(r)}</td><td class="small mono" style="white-space:nowrap">${aiO(r)?.aiTarih ? esc(tamTarih(aiO(r).aiTarih)) : ""}</td></tr>`).join("")
+    : `<tr><td colspan="13" class="empty">${st.veri?.kayit ? "Filtreye uyan satır yok." : "Henüz tarama yok."}</td></tr>`;
   $("#count").textContent = `${fmt(l.length)} satır${l.length > st.limit ? ` · ilk ${fmt(st.limit)} gösteriliyor` : ""}`;
   $("#more").hidden = l.length <= st.limit;
 }
@@ -419,9 +421,9 @@ function csv() {
   const l = st.tab === "satir" ? suz() : null;
   const q = v => `"${String(v ?? "").replace(/"/g, '""')}"`;
   const lines = st.tab === "satir"
-    ? [["IP", "SUNUCU", "KURUM", "PORT", "ERT UYGULAMASI", "WEBSITE", "EXE", "EXE YOLU", "HTTP.SYS", "EXE KAYNAĞI", "IIS UYGULAMALARI", "VIP HAVUZU", "BAĞLANTI", "DURUM", "TESPİT EDİLEN UYGULAMA", "GÜVEN", "NASIL", "ADAYLAR", "PLATFORM", "AI ÖNERİSİ", "AI GÜVEN", "AI DURUM", "AI GEREKÇE"].join(";"),
+    ? [["IP", "SUNUCU", "KURUM", "PORT", "ERT UYGULAMASI", "WEBSITE", "EXE", "EXE YOLU", "HTTP.SYS", "EXE KAYNAĞI", "IIS UYGULAMALARI", "VIP HAVUZU", "BAĞLANTI", "DURUM", "TESPİT EDİLEN UYGULAMA", "GÜVEN", "NASIL", "ADAYLAR", "PLATFORM", "AI ÖNERİSİ", "AI GÜVEN", "AI DURUM", "AI TARAMA TARİHİ", "AI GEREKÇE"].join(";"),
        ...l.map(r => [r.ip, r.sunucu, r.kurum, r.port, r.ert, r.website, r.exe, r.exeYol, r.httpSys ? "evet" : "", r.exeKaynak, (r.iis || []).join(", "), (r.vip || []).join(", "), r.baglanti, DURUM[dur(r)] ?? r.durum, r.oneri, r.guven, r.not,
-         (r.adaylar || []).map(a => `${a.ad} (${a.sunucu})`).join(", "), r.platform ? "evet" : "", aiO(r)?.uygulama, aiO(r)?.guven, aiO(r)?.durum, aiO(r)?.gerekce].map(q).join(";"))]
+         (r.adaylar || []).map(a => `${a.ad} (${a.sunucu})`).join(", "), r.platform ? "evet" : "", aiO(r)?.uygulama, aiO(r)?.guven, aiO(r)?.durum, aiO(r)?.aiTarih ? tamTarih(aiO(r).aiTarih) : "", aiO(r)?.gerekce].map(q).join(";"))]
     : [["EXE", "PORT", "ERT ADLARI", "IIS UYGULAMALARI", "SUNUCU", "ÇELİŞKİ"].join(";"),
        ...(st.veri?.sozluk || []).map(s => [s.exe, s.port, s.adlar.map(a => `${a.ad} (${a.sunucu})`).join(", "), s.iis.join(", "), s.sunucu, s.celiski ? "evet" : ""].map(q).join(";"))];
   const a = document.createElement("a");

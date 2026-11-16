@@ -465,6 +465,10 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
   ürünün kendi sunucusu değil) "Altyapı: <ürün>"; port DB portu / DB süreci değilse öneri null ("veritabanı portu değil"); yalnız DB portunda sahip aranır. `DbSahibi` artık
   instance, ajan adlarını sahip saymaz. `AdTemizle` (katalogda birebir olmayan AI adlarında): "(null)" / sondaki "-null" ve sondaki "sunucu(su)* / sunucuları / server /
   production / prod / canlı / database / db" kelimeleri atılır (ör. "Kredi Kartı production database sunucususu-null(null)" → "Kredi Kartı" → + " Veritabanı").
+- **AI tarama tarihi** (kullanıcı: "AI tarama bitince tarih saat dakika saniye bir kolona yazılsın"): `EksikOneri.AiTarih` = AI'ın portu en son taradığı an;
+  DF_ERT_UYGULAMA_ONERI.AI_TARIH (sql/ert_oneri.sql'de ALTER + mevcut AI satırlarına TARIH'ten bir kerelik UPDATE). Yalnız AI yazımı günceller (onay / ret / elle korur;
+  TARIH ise her değişiklikte). Kolon yoksa (207) `_aiTarihKolon=false` → eski SQL, AI satırlarında AiTarih = TARIH. Arayüz: eksik.html ve imza.html "AI tarama" kolonu
+  (`tamTarih`: gg.aa.yyyy ss:dd:sn), CSV'lerde "AI TARAMA TARİHİ".
 - **"Bu sunucuda hangi uygulama çalışıyor?"** (IP kartı, Gelen portlar tablosunun üstündeki düğme; `SurecAi` Surec.cs, `POST /api/surec/ai`):
   arayüzdeki /api/surec sonucu exe başına toplanıp (PID'ler, portlar, giden, bağlanan / bağlandığı uygulamalar) AI'a gider (yeniden
   sorgulanmaz) + ERT kayıtları + segment + genel bilgiler dosyası. Kesin genel süreçler kodda ayıklanır (`GenelAd` / `GenelYol`: svchost,

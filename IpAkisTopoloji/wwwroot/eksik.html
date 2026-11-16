@@ -127,8 +127,8 @@
     </div>
     <div id="run"></div>
     <div class="grid"><table>
-      <thead><tr><th style="width:30px"><input type="checkbox" id="all"></th><th data-sort="ip">IP<span class="arr"></span></th><th data-sort="port">Port<span class="arr"></span></th><th data-sort="sunucu">Sunucu / segment<span class="arr"></span></th><th>ERT satırındaki bilgiler</th><th>Aynı sunucudaki uygulamalar</th><th data-sort="oneri" title="Öneriye göre sırala (önerisi olmayanlar sonda)">Öneri<span class="arr"></span> <span class="sub2" data-sort="guven" title="Güvene göre sırala">güven<span class="arr"></span></span> <span class="sub2" data-sort="durum" title="Duruma göre sırala">durum<span class="arr"></span></span></th><th></th></tr></thead>
-      <tbody id="body"><tr><td colspan="8" class="empty"><span class="spinner"></span> Yükleniyor…</td></tr></tbody>
+      <thead><tr><th style="width:30px"><input type="checkbox" id="all"></th><th data-sort="ip">IP<span class="arr"></span></th><th data-sort="port">Port<span class="arr"></span></th><th data-sort="sunucu">Sunucu / segment<span class="arr"></span></th><th>ERT satırındaki bilgiler</th><th>Aynı sunucudaki uygulamalar</th><th data-sort="oneri" title="Öneriye göre sırala (önerisi olmayanlar sonda)">Öneri<span class="arr"></span> <span class="sub2" data-sort="guven" title="Güvene göre sırala">güven<span class="arr"></span></span> <span class="sub2" data-sort="durum" title="Duruma göre sırala">durum<span class="arr"></span></span></th><th title="AI'ın bu portu en son taradığı an (onay / ret / elle değiştirmez)">AI tarama</th><th></th></tr></thead>
+      <tbody id="body"><tr><td colspan="9" class="empty"><span class="spinner"></span> Yükleniyor…</td></tr></tbody>
     </table></div>
     <div class="foot"><span id="count"></span>
       <span><button id="prev">‹ Önceki</button> <span id="page"></span> <button id="next">Sonraki ›</button></span></div>
@@ -150,6 +150,8 @@ async function api(url, opt) {
 }
 const post = (url, body) => api(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
 
+// AI tarama anı: gün.ay.yıl saat:dakika:saniye
+const tamTarih = d => { const t = new Date(d); if (isNaN(t)) return String(d); const p = n => String(n).padStart(2, "0"); return `${p(t.getDate())}.${p(t.getMonth() + 1)}.${t.getFullYear()} ${p(t.getHours())}:${p(t.getMinutes())}:${p(t.getSeconds())}`; };
 async function load() {
   const my = ++st.seq;
   try {
@@ -165,7 +167,7 @@ async function load() {
     if (b.kurumlar) $("#kurum").innerHTML = `<option value="">Tümü</option>` + b.kurumlar.map(k => `<option value="${esc(k.ad)}"${k.ad === st.kurum ? " selected" : ""}>${esc(k.ad)} (${fmt(k.satir)} satır · ${fmt(k.sunucu)} sunucu)</option>`).join("");
     render();
     if (b.durum?.calisiyor) watch();
-  } catch (e) { $("#body").innerHTML = `<tr><td colspan="8" class="empty" style="color:var(--err)">${esc(e.message)}</td></tr>`; }
+  } catch (e) { $("#body").innerHTML = `<tr><td colspan="9" class="empty" style="color:var(--err)">${esc(e.message)}</td></tr>`; }
 }
 
 function render() {
@@ -208,9 +210,10 @@ function render() {
           <span class="st ${stc}">${esc(o.durum)}</span>${o.yeni ? ` <span class="st new" title="ERT'deki uygulama listesinde yok">yeni ad</span>` : ""}${r.atanmamisUyg ? ` <span class="st una" title="ERT ana kaydında (ERT_APPLICATIONDETAIL) var ama hiçbir sunucuya atanmamış: envanterde sunucu ataması eksik">sunucuya atanmamış</span>` : ""}</div>
           ${o.gerekce ? `<div class="why">${esc(o.gerekce)}</div>` : ""}${o.durum !== "AI" && o.kaynak ? `<div class="why">${esc(o.kaynak)}</div>` : ""}`
         : `<span class="muted small">—</span>`}</td>
+      <td class="small mono" style="white-space:nowrap">${o?.aiTarih ? esc(tamTarih(o.aiTarih)) : `<span class="muted">—</span>`}</td>
       <td class="acts">${w ? `${o?.uygulama && o.durum === "AI" ? `<button data-k="onay" data-ip="${esc(r.ip)}" data-port="${esc(r.port)}" title="Öneriyi onayla">✓</button> ` : ""}${o && o.durum !== "Reddedildi" ? `<button data-k="red" data-ip="${esc(r.ip)}" data-port="${esc(r.port)}" title="Reddet">✗</button> ` : ""}<button data-k="elle" data-ip="${esc(r.ip)}" data-port="${esc(r.port)}" data-cur="${esc(o?.uygulama || "")}" title="Uygulama adını elle yaz">✎</button>${o ? ` <button data-k="sil" data-ip="${esc(r.ip)}" data-port="${esc(r.port)}" title="Öneriyi ve kararı sil">⟲</button>` : ""}` : ""}</td>
     </tr>`;
-  }).join("") : `<tr><td colspan="8" class="empty">Filtreye uyan satır yok.</td></tr>`;
+  }).join("") : `<tr><td colspan="9" class="empty">Filtreye uyan satır yok.</td></tr>`;
   const from = d.toplam ? (st.page - 1) * st.size + 1 : 0, to = Math.min(st.page * st.size, d.toplam);
   $("#count").textContent = `${fmt(from)}–${fmt(to)} / ${fmt(d.toplam)} satır`;
   $("#page").textContent = `${st.page} / ${Math.max(1, Math.ceil(d.toplam / st.size))}`;

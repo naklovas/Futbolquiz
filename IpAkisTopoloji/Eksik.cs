@@ -11,7 +11,8 @@ using Microsoft.Data.SqlClient;
 // Sonuçlar ERT'ye YAZILMAZ: Eksik:OneriTablosu (dbo.DF_ERT_UYGULAMA_ONERI, sql/ert_oneri.sql); onay / ret / elle düzeltme,
 // Excel'e (CSV) aktarım. Tablo yoksa öneriler bellekte tutulur (uyarı gösterilir).
 // ---------------------------------------------------------------------------
-record EksikOneri(string? Uygulama, bool Yeni, int Guven, string? Gerekce, string Durum, string? Kaynak, DateTime Tarih);
+record EksikOneri(string? Uygulama, bool Yeni, int Guven, string? Gerekce, string Durum, string? Kaynak, DateTime Tarih, DateTime? AiTarih = null);
+// AiTarih: AI'ın bu portu en son taradığı an (kullanıcı: "AI tarama bitince tarih saat dakika saniye bir kolona yazılsın"); onay / ret / elle değiştirmez
 record EksikSatir(string Ip, string Port, string? Hostname, string? Segment, string? Website, string? Servis, string? Muhafiz,
     string? Birim, List<string> Diger, bool Altyapi, EksikOneri? Oneri, bool Test = false, bool AtanmamisUyg = false, string? Kurum = null);
 // AtanmamisUyg: öneri ERT ana kaydında olup hiçbir sunucuya atanmamış uygulama (envanterde sunucu ataması eksik)
@@ -167,12 +168,24 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
         {
             await using var conn = new SqlConnection(ConnStr);
             await conn.OpenAsync(ct);
-            await using var cmd = new SqlCommand($"SELECT IP, PORT, UYGULAMA, YENI, GUVEN, GEREKCE, DURUM, KAYNAK, TARIH FROM {Table}", conn);
-            await using var r = await cmd.ExecuteReaderAsync(ct);
+            // AI_TARIH kolonu sonradan eklendi (sql/ert_oneri.sql ALTER); yoksa (207) eski sorgu, AI satırlarında TARIH = AI tarama zamanı
+            SqlDataReader r;
+            try { r = await new SqlCommand($"SELECT IP, PORT, UYGULAMA, YENI, GUVEN, GEREKCE, DURUM, KAYNAK, TARIH, AI_TARIH FROM {Table}", conn).ExecuteReaderAsync(ct); _aiTarihKolon = true; }
+            catch (SqlException ex) when (ex.Number == 207)
+            {
+                r = await new SqlCommand($"SELECT IP, PORT, UYGULAMA, YENI, GUVEN, GEREKCE, DURUM, KAYNAK, TARIH FROM {Table}", conn).ExecuteReaderAsync(ct);
+                _aiTarihKolon = false;
+            }
+            await using var _r = r;
             string? S(int i) => r.IsDBNull(i) ? null : r.GetString(i);
             while (await r.ReadAsync(ct))
+            {
+                DateTime tarih = r.IsDBNull(8) ? DateTime.Now : r.GetDateTime(8);
+                string durum = S(6) ?? Ai;
+                DateTime? aiT = _aiTarihKolon && !r.IsDBNull(9) ? r.GetDateTime(9) : durum == Ai ? tarih : null;
                 map[(r.GetString(0), S(1) ?? "")] = new EksikOneri(S(2), !r.IsDBNull(3) && r.GetBoolean(3), r.IsDBNull(4) ? 0 : r.GetInt32(4),
-                    S(5), S(6) ?? Ai, S(7), r.IsDBNull(8) ? DateTime.Now : r.GetDateTime(8));
+                    S(5), durum, S(7), tarih, aiT);
+            }
             _uyari = null;
         }
         catch (SqlException ex) when (ex.Number == 208)
@@ -183,8 +196,11 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
         return _cache = map;
     }
 
+    bool _aiTarihKolon = true;   // DF_ERT_UYGULAMA_ONERI.AI_TARIH var mı (LoadAsync belirler)
     async Task SaveAsync(string ip, string port, EksikOneri o, string? kanit, CancellationToken ct)
     {
+        // AI yazımında tarama anı; kararlarda önceki AI tarama anı korunur (bellek / önbellek için)
+        o = o.Durum == Ai ? o with { AiTarih = DateTime.Now } : o with { AiTarih = o.AiTarih ?? (_cache?.GetValueOrDefault((ip, port))?.AiTarih) };
         lock (_gate) _mem[(ip, port)] = o;
         if (_cache != null) lock (_gate) _cache[(ip, port)] = o;
         if (_uyari != null) return;
@@ -192,7 +208,15 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
         {
             await using var conn = new SqlConnection(ConnStr);
             await conn.OpenAsync(ct);
-            await using var cmd = new SqlCommand($"""
+            // AI_TARIH: yalnız AI taraması yazınca güncellenir (@ai = 1); onay / ret / elle eskisini korur
+            await using var cmd = new SqlCommand(_aiTarihKolon ? $"""
+                UPDATE {Table} SET UYGULAMA = @u, YENI = @y, GUVEN = @g, GEREKCE = @r, DURUM = @d, KAYNAK = @k, TARIH = SYSDATETIME(),
+                       KANIT = COALESCE(@kn, KANIT), AI_TARIH = CASE WHEN @ai = 1 THEN SYSDATETIME() ELSE AI_TARIH END
+                WHERE IP = @ip AND PORT = @p;
+                IF @@ROWCOUNT = 0
+                  INSERT INTO {Table} (IP, PORT, UYGULAMA, YENI, GUVEN, GEREKCE, DURUM, KAYNAK, TARIH, KANIT, AI_TARIH)
+                  VALUES (@ip, @p, @u, @y, @g, @r, @d, @k, SYSDATETIME(), @kn, CASE WHEN @ai = 1 THEN SYSDATETIME() END);
+                """ : $"""
                 UPDATE {Table} SET UYGULAMA = @u, YENI = @y, GUVEN = @g, GEREKCE = @r, DURUM = @d, KAYNAK = @k, TARIH = SYSDATETIME(),
                        KANIT = COALESCE(@kn, KANIT)
                 WHERE IP = @ip AND PORT = @p;
@@ -200,6 +224,7 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
                   INSERT INTO {Table} (IP, PORT, UYGULAMA, YENI, GUVEN, GEREKCE, DURUM, KAYNAK, TARIH, KANIT)
                   VALUES (@ip, @p, @u, @y, @g, @r, @d, @k, SYSDATETIME(), @kn);
                 """, conn);
+            cmd.Parameters.AddWithValue("@ai", o.Durum == Ai);
             cmd.Parameters.AddWithValue("@ip", ip);
             cmd.Parameters.AddWithValue("@p", port);
             cmd.Parameters.AddWithValue("@u", (object?)o.Uygulama ?? DBNull.Value);
@@ -212,6 +237,7 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
             await cmd.ExecuteNonQueryAsync(ct);
         }
         catch (SqlException ex) when (ex.Number == 208) { _uyari = $"Öneri tablosu ({Table}) yok; sql/ert_oneri.sql betiğini çalıştırın."; }
+        catch (SqlException ex) when (ex.Number == 207 && _aiTarihKolon) { _aiTarihKolon = false; await SaveAsync(ip, port, o, kanit, ct); }   // AI_TARIH kolonu yok
     }
 
     static string? Cut(string? s, int n) => s == null ? null : s.Length > n ? s[..n] : s;
@@ -1736,12 +1762,12 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
             ? (await Task.WhenAll(Enumerable.Range(1, (first.Toplam + 999) / 1000)
                 .Select(p => ListAsync(null, hepsi ? null : "onay", true, p, 1000, false, ct, true)))).SelectMany(l => l.Satirlar).ToList()
             : first.Satirlar;
-        var sb = new StringBuilder("\uFEFFIP;PORT;SUNUCU;SEGMENT;WEBSITE;SERVICENAME;MUHAFIZ;AYNI SUNUCUDAKİ UYGULAMALAR;ÖNERİLEN UYGULAMA;YENİ AD;SUNUCUYA ATANMAMIŞ;GÜVEN;DURUM;KARAR VEREN;GEREKÇE\r\n");
+        var sb = new StringBuilder("\uFEFFIP;PORT;SUNUCU;SEGMENT;WEBSITE;SERVICENAME;MUHAFIZ;AYNI SUNUCUDAKİ UYGULAMALAR;ÖNERİLEN UYGULAMA;YENİ AD;SUNUCUYA ATANMAMIŞ;GÜVEN;DURUM;KARAR VEREN;AI TARAMA TARİHİ;GEREKÇE\r\n");
         static string C(string? s) => "\"" + (s ?? "").Replace("\"", "\"\"") + "\"";
         foreach (var r in rows.Where(r => r.Oneri != null))
             sb.Append(string.Join(";", C(r.Ip), C(r.Port), C(r.Hostname), C(r.Segment), C(r.Website), C(r.Servis), C(r.Muhafiz),
                 C(string.Join(", ", r.Diger)), C(r.Oneri!.Uygulama), C(r.Oneri.Yeni ? "evet" : ""), C(r.AtanmamisUyg ? "evet" : ""), C(r.Oneri.Guven.ToString()),
-                C(r.Oneri.Durum), C(r.Oneri.Kaynak), C(r.Oneri.Gerekce))).Append("\r\n");
+                C(r.Oneri.Durum), C(r.Oneri.Kaynak), C(r.Oneri.AiTarih?.ToString("dd.MM.yyyy HH:mm:ss")), C(r.Oneri.Gerekce))).Append("\r\n");
         return sb.ToString();
     }
 }
