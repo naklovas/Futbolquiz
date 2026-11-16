@@ -119,8 +119,21 @@ sealed class EnvanterService(IConfiguration cfg, ILogger<EnvanterService> log)
         }
 
         var tags = await LoadTagsAsync(conn, hostTable, ct);
+        // ERT'de olmayan (CMDB'nin taramadığı) IP'lerin etiketleri: DeltaFlow'un kendi tablosu (Etiket:EkTablosu, dbo.DF_ETIKET_EK)
+        var ek = await EtiketEk.OkuAsync(conn, cfg, log, ct);
+        var ertIp = hosts.Select(h => h.Ip).OfType<string>().ToHashSet();
+        foreach (var (ip, e) in ek)
+        {
+            if (ertIp.Contains(ip)) continue;   // sonradan ERT'ye girmişse ERT TAG'i geçerli
+            if (!tags.TryGetValue(ip, out var l)) tags[ip] = l = [];
+            foreach (var t in e.Tags) if (!l.Contains(t, StringComparer.OrdinalIgnoreCase)) l.Add(t);
+        }
         var detay = await LoadDetayAsync(conn, ct);
-        return new EnvanterSnapshot(segments, hosts, vips, vipGws, marker, tags) { Detay = detay };
+        return new EnvanterSnapshot(segments, hosts, vips, vipGws, marker, tags)
+        {
+            Detay = detay,
+            EkSunucular = ek.Where(kv => !ertIp.Contains(kv.Key)).ToDictionary(kv => kv.Key, kv => kv.Value.Host)
+        };
     }
 
     // Uygulama ana kaydı (kullanıcı: "sunucuya atanmamış uygulamalar ERT_HOSTIPADDRESS'te yok"; Konfigürasyon ve Değişiklik Yönetimi'nden
@@ -247,6 +260,10 @@ sealed class EnvanterSnapshot
     public List<string> KatalogAdlari => _katalog ??= _byApp.Keys.Union(Detay.Keys.Where(a => !IsSystemApp(a)), StringComparer.OrdinalIgnoreCase).ToList();
     public bool Atanmamis(string ad) => Detay.ContainsKey(ad) && !_byApp.ContainsKey(ad);
     readonly Dictionary<string, List<string>> _ipsByTag = new(StringComparer.OrdinalIgnoreCase);
+
+    // ERT'de olmayıp DF_ETIKET_EK'te etiketi olan IP'ler → kayıttaki sunucu adı
+    public Dictionary<string, string?> EkSunucular { get; init; } = new();
+    public bool ErtteVar(string ip) => _byIp.ContainsKey(ip);
 
     // Sunucu etiketleri (VERIAMBARI vb.)
     public List<string> TagsOf(string ip) => _tagsByIp.TryGetValue(ip, out var l) ? l : [];

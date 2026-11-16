@@ -500,8 +500,14 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
   segment adı / CIDR (datalist `/api/segment/liste`) → "Getir" = `POST /api/segment/tarama` (mod boş: kayıtlı tarama varsa ondan; "Yenile" = "yeniden"),
   `/api/segment/tarama/{id}` yoklanır; arayüzde "Carbon Black" yazmaz. ERT'dekiler `/api/etiket/sunucular?segment=<CIDR'ler>` (500'lük sayfalar).
   ANA TABLO bu listeye geçer (filtre / sıralama / sayfa tarayıcıda, `egSegYerel`); taramada görülüp ERT'de olmayan IP'ler aynı tabloda "ERT'de yok"
-  rozetiyle, checkbox'sız; sayaçlar "Segmentte / ERT'de yok", hızlı filtre ve etiket seçiminde "ERT'de yok" (`!ert`). "Kapat" tüm envantere döner.
-  AÇIK: ERT dışı IP'lere etiket (DF_ETIKET_EK önerildi) — sorulacak.
+  rozetiyle; sayaçlar "Segmentte / ERT'de yok", hızlı filtre ve etiket seçiminde "ERT'de yok" (`!ert`). "Kapat" tüm envantere döner.
+  ERT DIŞI ETİKET (kullanıcı: "ERT'de olmayan satırlara veri giremiyorum tamam ama en azından etiket ekleyelim"): `EtiketEk` (Etiket.cs) →
+  `Etiket:EkTablosu` dbo.DF_ETIKET_EK (`sql/etiket_ek.sql`: IPADDRESS PK, TAG aynı biçim, HOSTNAME, GUNCELLEYEN, TARIH; ERT'ye satır EKLENMEZ).
+  `POST /api/etiket` IP'leri ayırır: ERT'deki → TAG kolonu, olmayan → DF_ETIKET_EK (`adlar` ip → sunucu adı, segment taramasından). Envanter yüklenirken
+  (`EnvanterService`, `EtiketEk.OkuAsync`) ERT'de olmayan IP'lerin etiketleri envanterin etiket listesine katılır (TagIps / TagCatalog / TaggedIps →
+  topoloji, etiket taraması, işlev haritası da görür); `EnvanterSnapshot.EkSunucular`, `ErtteVar`. Etiketleme listesinde etiketli ERT dışı IP'ler
+  her zaman satır (`EtiketSunucu.ErtYok`, rozet + etiketler). IP sonradan ERT'ye girerse ERT TAG'i geçerli (ek kayıt okunmaz). Tablo yoksa okuma
+  sessiz, yazma betik adıyla hata. Etiket derinliği: 2 seviye (ANA/ALT; `TagRx`).
 - **"Bu sunucuda hangi uygulama çalışıyor?"** (IP kartı, Gelen portlar tablosunun üstündeki düğme; `SurecAi` Surec.cs, `POST /api/surec/ai`):
   arayüzdeki /api/surec sonucu exe başına toplanıp (PID'ler, portlar, giden, bağlanan / bağlandığı uygulamalar) AI'a gider (yeniden
   sorgulanmaz) + ERT kayıtları + segment + genel bilgiler dosyası. Kesin genel süreçler kodda ayıklanır (`GenelAd` / `GenelYol`: svchost,

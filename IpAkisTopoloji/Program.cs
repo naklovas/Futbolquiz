@@ -657,7 +657,11 @@ app.MapPost("/api/etiket", async (EtiketIstek req, HttpContext ctx, IConfigurati
         return Results.BadRequest(new { error = "Etiket geçersiz: harf, rakam, _ - . ve boşluk; en çok 50 karakter. Alt etiket: ANA/ALT." });
     try
     {
-        int n = await EtiketService.ApplyAsync(cfg, ips, add, remove, user, app.Logger, ct);
+        var env0 = await envanter.GetAsync(false, ct);
+        var ert = ips.Where(env0.ErtteVar).ToList();
+        var ertDisi = ips.Where(ip => !env0.ErtteVar(ip)).ToList();
+        int n = ert.Count > 0 ? await EtiketService.ApplyAsync(cfg, ert, add, remove, user, app.Logger, ct) : 0;
+        if (ertDisi.Count > 0) n += await EtiketEk.ApplyAsync(cfg, ertDisi, add, remove, req.Adlar, user, app.Logger, ct);   // ERT'de olmayanlar: DF_ETIKET_EK
         var env = await envanter.GetAsync(true, ct);   // yeni etiketler hemen görünsün
         var rows = ips.Select(ip => EtiketService.Row(env, ip)).OfType<EtiketSunucu>().ToList();
         return Results.Ok(new EtiketSonuc(n, rows));

@@ -9,13 +9,13 @@ using Microsoft.Data.SqlClient;
 // Alt etiket: "ANA/ALT" (ör. MOBILBANKACILIK/MOBIL APP) aynı TAG kolonunda; ana etiket seçilince alt etiketli sunucular da gelir.
 // Açıklamalar (ana ve alt etiket): ayrı küçük tablo Etiket:AciklamaTablosu (varsayılan dbo.DF_ETIKET_ACIKLAMA, sql/etiket_versiyon.sql).
 // ---------------------------------------------------------------------------
-record EtiketSunucu(string Ip, string? Hostname, List<string> Apps, string? Muhafiz, string? Segment, List<string> Tags, string? Cidr = null);
+record EtiketSunucu(string Ip, string? Hostname, List<string> Apps, string? Muhafiz, string? Segment, List<string> Tags, string? Cidr = null, bool ErtYok = false);
 record EtiketSayi(string Ad, int Sunucu, string? Aciklama = null);
 // Sunucular = istenen sayfa; Toplam = filtreye uyan; Tum / Etiketli = envanterin geneli; Etiketler = etiket başına sunucu sayısı
 record EtiketListe(List<EtiketSunucu> Sunucular, int Toplam, int Tum, int Etiketli, List<EtiketSayi> Etiketler, string? AciklamaUyari = null);
 record EtiketFiltre(string? Ip, string? Sunucu, string? Uygulama, string? Muhafiz, string? Segment, string? Etiket,
     string? Sirala, bool Azalan, int Sayfa, int Boyut);
-record EtiketIstek(List<string>? Ips, string? Ekle, string? Kaldir);
+record EtiketIstek(List<string>? Ips, string? Ekle, string? Kaldir, Dictionary<string, string?>? Adlar = null);   // Adlar: ERT dışı IP → sunucu adı (DF_ETIKET_EK)
 record EtiketSonuc(int Guncellenen, List<EtiketSunucu> Sunucular);
 record EtiketAciklamaIstek(string? Etiket, string? Aciklama);
 
@@ -61,9 +61,13 @@ static class EtiketService
             return new EtiketSunucu(ip, hosts.Select(h => h.UnixName).OfType<string>().FirstOrDefault(),
                 e.AppNamesOnIp(ip).Take(5).ToList(), muh == "" ? null : muh, e.FindSegment(ip)?.Label, e.TagsOf(ip), e.FindSegment(ip)?.Cidr);
         })
+        // ERT'de olmayan, DF_ETIKET_EK'te etiketi olan IP'ler (segment getir'den etiketlenenler)
+        .Concat(e.EkSunucular.Where(kv => e.TagsOf(kv.Key).Count > 0).Select(kv =>
+            new EtiketSunucu(kv.Key, kv.Value, [], null, e.FindSegment(kv.Key)?.Label, e.TagsOf(kv.Key), e.FindSegment(kv.Key)?.Cidr, true)))
         .ToList());
 
-    public static EtiketSunucu? Row(EnvanterSnapshot env, string ip) => All(env).FirstOrDefault(s => s.Ip == ip);
+    public static EtiketSunucu? Row(EnvanterSnapshot env, string ip) => All(env).FirstOrDefault(s => s.Ip == ip)
+        ?? (env.ErtteVar(ip) ? null : new EtiketSunucu(ip, env.EkSunucular.GetValueOrDefault(ip), [], null, env.FindSegment(ip)?.Label, env.TagsOf(ip), env.FindSegment(ip)?.Cidr, true));
 
     static bool Has(string? value, string? q) => string.IsNullOrWhiteSpace(q) || (value?.Contains(q.Trim(), StringComparison.CurrentCultureIgnoreCase) ?? false);
 
@@ -235,5 +239,89 @@ static class EtiketAciklama
         catch (SqlException ex) when (ex.Number == 208) { throw new InvalidOperationException(Missing(cfg)); }
         log.LogInformation("Etiket açıklaması: {User} {Tag} -> {Text}", user, tag, text ?? "(silindi)");
         await GetAsync(cfg, ct, true);
+    }
+}
+
+// ERT'de olmayan IP'lerin etiketleri (kullanıcı: "ERT'de olmayan satırlara veri giremiyorum tamam ama en azından etiket ekleyelim"):
+// ERT_HOSTIPADDRESS'e satır EKLENMEZ; DeltaFlow'un kendi tablosu Etiket:EkTablosu (dbo.DF_ETIKET_EK, sql/etiket_ek.sql):
+// IPADDRESS PK, TAG (ERT TAG'iyle aynı biçim "A,B/ALT"), HOSTNAME, GUNCELLEYEN, TARIH. Envanter yüklenirken ERT'de olmayan IP'lerin
+// etiketleri envanterin etiket listesine katılır (topoloji, etiket taraması, işlev haritası da görür). IP sonradan ERT'ye girerse ERT TAG'i geçerli.
+static class EtiketEk
+{
+    static readonly Regex SafeTable = new(@"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*){0,2}$");
+    public static string Table(IConfiguration cfg)
+    {
+        string t = cfg["Etiket:EkTablosu"] ?? "dbo.DF_ETIKET_EK";
+        return SafeTable.IsMatch(t) ? t : "dbo.DF_ETIKET_EK";
+    }
+
+    public static async Task<Dictionary<string, (List<string> Tags, string? Host)>> OkuAsync(SqlConnection conn, IConfiguration cfg, ILogger log, CancellationToken ct)
+    {
+        var map = new Dictionary<string, (List<string>, string?)>();
+        try
+        {
+            await using var cmd = new SqlCommand($"SELECT IPADDRESS, TAG, HOSTNAME FROM {Table(cfg)} WHERE TAG IS NOT NULL", conn);
+            await using var r = await cmd.ExecuteReaderAsync(ct);
+            while (await r.ReadAsync(ct))
+            {
+                string? ip = r.IsDBNull(0) ? null : r.GetString(0).Trim();
+                if (string.IsNullOrEmpty(ip) || r.IsDBNull(1)) continue;
+                map[ip] = (EtiketService.Split(r.GetString(1)).Distinct(StringComparer.OrdinalIgnoreCase).ToList(), r.IsDBNull(2) ? null : r.GetString(2));
+            }
+        }
+        catch (SqlException ex) when (ex.Number == 208) { log.LogInformation("ERT dışı etiket tablosu yok ({T}); sql/etiket_ek.sql", Table(cfg)); }
+        catch (SqlException ex) { log.LogInformation("ERT dışı etiketler okunamadı ({T}): {M}", Table(cfg), ex.Message); }
+        return map;
+    }
+
+    public static async Task<int> ApplyAsync(IConfiguration cfg, List<string> ips, string? add, string? remove, IReadOnlyDictionary<string, string?>? adlar,
+        string user, ILogger log, CancellationToken ct)
+    {
+        string t = Table(cfg);
+        int total = 0, max = cfg.GetValue("Etiket:MaxUzunluk", 200);
+        await using var conn = new SqlConnection(cfg.GetConnectionString("Envanter") ?? throw new InvalidOperationException("ConnectionStrings:Envanter tanımlı değil."));
+        await conn.OpenAsync(ct);
+        try
+        {
+            foreach (var ip in ips)
+            {
+                var current = new List<string>();
+                string? host = null;
+                await using (var cmd = new SqlCommand($"SELECT TAG, HOSTNAME FROM {t} WHERE IPADDRESS = @ip", conn))
+                {
+                    cmd.Parameters.AddWithValue("@ip", ip);
+                    await using var r = await cmd.ExecuteReaderAsync(ct);
+                    if (await r.ReadAsync(ct))
+                    {
+                        if (!r.IsDBNull(0)) current = EtiketService.Split(r.GetString(0)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+                        if (!r.IsDBNull(1)) host = r.GetString(1);
+                    }
+                }
+                var next = current.Where(x => remove == null || !string.Equals(x, remove, StringComparison.OrdinalIgnoreCase)).ToList();
+                if (add != null && !next.Contains(add, StringComparer.OrdinalIgnoreCase)) next.Add(add);
+                if (next.SequenceEqual(current)) continue;
+                string? value = next.Count == 0 ? null : string.Join(",", next);
+                if (value != null && value.Length > max) throw new InvalidOperationException($"{ip}: etiketler {max} karakteri geçiyor.");
+                string? ad = adlar != null && adlar.TryGetValue(ip, out var a) && !string.IsNullOrWhiteSpace(a) ? a.Trim() : host;
+                if (ad is { Length: > 200 }) ad = ad[..200];
+                await using (var cmd = new SqlCommand(value == null ? $"DELETE FROM {t} WHERE IPADDRESS = @ip" : $"""
+                    UPDATE {t} SET TAG = @v, HOSTNAME = @h, GUNCELLEYEN = @u, TARIH = SYSDATETIME() WHERE IPADDRESS = @ip;
+                    IF @@ROWCOUNT = 0 INSERT INTO {t} (IPADDRESS, TAG, HOSTNAME, GUNCELLEYEN, TARIH) VALUES (@ip, @v, @h, @u, SYSDATETIME());
+                    """, conn))
+                {
+                    cmd.Parameters.AddWithValue("@ip", ip);
+                    cmd.Parameters.AddWithValue("@v", (object?)value ?? DBNull.Value);
+                    cmd.Parameters.AddWithValue("@h", (object?)ad ?? DBNull.Value);
+                    cmd.Parameters.AddWithValue("@u", user);
+                    total += await cmd.ExecuteNonQueryAsync(ct) > 0 ? 1 : 0;
+                }
+                log.LogInformation("Etiket (ERT dışı): {User} {Ip} [{Old}] -> [{New}]", user, ip, string.Join(",", current), value ?? "");
+            }
+        }
+        catch (SqlException ex) when (ex.Number == 208)
+        {
+            throw new InvalidOperationException($"ERT'de olmayan sunucuların etiket tablosu ({t}) yok; sql/etiket_ek.sql betiğini çalıştırın.");
+        }
+        return total;
     }
 }

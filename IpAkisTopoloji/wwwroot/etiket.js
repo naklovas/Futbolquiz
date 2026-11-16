@@ -191,7 +191,7 @@ function etqShell() {
   $("#egPrev").addEventListener("click", () => { if (etq.page > 1) { etq.page--; etqLoad(); } });
   $("#egNext").addEventListener("click", () => { if (etq.page * etq.size < etq.total) { etq.page++; etqLoad(); } });
   if (w) {
-    $("#egAll").addEventListener("change", ev => { etq.rows.filter(r => !r.ertYok).forEach(r => ev.target.checked ? etq.selected.add(r.ip) : etq.selected.delete(r.ip)); etqUpdate(); });
+    $("#egAll").addEventListener("change", ev => { etq.rows.forEach(r => ev.target.checked ? etq.selected.add(r.ip) : etq.selected.delete(r.ip)); etqUpdate(); });
     // Etiket + alt etiket → "ANA/ALT"
     const full = () => { const a = $("#egNew").value.trim(), b = $("#egSub").value.trim(); return a && b ? `${a}/${b}` : a; };
     $("#egAdd").addEventListener("click", () => applyTag([...etq.selected], full(), null));
@@ -214,7 +214,7 @@ function etqShell() {
 
 function etqUpdate() {
   const w = etq.canWrite, f = etq.f;
-  const etiketsiz = etq.tum - etq.etiketli - (egs.aktif ? egs.yok : 0);
+  const etiketsiz = etq.tum - etq.etiketli;
   $("#egStats").innerHTML = (egs.aktif ? [["Segmentte", etq.tum], ["ERT'de yok", egs.yok]] : [["Envanterde", etq.tum]])
     .concat([["Etiketli", etq.etiketli], ["Etiketsiz", etiketsiz], ["Filtre sonucu", etq.total]])
     .map(([l, n]) => `<div class="eg-stat"><b>${fmt(n)}</b><span>${l}</span></div>`).join("");
@@ -244,15 +244,14 @@ function etqUpdate() {
   });
 
   $("#egBody").innerHTML = etq.rows.length ? etq.rows.map(r => `<tr class="${etq.selected.has(r.ip) ? "sel" : ""}">
-      ${w ? `<td class="cb">${r.ertYok ? "" : `<input type="checkbox" data-sel="${esc(r.ip)}"${etq.selected.has(r.ip) ? " checked" : ""}>`}</td>` : ""}
+      ${w ? `<td class="cb"><input type="checkbox" data-sel="${esc(r.ip)}"${etq.selected.has(r.ip) ? " checked" : ""}></td>` : ""}
       <td class="ip"><a href="${esc(ipTabUrl(r.ip))}" target="_blank" rel="noopener" title="Topolojisini yeni sekmede aç">${esc(r.ip)}</a></td>
       <td>${esc(r.hostname ?? "")}</td>
       <td class="app">${r.apps.map(a => `<span>${esc(a)}</span>`).join("") || `<span class="dim">—</span>`}</td>
       <td class="${r.muhafiz ? "" : "dim"}">${esc(r.muhafiz ?? "—")}</td>
       <td class="${r.segment ? "" : "dim"}">${esc(r.segment ?? "—")}${r.cidr ? `<div class="dim" style="font-size:11px">${esc(r.cidr)}</div>` : ""}</td>
-      <td>${r.ertYok ? `<span class="eg-yok" title="ERT_HOSTIPADDRESS tablosunda yok (ağda görüldü); TAG kolonu olmadığından etiketlenemez">ERT'de yok</span>`
-        : r.tags.map(t => tagChip(t, r.ip, w)).join("") || `<span class="dim">—</span>`}</td>
-      ${w ? `<td style="text-align:right">${r.ertYok ? "" : `<button type="button" class="eg-add" data-tagip="${esc(r.ip)}">+ Etiket</button>`}</td>` : ""}
+      <td>${r.ertYok ? `<span class="eg-yok" title="ERT_HOSTIPADDRESS tablosunda yok (ağda görüldü); etiketi DeltaFlow'un kendi tablosunda (DF_ETIKET_EK) tutulur">ERT'de yok</span> ` : ""}${r.tags.map(t => tagChip(t, r.ip, w)).join("") || (r.ertYok ? "" : `<span class="dim">—</span>`)}</td>
+      ${w ? `<td style="text-align:right"><button type="button" class="eg-add" data-tagip="${esc(r.ip)}">+ Etiket</button></td>` : ""}
     </tr>`).join("")
     : `<tr><td colspan="${ETQ_COLS.length + (w ? 2 : 0)}" class="eg-empty">Filtreye uyan sunucu yok.</td></tr>`;
 
@@ -261,7 +260,7 @@ function etqUpdate() {
   $("#egPage").textContent = ` ${etq.page} / ${Math.max(1, Math.ceil(etq.total / etq.size))} `;
   $("#egPrev").disabled = etq.page <= 1; $("#egNext").disabled = etq.page * etq.size >= etq.total;
   if (w) {
-    const sec = etq.rows.filter(r => !r.ertYok), allOn = sec.length > 0 && sec.every(r => etq.selected.has(r.ip));
+    const sec = etq.rows, allOn = sec.length > 0 && sec.every(r => etq.selected.has(r.ip));
     $("#egAll").checked = allOn;
     $("#egAll").indeterminate = !allOn && sec.some(r => etq.selected.has(r.ip));
     $("#egBar").hidden = etq.selected.size === 0;
@@ -325,11 +324,12 @@ async function applyTag(ips, add, remove) {
   if (msg) msg.textContent = "Kaydediliyor…";
   try {
     const r = await fetch("api/etiket", { method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ips, ...(add ? { ekle: tag } : { kaldir: tag }) }) });
+      body: JSON.stringify({ ips, ...(add ? { ekle: tag } : { kaldir: tag }), adlar: egSegAdlar(ips) }) });
     const b = await r.json().catch(() => ({ error: `HTTP ${r.status}` }));
     if (!r.ok) throw new Error(b.error || `HTTP ${r.status}`);
     tagMap ??= {};
     for (const srv of b.sunucular) tagMap[srv.ip] = srv.tags;
+    for (const ip of ips) if (!b.sunucular.some(x => x.ip === ip)) tagMap[ip] = [];   // ERT dışı IP'nin son etiketi kaldırıldı
     loadTopoTags?.(true);
     if (uiMode === "etiket") {
       await etqLoad();   // sayaçlar, haplar ve filtre sonucu yeniden
@@ -360,7 +360,7 @@ document.addEventListener("click", ev => {
 // Segment getir (kullanıcı: "segment getir kısmı olsun oradan segment bulayım ama tüm ipleri gelsin", "Carbon Black'ten tara demeyelim"):
 // segment tarama API'si (kayıtlı tarama varsa ondan açılır; "Yenile" baştan getirir) segmentteki IP'leri verir; ERT'dekiler
 // /api/etiket/sunucular?segment=<CIDR'ler> ile gelir. Ana tablo bu listeye geçer (filtre / sıralama / sayfa tarayıcıda);
-// ERT'de olmayan IP'ler "ERT'de yok" rozetiyle listelenir, TAG kolonu olmadığından seçilemez. Port listesi gösterilmez.
+// ERT'de olmayan IP'ler "ERT'de yok" rozetiyle listelenir; etiketleri DF_ETIKET_EK'e yazılır (sunucu adıyla). Port listesi gösterilmez.
 // ---------------------------------------------------------------------------
 const egs = { segs: null, aktif: null, liste: [], yok: 0, yukleniyor: false, ilerleme: "", hata: null, seq: 0 };
 
@@ -453,16 +453,23 @@ async function egSegGetir(seg, mod) {
 function egSegYerel() {
   const f = etq.f, low = v => String(v ?? "").toLocaleLowerCase("tr");
   const has = (v, q) => !q || low(v).includes(low(q));
-  const tagsOf = r => r.ertYok ? [] : (tagMap?.[r.ip] ?? r.tags);
+  const tagsOf = r => tagMap?.[r.ip] ?? r.tags;
   const u = ip => ip.split(".").reduce((a, b) => a * 256 + (+b || 0), 0);
   let rows = egs.liste.map(r => ({ ...r, tags: tagsOf(r) }));
   const tum = rows.length, etiketli = rows.filter(r => r.tags.length).length;
   rows = rows.filter(r => has(r.ip, f.ip) && has(r.hostname, f.sunucu) && has(r.apps.join(" "), f.uygulama) && has(r.muhafiz, f.muhafiz)
     && (has(r.segment, f.segment) || has(r.cidr, f.segment))
-    && (!f.etiket || (f.etiket === "!ert" ? r.ertYok : f.etiket === "*" ? r.tags.length > 0 : f.etiket === "-" ? !r.ertYok && !r.tags.length
+    && (!f.etiket || (f.etiket === "!ert" ? r.ertYok : f.etiket === "*" ? r.tags.length > 0 : f.etiket === "-" ? !r.tags.length
       : r.tags.some(t => t === f.etiket || (!f.etiket.includes("/") && tagParent(t) === f.etiket)))));
   const key = { ip: r => u(r.ip), sunucu: r => low(r.hostname), uygulama: r => low(r.apps.join(",")), muhafiz: r => low(r.muhafiz),
     segment: r => low(r.segment), etiket: r => low(r.tags.join(",")) }[etq.sort] ?? (r => u(r.ip));
   rows.sort((a, b) => { const x = key(a), y = key(b); const c = x < y ? -1 : x > y ? 1 : 0; return etq.desc ? -c : c; });
   Object.assign(etq, { rows: rows.slice((etq.page - 1) * etq.size, etq.page * etq.size), total: rows.length, tum, etiketli });
+}
+
+// ERT dışı seçili IP'lerin sunucu adları (DF_ETIKET_EK.HOSTNAME)
+function egSegAdlar(ips) {
+  const m = {};
+  for (const ip of ips) { const r = egs.liste.find(x => x.ip === ip); if (r?.ertYok && r.hostname) m[ip] = r.hostname; }
+  return m;
 }
