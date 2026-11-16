@@ -469,6 +469,9 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
   DF_ERT_UYGULAMA_ONERI.AI_TARIH (sql/ert_oneri.sql'de ALTER + mevcut AI satırlarına TARIH'ten bir kerelik UPDATE). Yalnız AI yazımı günceller (onay / ret / elle korur;
   TARIH ise her değişiklikte). Kolon yoksa (207) `_aiTarihKolon=false` → eski SQL, AI satırlarında AiTarih = TARIH. Arayüz: eksik.html ve imza.html "AI tarama" kolonu
   (`tamTarih`: gg.aa.yyyy ss:dd:sn), CSV'lerde "AI TARAMA TARİHİ".
+  SIRALAMA + ARAMA (kullanıcı: "tarih alanına göre sıralama olmalı, aramada tarih girebilmeliyim"): `/api/eksik?sirala=tarih` (taranmamışlar sonda; ilk tık en yeni üstte),
+  arama metni AiTarih'in "gg.aa.yyyy ss:dd:sn" / "yyyy-aa-gg …" biçiminde de aranır; "gg.aa.yyyy[ ss:dd[:sn]] - gg.aa.yyyy[…]" aralıktır (`TarihAraligi`; yalnız gün yazılan
+  bitiş günün sonuna kadar). imza.html'de aynısı tarayıcıda (`tarihAraligi`, "AI tarama" başlığı tıklanınca ▼ / ▲ / kapalı, `st.tarihSira`).
 - **"Bu sunucuda hangi uygulama çalışıyor?"** (IP kartı, Gelen portlar tablosunun üstündeki düğme; `SurecAi` Surec.cs, `POST /api/surec/ai`):
   arayüzdeki /api/surec sonucu exe başına toplanıp (PID'ler, portlar, giden, bağlanan / bağlandığı uygulamalar) AI'a gider (yeniden
   sorgulanmaz) + ERT kayıtları + segment + genel bilgiler dosyası. Kesin genel süreçler kodda ayıklanır (`GenelAd` / `GenelYol`: svchost,

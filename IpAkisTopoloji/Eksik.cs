@@ -94,13 +94,19 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
                 m.Row.SunucuIsletenBirim, env.AppNamesOnIp(m.Ip).Take(4).ToList(), infra.Contains(m.Port), o, IsTest(env, m.Ip), AtanmamisOneri(env, o), KurumBilgi.Of(cfg, env, m.Ip));
         }).ToList();
         string? q = ara?.Trim();
-        bool Has(string? v) => v != null && v.Contains(q!, StringComparison.CurrentCultureIgnoreCase);
+        // Tarih araması (kullanıcı: "aramada tarih girebilmeliyim"): "16.11.2026" / "16.11.2026 14:20" gibi parça AI tarama anında metin olarak aranır;
+        // "16.11.2026 - 17.11.2026" ya da "16.11.2026 10:00 - 16.11.2026 12:00" aralık (sonu dahil: yalnız gün yazılırsa günün sonuna kadar)
+        var aralik = TarihAraligi(q);
+        if (aralik != null) q = null;
+        bool Has(string? v) => v != null && q != null && v.Contains(q, StringComparison.CurrentCultureIgnoreCase);
         var kapsam = rows.Where(r => altyapi || !r.Altyapi).Where(r => test || !r.Test).ToList();
         var kurumlar = KurumBilgi.Adlar(cfg).Select(k => new EksikKurum(k, kapsam.Count(r => r.Kurum == k), kapsam.Where(r => r.Kurum == k).Select(r => r.Ip).Distinct().Count()))
             .Where(k => k.Satir > 0 || k.Ad != "Diğer").ToList();
         var f = kapsam.Where(r => string.IsNullOrEmpty(kurum) || r.Kurum == kurum)
-            .Where(r => string.IsNullOrEmpty(q) || Has(r.Ip) || Has(r.Port) || Has(r.Hostname) || Has(r.Website) || Has(r.Servis)
-                        || Has(r.Muhafiz) || Has(r.Segment) || Has(r.Oneri?.Uygulama) || Has(r.Oneri?.Gerekce) || r.Diger.Any(Has))
+            .Where(r => (string.IsNullOrEmpty(q) && aralik == null) || Has(r.Ip) || Has(r.Port) || Has(r.Hostname) || Has(r.Website) || Has(r.Servis)
+                        || Has(r.Muhafiz) || Has(r.Segment) || Has(r.Oneri?.Uygulama) || Has(r.Oneri?.Gerekce) || r.Diger.Any(Has)
+                        || Has(r.Oneri?.AiTarih?.ToString("dd.MM.yyyy HH:mm:ss")) || Has(r.Oneri?.AiTarih?.ToString("yyyy-MM-dd HH:mm:ss"))
+                        || (aralik is { } ar && r.Oneri?.AiTarih is { } at && at >= ar.Bas && at < ar.Son))
             .Where(r => durum switch
             {
                 "yok" => r.Oneri == null,
@@ -126,6 +132,8 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
                                : f.OrderBy(r => r.Oneri?.Uygulama == null).ThenBy(r => r.Oneri?.Uygulama ?? "", cmp)).ThenBy(r => IpKey(r.Ip)),
             "guven" => (azalan ? f.OrderByDescending(r => r.Oneri?.Guven ?? -1) : f.OrderBy(r => r.Oneri == null).ThenBy(r => r.Oneri?.Guven ?? 0)).ThenBy(r => IpKey(r.Ip)),
             "durum" => Ord(r => r.Oneri?.Durum ?? "\uffff", cmp).ThenByDescending(r => r.Oneri?.Guven ?? 0),
+            // AI tarama tarihi: taranmamışlar hep sonda
+            "tarih" => (azalan ? f.OrderBy(r => r.Oneri?.AiTarih == null).ThenByDescending(r => r.Oneri?.AiTarih) : f.OrderBy(r => r.Oneri?.AiTarih == null).ThenBy(r => r.Oneri?.AiTarih)).ThenBy(r => IpKey(r.Ip)),
             // varsayılan: IP + port (sabit; kullanıcı: tahmin bitince satır öneriye göre başka sayfaya kayıyordu)
             _ => f.OrderBy(r => IpKey(r.Ip)).ThenBy(r => PortN(r.Port))
         }).ToList();
@@ -135,6 +143,20 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
         return new EksikListe(f.Skip((page - 1) * size).Take(size).ToList(), f.Count, rows.Count, rows.Select(r => r.Ip).Distinct().Count(),
             rows.Count(r => r.Oneri != null), rows.Count(r => r.Oneri?.Durum is Onay or Elle), Durum, yazabilir, _uyari, false, bilgi, Surum,
             rows.Count(r => r.AtanmamisUyg), rows.Count(r => KatalogDisi(r.Oneri)), rows.Where(r => KatalogDisi(r.Oneri)).Select(r => r.Ip).Distinct().Count(), kurumlar);
+    }
+
+    // "gg.aa.yyyy[ ss:dd[:sn]] - gg.aa.yyyy[ ss:dd[:sn]]" → [Bas, Son); yalnız gün yazılan bitiş günün sonuna kadar
+    static (DateTime Bas, DateTime Son)? TarihAraligi(string? q)
+    {
+        if (string.IsNullOrWhiteSpace(q)) return null;
+        var m = System.Text.RegularExpressions.Regex.Match(q, @"^\s*(\d{1,2}\.\d{1,2}\.\d{4}(?:\s+\d{1,2}:\d{2}(?::\d{2})?)?)\s*(?:-|–|\.\.)\s*(\d{1,2}\.\d{1,2}\.\d{4}(?:\s+\d{1,2}:\d{2}(?::\d{2})?)?)\s*$");
+        if (!m.Success) return null;
+        string[] fmt = ["d.M.yyyy", "d.M.yyyy H:mm", "d.M.yyyy H:mm:ss"];
+        var tr = System.Globalization.CultureInfo.InvariantCulture;
+        if (!DateTime.TryParseExact(m.Groups[1].Value.Trim(), fmt, tr, System.Globalization.DateTimeStyles.None, out var a)
+            || !DateTime.TryParseExact(m.Groups[2].Value.Trim(), fmt, tr, System.Globalization.DateTimeStyles.None, out var b)) return null;
+        b = m.Groups[2].Value.Contains(':') ? b.AddSeconds(m.Groups[2].Value.Count(c => c == ':') == 1 ? 60 : 1) : b.AddDays(1);
+        return a <= b ? (a, b) : (b, a);
     }
 
     // Öneri sunucuya atanmamış bir katalog uygulaması mı (" Veritabanı" eki atılarak)

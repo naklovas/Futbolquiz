@@ -128,7 +128,7 @@
       <span class="sp" style="flex:1"></span><button type="button" id="csv" hidden>Excel'e aktar</button></div>
     <div class="tools" id="tools">
       <select id="kurum" title="Segment Domain'inin önekine göre: zb = Ziraat Bankası, zk = Ziraat Katılım, zi = İştirak (Imza:Kurumlar). Tarama düğmeleri de bu seçime uyar."><option value="">Kurum: Tümü</option></select>
-      <input type="search" id="q" placeholder="IP, sunucu, port, ERT adı, exe, IIS uygulaması, öneri ara…" style="min-width:320px">
+      <input type="search" id="q" placeholder="IP, sunucu, port, ERT adı, exe, IIS uygulaması, öneri, tarih ara…" title="AI tarama tarihi: '16.11.2026' ya da '16.11.2026 14:20'; aralık: '16.11.2026 - 17.11.2026' veya '16.11.2026 10:00 - 16.11.2026 12:00'" style="min-width:320px">
       <select id="durum" title="ERT tarafı">
         <option value="">Tüm satırlar</option>
         <option value="bostum">ERT'de adı boş (tümü)</option>
@@ -160,7 +160,7 @@ const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const fmt = n => Number(n || 0).toLocaleString("tr-TR");
 const tarih = d => d ? String(d).slice(0, 16).replace("T", " ") : "";
-const st = { veri: null, tab: "satir", limit: 500, yetki: {}, durumFiltre: "", sec: new Set(), kurum: "", ai: {} };
+const st = { veri: null, tab: "satir", limit: 500, yetki: {}, durumFiltre: "", sec: new Set(), kurum: "", ai: {}, tarihSira: "" };
 const aiO = r => st.ai[r.ip]?.[r.port];
 const DURUM = { kayitli: "ERT'de kayıtlı", bos: "boş", oneri: "boş · öneri var", uyumsuz: "ERT farklı", ertyok: "ERT'de kaydı yok" };
 const VERI = { yok: "tarandı · veri yok", taranmadi: "taranmadı" };
@@ -234,12 +234,30 @@ function suz() {
   const q = $("#q").value.trim().toLocaleLowerCase("tr"), g = $("#guven").value, alt = $("#alt").checked, gen = $("#gen").checked;
   let d = $("#durum").value, vf = $("#veri").value; const ku = st.kurum;
   if (st.durumFiltre.startsWith("v:")) vf = vf || st.durumFiltre.slice(2); else d = d || st.durumFiltre;
-  return v.satirlar.filter(r => (!ku || r.kurum === ku) && (alt || !r.altyapi) && (gen || !(r.genel && r.durum === "ertyok"))
+  // AI tarama tarihi aralığı: "16.11.2026 - 17.11.2026" ya da "16.11.2026 10:00 - 16.11.2026 12:00" (yalnız gün yazılan bitiş günün sonuna kadar)
+  const ar = tarihAraligi(q);
+  const l = v.satirlar.filter(r => (!ku || r.kurum === ku) && (alt || !r.altyapi) && (gen || !(r.genel && r.durum === "ertyok"))
     && (!d || (d === "bostum" ? r.durum === "bos" : d === "oneri" ? r.durum === "bos" && r.oneri : d === "bos" ? r.durum === "bos" && !r.oneri
         : d === "platform" ? r.platform && !r.oneri && r.durum !== "kayitli" : d === "aiyok" ? (r.durum === "bos" || r.durum === "ertyok") && !r.oneri && !aiO(r) : r.durum === d))
     && (!vf || r.veri === vf)
     && (!g || r.guven === g)
-    && (!q || [r.ip, r.port, r.sunucu, r.ert, r.website, r.exe, r.exeYol, r.oneri, r.not, ...(r.iis || []), ...(r.vip || [])].some(x => String(x ?? "").toLocaleLowerCase("tr").includes(q))));
+    && (ar ? (aiO(r)?.aiTarih && new Date(aiO(r).aiTarih) >= ar[0] && new Date(aiO(r).aiTarih) < ar[1])
+      : !q || [r.ip, r.port, r.sunucu, r.ert, r.website, r.exe, r.exeYol, r.oneri, r.not, ...(r.iis || []), ...(r.vip || []),
+          aiO(r)?.aiTarih ? tamTarih(aiO(r).aiTarih) : ""].some(x => String(x ?? "").toLocaleLowerCase("tr").includes(q))));
+  // "AI tarama" başlığına tıklayınca tarihe göre (taranmamışlar sonda)
+  if (st.tarihSira) {
+    const t = r => aiO(r)?.aiTarih ? new Date(aiO(r).aiTarih).getTime() : null, yon = st.tarihSira === "asc" ? 1 : -1;
+    l.sort((a, b) => { const x = t(a), y = t(b); return x == null ? (y == null ? 0 : 1) : y == null ? -1 : (x - y) * yon; });
+  }
+  return l;
+}
+function tarihAraligi(q) {
+  const m = /^\s*(\d{1,2})\.(\d{1,2})\.(\d{4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?\s*(?:-|–|\.\.)\s*(\d{1,2})\.(\d{1,2})\.(\d{4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?\s*$/.exec(q || "");
+  if (!m) return null;
+  const a = new Date(+m[3], +m[2] - 1, +m[1], +(m[4] || 0), +(m[5] || 0), +(m[6] || 0));
+  let b = new Date(+m[9], +m[8] - 1, +m[7], +(m[10] || 0), +(m[11] || 0), +(m[12] || 0));
+  b = new Date(b.getTime() + (m[10] == null ? 86400000 : m[12] == null ? 60000 : 1000));
+  return a <= b ? [a, b] : [b, a];
 }
 
 function oneriHucre(r) {
@@ -310,7 +328,7 @@ async function aiIzle() {
 }
 
 function satirTablo(l) {
-  $("#head").innerHTML = `<tr><th style="width:28px"><input type="checkbox" id="secHep" title="Süzülen satırların hepsini seç / bırak"${l.length && l.every(r => st.sec.has(r.ip)) ? " checked" : ""}></th><th>IP</th><th>Sunucu</th><th>Port</th><th>ERT uygulaması</th><th>Exe (Carbon Black)</th><th>IIS uygulamaları</th><th>VIP havuzu</th><th class="num">Bağlantı</th><th>Durum</th><th>Tespit edilen uygulama</th><th title="ERT eksikleri AI motorunun önerisi (DF_ERT_UYGULAMA_ONERI)">AI önerisi</th><th title="AI'ın bu portu en son taradığı an">AI tarama</th></tr>`;
+  $("#head").innerHTML = `<tr><th style="width:28px"><input type="checkbox" id="secHep" title="Süzülen satırların hepsini seç / bırak"${l.length && l.every(r => st.sec.has(r.ip)) ? " checked" : ""}></th><th>IP</th><th>Sunucu</th><th>Port</th><th>ERT uygulaması</th><th>Exe (Carbon Black)</th><th>IIS uygulamaları</th><th>VIP havuzu</th><th class="num">Bağlantı</th><th>Durum</th><th>Tespit edilen uygulama</th><th title="ERT eksikleri AI motorunun önerisi (DF_ERT_UYGULAMA_ONERI)">AI önerisi</th><th data-sort="tarih" id="thTarih" title="AI'ın bu portu en son taradığı an · sıralamak için tıklayın">AI tarama${st.tarihSira === "desc" ? " ▼" : st.tarihSira === "asc" ? " ▲" : ""}</th></tr>`;
   const g = l.slice(0, st.limit);
   $("#body").innerHTML = g.length ? g.map(r => `<tr${r.altyapi ? ` class="alt"` : ""}>
     <td><input type="checkbox" data-sec="${esc(r.ip)}"${st.sec.has(r.ip) ? " checked" : ""}></td>
@@ -379,6 +397,7 @@ function ciz() {
   if (st.tab === "satir") satirTablo(suz()); else if (st.tab === "iis") iisSozlukTablo(); else sozlukTablo();
   $("#msgs").innerHTML = v?.mesajlar?.length ? `<details><summary>${v.mesajlar.length} tarama uyarısı</summary>${v.mesajlar.map(m => `<div>${esc(m)}</div>`).join("")}</details>` : "";
   bagla();
+  $("#thTarih")?.addEventListener("click", () => { st.tarihSira = st.tarihSira === "desc" ? "asc" : st.tarihSira === "asc" ? "" : "desc"; ciz(); });
   $("#secHep")?.addEventListener("change", e => { const ips = suz().map(r => r.ip); ips.forEach(ip => e.target.checked ? st.sec.add(ip) : st.sec.delete(ip)); ciz(); });
 }
 

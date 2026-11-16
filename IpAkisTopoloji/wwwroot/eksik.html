@@ -108,7 +108,7 @@
     <div id="bilgi" class="sub" style="margin:-4px 0 10px"></div>
     <div id="warn"></div>
     <div class="tools">
-      <input type="search" id="q" placeholder="IP, sunucu, website, muhafız, öneri, gerekçe ara…" title="Gerekçede de arar: ör. 'Kahin' yazınca Kahin'e dayanan öneriler" style="min-width:300px">
+      <input type="search" id="q" placeholder="IP, sunucu, website, muhafız, öneri, gerekçe, tarih ara…" title="Gerekçede de arar: ör. 'Kahin' yazınca Kahin'e dayanan öneriler. AI tarama tarihi: '16.11.2026' ya da '16.11.2026 14:20'; aralık: '16.11.2026 - 17.11.2026' veya '16.11.2026 10:00 - 16.11.2026 12:00'" style="min-width:300px">
       <select id="durum">
         <option value="">Tümü</option><option value="yok">Önerisi yok</option><option value="ai">AI önerdi (karar bekliyor)</option>
         <option value="onay">Onaylanan / elle</option><option value="red">Reddedilen</option>
@@ -127,7 +127,7 @@
     </div>
     <div id="run"></div>
     <div class="grid"><table>
-      <thead><tr><th style="width:30px"><input type="checkbox" id="all"></th><th data-sort="ip">IP<span class="arr"></span></th><th data-sort="port">Port<span class="arr"></span></th><th data-sort="sunucu">Sunucu / segment<span class="arr"></span></th><th>ERT satırındaki bilgiler</th><th>Aynı sunucudaki uygulamalar</th><th data-sort="oneri" title="Öneriye göre sırala (önerisi olmayanlar sonda)">Öneri<span class="arr"></span> <span class="sub2" data-sort="guven" title="Güvene göre sırala">güven<span class="arr"></span></span> <span class="sub2" data-sort="durum" title="Duruma göre sırala">durum<span class="arr"></span></span></th><th title="AI'ın bu portu en son taradığı an (onay / ret / elle değiştirmez)">AI tarama</th><th></th></tr></thead>
+      <thead><tr><th style="width:30px"><input type="checkbox" id="all"></th><th data-sort="ip">IP<span class="arr"></span></th><th data-sort="port">Port<span class="arr"></span></th><th data-sort="sunucu">Sunucu / segment<span class="arr"></span></th><th>ERT satırındaki bilgiler</th><th>Aynı sunucudaki uygulamalar</th><th data-sort="oneri" title="Öneriye göre sırala (önerisi olmayanlar sonda)">Öneri<span class="arr"></span> <span class="sub2" data-sort="guven" title="Güvene göre sırala">güven<span class="arr"></span></span> <span class="sub2" data-sort="durum" title="Duruma göre sırala">durum<span class="arr"></span></span></th><th data-sort="tarih" title="AI'ın bu portu en son taradığı an (onay / ret / elle değiştirmez) · sıralamak için tıklayın">AI tarama<span class="arr"></span></th><th></th></tr></thead>
       <tbody id="body"><tr><td colspan="9" class="empty"><span class="spinner"></span> Yükleniyor…</td></tr></tbody>
     </table></div>
     <div class="foot"><span id="count"></span>
@@ -290,7 +290,7 @@ document.querySelectorAll("thead [data-sort]").forEach(th => th.addEventListener
   e.stopPropagation();
   const k = th.dataset.sort;
   // öneri / güven ilk tıklamada en iyi üstte (azalan), diğerleri artan
-  if ((st.sort || "ip") === k) { st.sort = k; st.desc = !st.desc; } else { st.sort = k; st.desc = k === "guven"; }
+  if ((st.sort || "ip") === k) { st.sort = k; st.desc = !st.desc; } else { st.sort = k; st.desc = k === "guven" || k === "tarih"; }
   st.page = 1; load();
 }));
 $("#next").addEventListener("click", () => { st.page++; load(); });
