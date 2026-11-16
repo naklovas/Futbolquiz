@@ -373,7 +373,9 @@ xlog"];
         foreach (var r in satir)
         {
             var p = new List<string>();
-            if (r.Exe != null) p.Add($"portu kabul eden exe {r.Exe}{(r.ExeYol != null && r.ExeYol != r.Exe ? $" ({r.ExeYol})" : "")}{(r.ExeKaynak is { } ek && ek != "Carbon Black" ? $" [kaynak: {ek}]" : "")}");
+            bool tahminExe = r.ExeKaynak?.Contains("korelasyon") == true;   // kesin değil: zaman korelasyonu
+            if (r.Exe != null && tahminExe) p.Add($"TAHMİNİ exe (zaman korelasyonu — KESİN DEĞİL, uygulama adı olarak kullanma): {r.Exe}{(r.ExeYol != null && r.ExeYol != r.Exe ? $" ({r.ExeYol})" : "")}");
+            else if (r.Exe != null) p.Add($"portu kabul eden exe {r.Exe}{(r.ExeYol != null && r.ExeYol != r.Exe ? $" ({r.ExeYol})" : "")}{(r.ExeKaynak is { } ek && ek != "Carbon Black" ? $" [kaynak: {ek}]" : "")}");
             else if (r.HttpSys) p.Add("HTTP.sys (ntoskrnl) — asıl exe bulunamadı");
             else if (r.GenelExe != null) p.Add($"yalnız genel süreç ({r.GenelExe}) — iş uygulaması değil");
             else if (r.Veri == "yok") p.Add("taramada bu portta trafik görülmedi");

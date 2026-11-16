@@ -757,11 +757,18 @@ sealed class HttpSysKayitService(IConfiguration cfg, ILogger<HttpSysKayitService
                 catch (Exception ex) when (ex is not OperationCanceledException) { log.LogWarning("HTTP.sys tahminleri okunamadı: {Hata}", ex.Message); }
             }
             await Oku($"SELECT IP, PORT, EXE_YOL FROM {UrlTablo} WITH (NOLOCK) WHERE EXE_YOL IS NOT NULL AND PORT > 0", "HTTP.sys kesin kaydı (netsh)");
-            await Oku($"SELECT IP, PORT, COALESCE(NULLIF(EXE_YOL, ''), EXE) FROM {KorTablo} WITH (NOLOCK) WHERE SIRA = 1 AND EXE IS NOT NULL", "zaman korelasyonu (kayıtlı tahmin)");
+            // Yalnız eşiği geçen tahmin (kullanıcı: 8031'de r 0,03 · 7/36 dk ile chrome.exe exe sayıldı): R ≥ MinKorelasyon ya da aynı istemci eşleşmesi;
+            // eşik altı "en yakın exe"ler (EsikAlti) exe yerine KONMAZ. ISTEMCI kolonu yoksa (207) yalnız R ile.
+            double minR = cfg.GetValue("HttpSys:MinKorelasyon", 0.3);
+            string rs = minR.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            int once = d.Count;
+            await Oku($"SELECT IP, PORT, COALESCE(NULLIF(EXE_YOL, ''), EXE) FROM {KorTablo} WITH (NOLOCK) WHERE SIRA = 1 AND EXE IS NOT NULL AND (R >= {rs} OR ISTEMCI > 0)", "zaman korelasyonu (tahmin, kesin değil)");
+            if (d.Count == once)
+                await Oku($"SELECT IP, PORT, COALESCE(NULLIF(EXE_YOL, ''), EXE) FROM {KorTablo} WITH (NOLOCK) WHERE SIRA = 1 AND EXE IS NOT NULL AND R >= {rs}", "zaman korelasyonu (tahmin, kesin değil)");
         }
         foreach (var (ip, res) in _kor)   // tablo yoksa bellekteki korelasyonlar
-            foreach (var p in res.Portlar) if (p.Adaylar.FirstOrDefault() is { } a && !d.ContainsKey(ip + "|" + p.Port))
-                d[ip + "|" + p.Port] = (string.IsNullOrEmpty(a.Yol) ? a.Exe : a.Yol, "zaman korelasyonu (kayıtlı tahmin)");
+            foreach (var p in res.Portlar) if (p.Adaylar.FirstOrDefault() is { EsikAlti: false } a && !d.ContainsKey(ip + "|" + p.Port))
+                d[ip + "|" + p.Port] = (string.IsNullOrEmpty(a.Yol) ? a.Exe : a.Yol, "zaman korelasyonu (tahmin, kesin değil)");
         _tum = (DateTime.UtcNow, d);
         return d;
     }

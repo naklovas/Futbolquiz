@@ -401,6 +401,22 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
         for (int i = 0; i < u.Length; i++) if (u.Remove(i, 1) == k) return true;
         return false;
     }
+    // AI adının ayırt edici kelimeleri: camelCase / _ / rakamla bölünür (BanksoftSharePoint → banksoft, sharepoint; ReeskService_Grp_7654 → reesk, service),
+    // genel kelimeler (GenelKelime kökleri, agent / service / server / grp / pool / vip / web / common…) ve sayılar atılır
+    static readonly HashSet<string> AileGenel = ["agent", "ajan", "service", "servis", "services", "server", "sunucu", "sunucusu", "grp", "group", "pool", "havuz",
+        "vip", "common", "web", "ws", "api", "app", "uygulama", "uygulamasi", "sistem", "sistemi", "entegrasyon", "entegrasyonu", "prod", "test"];
+    static List<string> AyirtKelimeler(string ad)
+    {
+        string b = System.Text.RegularExpressions.Regex.Replace(ad, @"(?<=\p{Ll})(?=\p{Lu})|(?<=\p{L})(?=\d)|(?<=\d)(?=\p{L})", " ");
+        return Kelimeler(b).Where(w => w.Length >= 3 && !w.All(char.IsDigit) && !AileGenel.Contains(w) && !GenelKelime.Contains(w.Length > 5 ? w[..5] : w)).Distinct().ToList();
+    }
+    static bool AileUyar(string aiAd, string katalogAd)
+    {
+        var a = AyirtKelimeler(aiAd);
+        if (a.Count == 0) return false;
+        var k = Kelimeler(katalogAd);
+        return a.Count(w => k.Any(v => KelimeEs(w, v))) * 2 >= a.Count;   // en az yarısı (SAS ALM → [ZK] SAS IFRS TFRS9 kalsın; BanksoftSharePoint 1/3 düşer)
+    }
     static bool KelimeEs(string x, string y)
     {
         if (x == y) return true;
@@ -532,7 +548,9 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
         // biri adında geçen katalog kayıtları: SAS → ZT SAS Enterprise Miner, [ZK] SAS IFRS TFRS9…) arasından bağlamla seç
         if (hit == null && coklu == null)
         {
-            var aile = cat.Where(c => c.Tok.Any(t => key.Contains(t))).Select(c => c.App).Take(15).ToList();
+            // kullanıcı: "isim benzerlikleri saçma" — tek ortak kök yetmiyordu ("Opsware Agent" → "Agent Ziraat Yatırım…", "BanksoftSharePoint" → "Banksoft Kredi Kartları"):
+            // aile üyesi AI adının ayırt edici kelimelerinin EN AZ YARISINI tam kelime olarak içermeli (AileUyar)
+            var aile = cat.Where(c => c.Tok.Any(t => key.Contains(t)) && AileUyar(name, c.App)).Select(c => c.App).Take(15).ToList();
             if (aile.Count > 0 && Secim(env, aile, a, ip, evidence) is { } sec2)
             {
                 yeni = false;
@@ -639,7 +657,9 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
         "McAfee", "Trellix", "Symantec", "Tanium", "Qualys", "Tenable", "Nessus", "CyberArk", "SCCM", "Zabbix", "Dynatrace", "AppDynamics",
         "AppInternals", "Commvault", "Veeam", "NetBackup", "Guardium", "Imperva", "Varonis", "Forcepoint", "Ansible", "Nagios", "PRTG", "SolarWinds",
         // yetkili erişim yönetimi (PAM): sunuculara bağlanmak için kullanılır, bağlandığı sunucunun uygulaması değildir (kullanıcı: Kron)
-        "Kron", "Single Connect", "BeyondTrust", "Delinea", "Thycotic", "Wallix"];
+        "Kron", "Single Connect", "BeyondTrust", "Delinea", "Thycotic", "Wallix",
+        // sunucu yönetim / otomasyon ajanları (kullanıcı ekranı: \opsware\agent\python3\python.exe → AI "Opsware Agent")
+        "Opsware", "Server Automation"];
     string[] Ajanlar() => cfg.GetSection("Eksik:AjanUygulamalari").GetChildren().Select(c => c.Value).OfType<string>().Where(v => v.Trim() != "") is var l && l.Any()
         ? l.ToArray() : DefaultAjanlar;
     // Ürünlerin eski / diğer adları (ör. Forcepoint'in eski adı Websense; segment adı WEBSENSE kalmış olabilir)
@@ -1469,7 +1489,11 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
             yazılmış uygulama alanı varsa çok güçlü; aynı satırdaki WEBSITE (IIS site adı) ve SERVICENAME; aynı sunucunun diğer portlarındaki uygulamalar; VIP ve havuz
             komşuları; BENZER ADLI SUNUCULARIN (aynı ad, farklı numara) uygulamaları; aynı segmentte aynı portu kullanan
             sunucuların uygulamaları; bu porta bağlanan istemci uygulamalar ve exe'nin bağlandığı yerler; sanal sunucu notları;
-            iş istekleri; sunucu adındaki kısaltmalar (ör. "atm", "sql", "web"). ntoskrnl.exe görünüyorsa port HTTP.sys üzerindendir ("IIS ERİŞİM LOGU" satırı varsa port KESİN o IIS sitesinindir ve URI'deki uygulama adı en güçlü kanıttır; "HTTP.SYS KAYDI" satırı varsa o portu dinleyen süreç KESİN odur — exe yolu / IIS havuzu adı uygulamayı gösterir, en güçlü kanıtlardan say; "SERVİS İMZASI" bölümünde "İMZA ÖNERİSİ … güçlü" (aynı VIP havuzunun diğer üyeleri ya da aynı exe:port + aynı IIS uygulamaları başka sunucularda bu adla kayıtlı) güçlü kanıttır, "orta" orta, "zayıf" zayıf ipucudur; "PLATFORM SÜRECİ" yazan exe (sqlservr.exe:1433 gibi) uygulamayı BELİRLEMEZ — o portta SM talepleri, VIP, aynı sunucunun diğer uygulamaları ve sunucu adına bak;
+            iş istekleri; sunucu adındaki kısaltmalar (ör. "atm", "sql", "web"). ntoskrnl.exe görünüyorsa port HTTP.sys üzerindendir ("IIS ERİŞİM LOGU" satırı varsa port KESİN o IIS sitesinindir ve URI'deki uygulama adı en güçlü kanıttır; "HTTP.SYS KAYDI" satırı varsa o portu dinleyen süreç KESİN odur — exe yolu / IIS havuzu adı uygulamayı gösterir, en güçlü kanıtlardan say; KESİN ve TAHMİNİ exe AYRIDIR: Carbon Black'te portu doğrudan kabul eden exe, HTTP.SYS KAYDI ve IIS ERİŞİM LOGU kesindir; "zaman korelasyonu", "TAHMİNİ exe", "ÇOK ZAYIF İPUCU"
+              satırları yalnız tahmindir — bunlarda exe adını uygulama adı yapma, güveni 50'nin üstüne çıkarma, uygulamayı VIP havuzu / SM / IIS / aynı sunucunun ERT kayıtlarından bul;
+              chrome / iexplore / msedge gibi tarayıcılar ve svchost / w3wp gibi genel süreçler hiçbir zaman uygulama adı değildir;
+              VIP havuz adları (ör. ZiraatWeb81, BanksoftSharePoint, ReeskService_Grp_7654) yük dengeleyicideki teknik addır, uygulama adı olarak yazma:
+              havuzun diğer üyelerinin ERT adlarına ve SERVİS İMZASI önerisine bak; "SERVİS İMZASI" bölümünde "İMZA ÖNERİSİ … güçlü" (aynı VIP havuzunun diğer üyeleri ya da aynı exe:port + aynı IIS uygulamaları başka sunucularda bu adla kayıtlı) güçlü kanıttır, "orta" orta, "zayıf" zayıf ipucudur; "PLATFORM SÜRECİ" yazan exe (sqlservr.exe:1433 gibi) uygulamayı BELİRLEMEZ — o portta SM talepleri, VIP, aynı sunucunun diğer uygulamaları ve sunucu adına bak;
             "HTTP.SYS PORT → EXE TAHMİNİ" satırındaki EN OLASI exe orta güçte kanıttır); asıl uygulama aynı sunucudaki ve adı WEBSITE ile
             örtüşen exe'dir.
 
@@ -1726,6 +1750,14 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
                 guven = Math.Min(guven, 50);
                 if (gerekce?.Contains("Kahin", StringComparison.OrdinalIgnoreCase) != true) gerekce = "Kahin tahmini (son çare): " + gerekce;
             }
+            // Genel süreç / tarayıcı adı uygulama değildir (kullanıcı: 8031'e zaman korelasyonu tahmini chrome.exe yüzünden AI "Chrome %85" yazdı)
+            if (app != null && System.Text.RegularExpressions.Regex.Replace(app.Trim(), @"(?i)\.exe$", "") is var exeAd && exeAd.Length > 0
+                && !exeAd.Contains(' ') && (SurecAi.GenelExe(exeAd + ".exe", null) || exeAd.Equals("w3wp", StringComparison.OrdinalIgnoreCase)
+                    || HttpSysEslesme.Cekirdek(exeAd + ".exe")))
+            {
+                gerekce = $"Yok sayıldı: AI '{app}' önerdi ama bu genel bir Windows / tarayıcı süreci adı (iş uygulaması değil). AI gerekçesi: {gerekce}";
+                app = null; guven = 0;
+            }
             // Ekip / birim adı uygulama değildir (kullanıcı: AI işleten birim "KATILIM VERİ AMBARI"nı uygulama diye önerdi)
             if (app != null && EkipAdi(env, ip, app) is { } ekip)
             {
@@ -1769,6 +1801,14 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
                 app = CatalogMatch(env, dbRx.Replace(app, "").Trim() is { Length: > 0 } core ? core : app, out yeni, out var katNot, ip, texts.GetValueOrDefault(ip));
                 if (db) app += " Veritabanı";
                 if (katNot != null) gerekce = $"{gerekce} [{katNot}]";
+                // VIP havuz adı (ZiraatWeb81, BanksoftSharePoint, ReeskService_Grp_7654) LB'deki teknik addır, uygulama adı değil (kullanıcı ekranı):
+                // katalogda karşılığı yoksa güven en çok 40 ve not
+                if (yeni && env.MemberOf(ip).Select(m => Norm(System.Text.RegularExpressions.Regex.Replace((m.Pool ?? "").Replace("/Common/", ""), @"(?i)[_-]?(grp|group|pool)([_-]?\d+)?$", "")))
+                        .Any(pn => pn.Length >= 4 && Norm(app).Contains(pn)))
+                {
+                    guven = Math.Min(guven, 40);
+                    gerekce = $"{gerekce} [ad VIP havuz adından türetilmiş; havuz adı uygulama adı değildir, ERT kataloğunda karşılığı bulunamadı]";
+                }
             }
             res[(ip, port)] = new EksikOneri(Cut(app, 200), yeni, guven, gerekce, Ai, "AI", DateTime.Now);
         }

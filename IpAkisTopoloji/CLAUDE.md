@@ -472,6 +472,18 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
   SIRALAMA + ARAMA (kullanıcı: "tarih alanına göre sıralama olmalı, aramada tarih girebilmeliyim"): `/api/eksik?sirala=tarih` (taranmamışlar sonda; ilk tık en yeni üstte),
   arama metni AiTarih'in "gg.aa.yyyy ss:dd:sn" / "yyyy-aa-gg …" biçiminde de aranır; "gg.aa.yyyy[ ss:dd[:sn]] - gg.aa.yyyy[…]" aralıktır (`TarihAraligi`; yalnız gün yazılan
   bitiş günün sonuna kadar). imza.html'de aynısı tarayıcıda (`tarihAraligi`, "AI tarama" başlığı tıklanınca ▼ / ▲ / kapalı, `st.tarihSira`).
+- **Kesin / tahmini exe ayrımı** (kullanıcı ekranı: 8031 HTTP.sys portunda korelasyon "güçlü aday yok · chrome.exe r 0,03 7/36 dk" eşik altıydı ama imza onu exe
+  saydı, AI "Chrome %85 yeni ad" yazdı; "process verisi net ise başka, tahmini ise başka yaklaşım olmalı"): `TumTahminlerAsync` DF_HTTPSYS_KORELASYON'dan yalnız
+  R ≥ `HttpSys:MinKorelasyon` ya da ISTEMCI > 0 olan SIRA 1'i okur (eşik altı yok; bellekte EsikAlti hariç), kaynak "zaman korelasyonu (tahmin, kesin değil)".
+  Tarayıcılar / güncelleyiciler `SurecAi.GenelAd` / `GenelYol`'a eklendi (chrome, msedge, iexplore, firefox, edgewebview, google/edge update; ayrıca \opsware\ = HP
+  Server Automation ajanı, python.exe) → korelasyon adayı, imza exe'si, sözlük olmazlar. Imza kanıt metninde korelasyon exe'si "TAHMİNİ exe (… KESİN DEĞİL, uygulama adı
+  olarak kullanma)", imza.html exe hücresinde "~ tahmin · zaman korelasyonu". Eksik prompt'u: kesin (CB doğrudan, HTTP.SYS KAYDI, IIS logu) ↔ tahmin (korelasyon) ayrımı,
+  tahminde exe adı uygulama yapılmaz / güven ≤ 50; tarayıcı / genel süreç asla uygulama. Kod: AI'ın adı genel süreç / tarayıcı / w3wp / ntoskrnl adıysa "Yok sayıldı".
+  ADDAN AİLE SEÇİMİ (kullanıcı: "uygulama isim benzerlikleri saçma": "Opsware Agent" → "Agent Ziraat Yatırım Tradesoft GTP entegrasyonu", "BanksoftSharePoint" →
+  "Banksoft Kredi Kartları"): CatalogMatch0 "aynı ürün ailesi" artık `AileUyar` ister — AI adının ayırt edici kelimeleri (`AyirtKelimeler`: camelCase / _ / rakamla
+  bölünür, `AileGenel` agent / service / server / grp / pool / vip / web… ve GenelKelime atılır) en az YARISI katalog adında tam kelime (KelimeEs) olmalı
+  (SAS ALM → [ZK] SAS IFRS TFRS9 ve ReeskService → Merkez Bankası Reeskont Kredisi kalır). Ajan listesine Opsware / Server Automation. VIP HAVUZ ADI: AI'ın serbest
+  adı sunucunun VIP havuz adından (Grp / pool eki atılmış) türetilmişse güven ≤ 40 + not; prompt'ta "havuz adı uygulama adı değildir".
 - **"Bu sunucuda hangi uygulama çalışıyor?"** (IP kartı, Gelen portlar tablosunun üstündeki düğme; `SurecAi` Surec.cs, `POST /api/surec/ai`):
   arayüzdeki /api/surec sonucu exe başına toplanıp (PID'ler, portlar, giden, bağlanan / bağlandığı uygulamalar) AI'a gider (yeniden
   sorgulanmaz) + ERT kayıtları + segment + genel bilgiler dosyası. Kesin genel süreçler kodda ayıklanır (`GenelAd` / `GenelYol`: svchost,

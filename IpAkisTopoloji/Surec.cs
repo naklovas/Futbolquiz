@@ -101,12 +101,17 @@ static class SurecAi
 {
     // Kesin genel / altyapı süreçleri: AI'a "ayıklandı" olarak bildirilir, ayrıntısı gönderilmez
     static readonly string[] GenelYol = [@"\windows\system32\", @"\windows\syswow64\", @"\splunkuniversalforwarder\", @"\trend micro\",
-        @"\carbon black\", @"\confer\", @"\vmware\vmware tools\", @"\windows defender\", @"\microsoft monitoring agent\", @"\zabbix", @"\nsclient"];
+        @"\carbon black\", @"\confer\", @"\vmware\vmware tools\", @"\windows defender\", @"\microsoft monitoring agent\", @"\zabbix", @"\nsclient",
+        // tarayıcılar ve güncelleyicileri (kullanıcı: korelasyon chrome.exe'yi 8031'in exe'si saydı, AI "Chrome" önerdi) — sunucuda port dinleyen iş uygulaması değil
+        @"\google\chrome\", @"\google\update\", @"\googleupdater\", @"\microsoft\edge", @"\microsoft\edgeupdate\", @"\mozilla firefox\", @"\internet explorer\",
+        // sunucu otomasyon ajanı (HP / Micro Focus Server Automation, python.exe ile çalışır)
+        @"\opsware\"];
     static readonly HashSet<string> GenelAd = new(StringComparer.OrdinalIgnoreCase)
     {
         "svchost.exe", "lsass.exe", "services.exe", "wininit.exe", "winlogon.exe", "csrss.exe", "smss.exe", "dwm.exe", "explorer.exe",
         "conhost.exe", "taskhostw.exe", "wmiprvse.exe", "spoolsv.exe", "rdpclip.exe", "splunkd.exe", "wget.exe", "msmpeng.exe",
-        "coreserviceshell.exe", "vmtoolsd.exe", "zabbix_agentd.exe", "repmgr.exe", "cb.exe", "lsm.exe", "wermgr.exe", "ccsvchst.exe"
+        "coreserviceshell.exe", "vmtoolsd.exe", "zabbix_agentd.exe", "repmgr.exe", "cb.exe", "lsm.exe", "wermgr.exe", "ccsvchst.exe",
+        "chrome.exe", "msedge.exe", "iexplore.exe", "firefox.exe", "msedgewebview2.exe", "googleupdate.exe", "microsoftedgeupdate.exe"
     };
     public static bool GenelExe(string ad, string? yol) =>
         GenelAd.Contains(ad) || (yol != null && GenelYol.Any(g => yol.Contains(g, StringComparison.OrdinalIgnoreCase)) && !(ad is "ntoskrnl.exe" or "System"));
