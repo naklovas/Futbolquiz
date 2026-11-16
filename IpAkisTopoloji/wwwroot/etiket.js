@@ -19,7 +19,7 @@ const ETQ_COLS = [
   { key: "sunucu", label: "Sunucu adı", ph: "ara…" },
   { key: "uygulama", label: "Uygulamalar", ph: "ara…" },
   { key: "muhafiz", label: "Varlık muhafızı", ph: "ara…" },
-  { key: "segment", label: "Segment", ph: "ara…" },
+  { key: "segment", label: "Segment", ph: "ad, CIDR (10.1.2.0/24) ya da IP öneki…" },
   { key: "etiket", label: "Etiketler" }
 ];
 
@@ -242,7 +242,7 @@ function etqUpdate() {
       <td>${esc(r.hostname ?? "")}</td>
       <td class="app">${r.apps.map(a => `<span>${esc(a)}</span>`).join("") || `<span class="dim">—</span>`}</td>
       <td class="${r.muhafiz ? "" : "dim"}">${esc(r.muhafiz ?? "—")}</td>
-      <td class="${r.segment ? "" : "dim"}">${esc(r.segment ?? "—")}</td>
+      <td class="${r.segment ? "" : "dim"}">${esc(r.segment ?? "—")}${r.cidr ? `<div class="dim" style="font-size:11px">${esc(r.cidr)}</div>` : ""}</td>
       <td>${r.tags.map(t => tagChip(t, r.ip, w)).join("") || `<span class="dim">—</span>`}</td>
       ${w ? `<td style="text-align:right"><button type="button" class="eg-add" data-tagip="${esc(r.ip)}">+ Etiket</button></td>` : ""}
     </tr>`).join("")

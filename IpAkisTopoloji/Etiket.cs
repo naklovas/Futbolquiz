@@ -9,7 +9,7 @@ using Microsoft.Data.SqlClient;
 // Alt etiket: "ANA/ALT" (ör. MOBILBANKACILIK/MOBIL APP) aynı TAG kolonunda; ana etiket seçilince alt etiketli sunucular da gelir.
 // Açıklamalar (ana ve alt etiket): ayrı küçük tablo Etiket:AciklamaTablosu (varsayılan dbo.DF_ETIKET_ACIKLAMA, sql/etiket_versiyon.sql).
 // ---------------------------------------------------------------------------
-record EtiketSunucu(string Ip, string? Hostname, List<string> Apps, string? Muhafiz, string? Segment, List<string> Tags);
+record EtiketSunucu(string Ip, string? Hostname, List<string> Apps, string? Muhafiz, string? Segment, List<string> Tags, string? Cidr = null);
 record EtiketSayi(string Ad, int Sunucu, string? Aciklama = null);
 // Sunucular = istenen sayfa; Toplam = filtreye uyan; Tum / Etiketli = envanterin geneli; Etiketler = etiket başına sunucu sayısı
 record EtiketListe(List<EtiketSunucu> Sunucular, int Toplam, int Tum, int Etiketli, List<EtiketSayi> Etiketler, string? AciklamaUyari = null);
@@ -59,13 +59,33 @@ static class EtiketService
             var hosts = e.AppsOnIp(ip);
             string? muh = string.Join(", ", hosts.Select(h => h.VarlikMuhafizi).OfType<string>().Distinct(StringComparer.OrdinalIgnoreCase).Take(3));
             return new EtiketSunucu(ip, hosts.Select(h => h.UnixName).OfType<string>().FirstOrDefault(),
-                e.AppNamesOnIp(ip).Take(5).ToList(), muh == "" ? null : muh, e.FindSegment(ip)?.Label, e.TagsOf(ip));
+                e.AppNamesOnIp(ip).Take(5).ToList(), muh == "" ? null : muh, e.FindSegment(ip)?.Label, e.TagsOf(ip), e.FindSegment(ip)?.Cidr);
         })
         .ToList());
 
     public static EtiketSunucu? Row(EnvanterSnapshot env, string ip) => All(env).FirstOrDefault(s => s.Ip == ip);
 
     static bool Has(string? value, string? q) => string.IsNullOrWhiteSpace(q) || (value?.Contains(q.Trim(), StringComparison.CurrentCultureIgnoreCase) ?? false);
+
+    // Segment süzgeci (kullanıcı: "segmenti CIDR olarak filtreleyemiyoruz"): "10.71.51.0/24" → IP bu aralıkta mı (segment kaydından bağımsız; birden çok
+    // aralık virgül / boşlukla), "10.71.51." gibi IP öneki → IP bununla başlıyor mu; diğer metin → segment adında ya da segmentin CIDR'ında geçiyor mu
+    static readonly System.Text.RegularExpressions.Regex _cidr = new(@"^(\d{1,3}(?:\.\d{1,3}){3})/(\d{1,2})$");
+    static bool SegmentUyar(EtiketSunucu s, string? q)
+    {
+        if (string.IsNullOrWhiteSpace(q)) return true;
+        var parca = q.Split(new[] { ',', ';', ' ' }, StringSplitOptions.RemoveEmptyEntries);
+        if (parca.All(p => _cidr.IsMatch(p)))
+            return EnvanterSnapshot.TryToUInt(s.Ip, out uint ipv) && parca.Any(p =>
+            {
+                var m = _cidr.Match(p);
+                if (!EnvanterSnapshot.TryToUInt(m.Groups[1].Value, out uint ag) || !int.TryParse(m.Groups[2].Value, out int n) || n > 32) return false;
+                uint mask = n == 0 ? 0u : uint.MaxValue << (32 - n);
+                return (ipv & mask) == (ag & mask);
+            });
+        string t = q.Trim();
+        if (System.Text.RegularExpressions.Regex.IsMatch(t, @"^\d{1,3}(\.\d{1,3}){1,3}\.?$")) return s.Ip.StartsWith(t) || (s.Cidr?.StartsWith(t) ?? false);
+        return Has(s.Segment, t) || Has(s.Cidr, t);
+    }
 
     // Kolon filtreleri (içinde geçen, büyük/küçük harf duyarsız), etiket filtresi ("" tümü, "-" etiketsiz, "*" etiketli, ad),
     // sıralama ve sayfalama.
@@ -74,7 +94,7 @@ static class EtiketService
         var all = All(env);
         IEnumerable<EtiketSunucu> q = all
             .Where(s => Has(s.Ip, f.Ip) && Has(s.Hostname, f.Sunucu) && Has(string.Join(" ", s.Apps), f.Uygulama)
-                        && Has(s.Muhafiz, f.Muhafiz) && Has(s.Segment, f.Segment))
+                        && Has(s.Muhafiz, f.Muhafiz) && SegmentUyar(s, f.Segment))
             .Where(s => f.Etiket switch
             {
                 null or "" => true,

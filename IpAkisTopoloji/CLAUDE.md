@@ -492,6 +492,11 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
   bölüm yok. + "NESSUS" (`NessusService.Metin`, `Islev:NessusMaxKarakter`=1200). Prompt: çalışan yazılım işlevi en doğrudan gösterir (sas = analitik, pmserver / odi / SSIS =
   ETL, sqlservr / oracle = DB, w3wp + IIS = web, MQ, Control-M…), tahmin yalnız ipucu, envanterle çelişirse yazılıma güven. `Islev:YazilimKaniti`=true ile kapatılır.
   ERT eksiklerinin onaylı önerileri EKLENMEDİ (EksikService IslevService'e bağlı → döngü).
+- **Etiketleme segment süzgecinde CIDR** (kullanıcı: "segmenti CIDR olarak filtreleyemiyoruz"): `EtiketService.SegmentUyar` — "a.b.c.d/n" (virgül / boşlukla birden çok)
+  → IP aralıkta mı (segment kaydından bağımsız), "10.71.51." gibi IP öneki → IP / segment CIDR'ı bununla başlıyor mu, diğer metin → segment adı ya da CIDR'ında geçiyor mu.
+  `EtiketSunucu.Cidr` (segment CIDR'ı), etiket.js segment hücresinde altta küçük CIDR, placeholder güncellendi.
+  AÇIK: ERT'de olmayan (CMDB'nin taramadığı) sunucuları segmentten Carbon Black'le tarayıp etiketleme listesine getirme — kullanıcıya soruldu (etiket kaydı DF_ETIKET_EK mi,
+  tarama düğmesi mi kayıtlı taramalardan mı), cevap bekleniyor.
 - **"Bu sunucuda hangi uygulama çalışıyor?"** (IP kartı, Gelen portlar tablosunun üstündeki düğme; `SurecAi` Surec.cs, `POST /api/surec/ai`):
   arayüzdeki /api/surec sonucu exe başına toplanıp (PID'ler, portlar, giden, bağlanan / bağlandığı uygulamalar) AI'a gider (yeniden
   sorgulanmaz) + ERT kayıtları + segment + genel bilgiler dosyası. Kesin genel süreçler kodda ayıklanır (`GenelAd` / `GenelYol`: svchost,
