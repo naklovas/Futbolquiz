@@ -145,6 +145,7 @@ function etqShell() {
     <div id="egDesc"></div>
     <div class="eg-pills" id="egPills"></div>
     <div class="eg-pills subs" id="egSubs" hidden></div>
+    <div id="egSeg"></div>
     ${w ? `<div class="eg-bar" id="egBar" hidden>
       <b id="egSelN"></b>
       <input type="text" id="egNew" list="egTagList" placeholder="Etiket (ör. MOBILBANKACILIK)">
@@ -200,6 +201,7 @@ function etqShell() {
     $("#egNew").addEventListener("keydown", ev => { if (ev.key === "Enter") { ev.preventDefault(); $("#egAdd").click(); } });
   }
   $("#egDescBtn").addEventListener("click", () => { etq.descOpen = !etq.descOpen; egDescRender(); });
+  egSegInit();
   $("#egBody").addEventListener("change", ev => {
     const cb = ev.target.closest("[data-sel]");
     if (!cb) return;
@@ -262,6 +264,7 @@ function etqUpdate() {
     egSubList();
   }
   if (etq.descOpen) egDescRender();
+  egSegRender();
 }
 
 // Alt etiket önerileri: yazılan ana etiketin mevcut altları
@@ -345,3 +348,144 @@ document.addEventListener("click", ev => {
     if (confirm(`${del.dataset.ip} sunucusundan "${del.dataset.untag}" etiketi kaldırılsın mı?`)) applyTag([del.dataset.ip], null, del.dataset.untag);
   }
 });
+
+// ---------------------------------------------------------------------------
+// Segment getir: segmentteki bütün IP'ler (ERT'dekiler + ERT'de olmayıp ağda görülenler) ve dinledikleri portlar.
+// Segment tarama API'si kullanılır (kayıtlı tarama varsa ondan açılır; "Yenile" baştan getirir). ERT'deki IP'ler
+// seçilip üstteki çubukla etiketlenir; ERT'de olmayanlar listelenir ama TAG kolonu olmadığından etiketlenemez.
+// ---------------------------------------------------------------------------
+const egs = { segs: null, is: null, ert: new Map(), filtre: "", hata: null, yukleniyor: false, ilerleme: "", seq: 0 };
+
+(function egsStyle() {
+  const st = document.createElement("style");
+  st.textContent = `
+  .eg-seg { border:1px solid var(--line); border-radius:10px; background:var(--bg); padding:10px 14px; margin-bottom:12px; }
+  .eg-seg .top { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  .eg-seg .top b { margin-right:4px; }
+  .eg-seg .top input { font:inherit; font-size:12.5px; padding:5px 8px; border:1px solid var(--line); border-radius:6px; background:var(--panel); color:var(--text); width:300px; max-width:100%; }
+  .eg-seg .info { color:var(--muted); font-size:12px; }
+  .eg-seg .eg-grid { margin-top:10px; max-height:420px; }
+  .eg-seg .ports span { display:inline-block; font-family:Consolas, ui-monospace, monospace; font-size:11.5px; background:var(--panel); border:1px solid var(--line); border-radius:4px; padding:0 5px; margin:1px 3px 1px 0; }
+  .eg-seg .ports span.gen { opacity:.55; }
+  .eg-yok { display:inline-block; border-radius:999px; padding:1px 8px; font-size:11px; font-weight:600; background:color-mix(in srgb, var(--err) 14%, transparent); color:var(--err); border:1px solid color-mix(in srgb, var(--err) 40%, transparent); }`;
+  document.head.appendChild(st);
+})();
+
+function egSegInit() {
+  const box = $("#egSeg");
+  if (!box) return;
+  box.innerHTML = `<div class="eg-seg">
+    <div class="top"><b>Segment getir</b>
+      <input type="search" id="egSegIn" list="egSegList" placeholder="Segment adı ya da CIDR (ör. 10.1.2.0/24)"><datalist id="egSegList"></datalist>
+      <button type="button" id="egSegGo">Getir</button>
+      <button type="button" id="egSegYen" hidden title="Kayıtlı sonucu değil, segmenti baştan getirir">Yenile</button>
+      <button type="button" id="egSegKapat" hidden>Kapat</button>
+      <span class="info" id="egSegInfo"></span></div>
+    <div id="egSegBody"></div></div>`;
+  const go = mod => egSegGetir($("#egSegIn").value.trim(), mod);
+  $("#egSegGo").addEventListener("click", () => go(""));
+  $("#egSegYen").addEventListener("click", () => go("yeniden"));
+  $("#egSegIn").addEventListener("keydown", ev => { if (ev.key === "Enter") { ev.preventDefault(); go(""); } });
+  $("#egSegKapat").addEventListener("click", () => { egs.seq++; Object.assign(egs, { is: null, hata: null, yukleniyor: false, ert: new Map() }); egSegRender(); });
+  $("#egSegBody").addEventListener("change", ev => {
+    const cb = ev.target.closest("[data-ssel]");
+    if (cb) { cb.checked ? etq.selected.add(cb.dataset.ssel) : etq.selected.delete(cb.dataset.ssel); etqUpdate(); return; }
+    const all = ev.target.closest("#egSegAll");
+    if (all) { egSegSatirlar().filter(r => r.ert).forEach(r => all.checked ? etq.selected.add(r.ip) : etq.selected.delete(r.ip)); etqUpdate(); }
+  });
+  $("#egSegBody").addEventListener("click", ev => {
+    const b = ev.target.closest("[data-sf]");
+    if (b) { egs.filtre = b.dataset.sf; egSegRender(); }
+  });
+  const fill = () => { $("#egSegList").innerHTML = (egs.segs || []).map(s => `<option value="${esc(s.ad)}">${esc(s.cidrler.join(", "))}${s.kurum ? " · " + esc(s.kurum) : ""} · ${fmt(s.ertSunucu)} sunucu</option>`).join(""); };
+  if (egs.segs) fill();
+  else fetch("api/segment/liste").then(r => r.ok ? r.json() : []).then(l => { egs.segs = l; fill(); }).catch(() => {});
+  egSegRender();
+}
+
+async function egSegGetir(seg, mod) {
+  if (!seg) { alert("Segment adı ya da CIDR yazın."); return; }
+  const my = ++egs.seq;
+  Object.assign(egs, { is: null, hata: null, yukleniyor: true, ilerleme: "Getiriliyor…", ert: new Map(), filtre: "" });
+  egSegRender();
+  const json = async r => { const b = await r.json().catch(() => ({ error: `HTTP ${r.status}` })); if (!r.ok) throw new Error(b.error || `HTTP ${r.status}`); return b; };
+  try {
+    let d = await json(await fetch("api/segment/tarama", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ segment: seg, saat: 24, mod }) }));
+    while (d.calisiyor) {
+      if (my !== egs.seq) return;
+      egs.ilerleme = `Getiriliyor…${d.toplam ? ` ${fmt(d.biten)} / ${fmt(d.toplam)}` : ""}`;
+      egSegRender();
+      await new Promise(res => setTimeout(res, 2000));
+      d = await json(await fetch("api/segment/tarama/" + encodeURIComponent(d.id)));
+    }
+    if (d.hata) throw new Error(d.hata);
+    if (!d.sonuc) throw new Error(d.asama || "Sonuç gelmedi.");
+    // ERT'deki sunucular (etiketleriyle): segmentin CIDR'leri etiket listesinin segment filtresine verilir
+    const ert = new Map(), q = d.sonuc.cidrler?.length ? d.sonuc.cidrler.join(",") : seg;
+    for (let page = 1; page <= 40; page++) {
+      const b = await json(await fetch("api/etiket/sunucular?" + new URLSearchParams({ segment: q, sayfa: page, boyut: 500, sirala: "ip" })));
+      for (const r of b.sunucular) ert.set(r.ip, r);
+      if (page * 500 >= b.toplam) break;
+    }
+    if (my !== egs.seq) return;
+    Object.assign(egs, { is: d, ert, yukleniyor: false });
+  } catch (e) {
+    if (my === egs.seq) Object.assign(egs, { hata: e.message, yukleniyor: false });
+  }
+  if (my === egs.seq) egSegRender();
+}
+
+// IP başına satır: tarama sonucundaki sunucular + ERT'de olup sonuçta görünmeyenler
+function egSegSatirlar() {
+  const s = egs.is?.sonuc;
+  if (!s) return [];
+  const portlar = new Map();
+  for (const x of s.satirlar || []) {
+    const m = portlar.get(x.ip) ?? new Map();
+    if (!m.has(x.port)) m.set(x.port, { port: x.port, exe: [], genel: true });
+    const p = m.get(x.port);
+    if (!p.exe.includes(x.exe)) p.exe.push(x.exe);
+    p.genel &&= x.genel || x.altyapi;
+    portlar.set(x.ip, m);
+  }
+  const ipler = new Map((s.sunucular || []).map(x => [x.ip, x]));
+  for (const ip of egs.ert.keys()) if (!ipler.has(ip)) ipler.set(ip, { ip });
+  const u = ip => ip.split(".").reduce((a, b) => a * 256 + (+b || 0), 0);
+  return [...ipler.values()].map(x => {
+    const e = egs.ert.get(x.ip);
+    return { ip: x.ip, sunucu: e?.hostname ?? x.sunucu, ert: !!e, apps: e?.apps ?? x.ertUygulamalar ?? [], tags: tagMap?.[x.ip] ?? e?.tags ?? [],
+      portlar: [...(portlar.get(x.ip)?.values() ?? [])].sort((a, b) => (+a.port || 99999) - (+b.port || 99999)), gorulen: !!x.cbVar };
+  }).sort((a, b) => u(a.ip) - u(b.ip));
+}
+
+function egSegRender() {
+  const body = $("#egSegBody");
+  if (!body) return;
+  const d = egs.is, w = etq.canWrite;
+  $("#egSegYen").hidden = !d;
+  $("#egSegKapat").hidden = !d && !egs.hata;
+  $("#egSegGo").disabled = egs.yukleniyor;
+  if (egs.yukleniyor) { $("#egSegInfo").innerHTML = `<span class="spinner"></span> ${esc(egs.ilerleme)}`; body.innerHTML = ""; return; }
+  if (egs.hata) { $("#egSegInfo").textContent = ""; body.innerHTML = `<div style="color:var(--err);margin-top:8px">${esc(egs.hata)}</div>`; return; }
+  if (!d) { $("#egSegInfo").textContent = "Segmentteki bütün IP'ler gelir: ERT'de olmayanlar da"; body.innerHTML = ""; return; }
+  const all = egSegSatirlar(), yok = all.filter(r => !r.ert).length;
+  const rows = egs.filtre === "yok" ? all.filter(r => !r.ert) : egs.filtre === "var" ? all.filter(r => r.ert) : all;
+  const s = d.sonuc, tarih = d.kayit?.tarih ? new Date(d.kayit.tarih).toLocaleString("tr-TR") : null;
+  $("#egSegInfo").textContent = `${s.segment}${s.cidrler?.length ? " · " + s.cidrler.join(", ") : ""} · son ${s.saat} saat${tarih ? ` · ${tarih} tarihli kayıt` : ""}${d.not ? " · " + d.not : ""}`;
+  const pill = (v, l, n) => `<button type="button" class="eg-pill${egs.filtre === v ? " on" : ""}" data-sf="${v}">${l}<i>${fmt(n)}</i></button>`;
+  const ertRows = rows.filter(r => r.ert), allOn = ertRows.length > 0 && ertRows.every(r => etq.selected.has(r.ip));
+  body.innerHTML = `<div class="eg-pills" style="margin:10px 0 0">${pill("", "Tümü", all.length)}${pill("var", "ERT'de var", all.length - yok)}${pill("yok", "ERT'de yok", yok)}</div>
+    <div class="eg-grid"><table>
+      <thead><tr>${w ? `<th class="cb"><input type="checkbox" id="egSegAll" title="Listedeki ERT sunucularının hepsini seç"${allOn ? " checked" : ""}></th>` : ""}
+        <th>IP adresi</th><th>Sunucu adı</th><th>Uygulamalar (ERT)</th><th>Dinlenen portlar</th><th>Etiketler</th></tr></thead>
+      <tbody>${rows.length ? rows.map(r => `<tr class="${etq.selected.has(r.ip) ? "sel" : ""}">
+        ${w ? `<td class="cb">${r.ert ? `<input type="checkbox" data-ssel="${esc(r.ip)}"${etq.selected.has(r.ip) ? " checked" : ""}>` : ""}</td>` : ""}
+        <td class="ip"><a href="${esc(ipTabUrl(r.ip))}" target="_blank" rel="noopener" title="Topolojisini yeni sekmede aç">${esc(r.ip)}</a></td>
+        <td>${esc(r.sunucu ?? "")}</td>
+        <td class="app">${r.apps.map(a => `<span>${esc(a)}</span>`).join("") || `<span class="dim">—</span>`}</td>
+        <td class="ports">${r.portlar.map(p => `<span${p.genel ? ` class="gen"` : ""} title="${esc(p.exe.join(", "))}">${esc(p.port)}</span>`).join("") || `<span class="dim" style="border:none;background:none">${r.gorulen ? "gelen port yok" : "—"}</span>`}</td>
+        <td>${r.ert ? (r.tags.map(t => tagChip(t, r.ip, w)).join("") || `<span class="dim">—</span>`) : `<span class="eg-yok" title="ERT_HOSTIPADDRESS tablosunda yok; TAG kolonu olmadığından etiketlenemez">ERT'de yok</span>`}</td>
+      </tr>`).join("") : `<tr><td colspan="${w ? 6 : 5}" class="eg-empty">Bu segmentte IP bulunamadı.</td></tr>`}</tbody>
+    </table></div>`;
+  const a = $("#egSegAll"); if (a) a.indeterminate = !allOn && ertRows.some(r => etq.selected.has(r.ip));
+}
