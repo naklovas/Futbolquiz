@@ -495,12 +495,13 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
 - **Etiketleme segment süzgecinde CIDR** (kullanıcı: "segmenti CIDR olarak filtreleyemiyoruz"): `EtiketService.SegmentUyar` — "a.b.c.d/n" (virgül / boşlukla birden çok)
   → IP aralıkta mı (segment kaydından bağımsız), "10.71.51." gibi IP öneki → IP / segment CIDR'ı bununla başlıyor mu, diğer metin → segment adı ya da CIDR'ında geçiyor mu.
   `EtiketSunucu.Cidr` (segment CIDR'ı), etiket.js segment hücresinde altta küçük CIDR, placeholder güncellendi.
-  **Segment getir** paneli (etiket.js `egs` / `egSegGetir` / `egSegRender`; kullanıcı: "segment getir kısmı olsun oradan segment bulayım ama tüm ipleri
-  portları gelsin", "Carbon Black'ten tara demeyelim de öyle gelsin"): segment adı / CIDR (datalist `/api/segment/liste`) → "Getir" = `POST /api/segment/tarama`
-  (mod boş: kayıtlı tarama varsa ondan açılır; "Yenile" = mod "yeniden"), bitene kadar `/api/segment/tarama/{id}` yoklanır; arayüzde "Carbon Black" yazmaz,
-  ilerleme "Getiriliyor… n / m". ERT üyeliği + etiketler `/api/etiket/sunucular?segment=<CIDR'ler>` (500'lük sayfalar). IP başına satır: sunucu, ERT
-  uygulamaları, dinlenen portlar (exe title'da; genel/altyapı soluk), etiketler; ERT'de olmayanlar "ERT'de yok" rozeti, checkbox yok (TAG kolonu yok).
-  ERT'dekiler seçilince üstteki ortak etiket çubuğuyla etiketlenir. AÇIK: ERT dışı IP'lere etiket (DF_ETIKET_EK önerildi) — sorulacak.
+  **Segment getir** (etiket.js `egs` / `egSegGetir` / `egSegYerel`; kullanıcı: "segment getir kısmı olsun oradan segment bulayım ama tüm ipleri gelsin",
+  "Carbon Black'ten tara demeyelim de öyle gelsin"; ilk sürümdeki ayrı tablo + port listesi "çok saçma oldu" → kaldırıldı, port GÖSTERİLMEZ):
+  segment adı / CIDR (datalist `/api/segment/liste`) → "Getir" = `POST /api/segment/tarama` (mod boş: kayıtlı tarama varsa ondan; "Yenile" = "yeniden"),
+  `/api/segment/tarama/{id}` yoklanır; arayüzde "Carbon Black" yazmaz. ERT'dekiler `/api/etiket/sunucular?segment=<CIDR'ler>` (500'lük sayfalar).
+  ANA TABLO bu listeye geçer (filtre / sıralama / sayfa tarayıcıda, `egSegYerel`); taramada görülüp ERT'de olmayan IP'ler aynı tabloda "ERT'de yok"
+  rozetiyle, checkbox'sız; sayaçlar "Segmentte / ERT'de yok", hızlı filtre ve etiket seçiminde "ERT'de yok" (`!ert`). "Kapat" tüm envantere döner.
+  AÇIK: ERT dışı IP'lere etiket (DF_ETIKET_EK önerildi) — sorulacak.
 - **"Bu sunucuda hangi uygulama çalışıyor?"** (IP kartı, Gelen portlar tablosunun üstündeki düğme; `SurecAi` Surec.cs, `POST /api/surec/ai`):
   arayüzdeki /api/surec sonucu exe başına toplanıp (PID'ler, portlar, giden, bağlanan / bağlandığı uygulamalar) AI'a gider (yeniden
   sorgulanmaz) + ERT kayıtları + segment + genel bilgiler dosyası. Kesin genel süreçler kodda ayıklanır (`GenelAd` / `GenelYol`: svchost,
