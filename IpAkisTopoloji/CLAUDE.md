@@ -492,6 +492,14 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
   bölüm yok. + "NESSUS" (`NessusService.Metin`, `Islev:NessusMaxKarakter`=1200). Prompt: çalışan yazılım işlevi en doğrudan gösterir (sas = analitik, pmserver / odi / SSIS =
   ETL, sqlservr / oracle = DB, w3wp + IIS = web, MQ, Control-M…), tahmin yalnız ipucu, envanterle çelişirse yazılıma güven. `Islev:YazilimKaniti`=true ile kapatılır.
   ERT eksiklerinin onaylı önerileri EKLENMEDİ (EksikService IslevService'e bağlı → döngü).
+- **T-1 / aynı sistemin yazımları + talep formundaki uygulama** (kullanıcı ekranı: zb1pwkkrapord01 1433 / 1434 — açıklamalarda "Yeni T-1", "Yeni T-1 Ortamı",
+  "Yeni T-1 Rapor Ortamı", "KrediKartları t-1", sunucu adı → BİRDEN ÇOK SİSTEM sayıldı; formda 6 talepte ZT_HEDEFUYGULAMA "Üye İşyeri Yönetimi" vardı; AI "SQL Server"
+  dedi, DbSahibi "sahibi belirsiz" diye yok saydı; 35058'e "Internal Service"): `SistemKumeleri` — dolgu kelimeler (yeni, ortam, erişim, sunucu…) ve sunucu adı atılır,
+  kelime kümesi diğerinin alt kümesi olanlar aynı sistem (alt küme yalnız GenelKelime'den oluşuyorsa birleştirmez: "Ziraat" POS ile Bansoft'u birleştirmez);
+  `HedefUygBas` "TALEPLERDEKİ HEDEF UYGULAMA (BU SUNUCU): X (n) | …" satırı (hedef talepler, ajan hariç). `DbSahibi` yeni sıra: imza → bu portun talebindeki
+  hedef uygulama (65) → istemci → sunucuda tek ERT uygulaması → formdaki hedef uygulama (tek ya da ikincinin 2 katı, 60) → SM. Yalnız genel kelimelerden oluşan
+  ad (`AyirtKelimeler` boş: Internal Service, Web Service, Application Server…, katalogda birebir yoksa) "Yok sayıldı". Prompt: yazım varyantları tek sistem, "T-1 (rapor)
+  ortamı" = canlı sistemin gün gecikmeli rapor kopyası → uygulama canlı sistem, DB'de "<sistem> Veritabanı"; formdaki hedef uygulama; sunucu adı kısaltmaları (kk = kredi kartları).
 - **Etiketleme segment süzgecinde CIDR** (kullanıcı: "segmenti CIDR olarak filtreleyemiyoruz"): `EtiketService.SegmentUyar` — "a.b.c.d/n" (virgül / boşlukla birden çok)
   → IP aralıkta mı (segment kaydından bağımsız), "10.71.51." gibi IP öneki → IP / segment CIDR'ı bununla başlıyor mu, diğer metin → segment adı ya da CIDR'ında geçiyor mu.
   `EtiketSunucu.Cidr` (segment CIDR'ı), etiket.js segment hücresinde altta küçük CIDR, placeholder güncellendi.

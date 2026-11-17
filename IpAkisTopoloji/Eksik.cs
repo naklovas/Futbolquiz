@@ -341,6 +341,10 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
         if (satirlar.FirstOrDefault(l => l.StartsWith($"- port {port}: ") && l.Contains("İMZA ÖNERİSİ: ")) is { } il
             && il.Split("İMZA ÖNERİSİ: ")[1].Split(" (güven ") is var ip2 && Iyi(Kok(ip2[0])))
             return (Kok(ip2[0]), "servis imzası" + (ip2.Length > 1 ? " · " + ip2[1].Split(';', ')')[0] : ""), ip2.Length > 1 && ip2[1].StartsWith("güçlü") ? 70 : 55);
+        // (1b) bu porta erişim talebinin formundaki hedef uygulama: "PORT P'E ERİŞİM TALEBİ VAR: … talepteki hedef uygulama: X (n)"
+        if (satirlar.FirstOrDefault(l => l.StartsWith($"PORT {port}'E ERİŞİM TALEBİ VAR") && l.Contains("talepteki hedef uygulama: ")) is { } hl
+            && hl.Split("talepteki hedef uygulama: ")[1] is var hx && System.Text.RegularExpressions.Regex.Replace(hx, @"\s*\(\d+\)\s*$", "").Trim() is var ha && Iyi(Kok(ha)))
+            return (Kok(ha), $"bu porta erişim talebinin formundaki hedef uygulama (ZT_HEDEFUYGULAMA)", 65);
         // (2) istemciler: "- gelen port P…· istemciler: A, B, LB GW, 10.x"
         if (satirlar.FirstOrDefault(l => l.StartsWith($"- gelen port {port}") && l.Contains("· istemciler: ")) is { } cl)
         {
@@ -351,6 +355,14 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
         // (3) aynı sunucunun ERT'deki iş uygulamaları
         var ayni = env.AppNamesOnIp(ip).Where(Iyi).Select(Kok).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         if (ayni.Count == 1) return (ayni[0], "sunucuda ERT'de kayıtlı tek uygulama", 50);
+        // (3b) bu sunucunun hedef olduğu taleplerin formundaki hedef uygulama: tek uygulama ya da açık çoğunluk (ikincinin en az iki katı)
+        if (satirlar.FirstOrDefault(l => l.StartsWith(HedefUygBas)) is { } sl)
+        {
+            var hs = sl[HedefUygBas.Length..].Split(" — ")[0].Split(" | ").Select(x => System.Text.RegularExpressions.Regex.Match(x.Trim(), @"^(.*)\((\d+)\)$"))
+                .Where(m => m.Success).Select(m => (Ad: Kok(m.Groups[1].Value.Trim()), N: int.Parse(m.Groups[2].Value))).Where(x => Iyi(x.Ad)).ToList();
+            if (hs.Count == 1 || (hs.Count > 1 && hs[0].N >= 2 * hs[1].N))
+                return (hs[0].Ad, $"bu sunucunun hedef olduğu taleplerin formundaki hedef uygulama (ZT_HEDEFUYGULAMA, {hs[0].N} talep)", 60);
+        }
         // (4) SM
         var sm = SmAdaylariOku(ev).Where(x => Iyi(x.Ad)).ToList();
         var smSec = sm.Count == 1 ? sm[0] : sm.FirstOrDefault(x => x.Port);
@@ -404,7 +416,8 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
     // AI adının ayırt edici kelimeleri: camelCase / _ / rakamla bölünür (BanksoftSharePoint → banksoft, sharepoint; ReeskService_Grp_7654 → reesk, service),
     // genel kelimeler (GenelKelime kökleri, agent / service / server / grp / pool / vip / web / common…) ve sayılar atılır
     static readonly HashSet<string> AileGenel = ["agent", "ajan", "service", "servis", "services", "server", "sunucu", "sunucusu", "grp", "group", "pool", "havuz",
-        "vip", "common", "web", "ws", "api", "app", "uygulama", "uygulamasi", "sistem", "sistemi", "entegrasyon", "entegrasyonu", "prod", "test"];
+        "vip", "common", "web", "ws", "api", "app", "uygulama", "uygulamasi", "sistem", "sistemi", "entegrasyon", "entegrasyonu", "prod", "test",
+        "internal", "external", "application", "applications", "dahili", "harici", "generic", "default", "custom", "unknown", "bilinmeyen", "local", "remote"];
     static List<string> AyirtKelimeler(string ad)
     {
         string b = System.Text.RegularExpressions.Regex.Replace(ad, @"(?<=\p{Ll})(?=\p{Lu})|(?<=\p{L})(?=\d)|(?<=\d)(?=\p{L})", " ");
@@ -956,6 +969,30 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
     }
     // Kanıttaki SM aday satırını okur: (ad, boş portu anan talep var mı)
     const string CokSistemBas = "BİRDEN ÇOK SİSTEM ANILIYOR:";
+    const string HedefUygBas = "TALEPLERDEKİ HEDEF UYGULAMA (BU SUNUCU):";
+    // Sunucuyu anlatan açıklamalardan FARKLI sistemler (kullanıcı: zb1pwkkrapord01'de "Yeni T-1" | "Yeni T-1 Ortamı" | "Yeni T-1 Rapor Ortamı" |
+    // "KrediKartları t-1" | "ZB1PWKKRAPORD01" beş ayrı sistem sayıldı, hepsi aynı T-1 rapor ortamı): dolgu kelimeler (yeni, ortam, erişim, sunucu…)
+    // ve sunucunun kendi adı atılır; kelime kümesi diğerinin alt kümesi olan açıklamalar aynı sistem (alt küme genel bir kelimeden ibaret değilse —
+    // "Ziraat" tek başına Ziraat POS ile Ziraat Bansoft'u birleştirmesin). Küme başına en çok kelimeli açıklama temsilci; anlamlı kelimesi olmayan küme atılır.
+    static readonly HashSet<string> SistemDolgu = ["yeni", "ortam", "ortami", "ortamina", "ortaminin", "ortamindaki", "ortamlari", "erisim", "erisimi", "erisimleri",
+        "sunucu", "sunucusu", "sunuculari", "sunucusuna", "server", "servers", "prod", "test", "icin", "ve", "ile", "ait", "olan"];
+    static List<string> SistemKumeleri(IEnumerable<string> aciklamalar, string? host)
+    {
+        string? h = host == null ? null : Kelimeler(host).FirstOrDefault();
+        var l = aciklamalar.Select(t => (t, k: Kelimeler(t).Where(w => !SistemDolgu.Contains(w) && w != h).ToHashSet())).Where(x => x.k.Count > 0).ToList();
+        var ust = Enumerable.Range(0, l.Count).ToArray();
+        int Bul(int i) => ust[i] == i ? i : ust[i] = Bul(ust[i]);
+        bool Ayirt(HashSet<string> k) => k.Any(w => !GenelKelime.Contains(w.Length > 5 ? w[..5] : w));
+        for (int i = 0; i < l.Count; i++)
+            for (int j = i + 1; j < l.Count; j++)
+            {
+                var (a, b) = l[i].k.Count <= l[j].k.Count ? (l[i].k, l[j].k) : (l[j].k, l[i].k);
+                if (a.IsSubsetOf(b) && Ayirt(a)) ust[Bul(i)] = Bul(j);
+            }
+        return Enumerable.Range(0, l.Count).GroupBy(Bul)
+            .Where(g => g.SelectMany(i => l[i].k).Any(w => w.Length >= 3 && !GenelKelime.Contains(w.Length > 5 ? w[..5] : w)))
+            .Select(g => l[g.OrderByDescending(i => l[i].k.Count).ThenBy(i => i).First()].t).ToList();
+    }
     static List<(string Ad, bool Port)> SmAdaylariOku(string? evidence) => evidence?.Split('\n').FirstOrDefault(l => l.StartsWith(SmAdayBas)) is { } l
         ? l[SmAdayBas.Length..].Split(" | ").Select(x => (Ad: x.Split(" (")[0].Trim(), Port: x.Contains("boş portu anan"))).Where(x => x.Ad.Length > 0).ToList() : [];
 
@@ -1090,6 +1127,12 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
                     : ajHit.Count > 0 ? $"PORT {p}'E İŞ UYGULAMASI İÇİN ERİŞİM TALEBİ YOK (yalnız ajan / araç talepleri var)"
                     : $"PORT {p}'E ERİŞİM TALEBİ YOK (son {DateTime.Today.Year - since.Year} yılda bu sunucuya ZT_HEDEFPORT {p} olan talep bulunamadı)");
             }
+            // Talep formunda bu sunucu için seçilen hedef uygulama (ZT_HEDEFUYGULAMA; kullanıcı: zb1pwkkrapord01'de 6 talepte "Üye İşyeri Yönetimi"
+            // vardı, AI "SQL Server" deyip sahibi belirsiz diye yok sayıldı) — DbSahibi de bu satırı okur
+            var hu = all.Where(x => x.hedef && x.aj == null).Select(x => G(x.r, "ZT_HEDEFUYGULAMA", "ZT_HEDEFUGULAMA")?.Trim()).OfType<string>().Where(a => a.Length > 1)
+                .GroupBy(a => a, StringComparer.OrdinalIgnoreCase).OrderByDescending(g => g.Count()).ToList();
+            if (hu.Count > 0)
+                sb.AppendLine($"{HedefUygBas} {string.Join(" | ", hu.Take(4).Select(g => $"{g.Key} ({g.Count()})"))} — talep formunda bu sunucu için seçilen uygulama alanı");
             // Kullanıcı: kaynak / hedef açıklamaları yeterince önemsenmiyordu → talepler içinde kaybolmasın diye önce TÜM eşleşen taleplerdeki
             // BU SUNUCUYU anlatan açıklama (hedefse ZT_HEDEFACIKLAMA, kaynaksa ZT_KAYNAKACIKLAMA) tekilleştirilip sayısıyla, ayrıca hedef
             // olduğu taleplerde erişen tarafın (ZT_KAYNAKACIKLAMA) açıklaması
@@ -1103,8 +1146,7 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
                 sb.AppendLine("uygulama olduğunu doğrudan söyler):");
                 foreach (var z in bunu) sb.AppendLine($"  • \"{Cut(z.t, 250)}\" — {z.n} talep, son {z.son}{(z.port ? $" · boş port {string.Join(",", z.portlar)} bu taleplerde" : "")}");
                 // Birden çok farklı sistem (kullanıcı örneği: Ziraat pos, Bansoft, 3DSec… aynı sunucuda; AI port kanıtı olmayan HER porta ilkini yazdı)
-                var sistemler = bunu.Select(z => z.t).Where(t => Kelimeler(t).Any(w => w.Length >= 3 && !GenelKelime.Contains(w.Length > 5 ? w[..5] : w) && w is not ("sunucu" or "sunucusu" or "server" or "prod" or "test")))
-                    .DistinctBy(t => string.Join(" ", Kelimeler(t).Where(w => w is not ("sunucu" or "sunucusu" or "server")).Select(w => w.Length > 5 ? w[..5] : w).OrderBy(w => w))).ToList();
+                var sistemler = SistemKumeleri(bunu.Select(z => z.t), hk);
                 if (sistemler.Count >= 2)
                     sb.AppendLine($"{CokSistemBas} {string.Join(" | ", sistemler.Take(6).Select(t => Cut(t, 60)))} — bu sunucuda birden çok sistem çalışıyor. " +
                         "Bir boş porta sistem atamak için O PORTA ÖZEL kanıt gerekir (ZT_HEDEFPORT eşleşmesi, açıklamada IP:port, portu kabul eden exe). " +
@@ -1534,6 +1576,16 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
               kabul eden exe) o sistemi ata. Port kanıtı olmayan porta da EN OLASI sistemi öner (VIP'in ERT uygulaması, aynı VIP'teki diğer
               portlar, port türü), güven ≤ 40, gerekçede diğer olası sistemleri yaz; null YAZMA. komşu ve segment ipuçlarını bunun önüne koyma. "Bu
               sunucuya erişen taraflar" ise istemcilerdir, onların adını bu sunucuya yazma.
+            - Aynı sistemin farklı yazımları TEK sistemdir: "Yeni T-1", "Yeni T-1 Ortamı", "T-1 Rapor Ortamı", "KrediKartları t-1" ve sunucunun
+              kendi adı aynı şeyi anlatır; bunları "birden çok sistem" sayma. "T-1 ortamı" / "T-1 rapor ortamı" canlı sistemin bir gün
+              gecikmeli RAPOR KOPYASIDIR: o sunucunun uygulaması canlı sistemin kendisidir (talep formundaki hedef uygulama ya da açıklamadaki
+              sistem), DB portunda "<sistem> Veritabanı" yaz, gerekçede T-1 / rapor kopyası olduğunu belirt; null YAZMA. "Yeni X" = X.
+            - "TALEPLERDEKİ HEDEF UYGULAMA (BU SUNUCU)" satırı talep formunda bu sunucu için seçilen uygulamadır (ZT_HEDEFUYGULAMA); açıklamalar
+              ortam / kopya adı söylüyorsa (T-1, rapor, DR, yedek) uygulama adı bu satırdaki uygulamadır. Veritabanı portunda sahibi budur.
+            - Sunucu adındaki kısaltmalar uygulamayı gösterebilir (ör. zb1pwkkrapord01: kk = kredi kartları, rapor, d = veritabanı); ad tek
+              başına kesin kanıt değildir ama SM / formdaki uygulamayla uyuşuyorsa güveni artırır.
+            - Yalnız genel kelimelerden oluşan ad (ör. "Internal Service", "Web Service", "Application Server") uygulama adı DEĞİLDİR;
+              port için kanıt yoksa sunucunun asıl sistemini öner (güven ≤ 40) ya da null yaz.
             - Bu sunucunun HEDEF olduğu bir talepte açıklama "<A> için / <A> karşılığı … <B>'nin DB'lerine / sunucularına / servisine
               erişim" diyorsa erişilen sistem <B> BU SUNUCUDUR (A karşı taraftır, isteyen uygulamadır). Ör. "KKB Karşılığı / Ziraat
               Katılım prod segmentinin KÖS Db'lerine erişim talebi" + bu sunucu HEDEF → uygulama "KÖS", veritabani true (KKB Karşılığı
@@ -1756,6 +1808,13 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
                     || HttpSysEslesme.Cekirdek(exeAd + ".exe")))
             {
                 gerekce = $"Yok sayıldı: AI '{app}' önerdi ama bu genel bir Windows / tarayıcı süreci adı (iş uygulaması değil). AI gerekçesi: {gerekce}";
+                app = null; guven = 0;
+            }
+            // Yalnız genel kelimelerden oluşan ad uygulama değildir (kullanıcı ekranı: 35058'e "Internal Service" yeni ad): katalogda birebir yoksa
+            if (app != null && !app.StartsWith("Altyapı", StringComparison.OrdinalIgnoreCase) && DbTeknoloji(app) == null && AyirtKelimeler(app).Count == 0
+                && !env.KatalogAdlari.Contains(app, StringComparer.OrdinalIgnoreCase))
+            {
+                gerekce = $"Yok sayıldı: AI '{app}' önerdi ama bu yalnız genel kelimelerden oluşan bir ad (uygulamayı ayırt etmez). AI gerekçesi: {gerekce}";
                 app = null; guven = 0;
             }
             // Ekip / birim adı uygulama değildir (kullanıcı: AI işleten birim "KATILIM VERİ AMBARI"nı uygulama diye önerdi)
