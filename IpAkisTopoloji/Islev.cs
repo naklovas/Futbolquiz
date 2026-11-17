@@ -18,7 +18,9 @@ using Microsoft.Data.SqlClient;
 record IslevDetay(string? Islev, string? Rol, int Guven, string? Gerekce, string? KumeAciklama, string? Tarih, string? Kaynak,
     string? Takma = null, string? TakmaKaynak = null);
 // AltEtiket: ana etiket seçiliyken sunucunun alt etiketi ("ANA/ALT" → "ALT")
-record IslevSunucu(string Ip, string? Hostname, List<string> Apps, string? Muhafiz, string? Rol, int? Guven, bool Elle, string? AltEtiket = null);
+// Etiketler: sunucunun tüm etiketleri (tam yol; arayüz seçili etiketin altındakileri kısaltır — kullanıcı: "topolojide etiketleri de göreyim")
+record IslevSunucu(string Ip, string? Hostname, List<string> Apps, string? Muhafiz, string? Rol, int? Guven, bool Elle, string? AltEtiket = null,
+    List<string>? Etiketler = null);
 record IslevVip(string Vip, string? Pool, string? App, List<IslevSunucu> Sunucular);
 record IslevSegment(string Ad, string? Cidr, List<IslevVip> Vipler, List<IslevSunucu> Sunucular, string? Tenant = null);
 record IslevKume(string Ad, string? Aciklama, int Sunucu, List<IslevSegment> Segmentler);
@@ -206,7 +208,7 @@ sealed class IslevService(IConfiguration cfg, IHttpClientFactory factory, Envant
             var hosts = env.AppsOnIp(ip);
             return new IslevSunucu(ip, hosts.Select(h => h.UnixName).OfType<string>().FirstOrDefault(), env.AppNamesOnIp(ip).Take(4).ToList(),
                 hosts.Select(h => h.VarlikMuhafizi).OfType<string>().FirstOrDefault(), x.Detay?.Rol ?? x.Detay?.Islev, x.Detay?.Guven,
-                x.Detay?.Kaynak?.StartsWith("Elle") == true, AltOf(ip));
+                x.Detay?.Kaynak?.StartsWith("Elle") == true, AltOf(ip), env.TagsOf(ip));
         }
         // seçilen etiketin bir alt seviyesi (IRAK seçiliyse "ACH RTGS"; IRAK/ACH RTGS seçiliyse "DB")
         string? AltOf(string ip) => env.TagsOf(ip).FirstOrDefault(t => t.StartsWith(tag + "/", StringComparison.OrdinalIgnoreCase))?[(tag.Length + 1)..].Split('/')[0];

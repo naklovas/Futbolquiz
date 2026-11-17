@@ -563,7 +563,7 @@ function ktDraw() {
             ${ktIcon(t.e, t.x + 14, t.y + KT.TH / 2, h)}
             <text class="nm" x="${t.x + 27}" y="${t.y + 14}">${esc(ktCut(t.e.ad, 16))}</text>
             <text class="ip" x="${t.x + 27}" y="${t.y + 26}">${esc(t.e.ip)}${t.e.tur === "vip" ? ` · ${t.e.uyeler.length}ü` : ""}</text>
-            <title>${esc(t.e.tur === "vip" ? `VIP ${t.e.ip}:${t.e.port || ""} · ${t.e.ad} · ${t.e.uyeler.length} üye` : `${t.e.ad} · ${t.e.ip} · ${t.e.alt || ""}`)}</title></g>`).join("")}</g>`;
+            <title>${esc(t.e.tur === "vip" ? `VIP ${t.e.ip}:${t.e.port || ""} · ${t.e.ad} · ${t.e.uyeler.length} üye` : `${t.e.ad} · ${t.e.ip} · ${t.e.alt || ""}${t.e.uyeler?.[0]?.etiketler?.length ? "\nEtiketler: " + t.e.uyeler[0].etiketler.map(x => x.split("/").join(" › ")).join(", ") : ""}`)}</title></g>`).join("")}</g>`;
   }).join("");
   const s = kt.scale;
   $("#ktWrap").innerHTML = `<svg class="kt-svg" id="ktSvg" viewBox="0 0 ${W} ${H}" width="${(W * s).toFixed(0)}" height="${(H * s).toFixed(0)}" xmlns="http://www.w3.org/2000/svg">
@@ -736,7 +736,7 @@ function ktServer(ip) {
   const g = u.guven == null ? "" : `%${u.guven}`;
   const bg = ktModal(`${ktHead(`▭ ${esc(u.hostname || ip)}`, `<span class="ip">${esc(ip)}</span> · ${esc(kume)}${el.tur === "vip" ? ` · VIP ${esc(el.ip)}:${esc(el.port || "")} üyesi` : ""} · ${esc(el.segment || "")}`, kt.stack.length > 1)}
     <div class="mb">
-      <dl class="kv"><dt>Küme</dt><dd><b>${esc(kume)}</b></dd>${el.uygulama ? `<dt>Uygulama (ERT)</dt><dd>${esc(el.uygulama)}</dd>` : ""}${el.altEtiket ? `<dt>Alt etiket</dt><dd>${esc(el.altEtiket)}</dd>` : ""}<dt>AI rolü</dt><dd>${esc(u.rol || "—")} ${g ? `<span class="eg-sub">(güven ${g}${u.elle ? ", elle atandı" : ""})</span>` : ""}</dd>
+      <dl class="kv"><dt>Küme</dt><dd><b>${esc(kume)}</b></dd>${el.uygulama ? `<dt>Uygulama (ERT)</dt><dd>${esc(el.uygulama)}</dd>` : ""}${u.etiketler?.length ? `<dt>Etiketler</dt><dd>${u.etiketler.map(t => `<span class="eg-tag" style="--h:${tagHue(t)}">${tagLabel(t)}</span>`).join(" ")}</dd>` : el.altEtiket ? `<dt>Alt etiket</dt><dd>${esc(el.altEtiket)}</dd>` : ""}<dt>AI rolü</dt><dd>${esc(u.rol || "—")} ${g ? `<span class="eg-sub">(güven ${g}${u.elle ? ", elle atandı" : ""})</span>` : ""}</dd>
         <dt>Trafik</dt><dd>${fmt(u.gelen)} gelen · ${fmt(u.giden)} giden (etiketli sunucularla)</dd></dl>
       <div id="ktWhy" class="eg-sub"><span class="spinner"></span> AI gerekçesi ve kanıtlar yükleniyor…</div>
       <div class="two"><div><h4>Gelen</h4>${ft(flows.filter(a => a.dst === ip), "in")}</div><div><h4>Giden</h4>${ft(flows.filter(a => a.src === ip), "out")}</div></div>

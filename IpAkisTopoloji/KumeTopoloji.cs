@@ -4,7 +4,7 @@
 // akışlar eleman → eleman bağına toplanır. Havuz üyesi sunucunun trafiği VIP'inin elemanına yazılır; LB GW → üye (VIP'in kendi
 // tesisatı) ve aynı eleman içi akışlar atlanır. Etiket dışına giden / dışarıdan gelen trafik eleman başına özetlenir (popup).
 // ---------------------------------------------------------------------------
-record KtUye(string Ip, string? Hostname, string? Rol, int? Guven, bool Elle, string? Port, long Gelen, long Giden);
+record KtUye(string Ip, string? Hostname, string? Rol, int? Guven, bool Elle, string? Port, long Gelen, long Giden, List<string>? Etiketler = null);
 record KtDis(string Ad, long Hits, List<string> Portlar);
 record KtEleman(string Id, string Tur, string Ip, string? Port, string Ad, string? Alt, string? Segment, List<KtUye> Uyeler,
     long Gelen, long Giden, List<KtDis> DisGelen, List<KtDis> DisGiden, string? Uygulama = null, string? AltEtiket = null,
@@ -144,7 +144,7 @@ static class KumeTopoloji
                 ? m.OrderByDescending(kv => kv.Value.Item1).Take(8).Select(kv => new KtDis(kv.Key, kv.Value.Item1, kv.Value.Item2.Take(6).ToList())).ToList()
                 : [];
         KtUye Uye(IslevSunucu s, string? port) => new(s.Ip, s.Hostname, s.Rol, s.Guven, s.Elle, port,
-            uyeGelen.GetValueOrDefault(s.Ip), uyeGiden.GetValueOrDefault(s.Ip));
+            uyeGelen.GetValueOrDefault(s.Ip), uyeGiden.GetValueOrDefault(s.Ip), s.Etiketler);
 
         var kumeler = groups.Select(k =>
         {

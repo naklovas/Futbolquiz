@@ -190,11 +190,11 @@ function ivRender() {
 
 function ivGrid() {
   const q = iv.q.trim().toLocaleLowerCase("tr");
-  const hit = s => !q || [s.ip, s.hostname, s.rol, s.muhafiz, s.altEtiket, ...(s.apps || [])].some(v => v && v.toLocaleLowerCase("tr").includes(q));
+  const hit = s => !q || [s.ip, s.hostname, s.rol, s.muhafiz, s.altEtiket, ...(s.etiketler || []), ...(s.apps || [])].some(v => v && v.toLocaleLowerCase("tr").includes(q));
   const srv = s => {
     const g = s.guven == null ? "" : s.guven >= 75 ? "g3" : s.guven >= 50 ? "g2" : "g1";
     return `<div class="iv-srv${iv.sel === s.ip ? " on" : ""}${iv.pick ? " pk" : ""}${iv.pick?.has(s.ip) ? " picked" : ""}" data-ivip="${esc(s.ip)}" title="${s.guven != null ? `AI güveni %${s.guven}` : "Sınıflanmamış"}">
-      <span class="dot ${g}"></span><span class="nm">${esc(s.hostname || s.ip)}${s.altEtiket ? `<span class="el alt" title="Alt etiket">${esc(s.altEtiket)}</span>` : ""}${s.elle ? `<span class="el">elle</span>` : ""}</span><span class="ip">${esc(s.ip)}</span>
+      <span class="dot ${g}"></span><span class="nm">${esc(s.hostname || s.ip)}${ivEtiketler(s).map(t => `<span class="el alt" title="Etiket: ${esc(t.tam.split("/").join(" › "))}">${esc(t.kisa)}</span>`).join("") || (s.altEtiket ? `<span class="el alt" title="Alt etiket">${esc(s.altEtiket)}</span>` : "")}${s.elle ? `<span class="el">elle</span>` : ""}</span><span class="ip">${esc(s.ip)}</span>
       <span class="rl">${esc(s.rol || (s.apps || []).join(", ") || "—")}</span></div>`;
   };
   const cards = iv.data.kumeler.map(k => {
@@ -526,4 +526,10 @@ function ivVerBar() {
       await ivVersions(true); await ivLoad();
     } catch (e) { alert("Silinemedi: " + e.message); }
   });
+}
+
+// Sunucunun seçili etiket altındaki başlıkları (kullanıcı: "topolojide etiketleri de göreyim"): IRAK seçiliyse "ALTYAPI › MICROSOFT ATA"
+function ivEtiketler(s) {
+  const tag = iv.data?.etiket || "";
+  return (s.etiketler || []).filter(t => t.startsWith(tag + "/")).map(t => ({ tam: t, kisa: t.slice(tag.length + 1).split("/").join(" › ") }));
 }

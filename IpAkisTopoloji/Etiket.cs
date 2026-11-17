@@ -373,7 +373,12 @@ static class EtiketZincir
             .Select(x => new EtiketZincirSatir(x.Key, EtiketService.Row(env, x.Key)?.Hostname, x.Value, x.yeni!, !env.ErtteVar(x.Key)))
             .OrderBy(x => string.Join(".", x.Ip.Split('.').Select(p => p.PadLeft(3, '0')))).ToList();
 
-    public static async Task<int> UygulaAsync(IConfiguration cfg, EnvanterSnapshot env, List<string> ips, string user, ILogger log, CancellationToken ct)
+    public static Task<int> UygulaAsync(IConfiguration cfg, EnvanterSnapshot env, List<string> ips, string user, ILogger log, CancellationToken ct) =>
+        DonusturAsync(cfg, env, ips, Birlestir, "Etiket zinciri birleştirildi", user, log, ct);
+
+    // IP başına etiket listesini DB'den okuyup dönüştürür ve yazar (ERT TAG; ERT dışı DF_ETIKET_EK). donustur null dönerse değişiklik yok.
+    public static async Task<int> DonusturAsync(IConfiguration cfg, EnvanterSnapshot env, List<string> ips, Func<List<string>, List<string>?> donustur,
+        string not, string user, ILogger log, CancellationToken ct)
     {
         string table = cfg["Envanter:HostTablosu"] ?? "dbo.ERT_HOSTIPADDRESS", col = EtiketService.Column(cfg), ek = EtiketEk.Table(cfg);
         int max = cfg.GetValue("Etiket:MaxUzunluk", 200), n = 0;
@@ -390,20 +395,75 @@ static class EtiketZincir
                 await using var r = await cmd.ExecuteReaderAsync(ct);
                 while (await r.ReadAsync(ct)) cur.AddRange(EtiketService.Split(Convert.ToString(r.GetValue(0)) ?? ""));
             }
-            if (Birlestir(cur) is not { } yeni) continue;
-            string v = string.Join(",", yeni);
-            if (v.Length > max) { log.LogWarning("Etiket zinciri: {Ip} birleşince {Max} karakteri geçiyor, atlandı", ip, max); continue; }
+            if (donustur(cur) is not { } yeni) continue;
+            string? v = yeni.Count == 0 ? null : string.Join(",", yeni.Distinct(StringComparer.OrdinalIgnoreCase));
+            if (v?.Length > max) { log.LogWarning("{Not}: {Ip} {Max} karakteri geçiyor, atlandı", not, ip, max); continue; }
             await using (var cmd = new SqlCommand(ert ? $"UPDATE {table} SET [{col}] = @v WHERE IPADDRESS = @ip"
                 : $"UPDATE {ek} SET TAG = @v, GUNCELLEYEN = @u, TARIH = SYSDATETIME() WHERE IPADDRESS = @ip", conn))
             {
                 cmd.Parameters.AddWithValue("@ip", ip);
-                cmd.Parameters.AddWithValue("@v", v);
+                cmd.Parameters.AddWithValue("@v", (object?)v ?? DBNull.Value);
                 cmd.Parameters.AddWithValue("@u", user);
                 await cmd.ExecuteNonQueryAsync(ct);
             }
             n++;
-            log.LogInformation("Etiket zinciri birleştirildi: {User} {Ip} [{Old}] -> [{New}]", user, ip, string.Join(",", cur), v);
+            log.LogInformation("{Not}: {User} {Ip} [{Old}] -> [{New}]", not, user, ip, string.Join(",", cur), v ?? "");
         }
         return n;
+    }
+}
+
+// Etiket düzenleme (kullanıcı: "mevcut etiketleri düzenleyebilmemiz lazım"): bir etiketi ALTINDAKİ seviyelerle birlikte tüm sunucularda yeniden adlandırır
+// ya da başka başlığın altına taşır (IRAK/ALTYAPI/MICROSOFT ATA → IRAK/ALTYAPI/ATA; BAGDAT → IRAK/BAGDAT ⇒ BAGDAT/ACTIVE DIRECTORY → IRAK/BAGDAT/ACTIVE DIRECTORY).
+// Açıklamalar (DF_ETIKET_ACIKLAMA) ve işlev / topoloji versiyonları (DF_TOPOLOJI_VERSIYON.ETIKET) de taşınır.
+record EtiketDuzenIstek(string? Eski, string? Yeni, bool Uygula = false);
+static class EtiketDuzen
+{
+    public static string? Cevir(string tag, string eski, string yeni) =>
+        string.Equals(tag, eski, StringComparison.OrdinalIgnoreCase) ? yeni
+        : tag.StartsWith(eski + "/", StringComparison.OrdinalIgnoreCase) ? yeni + tag[eski.Length..] : null;
+
+    public static List<string>? Donustur(List<string> tags, string eski, string yeni)
+    {
+        if (!tags.Any(t => Cevir(t, eski, yeni) != null)) return null;
+        return tags.Select(t => Cevir(t, eski, yeni) ?? t).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
+    // Doğrulama + etkilenen sunucular / etiketler
+    public static (List<string> Ips, List<(string Eski, string Yeni)> Etiketler, string? Hata) Onizle(EnvanterSnapshot env, string eski, string yeni)
+    {
+        if (string.Equals(eski, yeni, StringComparison.OrdinalIgnoreCase)) return ([], [], "Yeni ad eskisiyle aynı.");
+        if (yeni.StartsWith(eski + "/", StringComparison.OrdinalIgnoreCase)) return ([], [], "Bir etiket kendi altına taşınamaz.");
+        var ips = env.TaggedIps.Where(kv => kv.Value.Any(t => Cevir(t, eski, yeni) != null)).Select(kv => kv.Key).ToList();
+        var etk = env.TaggedIps.Values.SelectMany(v => v).Distinct(StringComparer.OrdinalIgnoreCase)
+            .Select(t => (t, y: Cevir(t, eski, yeni))).Where(x => x.y != null).Select(x => (x.t, x.y!)).OrderBy(x => x.t, Comparer<string>.Create(EtiketService.YolKarsilastir)).ToList();
+        if (etk.Any(x => x.Item2.Split('/').Length > EtiketService.MaxSeviye))
+            return ([], [], $"Taşıyınca {EtiketService.MaxSeviye} seviyeyi aşan etiket oluşuyor ({etk.First(x => x.Item2.Split('/').Length > EtiketService.MaxSeviye).Item2}).");
+        return (ips, etk, ips.Count == 0 ? "Bu etiketi taşıyan sunucu yok." : null);
+    }
+
+    // Açıklama ve versiyon kayıtlarındaki etiket adlarını taşır (tablo yoksa sessiz)
+    public static async Task YanKayitlarAsync(IConfiguration cfg, string eski, string yeni, ILogger log, CancellationToken ct)
+    {
+        string acik = cfg["Etiket:AciklamaTablosu"] ?? "dbo.DF_ETIKET_ACIKLAMA", ver = cfg["Islev:VersiyonTablosu"] ?? "dbo.DF_TOPOLOJI_VERSIYON";
+        var guvenli = new Regex(@"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*){0,2}$");
+        await using var conn = new SqlConnection(cfg.GetConnectionString("Envanter"));
+        await conn.OpenAsync(ct);
+        foreach (var (t, sql) in new[] {
+            (acik, $"UPDATE {acik} SET ETIKET = @y + SUBSTRING(ETIKET, LEN(@e) + 1, 4000) WHERE (ETIKET = @e OR ETIKET LIKE @l) AND NOT EXISTS (SELECT 1 FROM {acik} x WHERE x.ETIKET = @y + SUBSTRING({acik}.ETIKET, LEN(@e) + 1, 4000))"),
+            (ver, $"UPDATE {ver} SET ETIKET = @y + SUBSTRING(ETIKET, LEN(@e) + 1, 4000) WHERE ETIKET = @e OR ETIKET LIKE @l") })
+        {
+            if (!guvenli.IsMatch(t)) continue;
+            try
+            {
+                await using var cmd = new SqlCommand(sql, conn);
+                cmd.Parameters.AddWithValue("@e", eski);
+                cmd.Parameters.AddWithValue("@y", yeni);
+                cmd.Parameters.AddWithValue("@l", eski.Replace("[", "[[]").Replace("%", "[%]").Replace("_", "[_]") + "/%");
+                int n = await cmd.ExecuteNonQueryAsync(ct);
+                if (n > 0) log.LogInformation("Etiket düzenleme: {Tablo} {N} kayıt {Eski} → {Yeni}", t, n, eski, yeni);
+            }
+            catch (SqlException ex) when (ex.Number == 208) { }
+        }
     }
 }

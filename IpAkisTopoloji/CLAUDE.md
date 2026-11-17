@@ -520,6 +520,14 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
   X/…/Y ve Y/Z → X/…/Y/Z (zincir başı önce, tur tur, en çok MaxSeviye; A/B + B/A gibi döngü birleşmez). GET `/api/etiket/zincir` önizleme (envanterden), POST
   `{ips?}` (Yetki:Yazma) DB'den okuyup yazar (ERT TAG; ERT dışı DF_ETIKET_EK), envanter yeniden yüklenir. etiket.js `egZincirYukle` / `egZincirCiz`: uyarı bandı
   (kaç sunucu, ayrı görünen kökler), "Önizle" (şu an → birleşince tablo), "Hepsini tek etikete birleştir" (onaylı).
+- **Etiket düzenleme + ağaçtan seç + topolojide etiketler** (kullanıcı: "mevcut etiketleri düzenleyebilmemiz lazım, ayrıca topolojide etiketleri de göreyim"):
+  `EtiketDuzen` (Etiket.cs) — `POST /api/etiket/duzenle {eski, yeni, uygula}` (Yetki:Yazma): eski etiket ve ALTINDAKİ tüm seviyeler tüm sunucularda yeni yola
+  (yeniden adlandırma ya da başka başlığın altına taşıma; kendi altına taşıma / 4 seviyeyi aşma hata); uygula=false önizleme (sunucu sayısı, eski → yeni listesi);
+  yazma ortak `EtiketZincir.DonusturAsync` (ERT TAG / DF_ETIKET_EK), ayrıca DF_ETIKET_ACIKLAMA (çakışmayan) ve DF_TOPOLOJI_VERSIYON.ETIKET taşınır. DİKKAT: kök
+  etiket taşınırsa (ALTYAPI → IRAK/ALTYAPI) o kökü taşıyan TÜM sunucular taşınır. etiket.js: "Etiket açıklamaları" düğmesi → "Etiketleri düzenle", her satırda ✎
+  (`egDuzenle`: prompt → önizleme confirm → uygula). Hızlı filtre / ağaç hapına tıklayınca seçim çubuğu o yolla dolar (Etiket = kök, Alt başlık = "kalan/").
+  `IslevSunucu.Etiketler` (sunucunun tüm etiketleri) → işlev haritası kartında seçili etiketin altındaki başlıklar ("ALTYAPI › MICROSOFT ATA", `ivEtiketler`; arama
+  da bulur); `KtUye.Etiketler` → küme topolojisi sunucu penceresinde "Etiketler" rozetleri, karo ipucunda etiketler.
 - **Etiketleme segment süzgecinde CIDR** (kullanıcı: "segmenti CIDR olarak filtreleyemiyoruz"): `EtiketService.SegmentUyar` — "a.b.c.d/n" (virgül / boşlukla birden çok)
   → IP aralıkta mı (segment kaydından bağımsız), "10.71.51." gibi IP öneki → IP / segment CIDR'ı bununla başlıyor mu, diğer metin → segment adı ya da CIDR'ında geçiyor mu.
   `EtiketSunucu.Cidr` (segment CIDR'ı), etiket.js segment hücresinde altta küçük CIDR, placeholder güncellendi.

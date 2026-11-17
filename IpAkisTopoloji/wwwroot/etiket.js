@@ -146,7 +146,7 @@ function etqShell() {
     <div class="eg-head">
       <div><h2>Sunucu etiketleme</h2>
         <div class="eg-sub">Envanter (ERT_HOSTIPADDRESS) sunucuları · etiketler TAG kolonuna yazılır${w ? "" : " · <b>yalnız görüntüleme yetkiniz var</b>"}</div></div>
-      <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap"><button type="button" id="egDescBtn" title="Ana ve alt etiketlerin ne olduğunu yazın; AI sınıflandırması da bu açıklamaları kullanır">Etiket açıklamaları</button>
+      <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap"><button type="button" id="egDescBtn" title="Etiketleri yeniden adlandırın / başka başlığın altına taşıyın; açıklamalarını yazın (AI sınıflandırması da kullanır)">Etiketleri düzenle</button>
         <div class="eg-stats" id="egStats"></div></div>
     </div>
     <div id="egDesc"></div>
@@ -243,7 +243,13 @@ function etqUpdate() {
     return `<div class="eg-tree">${pill(c, esc(tagLast(c.ad)))}${alt.length ? `<span class="arr">›</span>` + alt.map(t => pill(t, t.ad.slice(c.ad.length + 1).split("/").map(esc).join(" › "))).join("") : ""}</div>`;
   }).join("") : "";
   document.querySelectorAll("#egPills [data-pill], #egSubs [data-pill]").forEach(b => b.addEventListener("click", () => {
-    f.etiket = b.dataset.pill; etq.page = 1; etqLoad();
+    f.etiket = b.dataset.pill; etq.page = 1;
+    // ağaçtan seç: gerçek bir etiket başlığıysa seçim çubuğundaki kutular o yolla dolar (altına yeni seviye yazmak için)
+    if (etq.canWrite && $("#egNew") && !["", "*", "-", "!ert"].includes(f.etiket)) {
+      const [a, ...r] = f.etiket.split("/");
+      $("#egNew").value = a; $("#egSub").value = r.length ? r.join("/") + "/" : "";
+    }
+    etqLoad();
   }));
   const sel = document.querySelector('.eg-grid select[data-f="etiket"]');
   sel.innerHTML = `<option value="">tümü</option><option value="*">etiketli</option><option value="-">etiketsiz</option>`
@@ -301,16 +307,17 @@ function egDescRender() {
   const w = etq.canWrite && !etq.descWarn;
   const tags = etq.tags;
   box.innerHTML = `<div class="eg-desc">
-    <h3>Etiket açıklamaları <span class="eg-sub">Alt etiket eklemek için seçim çubuğunda "Alt etiket" kutusunu doldurun (ANA/ALT olarak yazılır)</span></h3>
+    <h3>Etiketleri düzenle <span class="eg-sub">✎ ile bir etiketi altındaki seviyelerle birlikte tüm sunucularda yeniden adlandırın ya da başka başlığın altına taşıyın (ör. ALTYAPI/MICROSOFT ATA → IRAK/ALTYAPI/MICROSOFT ATA)</span></h3>
     ${etq.descWarn ? `<div class="iv-warn" style="margin:0">${esc(etq.descWarn)}</div>` : ""}
     ${tags.length ? tags.map(t => `<div class="row${t.ad.includes("/") ? " sub" : ""}"${tagDepth(t.ad) > 2 ? ` style="padding-left:${22 * (tagDepth(t.ad) - 1)}px"` : ""}>
-      <div><span class="eg-tag" style="--h:${tagHue(t.ad)}">${esc(tagLast(t.ad))}</span></div>
+      <div><span class="eg-tag" style="--h:${tagHue(t.ad)}" title="${esc(t.ad.split("/").join(" › "))}">${esc(tagLast(t.ad))}</span>${etq.canWrite ? ` <button type="button" class="eg-add" data-dren="${esc(t.ad)}" title="Yeniden adlandır / taşı (alt seviyeleriyle, tüm sunucularda)">✎</button>` : ""}</div>
       <span class="n">${fmt(t.sunucu)} sunucu</span>
       ${w ? `<textarea rows="1" maxlength="2000" data-desc="${esc(t.ad)}" placeholder="${t.ad.includes("/") ? "Bu alt etiketteki sunucular ne iş yapar?" : "Bu etiket neyi kapsar?"}">${esc(t.aciklama || "")}</textarea>
         <span><button type="button" data-dsave="${esc(t.ad)}">Kaydet</button> <span class="ok" data-dok="${esc(t.ad)}"></span></span>`
         : `<div class="txt">${esc(t.aciklama || "—")}</div><span></span>`}
     </div>`).join("") : `<div class="eg-sub">Henüz etiket yok.</div>`}
   </div>`;
+  box.querySelectorAll("[data-dren]").forEach(b => b.addEventListener("click", () => egDuzenle(b.dataset.dren)));
   box.querySelectorAll("[data-dsave]").forEach(b => b.addEventListener("click", async () => {
     const tag = b.dataset.dsave, ta = box.querySelector(`textarea[data-desc="${CSS.escape(tag)}"]`), ok = box.querySelector(`[data-dok="${CSS.escape(tag)}"]`);
     b.disabled = true;
@@ -533,4 +540,28 @@ function egZincirCiz() {
       await egZincirYukle();
     } catch (e) { alert("Birleştirilemedi: " + e.message); ev.target.disabled = false; }
   });
+}
+
+// Etiket düzenleme: yeni yol sor → önizleme (kaç sunucu, hangi etiketler) → onay → uygula (/api/etiket/duzenle)
+async function egDuzenle(eski) {
+  const yeni = prompt(`"${eski.split("/").join(" › ")}" için yeni yol (seviyeler / ile, en çok 4).\nAltındaki başlıklar da birlikte taşınır.\nÖrn: IRAK/ALTYAPI/MICROSOFT ATA`, eski);
+  if (!yeni?.trim() || yeni.trim().toLocaleUpperCase("tr") === eski) return;
+  const post = async uygula => {
+    const r = await fetch("api/etiket/duzenle", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ eski, yeni: yeni.trim(), uygula }) });
+    const b = await r.json().catch(() => ({ error: `HTTP ${r.status}` }));
+    if (!r.ok) throw new Error(b.error || `HTTP ${r.status}`);
+    return b;
+  };
+  try {
+    const o = await post(false);
+    const liste = o.etiketler.slice(0, 15).map(x => `  ${x.eski.split("/").join(" › ")}  →  ${x.yeni.split("/").join(" › ")}`).join("\n");
+    if (!confirm(`${fmt(o.sunucu)} sunucuda ${o.etiketler.length} etiket değişecek:\n\n${liste}${o.etiketler.length > 15 ? `\n  … ve ${o.etiketler.length - 15} etiket daha` : ""}\n\nAçıklamalar ve kayıtlı topoloji versiyonları da taşınır. Devam?`)) return;
+    const u = await post(true);
+    if (etq.f.etiket && (etq.f.etiket === eski || etq.f.etiket.startsWith(eski + "/"))) etq.f.etiket = u.yeni + etq.f.etiket.slice(eski.length);
+    fetch("api/etiketler").then(x => x.ok ? x.json() : null).then(x => { if (x?.ipler) tagMap = x.ipler; }).catch(() => {});
+    loadTopoTags?.(true);
+    await etqLoad();
+    await egZincirYukle();
+    alert(`${fmt(u.guncellenen)} sunucunun etiketi güncellendi.`);
+  } catch (e) { alert("Düzenlenemedi: " + e.message); }
 }

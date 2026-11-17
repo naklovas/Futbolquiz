@@ -671,6 +671,29 @@ app.MapPost("/api/etiket", async (EtiketIstek req, HttpContext ctx, IConfigurati
 });
 
 // Etiket / alt etiket açıklaması (boş = sil). Etiketin envanterde olması gerekmez (önceden yazılabilir).
+// Etiket düzenleme (yeniden adlandır / taşı, alt seviyelerle; Etiket.cs EtiketDuzen): Uygula=false önizleme
+app.MapPost("/api/etiket/duzenle", async (EtiketDuzenIstek req, HttpContext ctx, IConfiguration cfg, EnvanterService envanter, CancellationToken ct) =>
+{
+    string user = ctx.User?.Identity?.Name ?? "?";
+    if (!EtiketService.CanWrite(cfg, ctx)) return Results.Json(new { error = $"Etiket yazma yetkiniz yok ({user})." }, statusCode: 403);
+    string? eski = EtiketService.NormalizeTag(req.Eski), yeni = EtiketService.NormalizeTag(req.Yeni);
+    if (eski == null || yeni == null)
+        return Results.BadRequest(new { error = "Etiket geçersiz: harf, rakam, _ - . ve boşluk; alt seviyeler / ile, en çok 4 seviye." });
+    try
+    {
+        var env = await envanter.GetAsync(false, ct);
+        var (ips, etk, hata) = EtiketDuzen.Onizle(env, eski, yeni);
+        if (hata != null) return Results.BadRequest(new { error = hata });
+        if (!req.Uygula) return Results.Ok(new { eski, yeni, sunucu = ips.Count, etiketler = etk.Select(x => new { eski = x.Eski, yeni = x.Yeni }) });
+        int n = await EtiketZincir.DonusturAsync(cfg, env, ips, l => EtiketDuzen.Donustur(l, eski, yeni), "Etiket düzenlendi", user, app.Logger, ct);
+        await EtiketDuzen.YanKayitlarAsync(cfg, eski, yeni, app.Logger, ct);
+        await EtiketAciklama.GetAsync(cfg, ct, true);
+        await envanter.GetAsync(true, ct);
+        return Results.Ok(new { eski, yeni, guncellenen = n });
+    }
+    catch (InvalidOperationException ex) { return Results.BadRequest(new { error = ex.Message }); }
+    catch (Microsoft.Data.SqlClient.SqlException ex) { return Results.Json(new { error = "SQL: " + ex.Message }, statusCode: 502); }
+});
 // Zincirleme etiket birleştirme (Etiket.cs EtiketZincir): önizleme ve uygulama
 app.MapGet("/api/etiket/zincir", async (EnvanterService envanter, CancellationToken ct) =>
 {
