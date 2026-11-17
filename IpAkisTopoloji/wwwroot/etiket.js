@@ -80,9 +80,25 @@ const ETQ_COLS = [
   .eg-empty { padding:40px; text-align:center; color:var(--muted); }
   .eg-tag .sub { font-weight:500; margin-left:3px; opacity:.85; white-space:nowrap; }
   .eg-pills.subs { margin-top:-6px; padding-left:14px; border-left:2px solid var(--line); }
-  .eg-pills.subs .lbl { font-size:11.5px; width:100%; }
-  .eg-tree { display:flex; gap:6px; flex-wrap:wrap; align-items:center; width:100%; }
-  .eg-tree .arr { color:var(--muted); }
+  .eg-pills.subs .lbl { font-size:11.5px; font-weight:600; }
+  .eg-pill.on .eg-tag { background:var(--panel); color:var(--text); border-color:var(--panel); }
+  .eg-grp { display:inline-flex; gap:3px; align-items:center; flex-wrap:wrap; padding:2px 6px 2px 4px; border:1px dashed var(--line); border-radius:999px; }
+  .eg-pills.subs .eg-pill { padding:2px 8px; font-size:11.5px; }
+  .eg-pills.subs .eg-grp .eg-pill + .eg-pill { opacity:.9; }
+  .eg-tg { --h:210; display:inline-flex; flex-wrap:wrap; align-items:center; gap:1px 2px; border-radius:10px; padding:1px 7px; margin:1px 4px 1px 0; font-size:11.5px;
+    font-weight:600; background:hsl(var(--h) 65% 50% / .13); color:hsl(var(--h) 60% 34%); border:1px solid hsl(var(--h) 60% 50% / .35); line-height:1.5; }
+  :root[data-theme="dark"] .eg-tg { color:hsl(var(--h) 75% 74%); }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .eg-tg { color:hsl(var(--h) 75% 74%); } }
+  .eg-tg [data-etag] { cursor:pointer; border-radius:4px; padding:0 2px; }
+  .eg-tg [data-etag]:hover { background:hsl(var(--h) 60% 50% / .22); }
+  .eg-tg .s { font-weight:500; }
+  .eg-tg .sep { opacity:.4; margin:0 2px; }
+  .eg-tg a { color:inherit; text-decoration:none; opacity:.5; font-weight:700; }
+  .eg-tg a:hover { opacity:1; }
+  .eg-pop { position:fixed; z-index:50; background:var(--panel); border:1px solid var(--line); border-radius:10px; box-shadow:0 10px 30px rgba(0,0,0,.2);
+    padding:10px; display:grid; gap:8px; width:380px; max-width:calc(100vw - 32px); font-size:12.5px; }
+  .eg-pop input { font:inherit; padding:6px 8px; border:1px solid var(--line); border-radius:6px; background:var(--bg); color:var(--text); }
+  .eg-pop .b { display:flex; gap:6px; flex-wrap:wrap; }
   .eg-bar input.subin { width:170px; }
   .eg-desc { border:1px solid var(--line); border-radius:10px; background:var(--bg); padding:12px 14px; margin-bottom:12px; display:grid; gap:8px; }
   .eg-desc h3 { margin:0; font-size:14px; display:flex; justify-content:space-between; gap:10px; align-items:baseline; }
@@ -146,7 +162,7 @@ function etqShell() {
     <div class="eg-head">
       <div><h2>Sunucu etiketleme</h2>
         <div class="eg-sub">Envanter (ERT_HOSTIPADDRESS) sunucuları · etiketler TAG kolonuna yazılır${w ? "" : " · <b>yalnız görüntüleme yetkiniz var</b>"}</div></div>
-      <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap"><button type="button" id="egDescBtn" title="Etiketleri yeniden adlandırın / başka başlığın altına taşıyın; açıklamalarını yazın (AI sınıflandırması da kullanır)">Etiketleri düzenle</button>
+      <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap"><button type="button" id="egDescBtn" title="Ana ve alt başlıkların ne olduğunu yazın; AI sınıflandırması da bu açıklamaları kullanır">Etiket açıklamaları</button>
         <div class="eg-stats" id="egStats"></div></div>
     </div>
     <div id="egDesc"></div>
@@ -233,14 +249,15 @@ function etqUpdate() {
       .concat(egs.aktif ? [["!ert", "ERT'de yok", egs.yok]] : [])
       .map(([v, l, n]) => `<button type="button" class="eg-pill${f.etiket === v ? " on" : ""}" data-pill="${v}">${l}<i>${fmt(n)}</i></button>`).join("")
     + etq.tags.filter(t => !t.ad.includes("/")).map(t => pill(t, esc(t.ad) + (etq.tags.some(x => tagParent(x.ad) === t.ad && x.ad !== t.ad) ? ` <span class="sub">▾</span>` : ""))).join("");
-  // Seçilen ana etiketin bütün alt başlıkları ağaç halinde: 2. seviye başına bir satır, altındakiler o satırda "DB › TEST" gibi
+  // Seçilen ana etiketin bütün alt başlıkları TEK satırda (kullanıcı: "alt alta listeliyorsun, her şey aşağı kayıyor"): 2. seviye başına bir grup,
+  // altındakiler grubun içinde "DB › TEST" gibi; satır taşarsa sarar
   const root = f.etiket && !["*", "-", "!ert"].includes(f.etiket) ? tagParent(f.etiket) : null;
   const subs = root ? etq.tags.filter(t => t.ad.startsWith(root + "/")) : [];
   const ikinci = subs.filter(t => tagDepth(t.ad) === 2);
   $("#egSubs").hidden = !subs.length;
-  $("#egSubs").innerHTML = subs.length ? `<div class="lbl">${esc(root)} altındaki başlıklar:</div>` + ikinci.map(c => {
+  $("#egSubs").innerHTML = subs.length ? `<span class="lbl">${esc(root)} ›</span>` + ikinci.map(c => {
     const alt = subs.filter(t => t.ad.startsWith(c.ad + "/"));
-    return `<div class="eg-tree">${pill(c, esc(tagLast(c.ad)))}${alt.length ? `<span class="arr">›</span>` + alt.map(t => pill(t, t.ad.slice(c.ad.length + 1).split("/").map(esc).join(" › "))).join("") : ""}</div>`;
+    return `<span class="eg-grp">${pill(c, esc(tagLast(c.ad)))}${alt.map(t => pill(t, t.ad.slice(c.ad.length + 1).split("/").map(esc).join(" › "))).join("")}</span>`;
   }).join("") : "";
   document.querySelectorAll("#egPills [data-pill], #egSubs [data-pill]").forEach(b => b.addEventListener("click", () => {
     f.etiket = b.dataset.pill; etq.page = 1;
@@ -269,7 +286,7 @@ function etqUpdate() {
       <td class="app">${r.apps.map(a => `<span>${esc(a)}</span>`).join("") || `<span class="dim">—</span>`}</td>
       <td class="${r.muhafiz ? "" : "dim"}">${esc(r.muhafiz ?? "—")}</td>
       <td class="${r.segment ? "" : "dim"}">${esc(r.segment ?? "—")}${r.cidr ? `<div class="dim" style="font-size:11px">${esc(r.cidr)}</div>` : ""}</td>
-      <td>${r.ertYok ? `<span class="eg-yok" title="ERT_HOSTIPADDRESS tablosunda yok (ağda görüldü); etiketi DeltaFlow'un kendi tablosunda (DF_ETIKET_EK) tutulur">ERT'de yok</span> ` : ""}${r.tags.map(t => tagChip(t, r.ip, w)).join("") || (r.ertYok ? "" : `<span class="dim">—</span>`)}</td>
+      <td>${r.ertYok ? `<span class="eg-yok" title="ERT_HOSTIPADDRESS tablosunda yok (ağda görüldü); etiketi DeltaFlow'un kendi tablosunda (DF_ETIKET_EK) tutulur">ERT'de yok</span> ` : ""}${tagGrup(r.tags, r.ip, w) || (r.ertYok ? "" : `<span class="dim">—</span>`)}</td>
       ${w ? `<td style="text-align:right"><button type="button" class="eg-add" data-tagip="${esc(r.ip)}">+ Etiket</button></td>` : ""}
     </tr>`).join("")
     : `<tr><td colspan="${ETQ_COLS.length + (w ? 2 : 0)}" class="eg-empty">Filtreye uyan sunucu yok.</td></tr>`;
@@ -307,17 +324,16 @@ function egDescRender() {
   const w = etq.canWrite && !etq.descWarn;
   const tags = etq.tags;
   box.innerHTML = `<div class="eg-desc">
-    <h3>Etiketleri düzenle <span class="eg-sub">✎ ile bir etiketi altındaki seviyelerle birlikte tüm sunucularda yeniden adlandırın ya da başka başlığın altına taşıyın (ör. ALTYAPI/MICROSOFT ATA → IRAK/ALTYAPI/MICROSOFT ATA)</span></h3>
+    <h3>Etiket açıklamaları <span class="eg-sub">Etiketi değiştirmek için tablodaki etiketin üzerine tıklayın</span></h3>
     ${etq.descWarn ? `<div class="iv-warn" style="margin:0">${esc(etq.descWarn)}</div>` : ""}
     ${tags.length ? tags.map(t => `<div class="row${t.ad.includes("/") ? " sub" : ""}"${tagDepth(t.ad) > 2 ? ` style="padding-left:${22 * (tagDepth(t.ad) - 1)}px"` : ""}>
-      <div><span class="eg-tag" style="--h:${tagHue(t.ad)}" title="${esc(t.ad.split("/").join(" › "))}">${esc(tagLast(t.ad))}</span>${etq.canWrite ? ` <button type="button" class="eg-add" data-dren="${esc(t.ad)}" title="Yeniden adlandır / taşı (alt seviyeleriyle, tüm sunucularda)">✎</button>` : ""}</div>
+      <div><span class="eg-tag" style="--h:${tagHue(t.ad)}" title="${esc(t.ad.split("/").join(" › "))}">${esc(tagLast(t.ad))}</span></div>
       <span class="n">${fmt(t.sunucu)} sunucu</span>
       ${w ? `<textarea rows="1" maxlength="2000" data-desc="${esc(t.ad)}" placeholder="${t.ad.includes("/") ? "Bu alt etiketteki sunucular ne iş yapar?" : "Bu etiket neyi kapsar?"}">${esc(t.aciklama || "")}</textarea>
         <span><button type="button" data-dsave="${esc(t.ad)}">Kaydet</button> <span class="ok" data-dok="${esc(t.ad)}"></span></span>`
         : `<div class="txt">${esc(t.aciklama || "—")}</div><span></span>`}
     </div>`).join("") : `<div class="eg-sub">Henüz etiket yok.</div>`}
   </div>`;
-  box.querySelectorAll("[data-dren]").forEach(b => b.addEventListener("click", () => egDuzenle(b.dataset.dren)));
   box.querySelectorAll("[data-dsave]").forEach(b => b.addEventListener("click", async () => {
     const tag = b.dataset.dsave, ta = box.querySelector(`textarea[data-desc="${CSS.escape(tag)}"]`), ok = box.querySelector(`[data-dok="${CSS.escape(tag)}"]`);
     b.disabled = true;
@@ -543,8 +559,8 @@ function egZincirCiz() {
 }
 
 // Etiket düzenleme: yeni yol sor → önizleme (kaç sunucu, hangi etiketler) → onay → uygula (/api/etiket/duzenle)
-async function egDuzenle(eski) {
-  const yeni = prompt(`"${eski.split("/").join(" › ")}" için yeni yol (seviyeler / ile, en çok 4).\nAltındaki başlıklar da birlikte taşınır.\nÖrn: IRAK/ALTYAPI/MICROSOFT ATA`, eski);
+async function egDuzenle(eski, hazir) {
+  const yeni = hazir ?? prompt(`"${eski.split("/").join(" › ")}" için yeni yol (seviyeler / ile, en çok 4).\nAltındaki başlıklar da birlikte taşınır.\nÖrn: IRAK/ALTYAPI/MICROSOFT ATA`, eski);
   if (!yeni?.trim() || yeni.trim().toLocaleUpperCase("tr") === eski) return;
   const post = async uygula => {
     const r = await fetch("api/etiket/duzenle", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ eski, yeni: yeni.trim(), uygula }) });
@@ -564,4 +580,67 @@ async function egDuzenle(eski) {
     await egZincirYukle();
     alert(`${fmt(u.guncellenen)} sunucunun etiketi güncellendi.`);
   } catch (e) { alert("Düzenlenemedi: " + e.message); }
+}
+
+// Tablodaki etiket hücresi (kullanıcı: "fazla etiket olduğu için biçimsiz"): aynı kök etiketin başlıkları TEK rozette — IRAK › ALTYAPI · BAGDAT › ACTIVE DIRECTORY;
+// her başlık tıklanınca düzenlenir (data-etag), × ile kaldırılır
+function tagGrup(tags, ip, w) {
+  const g = new Map();
+  for (const t of [...tags].sort()) { const r = tagParent(t); (g.get(r) || g.set(r, []).get(r)).push(t); }
+  const x = t => w ? `<a href="#" data-untag="${esc(t)}" data-ip="${esc(ip)}" title="Bu etiketi kaldır">×</a>` : "";
+  const ed = (t, html) => `<span data-etag="${esc(t)}" data-ip="${esc(ip)}" title="${esc(t.split("/").join(" › "))}${w ? " — değiştirmek için tıklayın" : ""}">${html}</span>`;
+  return [...g].map(([r, ts]) => {
+    const kok = ts.includes(r), alt = ts.filter(t => t !== r);
+    const d = tagDesc(r);
+    return `<span class="eg-tg" style="--h:${tagHue(r)}"${d ? ` title="${esc(d)}"` : ""}>${kok ? ed(r, esc(r)) + x(r) : esc(r)}${alt.map((t, i) =>
+      `${i || kok ? `<span class="sep">·</span>` : " "}${ed(t, `<span class="s">› ${t.slice(r.length + 1).split("/").map(esc).join(" › ")}</span>`)}${x(t)}`).join("")}</span>`;
+  }).join("");
+}
+
+// Etiketi yerinde değiştir: bu sunucuda / seçili sunucularda / bu etiketi taşıyan tüm sunucularda (alt seviyeleriyle, önizlemeli)
+document.addEventListener("click", ev => {
+  const el = ev.target.closest(".eg-grid [data-etag]");
+  if (!el || !etq.canWrite) return;
+  ev.preventDefault();
+  egPop(el, el.dataset.etag, el.dataset.ip);
+});
+function egPopKapat() { document.querySelector(".eg-pop")?.remove(); }
+function egPop(el, eski, ip) {
+  egPopKapat();
+  const sec = etq.selected.has(ip) && etq.selected.size > 1 ? [...etq.selected] : null;
+  const n = etq.tags.find(t => t.ad === eski)?.sunucu;
+  const box = document.createElement("div");
+  box.className = "eg-pop";
+  box.innerHTML = `<div><b>Etiketi değiştir</b> <span class="eg-sub">· seviyeler / ile, en çok 4</span></div>
+    <input type="text" value="${esc(eski)}" list="egPopList"><datalist id="egPopList">${etq.tags.map(t => `<option value="${esc(t.ad)}">`).join("")}</datalist>
+    <div class="b"><button type="button" class="primary" data-k="bu">Bu sunucuda</button>
+      ${sec ? `<button type="button" data-k="sec">Seçili ${fmt(sec.length)} sunucuda</button>` : ""}
+      <button type="button" data-k="tum" title="Bu etiketi (ve altındaki başlıkları) taşıyan tüm sunucularda; önce önizleme">Tüm sunucularda${n ? ` (${fmt(n)})` : ""}</button>
+      <button type="button" data-k="iptal">İptal</button></div>`;
+  document.body.appendChild(box);
+  const r = el.getBoundingClientRect();
+  box.style.left = Math.max(8, Math.min(r.left, innerWidth - box.offsetWidth - 8)) + "px";
+  box.style.top = (r.bottom + box.offsetHeight + 12 > innerHeight ? Math.max(8, r.top - box.offsetHeight - 6) : r.bottom + 6) + "px";
+  const inp = box.querySelector("input");
+  inp.focus(); inp.select();
+  const yap = async k => {
+    const yeni = inp.value.trim().toLocaleUpperCase("tr");
+    if (k === "iptal" || !yeni || yeni === eski) { egPopKapat(); return; }
+    egPopKapat();
+    if (k === "tum") { egDuzenle(eski, yeni); return; }
+    const ips = k === "sec" ? sec : [ip];
+    try {
+      const res = await fetch("api/etiket", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ips, ekle: yeni, kaldir: eski, adlar: egSegAdlar(ips) }) });
+      const b = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+      if (!res.ok) throw new Error(b.error || `HTTP ${res.status}`);
+      tagMap ??= {};
+      for (const srv of b.sunucular) tagMap[srv.ip] = srv.tags;
+      loadTopoTags?.(true);
+      await etqLoad();
+    } catch (e) { alert("Etiket değiştirilemedi: " + e.message); }
+  };
+  box.querySelectorAll("[data-k]").forEach(b => b.addEventListener("click", () => yap(b.dataset.k)));
+  inp.addEventListener("keydown", e => { if (e.key === "Enter") yap("bu"); if (e.key === "Escape") egPopKapat(); });
+  setTimeout(() => document.addEventListener("mousedown", function dis(e) { if (!box.contains(e.target)) { egPopKapat(); document.removeEventListener("mousedown", dis); } }), 0);
 }

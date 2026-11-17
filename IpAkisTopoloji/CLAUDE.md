@@ -528,6 +528,11 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
   (`egDuzenle`: prompt → önizleme confirm → uygula). Hızlı filtre / ağaç hapına tıklayınca seçim çubuğu o yolla dolar (Etiket = kök, Alt başlık = "kalan/").
   `IslevSunucu.Etiketler` (sunucunun tüm etiketleri) → işlev haritası kartında seçili etiketin altındaki başlıklar ("ALTYAPI › MICROSOFT ATA", `ivEtiketler`; arama
   da bulur); `KtUye.Etiketler` → küme topolojisi sunucu penceresinde "Etiketler" rozetleri, karo ipucunda etiketler.
+- **Etiketi tabloda değiştirme + sade görünüm** (kullanıcı: "alt etiketleri alt alta listeliyorsun, her şey aşağı kayıyor"; "etiket düzenle değil, etiket girdiğim yerde
+  düzenleyebilmem lazım"; "fazla etiket olduğu için biçimsiz"): hızlı filtrede kök seçilince alt başlıklar TEK satırda grup grup (`.eg-grp`, 2. seviye + altları).
+  Tablo hücresi `tagGrup`: aynı kökün etiketleri TEK rozet ("IRAK › ALTYAPI · › BAGDAT › ACTIVE DIRECTORY"), her başlık `data-etag` (tıkla → `egPop` açılır pencere:
+  yeni yol (datalist), "Bu sunucuda" / "Seçili N sunucuda" (POST /api/etiket {ekle: yeni, kaldir: eski}) / "Tüm sunucularda (N)" (egDuzenle → /api/etiket/duzenle
+  önizlemeli), Enter / Esc), × ile kaldır. "Etiketleri düzenle" paneli yeniden "Etiket açıklamaları" (✎ kaldırıldı). Seçili hap okunur (`.eg-pill.on .eg-tag`).
 - **Etiketleme segment süzgecinde CIDR** (kullanıcı: "segmenti CIDR olarak filtreleyemiyoruz"): `EtiketService.SegmentUyar` — "a.b.c.d/n" (virgül / boşlukla birden çok)
   → IP aralıkta mı (segment kaydından bağımsız), "10.71.51." gibi IP öneki → IP / segment CIDR'ı bununla başlıyor mu, diğer metin → segment adı ya da CIDR'ında geçiyor mu.
   `EtiketSunucu.Cidr` (segment CIDR'ı), etiket.js segment hücresinde altta küçük CIDR, placeholder güncellendi.
