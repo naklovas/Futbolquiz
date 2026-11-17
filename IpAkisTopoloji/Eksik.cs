@@ -1012,7 +1012,18 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
     // ve sunucunun kendi adı atılır; kelime kümesi diğerinin alt kümesi olan açıklamalar aynı sistem (alt küme genel bir kelimeden ibaret değilse —
     // "Ziraat" tek başına Ziraat POS ile Ziraat Bansoft'u birleştirmesin). Küme başına en çok kelimeli açıklama temsilci; anlamlı kelimesi olmayan küme atılır.
     static readonly HashSet<string> SistemDolgu = ["yeni", "ortam", "ortami", "ortamina", "ortaminin", "ortamindaki", "ortamlari", "erisim", "erisimi", "erisimleri",
-        "sunucu", "sunucusu", "sunuculari", "sunucusuna", "server", "servers", "prod", "test", "icin", "ve", "ile", "ait", "olan"];
+        "sunucu", "sunucusu", "sunuculari", "sunucusuna", "server", "servers", "prod", "test", "icin", "ve", "ile", "ait", "olan",
+        // alan adı parçaları (kullanıcı ekranı: açıklama "ZB1PWKMPNSQLD02.core.ziraat.bank" sistem sanıldı)
+        "core", "ziraat", "bank", "local", "corp", "com", "tr", "net", "msy", "csy", "zb", "zk"];
+    // Sunucu adı (FQDN dahil) — açıklama yalnız bundan ibaretse sistem bilgisi taşımaz; öneri sunucu adıysa uygulama adı değildir
+    static readonly System.Text.RegularExpressions.Regex SunucuAdiRx = new(@"^[a-z]{2,4}\d[a-z0-9]*[a-z][a-z0-9]*\d{2,3}(\.[a-z0-9-]+)*$", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+    static bool SunucuAdiMi(string t, string? host)
+    {
+        string x = t.Trim().Trim('"', '\'', '.');
+        if (SunucuAdiRx.IsMatch(x)) return true;
+        string? h = host?.Split('.')[0];
+        return h is { Length: >= 4 } && Kelimeler(x).Where(w => !SistemDolgu.Contains(w)).All(w => w == h.ToLowerInvariant()) && Kelimeler(x).Contains(h.ToLowerInvariant());
+    }
     static List<string> SistemKumeleri(IEnumerable<string> aciklamalar, string? host)
     {
         string? h = host == null ? null : Kelimeler(host).FirstOrDefault();
@@ -1173,7 +1184,7 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
             // Kullanıcı: kaynak / hedef açıklamaları yeterince önemsenmiyordu → talepler içinde kaybolmasın diye önce TÜM eşleşen taleplerdeki
             // BU SUNUCUYU anlatan açıklama (hedefse ZT_HEDEFACIKLAMA, kaynaksa ZT_KAYNAKACIKLAMA) tekilleştirilip sayısıyla, ayrıca hedef
             // olduğu taleplerde erişen tarafın (ZT_KAYNAKACIKLAMA) açıklaması
-            var bunu = all.Where(x => x.aj == null).Select(x => (t: Own(x.r, x.hedef), x)).Where(y => y.t != null)
+            var bunu = all.Where(x => x.aj == null).Select(x => (t: Own(x.r, x.hedef), x)).Where(y => y.t != null && !SunucuAdiMi(y.t, host))
                 .GroupBy(y => Norm(y.t!)).Select(g => (t: g.First().t!, n: g.Count(), son: g.Max(y => G(y.x.r, "TARIH")), port: g.Any(y => y.x.ps.Count > 0 || y.x.pa.Count > 0),
                     portlar: g.SelectMany(y => y.x.ps.Concat(y.x.pa)).Distinct().ToList()))
                 .OrderByDescending(z => z.port).ThenByDescending(z => z.n).ThenByDescending(z => z.son).Take(8).ToList();
@@ -1626,6 +1637,8 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
               uygulama sunucunun / talep formunun uygulamasıdır, veritabani true ("<uygulama> Veritabanı"); yalnız teknoloji adı yazma.
             - "BİLİNEN SİSTEM PORTLARI" satırındaki portlar (ör. 3343 Windows Failover Cluster) iş uygulaması değildir: "Altyapı: <ad>" yaz.
             - Talepte "kaynak uygulama … (KARŞI TARAF …)" bu sunucuya erişen uygulamadır; bu sunucunun adı olarak YAZMA.
+            - Sunucu adı / FQDN (ör. "ZB1PWKMPNSQLD02.core.ziraat.bank") uygulama adı DEĞİLDİR; açıklamada yalnız sunucu adı yazıyorsa o açıklama
+              sistem bilgisi taşımaz, başka kanıta bak.
             - Yalnız genel kelimelerden oluşan ad (ör. "Internal Service", "Web Service", "Application Server") uygulama adı DEĞİLDİR;
               port için kanıt yoksa sunucunun asıl sistemini öner (güven ≤ 40) ya da null yaz.
             - Bu sunucunun HEDEF olduğu bir talepte açıklama "<A> için / <A> karşılığı … <B>'nin DB'lerine / sunucularına / servisine
@@ -1860,6 +1873,12 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
                     || HttpSysEslesme.Cekirdek(exeAd + ".exe")))
             {
                 gerekce = $"Yok sayıldı: AI '{app}' önerdi ama bu genel bir Windows / tarayıcı süreci adı (iş uygulaması değil). AI gerekçesi: {gerekce}";
+                app = null; guven = 0;
+            }
+            // Sunucu adı uygulama değildir (kullanıcı ekranı: AI "ZB1PWKMPNSQLD02.core.ziraat.bank" önerdi — açıklamada yalnız sunucu adı yazıyordu)
+            if (app != null && SunucuAdiMi(app, env.AppsOnIp(ip).Select(h => h.UnixName).OfType<string>().FirstOrDefault()))
+            {
+                gerekce = $"Yok sayıldı: AI '{app}' önerdi ama bu bir sunucu adı, uygulama adı değil. AI gerekçesi: {gerekce}";
                 app = null; guven = 0;
             }
             // Yalnız genel kelimelerden oluşan ad uygulama değildir (kullanıcı ekranı: 35058'e "Internal Service" yeni ad): katalogda birebir yoksa
