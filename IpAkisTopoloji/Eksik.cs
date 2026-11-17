@@ -767,7 +767,34 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
     static readonly string[] DbSurecleri = ["sqlservr", "sqlbrowser", "msmdsrv", "oracle", "tnslsnr", "ocssd", "cmadmin", "postgres", "edb-postgres", "pgbouncer",
         "mysqld", "mariadbd", "db2sysc", "db2syscs", "oninit", "dataserver", "hdbindexserver", "hdbnameserver", "mongod", "mongos", "redis-server",
         "memcached", "influxd", "clickhouse-server", "cockroach", "fbserver", "firebird", "tdatcmd", "nzstart"];
+    // Sunucu adı standardı (kullanıcı: "sunucu isminde db olduğunu standarta göre anlamalıydı"): sql / db / ora… kısaltmaları ya da sondaki sayıdan önce rol harfi
+    // 'd' (zb1pwkkrapord01, zb1pwswarsivd02, zb1pwkmpnsqld01 → veritabanı sunucusu; Eksik:DbRolHarfi=false ile kapatılır)
     static readonly System.Text.RegularExpressions.Regex DbAd = new(@"(sql|db|ora(?=\d|db|cl|$)|orcl|exa|dwh|pgs)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+    static readonly System.Text.RegularExpressions.Regex DbRolHarfi = new(@"(?<=[a-z])d(?=\d{1,3}$)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+    string? DbAdi(string? host)
+    {
+        if (host == null) return null;
+        string kisa = host.Split('.')[0];
+        if (DbAd.Match(kisa) is { Success: true } m) return $"'{m.Value}'";
+        return cfg.GetValue("Eksik:DbRolHarfi", true) && DbRolHarfi.IsMatch(kisa) ? "rol harfi 'd' (sondaki numaradan önce)" : null;
+    }
+    const string DbAdIsareti = "(isimlendirme standardında veritabanı sunucusu)";
+    // Bilinen sistem portları (kullanıcı: 3343'ü yorumlayamıyor — Windows Failover Cluster kalp atışı; AI "Üye İşyeri Kampanya" / "[KKARSIV]" yazdı):
+    // iş uygulaması değildir, öneri doğrudan "Altyapı: X". Eksik:BilinenSistemPortlari {"port": "ad"} ile değişir.
+    static readonly Dictionary<string, string> DefaultSistemPortlari = new()
+    {
+        ["3343"] = "Windows Failover Cluster", ["47001"] = "Windows Remote Management (WinRM)", ["9389"] = "Active Directory Web Services",
+        ["5723"] = "SCOM ajanı", ["5724"] = "SCOM", ["2179"] = "Hyper-V VMConnect"
+    };
+    Dictionary<string, string> SistemPortlari() =>
+        cfg.GetSection("Eksik:BilinenSistemPortlari").GetChildren().Where(c => c.Value is { Length: > 0 }).ToDictionary(c => c.Key, c => c.Value!) is { Count: > 0 } d
+            ? d : DefaultSistemPortlari;
+    static readonly HashSet<string> WebPortlari = ["80", "443", "8080", "8443", "8000", "8081", "8888", "9443"];
+    // Adı standarda göre veritabanı sunucusu olan sunucuda bu port DB portu sayılır mı: sistem / altyapı / web portu değil ve Carbon Black'te portu
+    // DB dışı bir süreç kabul etmiyor (SQL Server adlandırılmış instance'ları 5101, 5378 gibi sabit olmayan portlarda dinler)
+    bool AdDbPort(string? evidence, string port) =>
+        port.Length > 0 && port != "0" && !SistemPortlari().ContainsKey(port) && !WebPortlari.Contains(port) && !AppTopology.InfraPorts(cfg).Contains(port)
+        && (PortLine(evidence, port) is not { } pl || DbSurec(pl) != null);
     Dictionary<string, string> DbPortlari() =>
         cfg.GetSection("Eksik:VeritabaniPortlari").GetChildren().Where(c => c.Value is { Length: > 0 }).ToDictionary(c => c.Key, c => c.Value!) is { Count: > 0 } d
             ? d : DefaultDbPortlari;
@@ -782,20 +809,30 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
         string? surec = DbSurec(PortLine(evidence, port));
         tek = DbPortlari().GetValueOrDefault(port);
         if (surec != null) { tek ??= surec; return true; }
-        return tek != null && !tek.EndsWith('?');
+        if (tek != null && !tek.EndsWith('?')) return true;
+        if (evidence?.Contains(DbAdIsareti) == true && AdDbPort(evidence, port)) { tek = "veritabanı sunucusu (ad standardı; muhtemelen adlandırılmış instance portu)"; return true; }
+        return false;
     }
     string DbHints(EnvanterSnapshot env, string ip, List<string> miss, string evidence)
     {
         var parts = new List<string>();
         string? host = env.AppsOnIp(ip).Select(h => h.UnixName).OfType<string>().FirstOrDefault();
-        if (host != null && DbAd.Match(host) is { Success: true } m) parts.Add($"sunucu adı '{host}' içinde '{m.Value}' (isimlendirme standardında veritabanı sunucusu)");
+        bool adDb = DbAdi(host) is { } da;
+        if (adDb) parts.Add($"sunucu adı '{host}' içinde {DbAdi(host)} {DbAdIsareti}");
         var ports = env.AppsOnIp(ip).Select(h => Key(h.Port)).Where(p => p.Length > 0).Distinct().ToList();
         foreach (var p in ports.Where(p => DbPort(evidence, p, out _)))   // "?"li portlar yalnız DB süreciyle
         {
             DbPort(evidence, p, out var tek);
             parts.Add($"port {p}{(tek != null ? $" ({tek.TrimEnd('?')}{(tek.EndsWith('?') ? "?" : "")})" : "")}{(miss.Contains(p) ? " — uygulama adı boş" : "")}{(DbSurec(PortLine(evidence, p)) is { } sr ? $", portu kabul eden süreç {sr}" : "")}");
         }
-        return parts.Count == 0 ? "" : "VERİTABANI SUNUCUSU İPUÇLARI: " + string.Join("; ", parts) + "\n";
+        // ad standardına göre DB sunucusu: bilinen DB portu olmayan boş portlar da (DB dışı süreç görülmediyse) büyük olasılıkla instance portu
+        if (adDb)
+            foreach (var p in miss.Where(p => !ports.Where(q => DbPort(evidence, q, out _)).Contains(p) && AdDbPort(evidence, p)))
+                parts.Add($"port {p} — uygulama adı boş; veritabanı sunucusunda, DB dışı süreç görülmedi → büyük olasılıkla SQL Server adlandırılmış instance / veritabanı portu");
+        var sis = miss.Where(p => SistemPortlari().ContainsKey(p)).Select(p => $"port {p} = {SistemPortlari()[p]}").ToList();
+        string sisSatir = sis.Count > 0 ? "BİLİNEN SİSTEM PORTLARI (iş uygulaması DEĞİL, öneri \"Altyapı: <ad>\"): " + string.Join("; ", sis) + "\n" : "";
+        if (parts.Count == 0) return sisSatir;
+        return sisSatir + "VERİTABANI SUNUCUSU İPUÇLARI: " + string.Join("; ", parts) + "\n";
     }
 
     async Task<Dictionary<string, string>> BuildAsync(List<string> ips, Dictionary<string, List<string>> ports, EnvanterSnapshot env,
@@ -1186,7 +1223,7 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
                 if (G(r, "DESCRIPTION") is { } d) sb.AppendLine($"    Açıklama: {Cut(d, 400)}");
                 string? hApp = G(r, "ZT_HEDEFUYGULAMA", "ZT_HEDEFUGULAMA"), kApp = G(r, "ZT_KAYNAKUYGULAMA");
                 if (hApp != null || kApp != null)
-                    sb.AppendLine($"    Talepteki uygulama alanları: {(hApp != null ? $"hedef uygulama = {hApp}{(hedef ? " (BU SUNUCU)" : "")}" : "")}{(hApp != null && kApp != null ? "; " : "")}{(kApp != null ? $"kaynak uygulama = {kApp}{(kaynak && !hedef ? " (BU SUNUCU)" : "")}" : "")}");
+                    sb.AppendLine($"    Talepteki uygulama alanları: {(hApp != null ? $"hedef uygulama = {hApp}{(hedef ? " (BU SUNUCU)" : "")}" : "")}{(hApp != null && kApp != null ? "; " : "")}{(kApp != null ? $"kaynak uygulama = {kApp}{(kaynak && !hedef ? " (BU SUNUCU)" : hedef ? " (KARŞI TARAF — bu sunucuya erişen uygulama, BU SUNUCUNUN uygulaması DEĞİL)" : "")}" : "")}");
             }
             outp[ip] = sb.ToString();
         }
@@ -1584,6 +1621,11 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
               ortam / kopya adı söylüyorsa (T-1, rapor, DR, yedek) uygulama adı bu satırdaki uygulamadır. Veritabanı portunda sahibi budur.
             - Sunucu adındaki kısaltmalar uygulamayı gösterebilir (ör. zb1pwkkrapord01: kk = kredi kartları, rapor, d = veritabanı); ad tek
               başına kesin kanıt değildir ama SM / formdaki uygulamayla uyuşuyorsa güveni artırır.
+            - "VERİTABANI SUNUCUSU İPUÇLARI"nda sunucu adı isimlendirme standardına göre veritabanı sunucusuysa (sql / db / ora ya da numaradan
+              önceki 'd' rol harfi) bilinen DB portu olmayan boş portlar da büyük olasılıkla SQL Server adlandırılmış instance portudur:
+              uygulama sunucunun / talep formunun uygulamasıdır, veritabani true ("<uygulama> Veritabanı"); yalnız teknoloji adı yazma.
+            - "BİLİNEN SİSTEM PORTLARI" satırındaki portlar (ör. 3343 Windows Failover Cluster) iş uygulaması değildir: "Altyapı: <ad>" yaz.
+            - Talepte "kaynak uygulama … (KARŞI TARAF …)" bu sunucuya erişen uygulamadır; bu sunucunun adı olarak YAZMA.
             - Yalnız genel kelimelerden oluşan ad (ör. "Internal Service", "Web Service", "Application Server") uygulama adı DEĞİLDİR;
               port için kanıt yoksa sunucunun asıl sistemini öner (güven ≤ 40) ya da null yaz.
             - Bu sunucunun HEDEF olduğu bir talepte açıklama "<A> için / <A> karşılığı … <B>'nin DB'lerine / sunucularına / servisine
@@ -1702,6 +1744,16 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
         ProgramKontrol();
         CokSistemKontrol();
         DbTeknolojiKontrol();
+        // Bilinen sistem portu (3343 Windows Failover Cluster…): AI ne derse desin "Altyapı: X"
+        foreach (var (ip, ports) in todo)
+            foreach (var port in ports)
+                if (SistemPortlari().TryGetValue(port, out var sp))
+                {
+                    var o = outp.GetValueOrDefault((ip, port));
+                    outp[(ip, port)] = new EksikOneri("Altyapı: " + sp, false, 90,
+                        $"Port {port} bilinen sistem portu: {sp} (iş uygulaması değil)" + (o?.Uygulama is { } ou && !ou.Contains(sp, StringComparison.OrdinalIgnoreCase) ? $"; AI '{ou}' yazmıştı" : ""),
+                        Ai, "AI", DateTime.Now);
+                }
         return outp;
 
         // Öneri yalnız veritabanı teknolojisiyse (kullanıcı: "SQL Server önermesin, isim olarak X Uygulaması Veritabanı olabilir"): "SQL Server",

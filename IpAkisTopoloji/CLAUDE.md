@@ -500,6 +500,13 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
   hedef uygulama (65) → istemci → sunucuda tek ERT uygulaması → formdaki hedef uygulama (tek ya da ikincinin 2 katı, 60) → SM. Yalnız genel kelimelerden oluşan
   ad (`AyirtKelimeler` boş: Internal Service, Web Service, Application Server…, katalogda birebir yoksa) "Yok sayıldı". Prompt: yazım varyantları tek sistem, "T-1 (rapor)
   ortamı" = canlı sistemin gün gecikmeli rapor kopyası → uygulama canlı sistem, DB'de "<sistem> Veritabanı"; formdaki hedef uygulama; sunucu adı kısaltmaları (kk = kredi kartları).
+- **Ad standardıyla DB sunucusu + bilinen sistem portları** (kullanıcı ekranı: zb1pwkmpnsqld01 5101 / 5378'e AI "SQL Server Veritabanı" dedi, kod "veritabanı
+  portu değil" diye yok saydı — "sunucu isminde db olduğunu standarta göre anlamalıydı"; 3343'e "Üye İşyeri Kampanya" / "[KKARSIV]"): `DbAdi(host)` = DbAd (sql / db /
+  ora…) ya da sondaki numaradan önce rol harfi 'd' (`DbRolHarfi`, zb1pwkkrapord01 / zb1pwswarsivd02; `Eksik:DbRolHarfi`=true; a = uygulama varsayımı YOK). DB adlı
+  sunucuda `AdDbPort`: sistem / altyapı / web (80, 443, 8080…) portu değil ve CB'de portu DB dışı süreç kabul etmiyorsa port DB portu sayılır (adlandırılmış instance)
+  → `DbPort` true (DbHints'teki `DbAdIsareti` metninden), DbSahibi çalışır ("<uygulama> Veritabanı"). `Eksik:BilinenSistemPortlari` (varsayılan 3343 Windows Failover
+  Cluster, 47001 WinRM, 9389 AD Web Services, 5723 / 5724 SCOM, 2179 Hyper-V): kanıtta "BİLİNEN SİSTEM PORTLARI" satırı, son kontrolde AI ne derse desin
+  "Altyapı: <ad>" (güven 90). Talepte sunucu hedefken "kaynak uygulama" artık "(KARŞI TARAF — … BU SUNUCUNUN uygulaması DEĞİL)" etiketli; prompt kuralları.
 - **Etiketleme segment süzgecinde CIDR** (kullanıcı: "segmenti CIDR olarak filtreleyemiyoruz"): `EtiketService.SegmentUyar` — "a.b.c.d/n" (virgül / boşlukla birden çok)
   → IP aralıkta mı (segment kaydından bağımsız), "10.71.51." gibi IP öneki → IP / segment CIDR'ı bununla başlıyor mu, diğer metin → segment adı ya da CIDR'ında geçiyor mu.
   `EtiketSunucu.Cidr` (segment CIDR'ı), etiket.js segment hücresinde altta küçük CIDR, placeholder güncellendi.
