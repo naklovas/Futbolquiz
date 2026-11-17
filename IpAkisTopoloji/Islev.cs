@@ -208,8 +208,8 @@ sealed class IslevService(IConfiguration cfg, IHttpClientFactory factory, Envant
                 hosts.Select(h => h.VarlikMuhafizi).OfType<string>().FirstOrDefault(), x.Detay?.Rol ?? x.Detay?.Islev, x.Detay?.Guven,
                 x.Detay?.Kaynak?.StartsWith("Elle") == true, AltOf(ip));
         }
-        string? AltOf(string ip) => tag.Contains('/') ? null
-            : env.TagsOf(ip).FirstOrDefault(t => t.StartsWith(tag + "/", StringComparison.OrdinalIgnoreCase))?[(tag.Length + 1)..];
+        // seçilen etiketin bir alt seviyesi (IRAK seçiliyse "ACH RTGS"; IRAK/ACH RTGS seçiliyse "DB")
+        string? AltOf(string ip) => env.TagsOf(ip).FirstOrDefault(t => t.StartsWith(tag + "/", StringComparison.OrdinalIgnoreCase))?[(tag.Length + 1)..].Split('/')[0];
         string KumeOf(string ip) => res.TryGetValue(ip, out var x) && !string.IsNullOrWhiteSpace(x.Kume) ? x.Kume! : Sinifsiz;
         var cmp = StringComparer.Create(new System.Globalization.CultureInfo("tr-TR"), true);
         var kumeler = ips.GroupBy(KumeOf, StringComparer.OrdinalIgnoreCase).Select(g =>
@@ -638,16 +638,25 @@ sealed class IslevService(IConfiguration cfg, IHttpClientFactory factory, Envant
                 b.Msy.Add(Join("; ", ("VM", S(r, 1)), ("DNS", S(r, 2)), ("Cluster", S(r, 3)), ("Host", S(r, 4)), ("OS", S(r, 5)), ("Not", Cut(S(r, 6), 400))));
                 AddHost(b, S(r, 1)); AddHost(b, S(r, 2));
             }, ct));
-        // ÇSY sanal sunucu envanteri
-        await Safe("ÇSY", () => InAsync(conn, $"SELECT Primary_IP_Address, Folder, VM, DNS_Name, CPUs, Memory, Total_disk_capacity_MiB FROM {Tbl("Csy", "dbo.CsyEnvanter")} WHERE Primary_IP_Address IN ({{0}})",
+        // ÇSY sanal sunucu envanteri (kullanıcı: "ÇSY'deki sunucular için Annotation kolonu var, baya açıklayıcı" → Islev:CsyNotKolonu, varsayılan Annotation;
+        // kolon yoksa (207) notsuz eski sorgu)
+        string csyNot = cfg["Islev:CsyNotKolonu"] is { Length: > 0 } cn && System.Text.RegularExpressions.Regex.IsMatch(cn, @"^[A-Za-z_][A-Za-z0-9_ ]*$") ? cn : "Annotation";
+        async Task CsyAsync(bool notlu) => await InAsync(conn,
+            $"SELECT Primary_IP_Address, Folder, VM, DNS_Name, CPUs, Memory, Total_disk_capacity_MiB{(notlu ? $", [{csyNot}]" : "")} FROM {Tbl("Csy", "dbo.CsyEnvanter")} WHERE Primary_IP_Address IN ({{0}})",
             bags.Keys, r =>
             {
                 if (S(r, 0) is not { } ip || !bags.TryGetValue(ip.Trim(), out var b)) return;
                 string? mem = double.TryParse(S(r, 5), out var mb) ? $"{mb / 1024:0.#} GB" : S(r, 5);
                 string? disk = double.TryParse(S(r, 6), out var mib) ? $"{mib / 1024:0} GB" : S(r, 6);
-                b.Csy.Add(Join("; ", ("Folder", S(r, 1)), ("VM", S(r, 2)), ("DNS", S(r, 3)), ("vCPU", S(r, 4)), ("RAM", mem), ("Disk", disk)));
+                b.Csy.Add(Join("; ", ("Folder", S(r, 1)), ("VM", S(r, 2)), ("DNS", S(r, 3)), ("vCPU", S(r, 4)), ("RAM", mem), ("Disk", disk),
+                    ("Not", notlu ? Cut(S(r, 7), 400) : null)));
                 AddHost(b, S(r, 2)); AddHost(b, S(r, 3));
-            }, ct));
+            }, ct);
+        await Safe("ÇSY", async () =>
+        {
+            try { await CsyAsync(true); }
+            catch (SqlException ex) when (ex.Number == 207) { log.LogInformation("ÇSY envanterinde {Kolon} kolonu yok; notsuz okunuyor", csyNot); await CsyAsync(false); }
+        });
         // Envanter Kahini tahminleri
         await Safe("Kahin", () => InAsync(conn, $"SELECT IP, PORT, TAHMIN, SAHIPLIK_ANALIZI FROM {Tbl("Kahin", "dbo.SONUCLAR")} WHERE IP IN ({{0}})",
             bags.Keys, r =>

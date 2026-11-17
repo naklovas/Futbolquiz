@@ -270,9 +270,7 @@ sealed class EnvanterSnapshot
     public List<string> TagIps(string tag) => _ipsByTag.TryGetValue(tag, out var l) ? l : [];
     public IReadOnlyDictionary<string, List<string>> TaggedIps => _tagsByIp;
     public List<(string Tag, int Count)> TagCatalog() =>
-        _ipsByTag.Select(kv => (kv.Key, kv.Value.Count))
-            .OrderBy(x => x.Key.Split('/')[0], StringComparer.CurrentCultureIgnoreCase).ThenBy(x => x.Key.Contains('/'))
-            .ThenBy(x => x.Key, StringComparer.CurrentCultureIgnoreCase).ToList();
+        _ipsByTag.Select(kv => (kv.Key, kv.Value.Count)).OrderBy(x => x.Key, Comparer<string>.Create(EtiketService.YolKarsilastir)).ToList();
 
     public EnvanterSnapshot(List<SegmentInfo> segments, List<HostApp> hosts,
         List<VipRow>? vips = null, List<VipGwRow>? vipGws = null, string systemMarker = SystemPorts.DefaultMarker,
@@ -282,8 +280,8 @@ sealed class EnvanterSnapshot
         foreach (var (ip, list) in tags ?? [])
         {
             _tagsByIp[ip] = list;
-            // Alt etiket "ANA/ALT": sunucu hem alt etikete hem ana etikete sayılır
-            foreach (var t in list.SelectMany(t => t.Contains('/') ? new[] { t, t.Split('/')[0] } : new[] { t }))
+            // Çok seviyeli etiket "A/B/C": sunucu A, A/B ve A/B/C'ye sayılır
+            foreach (var t in list.SelectMany(t => { var p = t.Split('/'); return Enumerable.Range(1, p.Length).Select(n => string.Join("/", p.Take(n))); }))
             {
                 if (!_ipsByTag.TryGetValue(t, out var ips)) _ipsByTag[t] = ips = [];
                 if (!ips.Contains(ip)) ips.Add(ip);

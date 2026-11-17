@@ -873,6 +873,17 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
             // SERVİS İMZASI (Imza.cs; kullanıcı: "iki sayfanın güçlerini birleştirelim"): kayıtlı taramadan exe / IIS / VIP / aynı exe:port'un başka
             // sunuculardaki ERT adları ve imza önerisi — yeni sorgu yapmaz; port başına tek satır, kısa —
             // SM'den ÖNCE (kullanıcı: "imzada bulduklarımız çok faydalı"; metin Eksik:MaxKarakter'de kesilir, uzun SM'de sona kalırsa kesiliyordu); tarama yoksa bölüm yok (`Eksik:ImzaKaniti`=true)
+            // SANAL SUNUCU NOTU (kullanıcı: "ÇSY'deki sunucular için Annotation kolonu var, baya açıklayıcı"): MSY / ÇSY Annotation — VM'i açanın yazdığı
+            // açıklama; profil sonda kesilebildiği için burada, kısa ve önde
+            if (profiles.TryGetValue(ip, out var pn))
+            {
+                var notlar = pn.Msy.Select(x => ("MSY", x)).Concat(pn.Csy.Select(x => ("ÇSY", x)))
+                    .Select(t => (t.Item1, not: t.Item2.Split("; ").FirstOrDefault(y => y.StartsWith("Not: "))?[5..].Trim())).Where(t => t.not is { Length: > 2 })
+                    .DistinctBy(t => t.not!.ToLowerInvariant()).Take(3).ToList();
+                if (notlar.Count > 0)
+                    sb.AppendLine("SANAL SUNUCU NOTU (VM'i açanın sanallaştırma envanterine yazdığı açıklama — sunucunun ne olduğunu çoğu zaman doğrudan söyler; GÜÇLÜ SUNUCU DÜZEYİ KANITI): "
+                        + string.Join(" | ", notlar.Select(t => $"{t.Item1}: \"{Cut(t.not, 300)}\"")));
+            }
             if (imza != null && cfg.GetValue("Eksik:ImzaKaniti", true) && await imza.KanitMetniAsync(ip, miss, ct) is { } imzaMetin) sb.Append(imzaMetin);
             if (smf.TryGetValue(ip, out var smfText)) sb.Append(smfText);
             // HTTP.sys KAYDI (kullanıcı: "gerçek portları bir yere yazsak, önce oraya baksak"): sunuculardan netsh ile toplanan kesin port → exe
@@ -1637,6 +1648,8 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
               uygulama sunucunun / talep formunun uygulamasıdır, veritabani true ("<uygulama> Veritabanı"); yalnız teknoloji adı yazma.
             - "BİLİNEN SİSTEM PORTLARI" satırındaki portlar (ör. 3343 Windows Failover Cluster) iş uygulaması değildir: "Altyapı: <ad>" yaz.
             - Talepte "kaynak uygulama … (KARŞI TARAF …)" bu sunucuya erişen uygulamadır; bu sunucunun adı olarak YAZMA.
+            - "SANAL SUNUCU NOTU" VM'i açanın sanallaştırma envanterine (MSY / ÇSY Annotation) yazdığı açıklamadır; sunucunun hangi sistem olduğunu
+              söylüyorsa SM açıklamasıyla aynı güçte SUNUCU DÜZEYİ kanıttır, gerekçede alıntıla.
             - Sunucu adı / FQDN (ör. "ZB1PWKMPNSQLD02.core.ziraat.bank") uygulama adı DEĞİLDİR; açıklamada yalnız sunucu adı yazıyorsa o açıklama
               sistem bilgisi taşımaz, başka kanıta bak.
             - Yalnız genel kelimelerden oluşan ad (ör. "Internal Service", "Web Service", "Application Server") uygulama adı DEĞİLDİR;

@@ -507,6 +507,15 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
   → `DbPort` true (DbHints'teki `DbAdIsareti` metninden), DbSahibi çalışır ("<uygulama> Veritabanı"). `Eksik:BilinenSistemPortlari` (varsayılan 3343 Windows Failover
   Cluster, 47001 WinRM, 9389 AD Web Services, 5723 / 5724 SCOM, 2179 Hyper-V): kanıtta "BİLİNEN SİSTEM PORTLARI" satırı, son kontrolde AI ne derse desin
   "Altyapı: <ad>" (güven 90). Talepte sunucu hedefken "kaynak uygulama" artık "(KARŞI TARAF — … BU SUNUCUNUN uygulaması DEĞİL)" etiketli; prompt kuralları.
+- **ÇSY Annotation** (kullanıcı: "ÇSY'deki sunucular için Annotation kolonu var, baya açıklayıcı"): ÇSY sorgusu `Islev:CsyNotKolonu` (varsayılan Annotation) kolonunu
+  da okur (yoksa 207 → notsuz). ERT eksikleri kanıtında imza / SM'den ÖNCE "SANAL SUNUCU NOTU" (MSY + ÇSY Annotation) + prompt: SM açıklamasıyla aynı güçte kanıt.
+- **Sunucu adı uygulama değil**: `SunucuAdiMi` / `SunucuAdiRx` (AI "ZB1PWKMPNSQLD02.core.ziraat.bank" önerdi) — "BU SUNUCUYU ANLATAN" listesine girmez, öneri "Yok sayıldı".
+- **Çok seviyeli etiket** (kullanıcı: "IRAK altında yazdığım tüm başlıkları hiyerarşileriyle görebilmem lazım"; 2 seviye yetmediği için IRAK/ACH RTGS + ACH RTGS/DB +
+  DB/TEST zinciri kurmuştu → ACH RTGS, DB, APP… ayrı ana etiket oldu): TAG içinde en çok 4 seviye `A/B/C/D` (`EtiketService.TagRx`, `MaxSeviye`); EnvanterSnapshot sunucuyu
+  her ön eke sayar (A, A/B, A/B/C); `Matches` her seviyede alt başlıkları kapsar; `TagCatalog` seviye seviye sıralı (`YolKarsilastir`). Islev `AltOf` = seçilen etiketin
+  bir alt seviyesi (IRAK → ACH RTGS; IRAK/ACH RTGS → DB) → işlev haritası "Alt başlıklar" + "← üst", topoloji "Kutu içi grup: Alt etiket" de bir alt seviye. etiket.js:
+  `tagLabel` "A › B › C", hızlı filtrede ana etiket seçilince altındaki TÜM başlıklar ağaç (2. seviye başına satır, altı "DB › TEST"), filtre / Topoloji seçicisinde
+  derinliğe göre girinti, açıklama panelinde girinti, "Alt başlık" kutusunda / ile seviye (Etiket IRAK + ACH RTGS/DB/TEST). Zincirleme eski etiketler kendiliğinden birleşmez.
 - **Etiketleme segment süzgecinde CIDR** (kullanıcı: "segmenti CIDR olarak filtreleyemiyoruz"): `EtiketService.SegmentUyar` — "a.b.c.d/n" (virgül / boşlukla birden çok)
   → IP aralıkta mı (segment kaydından bağımsız), "10.71.51." gibi IP öneki → IP / segment CIDR'ı bununla başlıyor mu, diğer metin → segment adı ya da CIDR'ında geçiyor mu.
   `EtiketSunucu.Cidr` (segment CIDR'ı), etiket.js segment hücresinde altta küçük CIDR, placeholder güncellendi.

@@ -654,7 +654,7 @@ app.MapPost("/api/etiket", async (EtiketIstek req, HttpContext ctx, IConfigurati
     if (ips.Count == 0 || ips.Count > 500) return Results.BadRequest(new { error = "1–500 arası geçerli IP seçin." });
     string? add = EtiketService.NormalizeTag(req.Ekle), remove = EtiketService.NormalizeTag(req.Kaldir);
     if (add == null && remove == null)
-        return Results.BadRequest(new { error = "Etiket geçersiz: harf, rakam, _ - . ve boşluk; en çok 50 karakter. Alt etiket: ANA/ALT." });
+        return Results.BadRequest(new { error = "Etiket geçersiz: harf, rakam, _ - . ve boşluk; seviye başına en çok 50 karakter. Alt seviyeler / ile, en çok 4 seviye (ör. IRAK/ACH RTGS/DB/TEST)." });
     try
     {
         var env0 = await envanter.GetAsync(false, ct);

@@ -148,8 +148,7 @@ function ivRender() {
       <div><h2>İşlev haritası · ${tagLabel(d.etiket)}</h2>
         <div class="eg-sub">AI, etiketli sunucuları envanter, sanal sunucu notları ve SM iş isteklerine bakarak işlevlerine göre kümeledi · Küme → Segment → VIP → Sunucu</div>
         <div class="iv-desc" id="ivDesc"></div>
-        ${isSub ? `<div class="iv-subs"><button data-ivtag="${esc(root)}">← ${esc(root)} (tüm alt etiketler)</button></div>`
-          : d.altEtiketler?.length ? `<div class="iv-subs">Alt etiketler: ${d.altEtiketler.map(a => `<button data-ivtag="${esc(root + "/" + a.ad)}" title="${esc(a.aciklama || "Yalnız bu alt etiketin haritası")}">${esc(a.ad)}<i>${a.sunucu}</i></button>`).join("")}</div>` : ""}</div>
+        ${isSub || d.altEtiketler?.length ? `<div class="iv-subs">${isSub ? `<button data-ivtag="${esc(d.etiket.split("/").slice(0, -1).join("/"))}">← ${esc(d.etiket.split("/").slice(0, -1).join(" › "))}</button> ` : ""}${d.altEtiketler?.length ? `Alt başlıklar: ${d.altEtiketler.map(a => `<button data-ivtag="${esc(d.etiket + "/" + a.ad)}" title="${esc(a.aciklama || "Yalnız bu başlığın haritası")}">${esc(a.ad)}<i>${a.sunucu}</i></button>`).join("")}` : ""}</div>` : ""}</div>
       <div class="eg-stats">
         <div class="eg-stat"><b>${fmt(d.toplam)}</b><span>Sunucu</span></div>
         <div class="eg-stat"><b>${fmt(d.siniflanan)}</b><span>Sınıflanan</span></div>

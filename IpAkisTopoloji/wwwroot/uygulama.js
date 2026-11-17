@@ -75,7 +75,7 @@ async function loadTopoTags(force) {
     globalThis.topoTagList = tags;
     // Alt etiketler ("ANA/ALT") ana etiketin altında girintili
     $("#topoTag").innerHTML = tags.length
-      ? tags.map(t => `<option value="${esc(t.ad)}"${t.ad === cur ? " selected" : ""}${t.aciklama ? ` title="${esc(t.aciklama)}"` : ""}>${t.ad.includes("/") ? "&nbsp;&nbsp;&nbsp;└ " + esc(t.ad.split("/")[1]) : esc(t.ad)} · ${t.sunucu} sunucu</option>`).join("")
+      ? tags.map(t => `<option value="${esc(t.ad)}"${t.ad === cur ? " selected" : ""}${t.aciklama ? ` title="${esc(t.aciklama)}"` : ""}>${t.ad.includes("/") ? "&nbsp;&nbsp;&nbsp;".repeat(t.ad.split("/").length - 1) + "└ " + esc(t.ad.split("/").pop()) : esc(t.ad)} · ${t.sunucu} sunucu</option>`).join("")
       : `<option value="">(henüz etiket yok)</option>`;
     if (b?.ipler) tagMap = b.ipler;
   } catch { /* liste gelmezse boş */ }

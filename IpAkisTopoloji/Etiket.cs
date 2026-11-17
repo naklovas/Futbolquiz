@@ -22,7 +22,10 @@ record EtiketAciklamaIstek(string? Etiket, string? Aciklama);
 static class EtiketService
 {
     static readonly Regex SafeName = new(@"^[A-Za-z_][A-Za-z0-9_]*$");
-    static readonly Regex TagRx = new(@"^[\p{L}\p{N}_\-. ]{1,50}(/[\p{L}\p{N}_\-. ]{1,50})?$");
+    // Çok seviyeli etiket (kullanıcı: "IRAK altında yazdığım tüm başlıkları hiyerarşileriyle görebilmem lazım"): en çok 4 seviye, "/" ile
+    // (IRAK/ACH RTGS/DB/TEST); sunucu her üst seviyeye de sayılır (EnvanterSnapshot)
+    public const int MaxSeviye = 4;
+    static readonly Regex TagRx = new(@"^[\p{L}\p{N}_\-. ]{1,50}(/[\p{L}\p{N}_\-. ]{1,50}){0,3}$");
 
     public static string Column(IConfiguration cfg)
     {
@@ -42,10 +45,18 @@ static class EtiketService
 
     // Ana etiket: "MOBILBANKACILIK/MOBIL APP" → "MOBILBANKACILIK"
     public static string Parent(string tag) => tag.Split('/')[0];
-    // Sunucunun etiketi seçilen etikete uyuyor mu (ana etiket seçiliyse alt etiketleri de)
+    // Sunucunun etiketi seçilen etikete uyuyor mu (seçilen her seviyenin altındakiler de)
     public static bool Matches(string serverTag, string wanted) =>
         string.Equals(serverTag, wanted, StringComparison.OrdinalIgnoreCase)
-        || (!wanted.Contains('/') && serverTag.StartsWith(wanted + "/", StringComparison.OrdinalIgnoreCase));
+        || serverTag.StartsWith(wanted + "/", StringComparison.OrdinalIgnoreCase);
+    // Etiket yolu karşılaştırması: seviye seviye (IRAK, IRAK/ACH RTGS, IRAK/ACH RTGS/DB, IRAK/ALTYAPI … sırası)
+    public static int YolKarsilastir(string a, string b)
+    {
+        var (x, y) = (a.Split('/'), b.Split('/'));
+        var c = StringComparer.Create(new System.Globalization.CultureInfo("tr-TR"), true);
+        for (int i = 0; i < Math.Min(x.Length, y.Length); i++) { int r = c.Compare(x[i], y[i]); if (r != 0) return r; }
+        return x.Length.CompareTo(y.Length);
+    }
 
     // Yazma (etiketleme, işlev haritası düzenleme, AI çalıştırma, ERT eksikleri kararları) yetkisi: Yetki.cs (DokuPanel site kaydı
     // Yetki:Yazma, boşsa Etiket:YazmaSiteAdi, o da boşsa Etiket:Yazanlar listesi).

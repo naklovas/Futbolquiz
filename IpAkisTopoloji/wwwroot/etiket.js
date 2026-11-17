@@ -78,9 +78,11 @@ const ETQ_COLS = [
   .eg-bar .del { background:transparent; color:var(--panel); border:1px solid color-mix(in srgb, var(--panel) 40%, transparent); }
   .eg-bar .clr { background:transparent; color:var(--panel); opacity:.7; margin-left:auto; }
   .eg-empty { padding:40px; text-align:center; color:var(--muted); }
-  .eg-tag .sub { font-weight:500; margin-left:3px; opacity:.85; }
+  .eg-tag .sub { font-weight:500; margin-left:3px; opacity:.85; white-space:nowrap; }
   .eg-pills.subs { margin-top:-6px; padding-left:14px; border-left:2px solid var(--line); }
-  .eg-pills.subs .lbl { font-size:11.5px; }
+  .eg-pills.subs .lbl { font-size:11.5px; width:100%; }
+  .eg-tree { display:flex; gap:6px; flex-wrap:wrap; align-items:center; width:100%; }
+  .eg-tree .arr { color:var(--muted); }
   .eg-bar input.subin { width:170px; }
   .eg-desc { border:1px solid var(--line); border-radius:10px; background:var(--bg); padding:12px 14px; margin-bottom:12px; display:grid; gap:8px; }
   .eg-desc h3 { margin:0; font-size:14px; display:flex; justify-content:space-between; gap:10px; align-items:baseline; }
@@ -98,8 +100,12 @@ const ETQ_COLS = [
 
 // Etiket adına göre sabit renk tonu (alt etiket ana etiketin rengini alır)
 function tagHue(t) { let h = 0; for (const c of String(t).split("/")[0]) h = (h * 31 + c.charCodeAt(0)) % 360; return h; }
-// "ANA/ALT" → ANA › ALT
-function tagLabel(t) { const [a, b] = String(t).split("/"); return b ? `${esc(a)}<span class="sub">› ${esc(b)}</span>` : esc(a); }
+// "A/B/C" → A › B › C (en çok 4 seviye)
+function tagLabel(t) { const [a, ...r] = String(t).split("/"); return esc(a) + r.map(x => `<span class="sub">› ${esc(x)}</span>`).join(""); }
+const tagDepth = t => String(t).split("/").length;
+const tagLast = t => String(t).split("/").pop();
+// t, p'nin kendisi ya da altında mı
+const tagUnder = (t, p) => t === p || String(t).startsWith(p + "/");
 function tagDesc(t) { return (etq.tags.find(x => x.ad === t) || (globalThis.topoTagList || []).find(x => x.ad === t))?.aciklama || ""; }
 function tagChip(t, ip, removable) {
   const d = tagDesc(t);
@@ -151,7 +157,7 @@ function etqShell() {
       <b id="egSelN"></b>
       <input type="text" id="egNew" list="egTagList" placeholder="Etiket (ör. MOBILBANKACILIK)">
       <datalist id="egTagList"></datalist>
-      <input type="text" id="egSub" class="subin" list="egSubList" placeholder="Alt etiket (isteğe bağlı)">
+      <input type="text" id="egSub" class="subin" list="egSubList" placeholder="Alt başlık (isteğe bağlı; seviye için /, ör. ACH RTGS/DB/TEST)" title="En çok 4 seviye: Etiket IRAK + Alt başlık ACH RTGS/DB/TEST → IRAK › ACH RTGS › DB › TEST">
       <datalist id="egSubList"></datalist>
       <button type="button" class="add" id="egAdd">Etiket ekle</button>
       <button type="button" class="del" id="egDel">Etiketi kaldır</button>
@@ -225,16 +231,21 @@ function etqUpdate() {
       .concat(egs.aktif ? [["!ert", "ERT'de yok", egs.yok]] : [])
       .map(([v, l, n]) => `<button type="button" class="eg-pill${f.etiket === v ? " on" : ""}" data-pill="${v}">${l}<i>${fmt(n)}</i></button>`).join("")
     + etq.tags.filter(t => !t.ad.includes("/")).map(t => pill(t, esc(t.ad) + (etq.tags.some(x => tagParent(x.ad) === t.ad && x.ad !== t.ad) ? ` <span class="sub">▾</span>` : ""))).join("");
+  // Seçilen ana etiketin bütün alt başlıkları ağaç halinde: 2. seviye başına bir satır, altındakiler o satırda "DB › TEST" gibi
   const root = f.etiket && !["*", "-", "!ert"].includes(f.etiket) ? tagParent(f.etiket) : null;
   const subs = root ? etq.tags.filter(t => t.ad.startsWith(root + "/")) : [];
+  const ikinci = subs.filter(t => tagDepth(t.ad) === 2);
   $("#egSubs").hidden = !subs.length;
-  $("#egSubs").innerHTML = subs.length ? `<span class="lbl">${esc(root)} alt etiketleri:</span>` + subs.map(t => pill(t, esc(t.ad.slice(root.length + 1)))).join("") : "";
+  $("#egSubs").innerHTML = subs.length ? `<div class="lbl">${esc(root)} altındaki başlıklar:</div>` + ikinci.map(c => {
+    const alt = subs.filter(t => t.ad.startsWith(c.ad + "/"));
+    return `<div class="eg-tree">${pill(c, esc(tagLast(c.ad)))}${alt.length ? `<span class="arr">›</span>` + alt.map(t => pill(t, t.ad.slice(c.ad.length + 1).split("/").map(esc).join(" › "))).join("") : ""}</div>`;
+  }).join("") : "";
   document.querySelectorAll("#egPills [data-pill], #egSubs [data-pill]").forEach(b => b.addEventListener("click", () => {
     f.etiket = b.dataset.pill; etq.page = 1; etqLoad();
   }));
   const sel = document.querySelector('.eg-grid select[data-f="etiket"]');
   sel.innerHTML = `<option value="">tümü</option><option value="*">etiketli</option><option value="-">etiketsiz</option>`
-    + etq.tags.map(t => `<option value="${esc(t.ad)}">${t.ad.includes("/") ? "&nbsp;&nbsp;└ " + esc(t.ad.split("/")[1]) : esc(t.ad)}</option>`).join("");
+    + etq.tags.map(t => `<option value="${esc(t.ad)}">${tagDepth(t.ad) > 1 ? "&nbsp;&nbsp;&nbsp;".repeat(tagDepth(t.ad) - 1) + "└ " + esc(tagLast(t.ad)) : esc(t.ad)}</option>`).join("");
   if (egs.aktif) sel.insertAdjacentHTML("beforeend", `<option value="!ert">ERT'de yok</option>`);
   sel.value = f.etiket; sel.classList.toggle("has", !!f.etiket);
   document.querySelectorAll(".eg-grid [data-sort]").forEach(th => {
@@ -290,8 +301,8 @@ function egDescRender() {
   box.innerHTML = `<div class="eg-desc">
     <h3>Etiket açıklamaları <span class="eg-sub">Alt etiket eklemek için seçim çubuğunda "Alt etiket" kutusunu doldurun (ANA/ALT olarak yazılır)</span></h3>
     ${etq.descWarn ? `<div class="iv-warn" style="margin:0">${esc(etq.descWarn)}</div>` : ""}
-    ${tags.length ? tags.map(t => `<div class="row${t.ad.includes("/") ? " sub" : ""}">
-      <div><span class="eg-tag" style="--h:${tagHue(t.ad)}">${t.ad.includes("/") ? esc(t.ad.split("/")[1]) : esc(t.ad)}</span></div>
+    ${tags.length ? tags.map(t => `<div class="row${t.ad.includes("/") ? " sub" : ""}"${tagDepth(t.ad) > 2 ? ` style="padding-left:${22 * (tagDepth(t.ad) - 1)}px"` : ""}>
+      <div><span class="eg-tag" style="--h:${tagHue(t.ad)}">${esc(tagLast(t.ad))}</span></div>
       <span class="n">${fmt(t.sunucu)} sunucu</span>
       ${w ? `<textarea rows="1" maxlength="2000" data-desc="${esc(t.ad)}" placeholder="${t.ad.includes("/") ? "Bu alt etiketteki sunucular ne iş yapar?" : "Bu etiket neyi kapsar?"}">${esc(t.aciklama || "")}</textarea>
         <span><button type="button" data-dsave="${esc(t.ad)}">Kaydet</button> <span class="ok" data-dok="${esc(t.ad)}"></span></span>`
@@ -318,8 +329,8 @@ async function applyTag(ips, add, remove) {
   if (!ips.length) return;
   const tag = (add ?? remove ?? "").trim();
   if (!tag) { alert("Etiket yazın (ör. VERIAMBARI)."); return; }
-  if (!add && remove && !remove.includes("/") && etq.tags.some(t => t.ad.startsWith(remove.toLocaleUpperCase("tr") + "/")))
-    if (!confirm(`"${remove}" yalnız ana etiket olarak yazılmış sunuculardan kaldırılır; "${remove}/…" alt etiketleri durur. Alt etiketi kaldırmak için "Alt etiket" kutusunu da doldurun. Devam?`)) return;
+  if (!add && remove && etq.tags.some(t => t.ad.startsWith(remove.toLocaleUpperCase("tr") + "/")))
+    if (!confirm(`"${remove}" yalnız tam olarak bu etiketle yazılmış sunuculardan kaldırılır; "${remove}/…" alt başlıkları durur. Alt başlığı kaldırmak için tam yolunu yazın. Devam?`)) return;
   const msg = $("#egMsg");
   if (msg) msg.textContent = "Kaydediliyor…";
   try {
@@ -460,7 +471,7 @@ function egSegYerel() {
   rows = rows.filter(r => has(r.ip, f.ip) && has(r.hostname, f.sunucu) && has(r.apps.join(" "), f.uygulama) && has(r.muhafiz, f.muhafiz)
     && (has(r.segment, f.segment) || has(r.cidr, f.segment))
     && (!f.etiket || (f.etiket === "!ert" ? r.ertYok : f.etiket === "*" ? r.tags.length > 0 : f.etiket === "-" ? !r.tags.length
-      : r.tags.some(t => t === f.etiket || (!f.etiket.includes("/") && tagParent(t) === f.etiket)))));
+      : r.tags.some(t => tagUnder(t, f.etiket)))));
   const key = { ip: r => u(r.ip), sunucu: r => low(r.hostname), uygulama: r => low(r.apps.join(",")), muhafiz: r => low(r.muhafiz),
     segment: r => low(r.segment), etiket: r => low(r.tags.join(",")) }[etq.sort] ?? (r => u(r.ip));
   rows.sort((a, b) => { const x = key(a), y = key(b); const c = x < y ? -1 : x > y ? 1 : 0; return etq.desc ? -c : c; });
