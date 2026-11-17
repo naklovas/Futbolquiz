@@ -671,6 +671,27 @@ app.MapPost("/api/etiket", async (EtiketIstek req, HttpContext ctx, IConfigurati
 });
 
 // Etiket / alt etiket açıklaması (boş = sil). Etiketin envanterde olması gerekmez (önceden yazılabilir).
+// Zincirleme etiket birleştirme (Etiket.cs EtiketZincir): önizleme ve uygulama
+app.MapGet("/api/etiket/zincir", async (EnvanterService envanter, CancellationToken ct) =>
+{
+    try { return Results.Ok(new { satirlar = EtiketZincir.Onizle(await envanter.GetAsync(false, ct)) }); }
+    catch (Exception ex) { return Results.Json(new { error = ex.Message }, statusCode: 502); }
+});
+app.MapPost("/api/etiket/zincir", async (EtiketZincirIstek req, HttpContext ctx, IConfiguration cfg, EnvanterService envanter, CancellationToken ct) =>
+{
+    string user = ctx.User?.Identity?.Name ?? "?";
+    if (!EtiketService.CanWrite(cfg, ctx)) return Results.Json(new { error = $"Etiket yazma yetkiniz yok ({user})." }, statusCode: 403);
+    try
+    {
+        var env = await envanter.GetAsync(false, ct);
+        var ips = req.Ips is { Count: > 0 } l ? l : EtiketZincir.Onizle(env).Select(x => x.Ip).ToList();
+        int n = await EtiketZincir.UygulaAsync(cfg, env, ips, user, app.Logger, ct);
+        await envanter.GetAsync(true, ct);
+        return Results.Ok(new { guncellenen = n });
+    }
+    catch (InvalidOperationException ex) { return Results.BadRequest(new { error = ex.Message }); }
+    catch (Microsoft.Data.SqlClient.SqlException ex) { return Results.Json(new { error = "SQL: " + ex.Message }, statusCode: 502); }
+});
 app.MapPost("/api/etiket/aciklama", async (EtiketAciklamaIstek req, HttpContext ctx, IConfiguration cfg, CancellationToken ct) =>
 {
     string user = ctx.User?.Identity?.Name ?? "?";

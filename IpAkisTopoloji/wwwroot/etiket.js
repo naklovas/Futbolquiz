@@ -150,6 +150,7 @@ function etqShell() {
         <div class="eg-stats" id="egStats"></div></div>
     </div>
     <div id="egDesc"></div>
+    <div id="egZincir"></div>
     <div class="eg-pills" id="egPills"></div>
     <div class="eg-pills subs" id="egSubs" hidden></div>
     <div id="egSeg"></div>
@@ -209,6 +210,7 @@ function etqShell() {
   }
   $("#egDescBtn").addEventListener("click", () => { etq.descOpen = !etq.descOpen; egDescRender(); });
   egSegInit();
+  egZincirYukle();
   $("#egBody").addEventListener("change", ev => {
     const cb = ev.target.closest("[data-sel]");
     if (!cb) return;
@@ -483,4 +485,52 @@ function egSegAdlar(ips) {
   const m = {};
   for (const ip of ips) { const r = egs.liste.find(x => x.ip === ip); if (r?.ertYok && r.hostname) m[ip] = r.hostname; }
   return m;
+}
+
+// Zincirleme girilmiş etiketler (IRAK/BAGDAT + BAGDAT/ACTIVE DIRECTORY → IRAK/BAGDAT/ACTIVE DIRECTORY): önizleme + birleştir (/api/etiket/zincir)
+const egz = { satirlar: [], acik: false };
+async function egZincirYukle() {
+  try {
+    const r = await fetch("api/etiket/zincir");
+    egz.satirlar = r.ok ? (await r.json()).satirlar || [] : [];
+  } catch { egz.satirlar = []; }
+  egZincirCiz();
+}
+// birleşince ana etiket olmaktan çıkacak kökler (ör. BAGDAT, DB, ALTYAPI)
+function egZincirKokler(z) {
+  const yeni = new Set(z.flatMap(x => x.yeni).map(tagParent));
+  return [...new Set(z.flatMap(x => x.eski).map(tagParent))].filter(r => !yeni.has(r));
+}
+function egZincirCiz() {
+  const box = $("#egZincir");
+  if (!box) return;
+  const z = egz.satirlar;
+  if (!z.length) { box.innerHTML = ""; return; }
+  const ornek = z[0];
+  box.innerHTML = `<div class="iv-warn" style="margin:0 0 12px">
+    <b>${fmt(z.length)} sunucuda zincirleme girilmiş etiket var</b> (ör. ${ornek.eski.map(tagLabel).join(" + ")}): bunlar ayrı ana etiket sayılıyor,
+    bu yüzden Topoloji listesinde ${esc(egZincirKokler(z).slice(0, 6).join(", ")) || "alt başlıklar"} ayrı ana etiket olarak görünüyor.
+    <button type="button" id="egZAc">${egz.acik ? "Gizle" : "Önizle"}</button>
+    ${etq.canWrite ? `<button type="button" id="egZUy" class="primary">Hepsini tek etikete birleştir</button>` : ""}
+    ${egz.acik ? `<div class="eg-grid" style="margin-top:10px;max-height:320px"><table><thead><tr><th>IP</th><th>Sunucu</th><th>Şu an</th><th>Birleşince</th></tr></thead><tbody>
+      ${z.map(x => `<tr><td class="ip">${esc(x.ip)}</td><td>${esc(x.hostname ?? "")}${x.ertYok ? ` <span class="eg-yok">ERT'de yok</span>` : ""}</td>
+        <td>${x.eski.map(t => `<span class="eg-tag" style="--h:${tagHue(t)}">${tagLabel(t)}</span>`).join("")}</td>
+        <td>${x.yeni.map(t => `<span class="eg-tag" style="--h:${tagHue(t)}">${tagLabel(t)}</span>`).join("")}</td></tr>`).join("")}
+    </tbody></table></div>` : ""}
+  </div>`;
+  $("#egZAc").addEventListener("click", () => { egz.acik = !egz.acik; egZincirCiz(); });
+  $("#egZUy")?.addEventListener("click", async ev => {
+    if (!confirm(`${z.length} sunucunun etiketleri birleştirilecek (ERT TAG kolonu; ERT'de olmayanlar DF_ETIKET_EK). Önce "Önizle" ile kontrol edin. Devam?`)) return;
+    ev.target.disabled = true;
+    try {
+      const r = await fetch("api/etiket/zincir", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) });
+      const b = await r.json().catch(() => ({ error: `HTTP ${r.status}` }));
+      if (!r.ok) throw new Error(b.error || `HTTP ${r.status}`);
+      alert(`${fmt(b.guncellenen)} sunucunun etiketleri birleştirildi.`);
+      fetch("api/etiketler").then(x => x.ok ? x.json() : null).then(x => { if (x?.ipler) tagMap = x.ipler; }).catch(() => {});
+      loadTopoTags?.(true);
+      await etqLoad();
+      await egZincirYukle();
+    } catch (e) { alert("Birleştirilemedi: " + e.message); ev.target.disabled = false; }
+  });
 }

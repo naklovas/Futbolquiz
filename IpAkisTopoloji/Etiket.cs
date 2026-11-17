@@ -336,3 +336,74 @@ static class EtiketEk
         return total;
     }
 }
+
+// Zincirleme girilmiş etiketleri birleştirme (kullanıcı: "topolojide en üst IRAK etiketi yok, hep ayrık şekilde alt etiketler var" — 2 seviye varken
+// IRAK/BAGDAT + BAGDAT/ACTIVE DIRECTORY gibi zincir kurulmuştu, BAGDAT / DB / ALTYAPI… ayrı ana etiket oldu): aynı sunucuda X/…/Y ve Y/Z varsa → X/…/Y/Z
+// (en çok EtiketService.MaxSeviye seviye). Zincirin başı (kendisine bağlanan başka etiket olmayan) önce, tur tur. Önizleme envanterden, uygulama DB'den
+// okuyup yazar (ERT TAG kolonu; ERT'de olmayan IP → DF_ETIKET_EK).
+record EtiketZincirSatir(string Ip, string? Hostname, List<string> Eski, List<string> Yeni, bool ErtYok);
+record EtiketZincirIstek(List<string>? Ips);
+
+static class EtiketZincir
+{
+    static readonly StringComparer Ic = StringComparer.OrdinalIgnoreCase;
+    static string Son(string t) => t[(t.LastIndexOf('/') + 1)..];
+    static string Ilk(string t) => t.Split('/')[0];
+
+    public static List<string>? Birlestir(IEnumerable<string> tags)
+    {
+        var l = tags.Distinct(Ic).ToList();
+        bool degisti = false;
+        for (int tur = 0; tur < 8; tur++)
+        {
+            var cok = l.Where(t => t.Contains('/')).ToList();
+            bool Bas(string a) => !cok.Any(t => !Ic.Equals(t, a) && Ic.Equals(Son(t), Ilk(a)));
+            var ciftler = cok.SelectMany(b => cok.Where(a => !Ic.Equals(a, b) && Bas(a) && Ic.Equals(Son(a), Ilk(b))
+                    && a.Split('/').Length + b.Split('/').Length - 1 <= EtiketService.MaxSeviye).Select(a => (a, b))).ToList();
+            if (ciftler.Count == 0) break;
+            foreach (var (a, b) in ciftler) { l.Remove(a); l.Remove(b); }
+            foreach (var (a, b) in ciftler) { string y = a + b[b.IndexOf('/')..]; if (!l.Contains(y, Ic)) l.Add(y); }
+            degisti = true;
+        }
+        return degisti ? l.OrderBy(x => x, Comparer<string>.Create(EtiketService.YolKarsilastir)).ToList() : null;
+    }
+
+    public static List<EtiketZincirSatir> Onizle(EnvanterSnapshot env) =>
+        env.TaggedIps.Select(kv => (kv.Key, kv.Value, yeni: Birlestir(kv.Value))).Where(x => x.yeni != null)
+            .Select(x => new EtiketZincirSatir(x.Key, EtiketService.Row(env, x.Key)?.Hostname, x.Value, x.yeni!, !env.ErtteVar(x.Key)))
+            .OrderBy(x => string.Join(".", x.Ip.Split('.').Select(p => p.PadLeft(3, '0')))).ToList();
+
+    public static async Task<int> UygulaAsync(IConfiguration cfg, EnvanterSnapshot env, List<string> ips, string user, ILogger log, CancellationToken ct)
+    {
+        string table = cfg["Envanter:HostTablosu"] ?? "dbo.ERT_HOSTIPADDRESS", col = EtiketService.Column(cfg), ek = EtiketEk.Table(cfg);
+        int max = cfg.GetValue("Etiket:MaxUzunluk", 200), n = 0;
+        await using var conn = new SqlConnection(cfg.GetConnectionString("Envanter") ?? throw new InvalidOperationException("ConnectionStrings:Envanter tanımlı değil."));
+        await conn.OpenAsync(ct);
+        foreach (var ip in ips)
+        {
+            bool ert = env.ErtteVar(ip);
+            string sel = ert ? $"SELECT DISTINCT [{col}] FROM {table} WHERE IPADDRESS = @ip AND [{col}] IS NOT NULL" : $"SELECT TAG FROM {ek} WHERE IPADDRESS = @ip AND TAG IS NOT NULL";
+            var cur = new List<string>();
+            await using (var cmd = new SqlCommand(sel, conn))
+            {
+                cmd.Parameters.AddWithValue("@ip", ip);
+                await using var r = await cmd.ExecuteReaderAsync(ct);
+                while (await r.ReadAsync(ct)) cur.AddRange(EtiketService.Split(Convert.ToString(r.GetValue(0)) ?? ""));
+            }
+            if (Birlestir(cur) is not { } yeni) continue;
+            string v = string.Join(",", yeni);
+            if (v.Length > max) { log.LogWarning("Etiket zinciri: {Ip} birleşince {Max} karakteri geçiyor, atlandı", ip, max); continue; }
+            await using (var cmd = new SqlCommand(ert ? $"UPDATE {table} SET [{col}] = @v WHERE IPADDRESS = @ip"
+                : $"UPDATE {ek} SET TAG = @v, GUNCELLEYEN = @u, TARIH = SYSDATETIME() WHERE IPADDRESS = @ip", conn))
+            {
+                cmd.Parameters.AddWithValue("@ip", ip);
+                cmd.Parameters.AddWithValue("@v", v);
+                cmd.Parameters.AddWithValue("@u", user);
+                await cmd.ExecuteNonQueryAsync(ct);
+            }
+            n++;
+            log.LogInformation("Etiket zinciri birleştirildi: {User} {Ip} [{Old}] -> [{New}]", user, ip, string.Join(",", cur), v);
+        }
+        return n;
+    }
+}

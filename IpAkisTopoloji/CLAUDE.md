@@ -516,6 +516,10 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
   bir alt seviyesi (IRAK → ACH RTGS; IRAK/ACH RTGS → DB) → işlev haritası "Alt başlıklar" + "← üst", topoloji "Kutu içi grup: Alt etiket" de bir alt seviye. etiket.js:
   `tagLabel` "A › B › C", hızlı filtrede ana etiket seçilince altındaki TÜM başlıklar ağaç (2. seviye başına satır, altı "DB › TEST"), filtre / Topoloji seçicisinde
   derinliğe göre girinti, açıklama panelinde girinti, "Alt başlık" kutusunda / ile seviye (Etiket IRAK + ACH RTGS/DB/TEST). Zincirleme eski etiketler kendiliğinden birleşmez.
+- **Zincirleme etiket birleştirme** (kullanıcı: "topolojide en üst IRAK etiketi yok, hep ayrık şekilde alt etiketler var"): `EtiketZincir` (Etiket.cs) — aynı sunucuda
+  X/…/Y ve Y/Z → X/…/Y/Z (zincir başı önce, tur tur, en çok MaxSeviye; A/B + B/A gibi döngü birleşmez). GET `/api/etiket/zincir` önizleme (envanterden), POST
+  `{ips?}` (Yetki:Yazma) DB'den okuyup yazar (ERT TAG; ERT dışı DF_ETIKET_EK), envanter yeniden yüklenir. etiket.js `egZincirYukle` / `egZincirCiz`: uyarı bandı
+  (kaç sunucu, ayrı görünen kökler), "Önizle" (şu an → birleşince tablo), "Hepsini tek etikete birleştir" (onaylı).
 - **Etiketleme segment süzgecinde CIDR** (kullanıcı: "segmenti CIDR olarak filtreleyemiyoruz"): `EtiketService.SegmentUyar` — "a.b.c.d/n" (virgül / boşlukla birden çok)
   → IP aralıkta mı (segment kaydından bağımsız), "10.71.51." gibi IP öneki → IP / segment CIDR'ı bununla başlıyor mu, diğer metin → segment adı ya da CIDR'ında geçiyor mu.
   `EtiketSunucu.Cidr` (segment CIDR'ı), etiket.js segment hücresinde altta küçük CIDR, placeholder güncellendi.
