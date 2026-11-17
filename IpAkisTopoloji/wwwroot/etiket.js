@@ -512,10 +512,10 @@ function egZincirCiz() {
     bu yüzden Topoloji listesinde ${esc(egZincirKokler(z).slice(0, 6).join(", ")) || "alt başlıklar"} ayrı ana etiket olarak görünüyor.
     <button type="button" id="egZAc">${egz.acik ? "Gizle" : "Önizle"}</button>
     ${etq.canWrite ? `<button type="button" id="egZUy" class="primary">Hepsini tek etikete birleştir</button>` : ""}
-    ${egz.acik ? `<div class="eg-grid" style="margin-top:10px;max-height:320px"><table><thead><tr><th>IP</th><th>Sunucu</th><th>Şu an</th><th>Birleşince</th></tr></thead><tbody>
+    ${egz.acik ? `<div class="eg-grid" style="margin-top:10px;max-height:320px"><table><thead><tr><th>IP</th><th>Sunucu</th><th>Şu an → birleşince</th></tr></thead><tbody>
       ${z.map(x => `<tr><td class="ip">${esc(x.ip)}</td><td>${esc(x.hostname ?? "")}${x.ertYok ? ` <span class="eg-yok">ERT'de yok</span>` : ""}</td>
-        <td>${x.eski.map(t => `<span class="eg-tag" style="--h:${tagHue(t)}">${tagLabel(t)}</span>`).join("")}</td>
-        <td>${x.yeni.map(t => `<span class="eg-tag" style="--h:${tagHue(t)}">${tagLabel(t)}</span>`).join("")}</td></tr>`).join("")}
+        <td><div>${x.eski.map(t => `<span class="eg-tag" style="--h:${tagHue(t)};opacity:.6">${tagLabel(t)}</span>`).join("")}</div>
+          <div style="margin-top:4px"><b>→</b> ${x.yeni.map(t => `<span class="eg-tag" style="--h:${tagHue(t)}">${tagLabel(t)}</span>`).join("")}</div></td></tr>`).join("")}
     </tbody></table></div>` : ""}
   </div>`;
   $("#egZAc").addEventListener("click", () => { egz.acik = !egz.acik; egZincirCiz(); });
