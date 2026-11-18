@@ -102,7 +102,7 @@ sealed class NessusService(IConfiguration cfg, IHttpClientFactory factory, ILogg
     }
 
     // ---------------- Açıklık taraması: tüm repoda arama (IP süzgeci yok) ----------------
-    JsonObject GenelSorgu(JsonArray ekFiltre, int bas, int bit)
+    JsonObject GenelSorgu(JsonArray ekFiltre, int bas, int bit, string tool = "vulndetails")
     {
         var filtre = new JsonArray();
         foreach (var f in ekFiltre) filtre.Add(f!.DeepClone());
@@ -113,8 +113,48 @@ sealed class NessusService(IConfiguration cfg, IHttpClientFactory factory, ILogg
         return new JsonObject
         {
             ["type"] = "vuln", ["sourceType"] = "cumulative",
-            ["query"] = new JsonObject { ["type"] = "vuln", ["tool"] = "vulndetails", ["startOffset"] = bas, ["endOffset"] = bit, ["filters"] = filtre }
+            ["query"] = new JsonObject { ["type"] = "vuln", ["tool"] = tool, ["startOffset"] = bas, ["endOffset"] = bit, ["filters"] = filtre }
         };
+    }
+
+    // Repodaki plugin özeti (tool sumid: plugin başına bir satır — pluginID, ad, ciddiyet, bulgu / host sayısı); 30 dk önbellek
+    (List<(string Id, string Ad, long Host)> L, DateTime T)? _pluginOzet;
+    public async Task<List<(string Id, string Ad, long Host)>> PluginOzetiAsync(CancellationToken ct)
+    {
+        lock (_cache) if (_pluginOzet is { } o && DateTime.UtcNow - o.T < TimeSpan.FromMinutes(30)) return o.L;
+        int sayfa = 5000, max = cfg.GetValue("Zafiyet:NessusPluginSayfa", 40);
+        var l = new List<(string, string, long)>();
+        for (int i = 0, bas = 0; i < max; i++, bas += sayfa)
+        {
+            var r = (await GonderAsync(Istek(HttpMethod.Post, "/rest/analysis", GenelSorgu(new JsonArray(), bas, bas + sayfa, "sumid")), ct))["response"];
+            var res = r?["results"]?.AsArray().OfType<JsonNode>().ToList() ?? [];
+            foreach (var x in res)
+                if ((S(x, "pluginID") ?? S(x, "id")) is { Length: > 0 } id)
+                    l.Add((id, S(x, "name") ?? S(x, "pluginName") ?? "", long.TryParse(S(x, "hostTotal") ?? S(x, "total"), out long h) ? h : 0));
+            if (!long.TryParse(r?["totalRecords"]?.ToString(), out long top) || bas + sayfa >= top || res.Count == 0) break;
+        }
+        lock (_cache) _pluginOzet = (l, DateTime.UtcNow);
+        return l;
+    }
+
+    // Ürün araması (kullanıcı: "tarama ekseninde gidelim"; canlıda pluginName "~=" süzgeci YOK SAYILDI — her kelime aynı 50.000 bulguyu döndürdü):
+    // plugin adı KODDA eşlenir (sumid özeti), bulgular pluginID ile istenir, bulgu adı yine kodda doğrulanır.
+    // Dönüş: bulgular + kelime başına eşleşen plugin sayısı.
+    public async Task<(List<NessusBulgu> L, Dictionary<string, int> Kelime, bool Kesik)> UrunlerAsync(IReadOnlyList<string> kelimeler, Regex? haric, CancellationToken ct)
+    {
+        var ozet = await PluginOzetiAsync(ct);
+        bool Uyar(string ad, string k) => Regex.IsMatch(ad, $@"(?<![A-Za-z]){Regex.Escape(k)}", RegexOptions.IgnoreCase) && !(haric?.IsMatch(ad) ?? false);
+        var kel = kelimeler.ToDictionary(k => k, k => ozet.Count(p => Uyar(p.Ad, k)), StringComparer.OrdinalIgnoreCase);
+        var ids = ozet.Where(p => kelimeler.Any(k => Uyar(p.Ad, k))).Select(p => p.Id).Distinct().ToList();
+        var list = new List<NessusBulgu>();
+        bool kesik = false;
+        foreach (var parca in ids.Chunk(150))
+        {
+            var (l, k) = await AraAsync(new JsonArray { new JsonObject { ["filterName"] = "pluginID", ["operator"] = "=", ["value"] = string.Join(",", parca) } }, ct);
+            list.AddRange(l.Where(b => kelimeler.Any(w => Uyar(b.PluginAd, w))));   // süzgeç yine yok sayılırsa alakasız bulgu girmesin
+            kesik |= k;
+        }
+        return (list, kel, kesik);
     }
 
     async Task<(List<NessusBulgu> L, bool Kesik)> AraAsync(JsonArray filtre, CancellationToken ct)

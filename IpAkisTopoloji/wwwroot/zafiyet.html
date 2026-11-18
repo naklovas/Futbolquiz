@@ -216,7 +216,7 @@ function kuralAciklama(k) {
     + `Aranan süreçler: <span class="mono">${esc(k.exeler.join(", "))}</span>`
     + (ar.length ? `<br>Etkilenen: ${esc(ar.join(" | "))}` : "")
     + (k.onlemNot ? `<br>Geçici önlem (komut satırında aranır): <span class="mono">${esc(k.onlemNot)}</span>` : "")
-    + `<br>Nessus'ta aranan ürün adları: <span class="mono">${esc((k.nessusAnahtarlar?.length ? k.nessusAnahtarlar : k.java ? ["Java", "JDK", "JRE", "Corretto", "Temurin", "Zulu", "GraalVM"] : (k.exeler || []).filter(e => !e.includes("*"))).join(", "))}</span>${k.cve ? " · ayrıca " + esc(k.cve) + " bulguları" : ""}`;
+    + `<br>Nessus'ta aranan ürün adları: <span class="mono">${esc((k.nessusAnahtarlar?.length ? k.nessusAnahtarlar : k.java ? ["Java", "OpenJDK", "JDK", "JRE", "Corretto", "Temurin", "Zulu", "GraalVM"] : (k.exeler || []).filter(e => !e.includes("*"))).join(", "))}</span>${k.cve ? " · ayrıca " + esc(k.cve) + " bulguları" : ""}`;
 }
 
 function arCiz() {

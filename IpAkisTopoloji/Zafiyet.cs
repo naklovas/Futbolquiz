@@ -57,7 +57,7 @@ sealed class ZafiyetService(IConfiguration cfg, IHttpClientFactory factory, Enva
         ["java", "javaw", "tomcat*", "prunsrv"], Java: true, AnaMin: 17,
         Araliklar: [new(17, "17.0.6", "17.0.21.1"), new(21, null, "21.0.13.1"), new(25, null, "25.0.5.1"), new(27, null, "27.0.1.1")],
         Onlem: [@"-XX:-UseBASE64Intrinsics", @"-XX:UseAVX=[0-2]\b"], OnlemNot: "-XX:-UseBASE64Intrinsics, -XX:UseAVX=2", NessusAnahtarlar: JavaNessus);
-    static readonly List<string> JavaNessus = ["Java", "JDK", "JRE", "Corretto", "Temurin", "Zulu", "GraalVM"];
+    static readonly List<string> JavaNessus = ["Java", "OpenJDK", "JDK", "JRE", "Corretto", "Temurin", "Zulu", "GraalVM"];
     // Kuralda Nessus kelimesi yoksa (eski kayıtlı kurallar da): Java kuralında Java kelimeleri, diğerlerinde exe adları
     static List<string> NessusKelimeleri(ZfKural k) => k.NessusAnahtarlar is { Count: > 0 } l ? l
         : k.Java ? JavaNessus : Temiz(k.Exeler).Where(e => !e.Contains('*') && e.Length >= 4).Take(6).ToList();
@@ -318,15 +318,15 @@ sealed class ZafiyetService(IConfiguration cfg, IHttpClientFactory factory, Enva
                         if (kesik) mesaj.Add("Nessus CVE bulguları sayfa sınırında kesildi (Zafiyet:NessusMaxSayfa).");
                     }
                     var kelimeler = NessusKelimeleri(k);
-                    var say = new List<string>();
-                    foreach (var kel in kelimeler.Take(10))
+                    if (kelimeler.Count > 0)
                     {
-                        Set(i => i with { Asama = $"Nessus: plugin adında \"{kel}\" geçen bulgular (tüm repo)" });
-                        var (l, kesik) = await nessus.UrunAsync(kel, ct);
-                        nUrun.AddRange(l);
-                        say.Add($"{kel}: {l.Count} bulgu / {l.Select(x => x.Ip).Distinct().Count()} IP / {l.Count(x => x.Kurulumlar.Count > 0)} sürümlü{(kesik ? " (sayfa sınırında kesildi)" : "")}");
+                        Set(i => i with { Asama = $"Nessus: plugin adında {string.Join(", ", kelimeler)} geçen bulgular (tüm repo)" });
+                        var haric = k.Java ? new Regex("javascript|jquery|json", RegexOptions.IgnoreCase) : null;
+                        var (l, kelSay, kesik) = await nessus.UrunlerAsync(kelimeler, haric, ct);
+                        nUrun = l;
+                        mesaj.Add($"Nessus ürün araması — {l.Select(x => x.Ip).Distinct().Count()} IP, {l.Count} bulgu ({l.Count(x => x.Kurulumlar.Count > 0)} sürümlü) · eşleşen plugin: "
+                            + string.Join(", ", kelSay.Select(x => $"{x.Key} {x.Value}")) + (kesik ? " · sayfa sınırında kesildi (Zafiyet:NessusMaxSayfa)" : ""));
                     }
-                    mesaj.Add($"Nessus ürün araması — toplam {nUrun.Select(x => x.Ip).Distinct().Count()} IP · " + string.Join(" · ", say));
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException) { mesaj.Add("Nessus sorgulanamadı (tarama Carbon Black'le devam etti): " + ex.Message); }
             }

@@ -1048,6 +1048,11 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
   "Nessus (ürün bulgusu)" satırı, durum bilinmiyor, öncelik İncele (Nessus kaynaklı / VIP'li bilinmiyor satırları İncele). Kelime başına mesaj "X: N bulgu / M IP /
   K sürümlü". Formda "Nessus'ta aranacak ürün adları" (`ZfOzel.NessusAnahtarlar`, virgülle; kopyala / düzenle doldurur), kural açıklamasında aranan kelimeler.
   Sahte envanter + bulgularla yansıma testi (eski kural, CPU bulgusu → etkilenen, sürümsüz kutu → İncele, JavaScript elendi).
+  CANLI HATA (kullanıcının mesajı: her kelime "50000 bulgu / 663 IP / 3527 sürümlü", 4354 yeni satır): Tenable.sc `pluginName "~="` süzgecini YOK SAYDI → repodaki ilk
+  50.000 bulgu geldi, alakasız "Version" satırları Java sürümü sanıldı. Düzeltme: `NessusService.PluginOzetiAsync` (tool `sumid`, plugin başına id + ad + host, 30 dk
+  önbellek, `Zafiyet:NessusPluginSayfa`=40 × 5000) → plugin adı KODDA eşlenir (kelime solunda harf yok; Java kuralında javascript / jquery / json hariç) →
+  `UrunlerAsync` bulguları pluginID ile (150'lik parçalar) ister ve bulgu adını yine kodda doğrular (süzgeç yok sayılsa da alakasız bulgu girmez). Mesajda kelime başına
+  eşleşen plugin sayısı. JavaNessus'a OpenJDK eklendi. Ad süzgecini yok sayan sahte Tenable.sc ile denendi (JavaScript ve Windows yazılım listesi elendi).
 - **VIP**: sorgulanan IP VIP ise üyeler + GW'ler aynı sorguya eklenir, üyeler "VIP ÜYESİ" (GW→üye trafiği varsa ✓).
   Gidilen IP VIP ise "VIP → n ÜYE"; gelen IP LB GW ise "LB GW"; sorgulanan sunucu havuz üyesiyse VIP kartı.
 - **Uygulama görünümü** (`/api/apps`, `/api/app`): `[kullanan uygulamalar] → [UYGULAMA: VIP'ler + segment grupları] → [bağımlı olunanlar]`,
