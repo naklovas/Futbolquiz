@@ -445,7 +445,7 @@ function egSegRender() {
   const a = egs.aktif;
   $("#egSegInfo").innerHTML = egs.yukleniyor ? `<span class="spinner"></span> ${esc(egs.ilerleme)}`
     : egs.hata ? `<span style="color:var(--err)">${esc(egs.hata)}</span>`
-    : a ? esc(`${a.ad}${a.cidrler.length ? " · " + a.cidrler.join(", ") : ""} · ${fmt(egs.liste.length)} IP (${fmt(egs.yok)} tanesi ERT'de yok${a.csy || a.msy ? `; ÇSY ${fmt(a.csy)}, MSY ${fmt(a.msy)}` : ""})${a.tarih ? ` · ${a.tarih} tarihli kayıt` : ""}`)
+    : a ? esc(`${a.ad}${a.cidrler.length ? " · " + a.cidrler.join(", ") : ""} · ${fmt(egs.liste.length)} IP (${fmt(egs.yok)} tanesi ERT'de yok${a.csy || a.msy || a.karsi ? `; ÇSY ${fmt(a.csy)}, MSY ${fmt(a.msy)}, karşı tarafta görülen ${fmt(a.karsi)}` : ""})${a.tarih ? ` · ${a.tarih} tarihli kayıt` : ""}`)
       + (a.uyari ? ` <span style="color:var(--err)">${esc(a.uyari)}</span>` : "")
     : "Segmentteki bütün IP'ler tabloya gelir: ERT, ağda görülenler ve MSY / ÇSY sanal sunucu envanteri";
 }
@@ -488,6 +488,13 @@ async function egSegGetir(seg, mod) {
       try { const b = await json(await fetch("api/etiket/sanal?" + new URLSearchParams({ cidr: cidrler.join(",") }))); sanal = b.sunucular || []; sanalUyari = b.uyari; }
       catch (e) { sanalUyari = "MSY / ÇSY okunamadı: " + e.message; }
     }
+    // 4) karşı taraf izi: ajanı olmayan sunucular merkezdeki ajanlı sunucuların kayıtlarında karşı IP olarak geçer (son 72 saat)
+    let karsi = [], karsiUyari = null;
+    if (cidrler.length && my === egs.seq) {
+      egs.ilerleme = "Karşı taraf kayıtları aranıyor (ajansız sunucular)…"; egSegRender();
+      try { const b = await json(await fetch("api/etiket/karsi?" + new URLSearchParams({ cidr: cidrler.join(","), saat: 72 }))); karsi = b.sunucular || []; }
+      catch (e) { karsiUyari = "Karşı taraf araması yapılamadı: " + e.message; }
+    }
     if (my !== egs.seq) return;
     const liste = [...ert.values()], var_ = new Map(liste.map(r => [r.ip, r]));
     const segAd = s?.segment ?? seg;
@@ -501,9 +508,17 @@ async function egSegGetir(seg, mod) {
       const y = { ip: v.ip, hostname: v.ad, apps: [], muhafiz: null, segment: segAd, cidr: null, tags: tagMap?.[v.ip] ?? [], ertYok: true, kaynak: v.kaynak, not: v.not };
       liste.push(y); var_.set(v.ip, y);
     }
+    for (const k of karsi) {
+      const not = [k.dinledigi.length ? "bağlanılan portları: " + k.dinledigi.join(", ") : null, k.baglandigi.length ? "bağlandığı portlar: " + k.baglandigi.join(", ") : null,
+        k.karsi.length ? "karşı sunucular: " + k.karsi.join(", ") : null, k.son ? "son " + k.son : null].filter(Boolean).join(" · ");
+      const r = var_.get(k.ip);
+      if (r) { r.karsi = k; if (r.ertYok) { r.kaynak = r.kaynak ? r.kaynak + " · karşı tarafta görüldü" : "karşı tarafta görüldü"; r.not = [r.not, not].filter(Boolean).join(" · "); } continue; }
+      const y = { ip: k.ip, hostname: null, apps: [], muhafiz: null, segment: segAd, cidr: null, tags: tagMap?.[k.ip] ?? [], ertYok: true, kaynak: "karşı tarafta görüldü", not, karsi: k };
+      liste.push(y); var_.set(k.ip, y);
+    }
     const say = k => liste.filter(r => r.ertYok && (r.kaynak || "").includes(k)).length;
     Object.assign(egs, { aktif: { ad: segAd, cidrler, tarih: kayit?.tarih ? new Date(kayit.tarih).toLocaleString("tr-TR") : null,
-        msy: say("MSY"), csy: say("ÇSY"), uyari: [taramaHata ? "Ağ taraması alınamadı: " + taramaHata : null, sanalUyari].filter(Boolean).join(" · ") || null },
+        msy: say("MSY"), csy: say("ÇSY"), karsi: say("karşı"), uyari: [taramaHata ? "Ağ taraması alınamadı: " + taramaHata : null, sanalUyari, karsiUyari].filter(Boolean).join(" · ") || null },
       liste, yok: liste.filter(r => r.ertYok).length, yukleniyor: false });
     etq.page = 1;
   } catch (e) {

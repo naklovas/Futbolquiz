@@ -523,3 +523,40 @@ static class SanalEnvanter
             .GroupBy(x => (x.Ip, x.Kaynak)).Select(g => g.First()).ToList();
     }
 }
+
+// Karşı taraf izi (kullanıcı: "küçük şubemiz, mutlaka hareket vardır; Carbon Black ajanı olmayabilir"): ajanı olmayan sunucunun kendi olayı yoktur ama
+// ajanlı (merkez) sunucuların kayıtlarında remote_ip olarak geçer. Segmentin CIDR'larına düşen remote_ip'ler: hangi portlarına bağlanılmış (giden olay → karşı
+// tarafın dinlediği port), hangi portlara bağlanmış (gelen olay → ajanlı sunucunun portu), karşı bilgisayarlar. Süre sınırlı (Etiket:KarsiSureSaniye=60).
+record KarsiIz(string Ip, long Baglanti, List<string> Dinledigi, List<string> Baglandigi, List<string> Karsi, string? Son);
+static class KarsiTaraf
+{
+    public static async Task<(List<KarsiIz> Liste, List<string> Mesaj)> AraAsync(IConfiguration cfg, HttpClient http, List<string> cidrs, int saat, CancellationToken ct)
+    {
+        var s = cfg.GetSection("Splunk");
+        string index = s["Index"] ?? "carbonblack", sourcetype = s["Sourcetype"] ?? "bit9:carbonblack:json";
+        var desen = SegmentTaramaService.Desenler(cidrs);
+        if (desen.Count == 0) return ([], ["Geçerli CIDR yok."]);
+        string spl = $"""
+            search index={index} sourcetype="{sourcetype}" ({string.Join(" OR ", desen.Select(d => d.Desen))}) ({string.Join(" OR ", desen.Select(d => $"remote_ip=\"{d.Desen}\""))})
+            | where {string.Join(" OR ", cidrs.Select(c => $"cidrmatch(\"{c}\", remote_ip)"))}
+            | eval yon=if(lower(direction)=="outbound", "giden", "gelen"), port=if(yon=="giden", remote_port, local_port)
+            | stats count values(computer_name) as pc max(_time) as son by remote_ip yon port
+            | eval pc=mvjoin(mvindex(pc, 0, 9), "|||")
+            """;
+        var bit = DateTimeOffset.Now;
+        var res = await SplunkService.ExportAsync(spl, new LookupQuery(cidrs[0].Split('/')[0], bit.AddHours(-saat), bit), cfg, http, ct, "Splunk",
+            TimeSpan.FromSeconds(cfg.GetValue("Etiket:KarsiSureSaniye", 60)));
+        string? V(Dictionary<string, string> r, string k) => r.TryGetValue(k, out var v) && !string.IsNullOrWhiteSpace(v) ? v.Trim() : null;
+        var liste = res.Rows.Where(r => V(r, "remote_ip") != null).GroupBy(r => V(r, "remote_ip")!).Select(g =>
+        {
+            static bool Port(string? p) => p is { Length: > 0 } && p != "0";
+            var din = g.Where(r => V(r, "yon") == "giden" && Port(V(r, "port"))).Select(r => V(r, "port")!).Distinct().OrderBy(p => int.TryParse(p, out int n) ? n : 99999).ToList();
+            var bag = g.Where(r => V(r, "yon") == "gelen" && Port(V(r, "port"))).Select(r => V(r, "port")!).Distinct().OrderBy(p => int.TryParse(p, out int n) ? n : 99999).ToList();
+            var pc = g.SelectMany(r => (V(r, "pc") ?? "").Split("|||", StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)).Distinct(StringComparer.OrdinalIgnoreCase).Take(8).ToList();
+            double son = g.Select(r => double.TryParse(V(r, "son"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var d) ? d : 0).Max();
+            return new KarsiIz(g.Key, g.Sum(r => long.TryParse(V(r, "count"), out long c) ? c : 0), din.Take(20).ToList(), bag.Take(20).ToList(), pc,
+                son > 0 ? DateTimeOffset.FromUnixTimeSeconds((long)son).ToLocalTime().ToString("yyyy-MM-dd HH:mm") : null);
+        }).OrderBy(x => EnvanterSnapshot.TryToUInt(x.Ip, out uint u) ? u : 0).ToList();
+        return (liste, res.Messages.Distinct().Take(5).ToList());
+    }
+}

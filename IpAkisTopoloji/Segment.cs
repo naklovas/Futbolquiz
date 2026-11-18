@@ -422,7 +422,7 @@ sealed class SegmentTaramaService(IConfiguration cfg, IHttpClientFactory factory
     }
 
     // Splunk arama deseni: /24 ve küçüğü → a.b.c.*; /16–/23 → /24 parçalar (16'dan çoksa a.b.*)
-    static List<(string Desen, List<string> Cidrler)> Desenler(List<string> cidrs)
+    internal static List<(string Desen, List<string> Cidrler)> Desenler(List<string> cidrs)
     {
         var d = new Dictionary<string, List<string>>();
         void Add(string k, string c) { if (!d.TryGetValue(k, out var l)) d[k] = l = []; if (!l.Contains(c)) l.Add(c); }

@@ -706,6 +706,18 @@ app.MapGet("/api/etiket/sanal", async (string? cidr, IConfiguration cfg, Cancell
     }
     catch (Exception ex) { return Results.Json(new { error = ex.Message }, statusCode: 502); }
 });
+// Segment getir: ajanı olmayan sunucuların karşı taraf izi (Etiket.cs KarsiTaraf; merkez sunucuların Carbon Black kayıtlarında remote_ip)
+app.MapGet("/api/etiket/karsi", async (string? cidr, int? saat, IConfiguration cfg, IHttpClientFactory factory, CancellationToken ct) =>
+{
+    var cidrler = (cidr ?? "").Split(new[] { ',', ';', ' ' }, StringSplitOptions.RemoveEmptyEntries).Where(c => EnvanterSnapshot.TryParseCidr(c, out _, out int p) && p >= 16).ToList();
+    if (cidrler.Count == 0) return Results.BadRequest(new { error = "cidr gerekli (en geniş /16)." });
+    try
+    {
+        var (l, m) = await KarsiTaraf.AraAsync(cfg, factory.CreateClient("splunk"), cidrler, Math.Clamp(saat ?? 72, 1, 168), ct);
+        return Results.Ok(new { sunucular = l, mesajlar = m });
+    }
+    catch (Exception ex) when (ex is not OperationCanceledException) { return Results.Json(new { error = ex.Message }, statusCode: 502); }
+});
 // Zincirleme etiket birleştirme (Etiket.cs EtiketZincir): önizleme ve uygulama
 app.MapGet("/api/etiket/zincir", async (EnvanterService envanter, CancellationToken ct) =>
 {

@@ -538,6 +538,11 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
   GET `/api/etiket/sanal?cidr=a,b` → CIDR'a düşen VM'ler {ip, ad (VM / DNS), kaynak MSY | ÇSY, not (Annotation + klasör)}. etiket.js `egSegGetir`: ağ taraması hata verirse
   (yetki / yok) CIDR'lar `egSegCidr` (segment listesi ya da yazılan CIDR) ile ERT + MSY / ÇSY yine gelir, bilgi satırında kırmızı uyarı; satırda sunucu adının yanında
   kaynak ("ÇSY", "MSY", "ağda görüldü"), Uygulamalar hücresinde (ERT'de değilse) VM notu; bilgi satırında ÇSY / MSY sayıları. Etiketleri DF_ETIKET_EK'e (ERT dışı) yazılır.
+- **Segment getir'de karşı taraf izi** (kullanıcı: "küçük şubemiz, mutlaka hareket vardır"; "Carbon Black ajanı olmayabilir"): segment taraması yalnız ajanın kendi
+  olaylarına (local_ip) bakar → ajansız sunucu görünmez. `KarsiTaraf` (Etiket.cs): GET `/api/etiket/karsi?cidr=&saat=72` (en geniş /16) — Carbon Black'te remote_ip'si
+  segment CIDR'ına düşen olaylar (ham önek terimi `a.b.c.*` + remote_ip alanı + cidrmatch; `SegmentTaramaService.Desenler` internal), `stats by remote_ip yon port`
+  → IP başına bağlanılan portlar (giden olay = karşının dinlediği), bağlandığı portlar (gelen olay), karşı bilgisayarlar (computer_name, ilk 8), son görülme;
+  süre `Etiket:KarsiSureSaniye`=60. etiket.js `egSegGetir` 4. adım: yeni IP'ler "karşı tarafta görüldü" kaynağıyla, notta portlar / karşı sunucular; bilgi satırında sayı.
 - **Etiketleme segment süzgecinde CIDR** (kullanıcı: "segmenti CIDR olarak filtreleyemiyoruz"): `EtiketService.SegmentUyar` — "a.b.c.d/n" (virgül / boşlukla birden çok)
   → IP aralıkta mı (segment kaydından bağımsız), "10.71.51." gibi IP öneki → IP / segment CIDR'ı bununla başlıyor mu, diğer metin → segment adı ya da CIDR'ında geçiyor mu.
   `EtiketSunucu.Cidr` (segment CIDR'ı), etiket.js segment hücresinde altta küçük CIDR, placeholder güncellendi.
