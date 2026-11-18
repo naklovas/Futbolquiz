@@ -140,13 +140,14 @@ sealed class NessusService(IConfiguration cfg, IHttpClientFactory factory, ILogg
     public Task<(List<NessusBulgu> L, bool Kesik)> CveAsync(string cve, CancellationToken ct) =>
         AraAsync(new JsonArray { new JsonObject { ["filterName"] = "cveID", ["operator"] = "=", ["value"] = cve } }, ct);
 
-    // Plugin adında kelime geçen BİLGİ bulguları (severity 0: "… Detection" plugin'leri → kurulu yazılım, yol, sürüm)
-    public Task<(List<NessusBulgu> L, bool Kesik)> UrunAsync(string kelime, CancellationToken ct) =>
-        AraAsync(new JsonArray
-        {
-            new JsonObject { ["filterName"] = "pluginName", ["operator"] = "~=", ["value"] = kelime },
-            new JsonObject { ["filterName"] = "severity", ["operator"] = "=", ["value"] = "0" }
-        }, ct);
+    // Plugin adında kelime geçen bulgular — TÜM ciddiyetler (kullanıcı: "tarama ekseninde gidelim"): "… Detection" bilgi bulguları kurulumu,
+    // "Oracle Java SE … CPU" gibi eski açıklık bulguları da kurulu sürümü söyler. yalnizBilgi=true → yalnız severity 0.
+    public Task<(List<NessusBulgu> L, bool Kesik)> UrunAsync(string kelime, CancellationToken ct, bool yalnizBilgi = false)
+    {
+        var f = new JsonArray { new JsonObject { ["filterName"] = "pluginName", ["operator"] = "~=", ["value"] = kelime } };
+        if (yalnizBilgi) f.Add(new JsonObject { ["filterName"] = "severity", ["operator"] = "=", ["value"] = "0" });
+        return AraAsync(f, ct);
+    }
 
     // Plugin çıktısındaki kurulumlar: "Path : …" / "Binary Location : …" + "Version : …" / "Installed version : …" (+ "Fixed version : …")
     static readonly Regex YolSatir = new(@"^\s*(?:path|binary location|install(?:ation)? path|location|java home)\s*:\s*(.+?)\s*$", RegexOptions.IgnoreCase);

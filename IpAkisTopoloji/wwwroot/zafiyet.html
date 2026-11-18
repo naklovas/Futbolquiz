@@ -154,6 +154,7 @@
       </div>
       <div class="row">
         <label>Geçici önlem — komut satırında aranacak parametreler (virgülle)<input id="onlem" placeholder="ör. -XX:-UseBASE64Intrinsics" style="min-width:340px"></label>
+        <label title="Tenable.sc'de plugin adında bu kelimeler geçen TÜM bulgular aranır (Carbon Black ajanı olmayan sunucular / kutular için). Boşsa Java kuralında Java, JDK, JRE, Corretto, Temurin, Zulu, GraalVM; diğerlerinde exe adları.">Nessus'ta aranacak ürün adları (virgülle)<input id="nessusKel" placeholder="ör. Java, Apigee" style="min-width:240px"></label>
         <label title="Aralık tablosunda olmayan ana sürümler (ör. desteği bitmiş 18, 19, 20)">Aralıkta olmayan ana sürümler<select id="diger"><option value="0">etkilenmez say</option><option value="1">etkilenen say (destek dışı)</option></select></label>
         <button type="button" id="kaydet" title="Bu formu hazır kural olarak kaydet (DF_ZAFIYET_KURAL)">💾 Kural olarak kaydet</button>
       </div>
@@ -214,7 +215,8 @@ function kuralAciklama(k) {
   return `${k.cve ? `<b>${esc(k.cve)}</b> · ` : ""}<b>${esc(k.ad)}</b><br>${k.aciklama ? esc(k.aciklama) + "<br>" : ""}`
     + `Aranan süreçler: <span class="mono">${esc(k.exeler.join(", "))}</span>`
     + (ar.length ? `<br>Etkilenen: ${esc(ar.join(" | "))}` : "")
-    + (k.onlemNot ? `<br>Geçici önlem (komut satırında aranır): <span class="mono">${esc(k.onlemNot)}</span>` : "");
+    + (k.onlemNot ? `<br>Geçici önlem (komut satırında aranır): <span class="mono">${esc(k.onlemNot)}</span>` : "")
+    + `<br>Nessus'ta aranan ürün adları: <span class="mono">${esc((k.nessusAnahtarlar?.length ? k.nessusAnahtarlar : k.java ? ["Java", "JDK", "JRE", "Corretto", "Temurin", "Zulu", "GraalVM"] : (k.exeler || []).filter(e => !e.includes("*"))).join(", "))}</span>${k.cve ? " · ayrıca " + esc(k.cve) + " bulguları" : ""}`;
 }
 
 function arCiz() {
@@ -230,7 +232,7 @@ function arCiz() {
 function ozel() {
   return { ad: $("#ad").value.trim(), cve: $("#cve").value.trim(), aciklama: st.ai?.ozet || null, exeler: $("#exeler").value.trim(),
     araliklar: st.ar.filter(a => String(a.min || a.duzeltilmis || a.son || "").trim()).map(a => ({ ana: String(a.ana ?? "").trim() === "" ? null : +a.ana, min: String(a.min || "").trim() || null, son: String(a.son || "").trim() || null, duzeltilmis: String(a.duzeltilmis || "").trim() || null })),
-    onlem: $("#onlem").value.trim(), digerEtkilenir: $("#diger").value === "1" };
+    onlem: $("#onlem").value.trim(), digerEtkilenir: $("#diger").value === "1", nessusAnahtarlar: $("#nessusKel").value.trim() || null };
 }
 
 function aiCiz() {
@@ -278,6 +280,7 @@ function kuralKopyala() {
   st.ar = (k.araliklar || []).map(a => ({ ana: a.ana ?? "", min: a.min ?? "", son: a.son ?? "", duzeltilmis: a.duzeltilmis ?? "" }));
   arCiz();
   $("#onlem").value = k.onlemNot || "";
+  $("#nessusKel").value = (k.nessusAnahtarlar || []).join(", ");
   $("#diger").value = k.destekDisiEtkilenir && k.anaMin != null ? "1" : "0";
   formCiz();
 }

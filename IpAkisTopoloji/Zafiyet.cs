@@ -26,7 +26,7 @@ record ZfSatir(string? Ip, string? Sunucu, string? Bilgisayar, string? Kurum, st
     string? Vlan = null, string? Domain = null, string? Cidr = null, string? Dagitim = null, string? Nessus = null);
 record ZfIs(string Durum, string Asama, DateTime Baslangic, DateTime? Bitis, string? Hata, string? Kaydeden, int Saat, int SurecSaat, ZfKural Kural);
 // Sayfadan elle / AI ile doldurulmuş kural: exe adları virgülle, önlem ifadeleri virgülle (DÜZ METİN; regex'e kaçışlanır)
-record ZfOzel(string? Ad, string? Cve, string? Aciklama, string? Exeler, List<ZfAralik>? Araliklar, string? Onlem, bool DigerEtkilenir);
+record ZfOzel(string? Ad, string? Cve, string? Aciklama, string? Exeler, List<ZfAralik>? Araliklar, string? Onlem, bool DigerEtkilenir, string? NessusAnahtarlar = null);
 record ZafiyetIstek(int? Saat, string? Kural, ZfOzel? Ozel);
 record ZafiyetAiIstek(string? Metin);
 // AI ile doldurma sonucu (kullanıcı onaylayıp düzenler; tarama kendiliğinden başlamaz)
@@ -58,6 +58,9 @@ sealed class ZafiyetService(IConfiguration cfg, IHttpClientFactory factory, Enva
         Araliklar: [new(17, "17.0.6", "17.0.21.1"), new(21, null, "21.0.13.1"), new(25, null, "25.0.5.1"), new(27, null, "27.0.1.1")],
         Onlem: [@"-XX:-UseBASE64Intrinsics", @"-XX:UseAVX=[0-2]\b"], OnlemNot: "-XX:-UseBASE64Intrinsics, -XX:UseAVX=2", NessusAnahtarlar: JavaNessus);
     static readonly List<string> JavaNessus = ["Java", "JDK", "JRE", "Corretto", "Temurin", "Zulu", "GraalVM"];
+    // Kuralda Nessus kelimesi yoksa (eski kayıtlı kurallar da): Java kuralında Java kelimeleri, diğerlerinde exe adları
+    static List<string> NessusKelimeleri(ZfKural k) => k.NessusAnahtarlar is { Count: > 0 } l ? l
+        : k.Java ? JavaNessus : Temiz(k.Exeler).Where(e => !e.Contains('*') && e.Length >= 4).Take(6).ToList();
 
     // Yerleşik / ayardaki kurallar + kayıtlı kurallar (DF_ZAFIYET_KURAL; aynı Id'de kayıtlı olan geçerli)
     List<ZfKural> AyarKurallari()
@@ -232,8 +235,8 @@ sealed class ZafiyetService(IConfiguration cfg, IHttpClientFactory factory, Enva
         return (new ZfKural(id, ad, T(o.Cve)?.ToUpperInvariant(), T(o.Aciklama), ex, Araliklar: ar.Count > 0 ? ar : null, AnaMin: anaMin,
             Onlem: onlem.Count > 0 ? onlem.Select(Regex.Escape).ToList() : null, OnlemNot: onlem.Count > 0 ? string.Join(", ", onlem) : null,
             Java: java, DestekDisiEtkilenir: o.DigerEtkilenir, Kaynak: "anlık",
-            NessusAnahtarlar: java ? JavaNessus : ex.Where(e => !e.Contains('*') && e.Length >= 4)
-                .Concat(Regex.Split(T(o.Ad) ?? "", @"[^\p{L}\p{N}]+").Where(w => w.Length >= 4 && !GenelUrunKelime.Contains(w))).Distinct(StringComparer.OrdinalIgnoreCase).Take(5).ToList()), null);
+            NessusAnahtarlar: (o.NessusAnahtarlar ?? "").Split(new[] { ',', ';', '\n' }, StringSplitOptions.RemoveEmptyEntries).Select(x => x.Trim()).Where(x => x.Length >= 3)
+                .Distinct(StringComparer.OrdinalIgnoreCase).ToList() is { Count: > 0 } na ? na : null), null);
     }
 
     public ZfIs Baslat(ZfKural kural, int saat, string? user)
@@ -314,15 +317,16 @@ sealed class ZafiyetService(IConfiguration cfg, IHttpClientFactory factory, Enva
                             : $"Nessus: {k.Cve} için bulgu yok (Tenable'ın bu CVE için kontrolü henüz yayımlanmamış ya da taranmamış olabilir).");
                         if (kesik) mesaj.Add("Nessus CVE bulguları sayfa sınırında kesildi (Zafiyet:NessusMaxSayfa).");
                     }
-                    foreach (var kel in (k.NessusAnahtarlar ?? []).Take(8))
+                    var kelimeler = NessusKelimeleri(k);
+                    var say = new List<string>();
+                    foreach (var kel in kelimeler.Take(10))
                     {
-                        Set(i => i with { Asama = $"Nessus: kurulu yazılım — plugin adında \"{kel}\"" });
+                        Set(i => i with { Asama = $"Nessus: plugin adında \"{kel}\" geçen bulgular (tüm repo)" });
                         var (l, kesik) = await nessus.UrunAsync(kel, ct);
                         nUrun.AddRange(l);
-                        if (kesik) mesaj.Add($"Nessus \"{kel}\" kurulumları sayfa sınırında kesildi.");
+                        say.Add($"{kel}: {l.Count} bulgu / {l.Select(x => x.Ip).Distinct().Count()} IP / {l.Count(x => x.Kurulumlar.Count > 0)} sürümlü{(kesik ? " (sayfa sınırında kesildi)" : "")}");
                     }
-                    if (k.NessusAnahtarlar is { Count: > 0 })
-                        mesaj.Add($"Nessus: {nUrun.Select(x => x.Ip).Distinct().Count()} IP'de kurulu yazılım kaydı ({string.Join(", ", k.NessusAnahtarlar)}).");
+                    mesaj.Add($"Nessus ürün araması — toplam {nUrun.Select(x => x.Ip).Distinct().Count()} IP · " + string.Join(" · ", say));
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException) { mesaj.Add("Nessus sorgulanamadı (tarama Carbon Black'le devam etti): " + ex.Message); }
             }
@@ -521,6 +525,17 @@ sealed class ZafiyetService(IConfiguration cfg, IHttpClientFactory factory, Enva
             eklenen++;
         }
 
+        // (a2) Ürün bulgusu var ama sürüm yazmıyor (kimliksiz tarama, kutu / appliance): IP'de başka satır yoksa "sürüm bilinmiyor" satırı
+        foreach (var g in nUrun.Where(b => b.Kurulumlar.Count == 0).GroupBy(b => b.Ip))
+        {
+            if (sonuc.Any(r => r.Ip == g.Key)) continue;
+            var b0 = g.OrderByDescending(x => x.Son).First();
+            string not = "ürün bulgusu (sürüm yok): " + string.Join(" | ", g.Select(x => x.PluginAd).Distinct().Take(3));
+            sonuc.Add(NessusSatir(k, env, test, b0, "(Nessus: sürüm yok)", null, "bilinmiyor",
+                "Nessus bu sunucuda ürünü görüyor ama sürüm yazmıyor (kimliksiz tarama / kutu olabilir) — elle doğrulayın", not, "Nessus (ürün bulgusu)"));
+            eklenen++;
+        }
+
         // (b) CVE bulguları: satırı olan IP'ler işaretlenir, olmayanlar yeni satır (Nessus açığı doğruladı)
         foreach (var (ip, l) in cveIp)
         {
@@ -572,7 +587,7 @@ sealed class ZafiyetService(IConfiguration cfg, IHttpClientFactory factory, Enva
         bool disari = r.Portlar.Any(p => p.Vip.Count > 0 || p.Dis.Count > 0);
         bool nessusDogru = r.Nessus?.Contains("CVE bulgusu") == true;
         string o = risk ? (cbPort ? (disari ? "kritik" : "yuksek") : disari ? "yuksek" : nessusDogru ? "yuksek" : "orta")
-            : r.Durum == "bilinmiyor" ? (cbPort ? "incele" : "dusuk") : "dusuk";
+            : r.Durum == "bilinmiyor" ? (cbPort || disari || r.Kaynak.StartsWith("Nessus") ? "incele" : "dusuk") : "dusuk";
         if (nessusDogru && disari && risk) o = "kritik";
         if (r.Onlem == "var" && o is "kritik" or "yuksek") o = "orta";
         return r with { Oncelik = o };

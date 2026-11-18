@@ -1042,6 +1042,12 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
   javascript / jquery plugin'leri elenir. Nessus satırında port bilinmez: VIP üyeliği "VIP" sahte port (`ZfPort`) olarak maruziyet; `Oncelikle` önceliği yeniden
   hesaplar (CVE doğrulanmış → en az yüksek, + VIP → kritik). Arayüz: "Kaynak" süzgeci (Carbon Black / + Nessus CVE doğruladı / Nessus CVE bulgusu / Nessus kurulu /
   servis imzası), kaynak hücresinde 🛡 Nessus notu, panelde ve CSV'de NESSUS. Tenable çıktı ayrıştırması örnek çıktılarla denendi, gerçek Tenable.sc'de denenmedi.
+  CANLI (kullanıcı: "Nessus: CVE için bulgu yok" — kontrol henüz yok; kutu (apigee) gelmedi; "tarama ekseninde gidelim"): kurulu yazılım araması HİÇ çalışmamıştı (eski
+  kayıtlı kuralda `NessusAnahtarlar` null) → `NessusKelimeleri(k)`: boşsa Java kuralında JavaNessus, diğerlerinde exe adları. `UrunAsync` artık TÜM ciddiyetler
+  ("Oracle Java SE … CPU" açıklık bulguları da kurulu sürümü yazar; `yalnizBilgi` ile eski davranış). Sürüm yazmayan ürün bulgusu olan ve başka satırı olmayan IP →
+  "Nessus (ürün bulgusu)" satırı, durum bilinmiyor, öncelik İncele (Nessus kaynaklı / VIP'li bilinmiyor satırları İncele). Kelime başına mesaj "X: N bulgu / M IP /
+  K sürümlü". Formda "Nessus'ta aranacak ürün adları" (`ZfOzel.NessusAnahtarlar`, virgülle; kopyala / düzenle doldurur), kural açıklamasında aranan kelimeler.
+  Sahte envanter + bulgularla yansıma testi (eski kural, CPU bulgusu → etkilenen, sürümsüz kutu → İncele, JavaScript elendi).
 - **VIP**: sorgulanan IP VIP ise üyeler + GW'ler aynı sorguya eklenir, üyeler "VIP ÜYESİ" (GW→üye trafiği varsa ✓).
   Gidilen IP VIP ise "VIP → n ÜYE"; gelen IP LB GW ise "LB GW"; sorgulanan sunucu havuz üyesiyse VIP kartı.
 - **Uygulama görünümü** (`/api/apps`, `/api/app`): `[kullanan uygulamalar] → [UYGULAMA: VIP'ler + segment grupları] → [bağımlı olunanlar]`,
