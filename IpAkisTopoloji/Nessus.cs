@@ -15,6 +15,9 @@ using System.Text.RegularExpressions;
 record NessusPort(string Port, string Protokol, string? Servis, string? WebSunucu, List<string> Teknoloji, List<string> Sertifika, string? Dinleyen, string? Son,
     List<string>? Tls = null);   // Tls: portun KABUL ETTİĞİ SSL / TLS sürümleri (Nessus'un el sıkışması; istemcinin kullandığı sürüm değil)
 record NessusServis(string Ad, string? Gorunen, string? Yol, string? Hesap);
+// Açıklık taraması (Zafiyet.cs) için tüm repoda arama: CVE bulgusu ya da ürün adındaki bilgi / bulgu plugin'leri; Kurulumlar = çıktıdaki yol + sürüm çiftleri
+record NessusKurulum(string? Yol, string Surum, string? Duzeltilmis);
+record NessusBulgu(string Ip, string? Dns, string? Netbios, string PluginId, string PluginAd, string? Seviye, string? Port, string? Son, List<NessusKurulum> Kurulumlar);
 record NessusSunucu(string Ip, string? Dns, string? Netbios, string? Os, bool? Kimlikli, string? Son, string? Repo,
     List<NessusPort> Portlar, List<string> Yazilim, List<string> Cpe,
     List<string> Veritabani, List<NessusServis> Servisler, List<string> Surecler, List<string> Paylasimlar, List<string> Urunler);
@@ -96,6 +99,73 @@ sealed class NessusService(IConfiguration cfg, IHttpClientFactory factory, ILogg
             if (!long.TryParse(r?["totalRecords"]?.ToString(), out long top) || bas + sayfa >= top || res.Count == 0) break;
         }
         return list;
+    }
+
+    // ---------------- Açıklık taraması: tüm repoda arama (IP süzgeci yok) ----------------
+    JsonObject GenelSorgu(JsonArray ekFiltre, int bas, int bit)
+    {
+        var filtre = new JsonArray();
+        foreach (var f in ekFiltre) filtre.Add(f!.DeepClone());
+        if (Repolar.Length > 0)
+            filtre.Add(new JsonObject { ["filterName"] = "repository", ["operator"] = "=", ["value"] = new JsonArray(Repolar.Select(r => (JsonNode)new JsonObject { ["id"] = r }).ToArray()) });
+        int gun = cfg.GetValue("Nessus:MaxGun", 30);
+        if (gun > 0) filtre.Add(new JsonObject { ["filterName"] = "lastSeen", ["operator"] = "=", ["value"] = $"0:{gun}" });
+        return new JsonObject
+        {
+            ["type"] = "vuln", ["sourceType"] = "cumulative",
+            ["query"] = new JsonObject { ["type"] = "vuln", ["tool"] = "vulndetails", ["startOffset"] = bas, ["endOffset"] = bit, ["filters"] = filtre }
+        };
+    }
+
+    async Task<(List<NessusBulgu> L, bool Kesik)> AraAsync(JsonArray filtre, CancellationToken ct)
+    {
+        int sayfa = Math.Clamp(cfg.GetValue("Nessus:SayfaBoyutu", 2000), 100, 10000), maxSayfa = cfg.GetValue("Zafiyet:NessusMaxSayfa", 25);
+        var list = new List<NessusBulgu>();
+        bool kesik = false;
+        for (int i = 0, bas = 0; ; i++, bas += sayfa)
+        {
+            if (i >= maxSayfa) { kesik = true; break; }
+            var r = (await GonderAsync(Istek(HttpMethod.Post, "/rest/analysis", GenelSorgu(filtre, bas, bas + sayfa)), ct))["response"];
+            var res = r?["results"]?.AsArray().OfType<JsonNode>().ToList() ?? [];
+            foreach (var x in res)
+                if (S(x, "ip") is { Length: > 0 } ip)
+                    list.Add(new NessusBulgu(ip, S(x, "dnsName") is { Length: > 0 } d ? d : null, S(x, "netbiosName") is { Length: > 0 } nb ? nb : null,
+                        S(x, "pluginID") ?? "", S(x, "pluginName") ?? "", S(x, "severity"), S(x, "port"), Zaman(S(x, "lastSeen")), KurulumOku(Cikti(x))));
+            if (!long.TryParse(r?["totalRecords"]?.ToString(), out long top) || bas + sayfa >= top || res.Count == 0) break;
+        }
+        return (list, kesik);
+    }
+
+    // CVE numarasına göre bulgular (plugin yayımlanmamışsa boş)
+    public Task<(List<NessusBulgu> L, bool Kesik)> CveAsync(string cve, CancellationToken ct) =>
+        AraAsync(new JsonArray { new JsonObject { ["filterName"] = "cveID", ["operator"] = "=", ["value"] = cve } }, ct);
+
+    // Plugin adında kelime geçen BİLGİ bulguları (severity 0: "… Detection" plugin'leri → kurulu yazılım, yol, sürüm)
+    public Task<(List<NessusBulgu> L, bool Kesik)> UrunAsync(string kelime, CancellationToken ct) =>
+        AraAsync(new JsonArray
+        {
+            new JsonObject { ["filterName"] = "pluginName", ["operator"] = "~=", ["value"] = kelime },
+            new JsonObject { ["filterName"] = "severity", ["operator"] = "=", ["value"] = "0" }
+        }, ct);
+
+    // Plugin çıktısındaki kurulumlar: "Path : …" / "Binary Location : …" + "Version : …" / "Installed version : …" (+ "Fixed version : …")
+    static readonly Regex YolSatir = new(@"^\s*(?:path|binary location|install(?:ation)? path|location|java home)\s*:\s*(.+?)\s*$", RegexOptions.IgnoreCase);
+    static readonly Regex SurumSatir = new(@"^\s*(?:installed version|version|product version|java version)\s*:\s*(.+?)\s*$", RegexOptions.IgnoreCase);
+    static readonly Regex DuzSatir = new(@"^\s*fixed version\s*:\s*(.+?)\s*$", RegexOptions.IgnoreCase);
+    static List<NessusKurulum> KurulumOku(string metin)
+    {
+        var l = new List<NessusKurulum>();
+        string? yol = null, surum = null, fix = null;
+        void Yaz() { if (surum != null && !l.Any(x => x.Yol == yol && x.Surum == surum)) l.Add(new NessusKurulum(yol, surum, fix)); yol = surum = fix = null; }
+        foreach (var satir in metin.Split('\n'))
+        {
+            if (string.IsNullOrWhiteSpace(satir)) { if (surum != null) Yaz(); continue; }
+            if (YolSatir.Match(satir) is { Success: true } y) { if (yol != null && surum != null) Yaz(); yol ??= y.Groups[1].Value; continue; }
+            if (DuzSatir.Match(satir) is { Success: true } f) { fix = f.Groups[1].Value; continue; }
+            if (SurumSatir.Match(satir) is { Success: true } v) { if (surum != null) Yaz(); surum = v.Groups[1].Value; }
+        }
+        Yaz();
+        return l.Take(20).ToList();
     }
 
     // Deneme ucu: o IP'nin ham kayıtları (tum = plugin filtresi olmadan, ilk sayfa)

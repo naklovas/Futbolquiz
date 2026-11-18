@@ -1032,6 +1032,16 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
   Debian / Ubuntu, "Oracle (muhtemel)" = program files\java\jdk…, "ürünle gelen (gömülü)"); `ZfSatir.Dagitim`, tabloda kolon + "Dağıtım" süzgeci, CSV, sağ panel.
   HATA DÜZELTİLDİ: Temurin / Microsoft klasörü "jdk-17.0.21.9-hotspot"ta son parça YAPI numarası (17.0.21+9) — 17.0.21.9 okunup 17.0.21.1'den büyük, "yamalı"
   sayılıyordu → "-hotspot" / "-openj9" ile biten 4+ parçalı sürümde son parça atılır. Oracle dışı dağıtımda "yamalı" notuna "dağıtıcının kendi düzeltilmiş sürümüyle karşılaştırın".
+  NESSUS (kullanıcı: "Nessus şart, API gateway gibi kutularda Carbon Black yok"): taramanın 3. adımı (`Zafiyet:Nessus`=true; Nessus:BaseUrl yoksa uyarı).
+  `NessusService.CveAsync(cve)` (tüm repo, filtre cveID) ve `UrunAsync(kelime)` (pluginName "~=" kelime + severity 0 = "… Detection" bilgi bulguları), sayfa sınırı
+  `Zafiyet:NessusMaxSayfa`=25 × SayfaBoyutu; `NessusBulgu` (ip, dns, netbios, plugin, ciddiyet, port, son görülme, `Kurulumlar` = çıktıdaki "Path / Binary Location" +
+  "Version / Installed version" (+ "Fixed version") çiftleri, `KurulumOku`). Kural alanı `NessusAnahtarlar` (Java4Shell: Java, JDK, JRE, Corretto, Temurin, Zulu, GraalVM;
+  anlık kuralda exe adları + ad kelimeleri). `NessusIsle`: (a) kurulum yolu aynı IP'deki CB satırının exe yolunun başıysa ve CB'de sürüm yoksa sürüm Nessus'tan
+  (`NessusSurum`: "17.0.10+7" → 17.0.10, 8u202); eşleşmeyen kurulum yeni satır (kaynak "Nessus (kurulu yazılım)", exe "java (Nessus)"); (b) CVE bulgusu olan IP'nin
+  CB satırlarına `ZfSatir.Nessus` notu + durum etkilenen (etkilenmez / yamalı değilse); satırı olmayan IP yeni satır "Nessus (CVE bulgusu)". Java kuralında
+  javascript / jquery plugin'leri elenir. Nessus satırında port bilinmez: VIP üyeliği "VIP" sahte port (`ZfPort`) olarak maruziyet; `Oncelikle` önceliği yeniden
+  hesaplar (CVE doğrulanmış → en az yüksek, + VIP → kritik). Arayüz: "Kaynak" süzgeci (Carbon Black / + Nessus CVE doğruladı / Nessus CVE bulgusu / Nessus kurulu /
+  servis imzası), kaynak hücresinde 🛡 Nessus notu, panelde ve CSV'de NESSUS. Tenable çıktı ayrıştırması örnek çıktılarla denendi, gerçek Tenable.sc'de denenmedi.
 - **VIP**: sorgulanan IP VIP ise üyeler + GW'ler aynı sorguya eklenir, üyeler "VIP ÜYESİ" (GW→üye trafiği varsa ✓).
   Gidilen IP VIP ise "VIP → n ÜYE"; gelen IP LB GW ise "LB GW"; sorgulanan sunucu havuz üyesiyse VIP kartı.
 - **Uygulama görünümü** (`/api/apps`, `/api/app`): `[kullanan uygulamalar] → [UYGULAMA: VIP'ler + segment grupları] → [bağımlı olunanlar]`,

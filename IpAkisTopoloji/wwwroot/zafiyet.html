@@ -179,6 +179,7 @@
       <select id="domainF"><option value="">Domain: Tümü</option></select>
       <select id="vlanF"><option value="">VLAN: Tümü</option></select>
       <select id="dagitimF"><option value="">Dağıtım: Tümü</option></select>
+      <select id="kaynakF" title="Carbon Black: süreç çalışırken görüldü · Nessus: CB ajanı olmayan sunucu / kutu ya da kurulu ama çalışmadığı görülen yazılım"><option value="">Kaynak: Tümü</option></select>
       <label><input type="checkbox" id="dinleyen"> Yalnız port dinleyenler</label>
       <label><input type="checkbox" id="testG" checked> Test sunucuları</label>
       <span class="sp"></span>
@@ -326,10 +327,19 @@ function runCiz() {
     ${is.hata ? `<div style="flex-basis:100%;color:var(--err)">${esc(is.hata)}</div>` : ""}</div>`;
 }
 
+// Kaynak süzgeci: Carbon Black / Nessus / Servis imzası kaydı (+ Carbon Black satırında Nessus CVE doğrulaması)
+function kaynakGrup(r) {
+  const k = r.kaynak || "";
+  if (k.startsWith("Nessus (CVE")) return "Nessus: CVE bulgusu (CB'de yok)";
+  if (k.startsWith("Nessus")) return "Nessus: kurulu yazılım (CB'de yok)";
+  if (k.startsWith("Servis imzası")) return "Servis imzası kaydı";
+  return r.nessus && r.nessus.includes("CVE bulgusu") ? "Carbon Black + Nessus CVE doğruladı" : "Carbon Black";
+}
+
 function suz() {
   const l = st.veri?.satirlar || [];
-  const q = $("#q").value.trim().toLowerCase(), d = $("#durumF").value, k = $("#kurumF").value, dm = $("#domainF").value, vl = $("#vlanF").value, dg = $("#dagitimF").value;
-  return l.filter(r => (!st.onc || r.oncelik === st.onc) && (!dm || (r.domain || "(yok)") === dm) && (!vl || (r.vlan || "(yok)") === vl) && (!dg || (r.dagitim || "(yok)") === dg) && (!st.onlemF || r.onlem === "var") && (!d || r.durum === d) && (!k || r.kurum === k)
+  const q = $("#q").value.trim().toLowerCase(), d = $("#durumF").value, k = $("#kurumF").value, dm = $("#domainF").value, vl = $("#vlanF").value, dg = $("#dagitimF").value, kn = $("#kaynakF").value;
+  return l.filter(r => (!st.onc || r.oncelik === st.onc) && (!dm || (r.domain || "(yok)") === dm) && (!vl || (r.vlan || "(yok)") === vl) && (!dg || (r.dagitim || "(yok)") === dg) && (!kn || kaynakGrup(r) === kn) && (!st.onlemF || r.onlem === "var") && (!d || r.durum === d) && (!k || r.kurum === k)
     && (!$("#dinleyen").checked || r.portlar.length) && ($("#testG").checked || !r.test)
     && (!q || [r.ip, r.sunucu, r.bilgisayar, r.segment, r.vlan, r.domain, r.cidr, r.dagitim, r.muhafiz, r.yol, r.urun, r.surum, r.jar, ...(r.uygulamalar || []), ...r.portlar.map(p => p.port + " " + (p.ert || "") + " " + p.vip.join(" "))]
       .some(x => String(x ?? "").toLowerCase().includes(q))));
@@ -354,6 +364,7 @@ function portHtml(r) {
   const g = r.portlar.slice(0, 6).map(p => {
     const dis = p.dis.length, vip = p.vip.length;
     const ip = [`${p.baglanti.toLocaleString("tr-TR")} bağlantı, ${p.istemci} istemci`, p.ert ? "ERT: " + p.ert : "", vip ? "VIP: " + p.vip.join(", ") : "", dis ? "dış istemci: " + p.dis.join(", ") : ""].filter(Boolean).join("\n");
+    if (p.port === "VIP") return `<span class="pt vip" title="${esc("Nessus satırı — dinlediği port bilinmiyor; sunucu VIP havuzunda: " + p.vip.join(", "))}">VIP üyesi</span>`;
     return `<span class="pt ${dis ? "dis" : vip ? "vip" : ""}" title="${esc(ip)}">${esc(p.port)}${vip ? " ⇄VIP" : ""}${dis ? " 🌐" : ""}</span>`;
   }).join("");
   return g + (r.portlar.length > 6 ? `<span class="muted small">+${r.portlar.length - 6}</span>` : "");
@@ -378,6 +389,8 @@ function ciz() {
   secenek("#domainF", "Domain", "domain", false);
   secenek("#vlanF", "VLAN", "vlan", true);
   secenek("#dagitimF", "Dağıtım", "dagitim", false);
+  for (const r of v.satirlar || []) r._kaynak = kaynakGrup(r);
+  secenek("#kaynakF", "Kaynak", "_kaynak", false);
   const l = suz();
   $("#tb").innerHTML = l.length ? l.slice(0, st.limit).map((r, i) => `<tr data-i="${(v.satirlar).indexOf(r)}">
     <td><span class="p ${r.oncelik}" title="${esc(ONC_IPUCU[r.oncelik])}">${ONC[r.oncelik]}</span></td>
@@ -393,7 +406,7 @@ function ciz() {
     <td class="small">${r.giden ? r.giden.toLocaleString("tr-TR") : '<span class="muted">—</span>'}</td>
     <td class="small o ${r.onlem}" title="Komut satırında geçici önlem parametresi">${r.onlem === "var" ? "✔ var" : r.onlem === "yok" ? "yok" : r.onlem === "bilinmiyor" ? '<span class="muted">bilinmiyor</span>' : '<span class="muted">—</span>'}</td>
     <td class="small">${esc(r.son || "")}${r.baslangic ? `<div class="muted">başlangıç ${esc(r.baslangic)}</div>` : ""}</td>
-    <td class="small muted">${esc(r.kaynak)}</td></tr>`).join("")
+    <td class="small muted">${esc(r.kaynak)}${r.nessus ? `<div style="color:${r.nessus.includes("CVE bulgusu") ? "var(--err)" : "var(--muted)"}" title="${esc(r.nessus)}">🛡 ${esc(r.nessus.length > 70 ? r.nessus.slice(0, 70) + "…" : r.nessus)}</div>` : ""}</td></tr>`).join("")
     : `<tr><td colspan="13" class="empty">${v.satirlar?.length ? "Süzgece uyan süreç yok." : "Bu aralıkta Carbon Black'te kurala uyan süreç görülmedi."}</td></tr>`;
   $("#sayi").textContent = `${Math.min(l.length, st.limit).toLocaleString("tr-TR")} / ${l.length.toLocaleString("tr-TR")} satır gösteriliyor`;
   $("#more").hidden = l.length <= st.limit;
@@ -420,6 +433,7 @@ function detay(r) {
       <dt>Giden bağlantı</dt><dd>${(r.giden || 0).toLocaleString("tr-TR")}</dd>
       <dt>Son görülme</dt><dd>${esc(r.son || "—")}${r.baslangic ? ` · süreç başlangıcı ${esc(r.baslangic)}` : ""}</dd>
       <dt>Kaynak</dt><dd>${esc(r.kaynak)}</dd>
+      ${r.nessus ? `<dt>Nessus</dt><dd>${esc(r.nessus)}</dd>` : ""}
     </dl>
     <div style="margin-top:12px"><b>Komut satırı</b>${r.komut ? `<pre>${esc(r.komut)}</pre>` : '<div class="muted small">Pencerede süreç başlangıcı görülmedi (uzun süredir çalışan süreç). Ağ olayı penceresini genişletmek komut satırını getirmez; süreç yeniden başlayınca görünür.</div>'}</div>
     ${r.ip ? `<div style="margin-top:12px"><a href="./?ip=${encodeURIComponent(r.ip)}" target="_blank" rel="noopener">Bu IP'nin topolojisini aç ↗</a></div>` : ""}
@@ -465,10 +479,10 @@ function csv() {
   if (!st.yetki.disari) return;
   const q = v => `"${String(v ?? "").replace(/"/g, '""')}"`;
   const lines = [["ÖNCELİK", "IP", "SUNUCU", "BİLGİSAYAR (CB)", "KURUM", "SEGMENT", "VLAN", "DOMAIN", "CIDR", "TEST", "ERT UYGULAMALARI", "MUHAFIZ", "EXE", "EXE YOLU", "ÜRÜN", "-JAR", "DAĞITIM", "SÜRÜM", "SÜRÜM KAYNAĞI", "DURUM", "DURUM NOTU",
-    "DİNLEDİĞİ PORTLAR", "VIP", "DIŞ İSTEMCİ", "GİDEN BAĞLANTI", "GEÇİCİ ÖNLEM", "SON GÖRÜLME", "SÜREÇ BAŞLANGICI", "KAYNAK", "KOMUT SATIRI"].join(";"),
+    "DİNLEDİĞİ PORTLAR", "VIP", "DIŞ İSTEMCİ", "GİDEN BAĞLANTI", "GEÇİCİ ÖNLEM", "SON GÖRÜLME", "SÜREÇ BAŞLANGICI", "KAYNAK", "NESSUS", "KOMUT SATIRI"].join(";"),
     ...suz().map(r => [ONC[r.oncelik], r.ip, r.sunucu, r.bilgisayar, r.kurum, r.segment, r.vlan, r.domain, r.cidr, r.test ? "evet" : "", (r.uygulamalar || []).join(" | "), r.muhafiz, r.exe, r.yol, r.urun, r.jar, r.dagitim,
       r.surum, r.surumKaynak, DUR[r.durum] || r.durum, r.durumNot, r.portlar.map(p => p.port).join(", "), [...new Set(r.portlar.flatMap(p => p.vip))].join(", "),
-      [...new Set(r.portlar.flatMap(p => p.dis))].join(", "), r.giden, r.onlem, r.son, r.baslangic, r.kaynak, r.komut].map(q).join(";"))];
+      [...new Set(r.portlar.flatMap(p => p.dis))].join(", "), r.giden, r.onlem, r.son, r.baslangic, r.kaynak, r.nessus, r.komut].map(q).join(";"))];
   const a = document.createElement("a");
   a.href = URL.createObjectURL(new Blob(["﻿" + lines.join("\r\n")], { type: "text/csv;charset=utf-8" }));
   a.download = `aciklik_${(st.veri?.is?.kural?.cve || st.veri?.is?.kural?.id || "tarama").replace(/[^\w.-]+/g, "_")}.csv`;
@@ -487,7 +501,7 @@ document.addEventListener("click", e => {
   if (tr) { document.querySelectorAll("tr.sel").forEach(x => x.classList.remove("sel")); tr.classList.add("sel"); detay(st.veri.satirlar[+tr.dataset.i]); }
 });
 document.addEventListener("keydown", e => { if (e.key === "Escape") detay(null); });
-["#q", "#durumF", "#kurumF", "#domainF", "#vlanF", "#dagitimF", "#dinleyen", "#testG"].forEach(s => $(s).addEventListener(s === "#q" ? "input" : "change", () => { st.limit = 500; ciz(); }));
+["#q", "#durumF", "#kurumF", "#domainF", "#vlanF", "#dagitimF", "#kaynakF", "#dinleyen", "#testG"].forEach(s => $(s).addEventListener(s === "#q" ? "input" : "change", () => { st.limit = 500; ciz(); }));
 $("#kural").addEventListener("change", formCiz);
 $("#aiDoldur").addEventListener("click", aiDoldur);
 $("#kaydet").addEventListener("click", kaydet);
