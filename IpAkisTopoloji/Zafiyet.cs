@@ -16,16 +16,23 @@ using System.Text.RegularExpressions;
 record ZfAralik(int? Ana, string? Min, string? Duzeltilmis);
 record ZfKural(string Id, string Ad, string? Cve, string? Aciklama, List<string> Exeler, List<string>? SurumDesenleri = null,
     int? AnaMin = null, List<ZfAralik>? Araliklar = null, List<string>? Onlem = null, string? OnlemNot = null, bool Java = false,
-    bool DestekDisiEtkilenir = true, string? Anahtar = null);
+    bool DestekDisiEtkilenir = true, string? Anahtar = null, string? Kaynak = null, string? Kaydeden = null, DateTime? Tarih = null);
 record ZfPort(string Port, long Baglanti, int Istemci, string? Ert, List<string> Vip, List<string> Dis);
 record ZfSatir(string? Ip, string? Sunucu, string? Bilgisayar, string? Kurum, string? Segment, bool Test, List<string> Uygulamalar, string? Muhafiz,
     string Exe, string Yol, string? Urun, string? Surum, string? SurumKaynak, string Durum, string DurumNot,
     List<ZfPort> Portlar, long Giden, string Onlem, string? Komut, string? Jar, string? Son, string? Baslangic, string Oncelik, string Kaynak);
 record ZfIs(string Durum, string Asama, DateTime Baslangic, DateTime? Bitis, string? Hata, string? Kaydeden, int Saat, int SurecSaat, ZfKural Kural);
-record ZafiyetIstek(int? Saat, string? Kural, string? Exeler, string? Min, string? Duzeltilmis, string? Ad);
+// Sayfadan elle / AI ile doldurulmuş kural: exe adları virgülle, önlem ifadeleri virgülle (DÜZ METİN; regex'e kaçışlanır)
+record ZfOzel(string? Ad, string? Cve, string? Aciklama, string? Exeler, List<ZfAralik>? Araliklar, string? Onlem, bool DigerEtkilenir);
+record ZafiyetIstek(int? Saat, string? Kural, ZfOzel? Ozel);
+record ZafiyetAiIstek(string? Metin);
+// AI ile doldurma sonucu (kullanıcı onaylayıp düzenler; tarama kendiliğinden başlamaz)
+record ZfAiExe(string Ad, string? Neden, string Kaynak, int Sunucu, List<string> Ornek);
+record ZfAiSonuc(string? Urun, string? Cve, string? Ozet, bool Kutuphane, string? KutuphaneNot, List<ZfAiExe> Exeler, List<ZfAralik> Araliklar,
+    List<string> Onlem, bool DigerEtkilenir, List<string> Uyarilar, string? EnvanterTarihi);
 record ZfSonuc(ZfIs? Is, List<ZfSatir> Satirlar, List<string> Mesajlar, List<ZfKural> Kurallar);
 
-sealed class ZafiyetService(IConfiguration cfg, IHttpClientFactory factory, EnvanterService envanter, ServisImzaService imza, ILogger<ZafiyetService> log)
+sealed class ZafiyetService(IConfiguration cfg, IHttpClientFactory factory, EnvanterService envanter, ServisImzaService imza, IslevService islev, ILogger<ZafiyetService> log)
 {
     readonly object _gate = new();
     ZfIs? _is;
@@ -33,7 +40,11 @@ sealed class ZafiyetService(IConfiguration cfg, IHttpClientFactory factory, Enva
     List<string> _mesaj = [];
     CancellationTokenSource? _cts;
 
-    public ZfSonuc Sonuc() { lock (_gate) return new ZfSonuc(_is, _satir, _mesaj, Kurallar()); }
+    public async Task<ZfSonuc> SonucAsync(CancellationToken ct)
+    {
+        var k = await KurallarAsync(ct);
+        lock (_gate) return new ZfSonuc(_is, _satir, _kayitUyari == null ? _mesaj : [.. _mesaj, _kayitUyari], k);
+    }
     public void Durdur() { lock (_gate) _cts?.Cancel(); }
 
     // ---------------- Kurallar ----------------
@@ -41,12 +52,19 @@ sealed class ZafiyetService(IConfiguration cfg, IHttpClientFactory factory, Enva
         "Java 17.0.6 ve sonrası, 18+ (21, 25, 27); x86-64 + AVX-512 VBMI. Java 8 / 11 etkilenmez. AVX-512 bilgisi yok: sürümü aralıktaki her süreç etkilenen sayılır.",
         ["java", "javaw", "tomcat*", "prunsrv"], Java: true, AnaMin: 17,
         Araliklar: [new(17, "17.0.6", "17.0.21.1"), new(21, null, "21.0.13.1"), new(25, null, "25.0.5.1"), new(27, null, "27.0.1.1")],
-        Onlem: [@"-XX:-UseBASE64Intrinsics", @"-XX:UseAVX=[0-2]\b"], OnlemNot: "-XX:-UseBASE64Intrinsics (ya da x86'da -XX:UseAVX=2)");
+        Onlem: [@"-XX:-UseBASE64Intrinsics", @"-XX:UseAVX=[0-2]\b"], OnlemNot: "-XX:-UseBASE64Intrinsics, -XX:UseAVX=2");
 
-    public List<ZfKural> Kurallar()
+    // Yerleşik / ayardaki kurallar + kayıtlı kurallar (DF_ZAFIYET_KURAL; aynı Id'de kayıtlı olan geçerli)
+    List<ZfKural> AyarKurallari()
     {
-        var l = cfg.GetSection("Zafiyet:Kurallar").Get<List<ZfKural>>()?.Where(k => !string.IsNullOrWhiteSpace(k.Id) && k.Exeler is { Count: > 0 }).ToList();
-        return l is { Count: > 0 } ? l : [Java4Shell];
+        var l = cfg.GetSection("Zafiyet:Kurallar").Get<List<ZfKural>>()?.Where(k => !string.IsNullOrWhiteSpace(k.Id) && k.Exeler is { Count: > 0 })
+            .Select(k => k with { Kaynak = "ayar" }).ToList();
+        return l is { Count: > 0 } ? l : [Java4Shell with { Kaynak = "yerleşik" }];
+    }
+    public async Task<List<ZfKural>> KurallarAsync(CancellationToken ct)
+    {
+        var kay = await KayitliAsync(ct);
+        return kay.Concat(AyarKurallari().Where(a => !kay.Any(k => k.Id.Equals(a.Id, StringComparison.OrdinalIgnoreCase)))).ToList();
     }
 
     // Exe adı → regex (yalnız harf / rakam . _ - ve * joker; .exe isteğe bağlı). SPL'de çift kaçışlı, C#'ta tek.
@@ -143,21 +161,30 @@ sealed class ZafiyetService(IConfiguration cfg, IHttpClientFactory factory, Enva
     }
 
     // ---------------- Tarama ----------------
-    // İstekte kural id'si ya da anlık exe listesi (+ isteğe bağlı Min / Duzeltilmis: tek aralık, tüm ana sürümler)
-    public ZfKural? KuralBul(ZafiyetIstek r, out string? hata)
+    // İstekte kural id'si ya da sayfada doldurulmuş kural
+    public async Task<(ZfKural? Kural, string? Hata)> KuralBulAsync(ZafiyetIstek r, CancellationToken ct)
     {
-        hata = null;
-        if (!string.IsNullOrWhiteSpace(r.Exeler))
-        {
-            var ex = Temiz(r.Exeler.Split(new[] { ',', ';', ' ', '\n' }, StringSplitOptions.RemoveEmptyEntries));
-            if (ex.Count == 0) { hata = "Geçerli exe adı yok (harf, rakam, . _ - ve * kullanılabilir)."; return null; }
-            if (ex.Any(e => e.Trim('*').Length < 3)) { hata = "Exe adları en az 3 harf olmalı (çok geniş arama olmasın)."; return null; }
-            string? min = string.IsNullOrWhiteSpace(r.Min) ? null : r.Min.Trim(), fix = string.IsNullOrWhiteSpace(r.Duzeltilmis) ? null : r.Duzeltilmis.Trim();
-            return new ZfKural("anlik", string.IsNullOrWhiteSpace(r.Ad) ? "Süreç araması: " + string.Join(", ", ex) : r.Ad.Trim(), null, null, ex,
-                Araliklar: min != null || fix != null ? [new(null, min, fix)] : null, Java: ex.Any(e => e is "java" or "javaw"));
-        }
-        var k = Kurallar().FirstOrDefault(x => string.Equals(x.Id, r.Kural ?? "", StringComparison.OrdinalIgnoreCase)) ?? Kurallar().First();
-        return k;
+        if (r.Ozel != null) return OzelKural(r.Ozel, "anlik");
+        var l = await KurallarAsync(ct);
+        return (l.FirstOrDefault(x => string.Equals(x.Id, r.Kural ?? "", StringComparison.OrdinalIgnoreCase)) ?? l.First(), null);
+    }
+
+    static (ZfKural? Kural, string? Hata) OzelKural(ZfOzel o, string id)
+    {
+        var ex = Temiz((o.Exeler ?? "").Split(new[] { ',', ';', ' ', '\n' }, StringSplitOptions.RemoveEmptyEntries));
+        if (ex.Count == 0) return (null, "Geçerli exe adı yok (harf, rakam, . _ - ve * kullanılabilir).");
+        if (ex.Any(e => e.Trim('*').Length < 3)) return (null, "Exe adları en az 3 harf olmalı (çok geniş arama olmasın).");
+        static string? T(string? x) => string.IsNullOrWhiteSpace(x) ? null : x.Trim();
+        var ar = (o.Araliklar ?? []).Select(a => new ZfAralik(a.Ana, T(a.Min), T(a.Duzeltilmis))).Where(a => a.Min != null || a.Duzeltilmis != null || a.Ana != null).ToList();
+        if (ar.SelectMany(a => new[] { a.Min, a.Duzeltilmis }).OfType<string>().Any(v => !Regex.IsMatch(v, @"^\d+([._\-+]\d+)*$")))
+            return (null, "Sürümler yalnız rakam ve . _ - + içermeli (ör. 17.0.6).");
+        var onlem = (o.Onlem ?? "").Split(new[] { ',', '\n' }, StringSplitOptions.RemoveEmptyEntries).Select(x => x.Trim()).Where(x => x.Length >= 3).Distinct().ToList();
+        bool java = ex.Any(e => e is "java" or "javaw");
+        int? anaMin = ar.Any(a => a.Ana != null) ? ar.Where(a => a.Ana != null).Min(a => a.Ana) : null;
+        string ad = T(o.Ad) ?? (T(o.Cve) is { } c ? c : "Süreç araması: " + string.Join(", ", ex));
+        return (new ZfKural(id, ad, T(o.Cve)?.ToUpperInvariant(), T(o.Aciklama), ex, Araliklar: ar.Count > 0 ? ar : null, AnaMin: anaMin,
+            Onlem: onlem.Count > 0 ? onlem.Select(Regex.Escape).ToList() : null, OnlemNot: onlem.Count > 0 ? string.Join(", ", onlem) : null,
+            Java: java, DestekDisiEtkilenir: o.DigerEtkilenir, Kaynak: "anlık"), null);
     }
 
     public ZfIs Baslat(ZfKural kural, int saat, string? user)
@@ -364,5 +391,272 @@ sealed class ZafiyetService(IConfiguration cfg, IHttpClientFactory factory, Enva
         }
         string[] sira = ["kritik", "yuksek", "orta", "incele", "dusuk"];
         return sonuc.OrderBy(x => Array.IndexOf(sira, x.Oncelik)).ThenByDescending(x => x.Portlar.Sum(p => p.Baglanti)).ThenBy(x => x.Ip).ToList();
+    }
+
+    // ---------------- Kayıtlı kurallar (DF_ZAFIYET_KURAL; sql/zafiyet_kural.sql) ----------------
+    string? _kayitUyari;
+    (List<ZfKural> L, DateTime At)? _kayitli;
+    readonly Dictionary<string, ZfKural> _bellek = new(StringComparer.OrdinalIgnoreCase);
+    static readonly System.Text.Json.JsonSerializerOptions Js = new(System.Text.Json.JsonSerializerDefaults.Web);
+    string Tablo => cfg["Zafiyet:KuralTablosu"] is { } t && Regex.IsMatch(t, @"^[\w.\[\]]+$") ? t : "dbo.DF_ZAFIYET_KURAL";
+
+    async Task<List<ZfKural>> KayitliAsync(CancellationToken ct)
+    {
+        lock (_gate) if (_kayitli is { } k && DateTime.UtcNow - k.At < TimeSpan.FromMinutes(5)) return k.L;
+        var l = new List<ZfKural>();
+        try
+        {
+            await using var conn = new Microsoft.Data.SqlClient.SqlConnection(cfg.GetConnectionString("Envanter"));
+            await conn.OpenAsync(ct);
+            await using var cmd = new Microsoft.Data.SqlClient.SqlCommand($"SELECT ID, KURAL, TARIH, KAYDEDEN FROM {Tablo} ORDER BY TARIH DESC", conn);
+            await using var rd = await cmd.ExecuteReaderAsync(ct);
+            while (await rd.ReadAsync(ct))
+                try
+                {
+                    if (System.Text.Json.JsonSerializer.Deserialize<ZfKural>(rd.GetString(1), Js) is { Exeler.Count: > 0 } z)
+                        l.Add(z with { Id = rd.GetString(0), Kaynak = "kayıtlı", Tarih = rd.IsDBNull(2) ? null : rd.GetDateTime(2), Kaydeden = rd.IsDBNull(3) ? null : rd.GetString(3) });
+                }
+                catch (System.Text.Json.JsonException) { }
+            _kayitUyari = null;
+        }
+        catch (Microsoft.Data.SqlClient.SqlException ex) when (ex.Number == 208) { _kayitUyari = $"Kural tablosu ({Tablo}) yok; kaydedilen kurallar yalnız bellekte tutuluyor (sql/zafiyet_kural.sql)."; }
+        catch (Exception ex) when (ex is not OperationCanceledException) { log.LogWarning(ex, "Kayıtlı açıklık kuralları okunamadı"); _kayitUyari = "Kayıtlı kurallar okunamadı: " + ex.Message; }
+        lock (_gate)
+        {
+            l.AddRange(_bellek.Values.Where(b => !l.Any(x => x.Id.Equals(b.Id, StringComparison.OrdinalIgnoreCase))));
+            _kayitli = (l, DateTime.UtcNow);
+        }
+        return l;
+    }
+
+    static string Slug(string s)
+    {
+        string t = Regex.Replace(s.ToLowerInvariant().Replace('ı', 'i').Replace('ş', 's').Replace('ğ', 'g').Replace('ü', 'u').Replace('ö', 'o').Replace('ç', 'c'), "[^a-z0-9]+", "-").Trim('-');
+        return t.Length > 60 ? t[..60] : t.Length == 0 ? "kural" : t;
+    }
+
+    public async Task<(ZfKural? Kural, string? Hata)> KaydetAsync(ZfOzel o, string? user, CancellationToken ct)
+    {
+        var (k0, hata) = OzelKural(o, "x");
+        if (k0 == null) return (null, hata);
+        string id = Slug(k0.Cve ?? k0.Ad);
+        if (id is "anlik" or "java4shell") id += "-k";
+        var k = k0 with { Id = id, Kaynak = null, Kaydeden = user, Tarih = DateTime.Now };
+        string json = System.Text.Json.JsonSerializer.Serialize(k with { Kaydeden = null, Tarih = null }, Js);
+        try
+        {
+            await using var conn = new Microsoft.Data.SqlClient.SqlConnection(cfg.GetConnectionString("Envanter"));
+            await conn.OpenAsync(ct);
+            await using var cmd = new Microsoft.Data.SqlClient.SqlCommand($"""
+                MERGE {Tablo} AS t USING (SELECT @id AS ID) AS s ON t.ID = s.ID
+                WHEN MATCHED THEN UPDATE SET KURAL = @k, TARIH = SYSDATETIME(), KAYDEDEN = @u
+                WHEN NOT MATCHED THEN INSERT (ID, KURAL, TARIH, KAYDEDEN) VALUES (@id, @k, SYSDATETIME(), @u);
+                """, conn);
+            cmd.Parameters.AddWithValue("@id", id);
+            cmd.Parameters.AddWithValue("@k", json);
+            cmd.Parameters.AddWithValue("@u", (object?)user ?? DBNull.Value);
+            await cmd.ExecuteNonQueryAsync(ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            lock (_gate) _bellek[id] = k with { Kaynak = "kayıtlı (bellekte)" };
+            _kayitUyari = (ex is Microsoft.Data.SqlClient.SqlException { Number: 208 } ? $"Kural tablosu ({Tablo}) yok" : "Kural DB'ye yazılamadı (" + ex.Message + ")")
+                + "; kural yalnız bellekte tutuldu (uygulama yeniden başlayınca kaybolur; sql/zafiyet_kural.sql).";
+        }
+        log.LogInformation("Açıklık kuralı kaydedildi: {Id} ({User})", id, user);
+        lock (_gate) _kayitli = null;
+        return (k with { Kaynak = "kayıtlı" }, null);
+    }
+
+    public async Task<bool> SilAsync(string id, string? user, CancellationToken ct)
+    {
+        bool var;
+        lock (_gate) var = _bellek.Remove(id);
+        try
+        {
+            await using var conn = new Microsoft.Data.SqlClient.SqlConnection(cfg.GetConnectionString("Envanter"));
+            await conn.OpenAsync(ct);
+            await using var cmd = new Microsoft.Data.SqlClient.SqlCommand($"DELETE FROM {Tablo} WHERE ID = @id", conn);
+            cmd.Parameters.AddWithValue("@id", id);
+            var |= await cmd.ExecuteNonQueryAsync(ct) > 0;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException) { log.LogWarning("Açıklık kuralı DB'den silinemedi: {H}", ex.Message); }
+        log.LogInformation("Açıklık kuralı silindi: {Id} ({User})", id, user);
+        lock (_gate) _kayitli = null;
+        return var;
+    }
+
+    // ---------------- AI ile kural doldurma ----------------
+    // Kullanıcı: "CVE'nin bir bölümünü yapıştırsak hangi process'lerin aranması gerektiğini önerse". AI yalnız FORMU doldurur, tarama başlatmaz.
+    // Doğrulama kodda: sürüm / önlem metinde birebir geçmiyorsa atılır; exe adları servis imzası kaydındaki gerçek exe'lerle sayılır
+    // (kaç sunucuda görüldü); ayrıca küçük ürün → exe sözlüğü ve ürün adının exe yollarında geçtiği süreçler (envanter) öneriye eklenir.
+    static readonly (string Desen, string[] Exeler, string? Not)[] UrunExe =
+    [
+        (@"\b(openjdk|java se|jdk|jre|java runtime|hotspot)\b", ["java", "javaw"], null),
+        (@"\btomcat\b", ["tomcat*", "java"], "Windows'ta Tomcat servisi tomcatN.exe içinde JVM çalıştırır"),
+        (@"\b(jboss|wildfly|weblogic|websphere|jetty|glassfish|payara|elasticsearch|logstash|kafka|zookeeper|jenkins|keycloak|solr|cassandra|activemq|confluence|jira|bitbucket)\b", ["java"], "Java tabanlı ürün"),
+        (@"\blog4j\b", ["java", "javaw", "tomcat*"], "log4j bir Java kütüphanesi: onu kullanan Java süreçleri"),
+        (@"\bspring\b", ["java"], "Spring bir Java çatısı"),
+        (@"\bnginx\b", ["nginx"], null),
+        (@"\b(apache http server|httpd)\b", ["httpd", "apache2", "apache"], null),
+        (@"\bopenssl\b", ["httpd", "nginx", "openssl", "node"], "OpenSSL bir kütüphane: ayrı süreci yok, onu kullanan süreçler"),
+        (@"\bopenssh\b|\bsshd\b", ["sshd"], null),
+        (@"\b(sql server|mssql)\b", ["sqlservr"], null),
+        (@"\boracle database\b", ["oracle", "tnslsnr"], null),
+        (@"\bpostgres(ql)?\b", ["postgres"], null),
+        (@"\bmysql\b|\bmariadb\b", ["mysqld", "mariadbd"], null),
+        (@"\bmongodb\b", ["mongod"], null),
+        (@"\bredis\b", ["redis-server"], null),
+        (@"\bexchange\b", ["w3wp", "msexchange*"], null),
+        (@"\bsharepoint\b", ["w3wp"], null),
+        (@"\b(iis|internet information services)\b", ["w3wp"], null),
+        (@"\b(asp\.net core|\.net core|\.net [5-9])\b", ["dotnet", "w3wp"], null),
+        (@"\bnode\.?js\b", ["node"], null),
+        (@"\bpython\b", ["python", "python3"], null),
+        (@"\bphp\b", ["php", "php-cgi"], null),
+        (@"\brabbitmq\b", ["erl"], null),
+        (@"\bvmware tools\b", ["vmtoolsd"], null),
+        (@"\bsamba\b", ["smbd"], null),
+        (@"\bbind\b", ["named"], null),
+    ];
+    static readonly HashSet<string> GenelUrunKelime = new(StringComparer.OrdinalIgnoreCase)
+    { "server", "servers", "service", "services", "microsoft", "oracle", "apache", "windows", "linux", "edition", "enterprise", "standard", "client", "agent",
+      "version", "versions", "software", "foundation", "community", "platform", "framework", "runtime", "openjdk", "java", "library", "remote", "code", "execution" };
+
+    (ImzaTarama T, Dictionary<string, (HashSet<string> Ip, List<string> Yol)> Idx)? _exeIdx;
+    async Task<(Dictionary<string, (HashSet<string> Ip, List<string> Yol)> Idx, DateTime? Tarih)> ExeIndexAsync(CancellationToken ct)
+    {
+        ImzaTarama? t = null;
+        try { t = await imza.TaramaAsync(ct); } catch (Exception ex) when (ex is not OperationCanceledException) { log.LogWarning("Açıklık AI: servis imzası okunamadı: {H}", ex.Message); }
+        if (t == null) return ([], null);
+        lock (_gate) if (_exeIdx is { } e && ReferenceEquals(e.T, t)) return (e.Idx, t.Baslangic);
+        var idx = new Dictionary<string, (HashSet<string> Ip, List<string> Yol)>();
+        void Ekle(string ip, string yol)
+        {
+            string ad = ExeAd0(ExeAd(yol));
+            if (ad.Length == 0) return;
+            if (!idx.TryGetValue(ad, out var v)) idx[ad] = v = ([], []);
+            v.Ip.Add(ip);
+            if (v.Yol.Count < 400 && !v.Yol.Contains(yol, StringComparer.OrdinalIgnoreCase)) v.Yol.Add(yol);
+        }
+        foreach (var sv in t.Sunucular)
+        {
+            foreach (var p in sv.Gelen) Ekle(sv.Ip, p.Yol);
+            foreach (var y in sv.Giden) Ekle(sv.Ip, y);
+        }
+        lock (_gate) _exeIdx = (t, idx);
+        return (idx, t.Baslangic);
+    }
+
+    static (int Sunucu, List<string> Ornek) Say(Dictionary<string, (HashSet<string> Ip, List<string> Yol)> idx, string exe)
+    {
+        var rx = new Regex("^" + Regex.Escape(exe).Replace(@"\*", "[a-z0-9_.-]*") + "$");
+        var ips = new HashSet<string>(); var orn = new List<string>();
+        foreach (var (ad, v) in idx)
+            if (rx.IsMatch(ad)) { ips.UnionWith(v.Ip); orn.AddRange(v.Yol.Take(2)); }
+        return (ips.Count, orn.Distinct(StringComparer.OrdinalIgnoreCase).Take(3).ToList());
+    }
+
+    static bool MetindeVar(string metin, string v) =>
+        Regex.IsMatch(metin, @"(?<![\d.])" + Regex.Replace(Regex.Escape(v), @"\\\.|_", "[._]") + @"(?![\d])");
+
+    public async Task<ZfAiSonuc> AiDoldurAsync(string metin, CancellationToken ct)
+    {
+        metin = (metin ?? "").Trim();
+        if (metin.Length < 30) throw new ArgumentException("CVE metni çok kısa; duyurunun açıklama ve etkilenen sürümler bölümünü yapıştırın.");
+        int max = Math.Clamp(cfg.GetValue("Zafiyet:AiMaxKarakter", 8000), 1000, 30000);
+        if (metin.Length > max) metin = metin[..max];
+        string prompt = $$"""
+            Aşağıda bir güvenlik açığı (CVE) duyurusundan bir bölüm var. Görevin: kurum sunucularındaki Carbon Black süreç (process) kayıtlarında bu açıktan
+            etkilenebilecek SÜREÇLERİ aramak için bir arama kuralı çıkarmak.
+            YALNIZ şu JSON nesnesini döndür (yorum, açıklama, markdown yok):
+            {"urun": "...", "cve": "CVE-....", "ozet": "Türkçe 1-2 cümle: açık ne, ne zaman etkiler", "kutuphane": false, "kutuphaneNot": "",
+             "exeler": [{"ad": "...", "neden": "..."}], "araliklar": [{"ana": 17, "min": "17.0.6", "duzeltilmis": "17.0.21.1"}],
+             "digerAnaSurumler": "etkilenen | etkilenmez | bilinmiyor", "onlem": ["..."]}
+            Kurallar:
+            - exeler: Windows ve Linux'ta bu ürünü çalıştıran sürecin DOSYA ADI, .exe olmadan, küçük harf (ör. java, javaw, httpd, apache2, nginx, sqlservr, w3wp, tomcat9).
+              Joker * kullanılabilir (tomcat*). Emin olmadığın adı yazma. svchost, explorer gibi genel adları yazma.
+            - Açık bir KÜTÜPHANEDE ya da çalışma ortamı bileşenindeyse (OpenSSL, log4j, zlib, glibc, Java'nın bir sınıfı…): kutuphane=true; exeler'e o kütüphaneyi
+              kullanan bilinen süreçleri yaz; kutuphaneNot'ta kısaca açıkla.
+            - araliklar: YALNIZ metinde geçen sürüm numaralarını HARFİ HARFİNE yaz; metinde yoksa boş dizi. Tahmin etme. min = etkilenen ilk sürüm, duzeltilmis = düzeltmeyi
+              içeren ilk sürüm. Birden çok ana sürüm dalı varsa (17, 21, 25…) her dal ayrı satır, "ana" alanı o dalın numarası; tek dal varsa ana null.
+            - digerAnaSurumler: listede olmayan diğer (daha yeni / desteği bitmiş) ana sürümler metne göre etkileniyorsa "etkilenen", etkilenmiyorsa "etkilenmez", bilinmiyorsa "bilinmiyor".
+            - onlem: metinde geçen geçici önlemin süreç KOMUT SATIRINDA görülebilecek parametreleri, harfi harfine (ör. -XX:-UseBASE64Intrinsics, -Dlog4j2.formatMsgNoLookups=true).
+              Komut satırında görünmeyen önlemler (yama, güvenlik duvarı, ayar dosyası) yazılmaz. Yoksa boş dizi.
+            METİN:
+            {{metin}}
+            """;
+        string cevap = await islev.ChatAsync(prompt, ct);
+        if (IslevService.ExtractJson(cevap) is not { } j || j.ValueKind != System.Text.Json.JsonValueKind.Object)
+            throw new InvalidOperationException("AI cevabı JSON değil: " + (cevap.Length > 200 ? cevap[..200] + "…" : cevap));
+
+        var uyari = new List<string>();
+        string? urun = IslevService.Str(j, "urun"), cve = IslevService.Str(j, "cve"), ozet = IslevService.Str(j, "ozet");
+        if (cve != null && !metin.Contains(cve, StringComparison.OrdinalIgnoreCase)) { uyari.Add($"AI'ın yazdığı CVE ({cve}) metinde geçmiyor, alınmadı."); cve = null; }
+        cve ??= Regex.Match(metin, @"CVE-\d{4}-\d{4,}", RegexOptions.IgnoreCase) is { Success: true } cm ? cm.Value.ToUpperInvariant() : null;
+        bool kut = IslevService.Prop(j, "kutuphane") is { ValueKind: System.Text.Json.JsonValueKind.True };
+        string? kutNot = IslevService.Str(j, "kutuphaneNot");
+
+        // Sürüm aralıkları: metinde birebir geçmeyen sürüm atılır
+        var ar = new List<ZfAralik>();
+        if (IslevService.Prop(j, "araliklar") is { ValueKind: System.Text.Json.JsonValueKind.Array } aa)
+            foreach (var a in aa.EnumerateArray())
+            {
+                string? min = IslevService.Str(a, "min"), fix = IslevService.Str(a, "duzeltilmis");
+                foreach (var (ad, v) in new[] { ("etkilenen ilk", min), ("düzeltilmiş", fix) })
+                    if (v != null && (!Regex.IsMatch(v, @"^\d+([._\-+]\d+)*$") || !MetindeVar(metin, v)))
+                    {
+                        uyari.Add($"AI'ın {ad} sürümü \"{v}\" metinde birebir geçmiyor, alınmadı — kontrol edip elle girin.");
+                        if (ad == "etkilenen ilk") min = null; else fix = null;
+                    }
+                int? ana = IslevService.Prop(a, "ana") is { ValueKind: System.Text.Json.JsonValueKind.Number } an && an.TryGetInt32(out int ai) ? ai : null;
+                if (min != null || fix != null) ar.Add(new ZfAralik(ana, min, fix));
+            }
+        if (ar.Count > 1)   // birden çok dal: ana numarası sürümden (Java'da 1.8 → 8)
+            ar = ar.Select(a => a.Ana != null ? a : a with { Ana = (a.Duzeltilmis ?? a.Min) is { } v && Parca(v) is { Count: > 0 } pp ? (pp[0] == 1 && pp.Count > 1 ? pp[1] : pp[0]) : null }).ToList();
+        else if (ar.Count == 1 && ar[0].Ana != null && IslevService.Str(j, "digerAnaSurumler") is not "etkilenen") ar[0] = ar[0] with { Ana = null };
+        if (ar.Count == 0) uyari.Add("Metinden sürüm aralığı çıkmadı: tarama yalnız nerede çalıştığını listeler (sürüm değerlendirmesi için aralığı elle girin).");
+        bool diger = IslevService.Str(j, "digerAnaSurumler")?.StartsWith("etkilenen", StringComparison.OrdinalIgnoreCase) == true;
+
+        var onlem = new List<string>();
+        if (IslevService.Prop(j, "onlem") is { ValueKind: System.Text.Json.JsonValueKind.Array } oa)
+            foreach (var o in oa.EnumerateArray())
+                if (o.ValueKind == System.Text.Json.JsonValueKind.String && o.GetString()?.Trim() is { Length: >= 3 } ov)
+                {
+                    if (metin.Contains(ov, StringComparison.OrdinalIgnoreCase)) onlem.Add(ov);
+                    else uyari.Add($"AI'ın önlem parametresi \"{ov}\" metinde geçmiyor, alınmadı.");
+                }
+
+        // Exe önerileri: AI + sözlük + envanter (ürün adı exe yolunda)
+        var (idx, envTarih) = await ExeIndexAsync(ct);
+        var exe = new List<(string Ad, string? Neden, string Kaynak)>();
+        void Oner(string ad, string? neden, string kaynak)
+        {
+            ad = ExeAd0(ad);
+            if (!Regex.IsMatch(ad, @"^[a-z0-9_.\-*]+$") || ad.Trim('*').Length < 3) return;
+            if (exe.Any(e => e.Ad == ad)) return;
+            exe.Add((ad, neden, kaynak));
+        }
+        if (IslevService.Prop(j, "exeler") is { ValueKind: System.Text.Json.JsonValueKind.Array } ea)
+            foreach (var e in ea.EnumerateArray())
+                if (e.ValueKind == System.Text.Json.JsonValueKind.String) Oner(e.GetString()!, null, "AI");
+                else if (IslevService.Str(e, "ad") is { } ad) Oner(ad, IslevService.Str(e, "neden"), "AI");
+        string bakilan = ((urun ?? "") + " " + (metin.Length > 1500 ? metin[..1500] : metin)).ToLowerInvariant();
+        foreach (var (desen, exeler, not) in UrunExe)
+            if (Regex.IsMatch(bakilan, desen)) foreach (var e in exeler) Oner(e, not ?? "ürün → süreç sözlüğü", "sözlük");
+        if (urun != null && idx.Count > 0)
+        {
+            var kelimeler = Regex.Split(urun.ToLowerInvariant(), "[^a-z0-9]+").Where(w => w.Length >= 4 && !GenelUrunKelime.Contains(w)).Distinct().Take(4).ToList();
+            foreach (var w in kelimeler)
+                foreach (var (ad, v) in idx.Where(x => x.Key.Contains(w) || x.Value.Yol.Any(y => y.ToLowerInvariant().Contains(w)))
+                    .Where(x => !imza.Gereksiz(x.Value.Yol[0])).OrderByDescending(x => x.Value.Ip.Count).Take(6))
+                    Oner(ad, $"envanterde exe adında / yolunda '{w}' geçiyor", "envanter");
+        }
+        var exeSon = exe.Select(e => { var (n, o) = Say(idx, e.Ad); return new ZfAiExe(e.Ad, e.Neden, e.Kaynak, n, o); }).ToList();
+        if (idx.Count == 0) uyari.Add("Servis imzası kaydı yok: önerilen exe adları envanterle doğrulanamadı (kaç sunucuda görüldüğü bilinmiyor).");
+        else foreach (var e in exeSon.Where(e => e.Sunucu == 0 && e.Kaynak == "AI"))
+            uyari.Add($"\"{e.Ad}\" servis imzası kaydında hiç görülmedi — adı doğrulayın (Linux sunucuları ya da kayıtta olmayan sunucular olabilir).");
+        if (exeSon.Count == 0) uyari.Add("AI süreç adı önermedi; exe adını elle girin.");
+        return new ZfAiSonuc(urun, cve, ozet, kut, kutNot, exeSon, ar, onlem, diger, uyari, envTarih?.ToString("dd.MM.yyyy HH:mm"));
     }
 }

@@ -419,11 +419,11 @@ app.MapGet("/api/erisim", async (string? src, string? dst, string? port, string?
 });
 
 // Açıklık taraması (Zafiyet.cs, wwwroot/zafiyet.html): kurala (ya da anlık exe listesine) uyan süreçler tüm sunucularda (Carbon Black, toplu)
-app.MapGet("/api/zafiyet", (ZafiyetService z) => Results.Ok(z.Sonuc()));
-app.MapPost("/api/zafiyet/tara", (ZafiyetIstek? req, HttpContext ctx, IConfiguration cfg, ZafiyetService z) =>
+app.MapGet("/api/zafiyet", async (ZafiyetService z, CancellationToken ct) => Results.Ok(await z.SonucAsync(ct)));
+app.MapPost("/api/zafiyet/tara", async (ZafiyetIstek? req, HttpContext ctx, IConfiguration cfg, ZafiyetService z, CancellationToken ct) =>
 {
     if (!Yetki.Var(cfg, ctx, Yetki.Topoloji)) return Yetki.Red(ctx, "Açıklık taraması");
-    var k = z.KuralBul(req ?? new ZafiyetIstek(null, null, null, null, null, null), out var hata);
+    var (k, hata) = await z.KuralBulAsync(req ?? new ZafiyetIstek(null, null, null), ct);
     if (k == null) return Results.BadRequest(new { error = hata });
     return Results.Ok(z.Baslat(k, req?.Saat ?? 0, ctx.User?.Identity?.Name));
 });
@@ -431,6 +431,25 @@ app.MapPost("/api/zafiyet/durdur", (HttpContext ctx, IConfiguration cfg, Zafiyet
 {
     if (!Yetki.Var(cfg, ctx, Yetki.Topoloji)) return Yetki.Red(ctx, "Açıklık taraması");
     z.Durdur(); return Results.Ok();
+});
+// CVE metninden AI ile kural önerisi (yalnız form doldurur; tarama başlatmaz)
+app.MapPost("/api/zafiyet/ai", async (ZafiyetAiIstek req, HttpContext ctx, IConfiguration cfg, ZafiyetService z, CancellationToken ct) =>
+{
+    if (!Yetki.Var(cfg, ctx, Yetki.Topoloji)) return Yetki.Red(ctx, "Açıklık taraması");
+    try { return Results.Ok(await z.AiDoldurAsync(req.Metin ?? "", ct)); }
+    catch (ArgumentException ex) { return Results.BadRequest(new { error = ex.Message }); }
+    catch (Exception ex) when (ex is not OperationCanceledException) { return Results.Json(new { error = ex.Message }, statusCode: 502); }
+});
+app.MapPost("/api/zafiyet/kural", async (ZfOzel req, HttpContext ctx, IConfiguration cfg, ZafiyetService z, CancellationToken ct) =>
+{
+    if (!Yetki.Var(cfg, ctx, Yetki.Topoloji)) return Yetki.Red(ctx, "Açıklık kuralı kaydetme");
+    var (k, hata) = await z.KaydetAsync(req, ctx.User?.Identity?.Name, ct);
+    return k == null ? Results.BadRequest(new { error = hata }) : Results.Ok(k);
+});
+app.MapDelete("/api/zafiyet/kural/{id}", async (string id, HttpContext ctx, IConfiguration cfg, ZafiyetService z, CancellationToken ct) =>
+{
+    if (!Yetki.Var(cfg, ctx, Yetki.Topoloji)) return Yetki.Red(ctx, "Açıklık kuralı silme");
+    return await z.SilAsync(id, ctx.User?.Identity?.Name, ct) ? Results.Ok() : Results.NotFound(new { error = "Kayıtlı kural bulunamadı (yerleşik / ayardaki kurallar silinemez)." });
 });
 
 // Opinnate tanı: rule-checker ve /devices ham yanıtları (düz metin; token / şifre yazılmaz)

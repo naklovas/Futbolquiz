@@ -1004,6 +1004,18 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
   Arayüz: kural / "Süreç adıyla ara" modu, ilerleme bandı (3 sn), uyarılar, öncelik + durum kartları (tıkla süz), arama / durum / kurum / yalnız dinleyen / test,
   tablo (sunucu, ERT uygulaması + muhafız, süreç + ürün + yol, sürüm + durum, portlar (🌐 dış, ⇄VIP), giden, önlem, son görülme, kaynak), satıra tıkla → sağ panel
   (komut satırı dahil), CSV (Yetki:Disari). Sürüm / kural mantığı yansıma testiyle, arayüz Playwright + mock'la denendi; gerçek Splunk'ta denenmedi.
+  AI İLE DOLDURMA + KAYITLI KURAL (kullanıcı: "CVE'nin bir bölümünü yapıştırsak hangi process'lerin aranacağını önerse"): "Süreç adıyla ara" formunda CVE metni →
+  POST `/api/zafiyet/ai {metin}` (`AiDoldurAsync`, `IslevService.ChatAsync`, metin `Zafiyet:AiMaxKarakter`=8000) → {urun, cve, ozet, kutuphane, exeler [{ad, neden,
+  kaynak AI | sözlük | envanter, sunucu, ornek}], araliklar, onlem, digerEtkilenir, uyarilar}. AI yalnız FORMU doldurur, tarama başlatmaz. Kodda doğrulama: sürüm ve
+  önlem metinde birebir geçmiyorsa atılır (`MetindeVar`), CVE metinde yoksa metindeki ilk CVE; exe adları servis imzası kaydındaki exe'lerle sayılır (`ExeIndexAsync`,
+  kaç sunucuda görüldü, örnek yol), görülmeyen AI adı uyarı; ek öneriler: `UrunExe` ürün → süreç sözlüğü (Tomcat, log4j, OpenSSL, nginx, httpd, SQL Server, Exchange…)
+  ve ürün adının ayırt edici kelimesi envanterdeki exe adında / yolunda geçen süreçler (genel / ajan hariç, `ServisImzaService.Gereksiz` public yapıldı). Tek aralıkta
+  Ana boşaltılır, çoklu aralıkta Ana sürümden türetilir. Arayüzde öneri çipleri (işaretli = AI ve görülen sözlük; envanter önerisi işaretsiz), düzenlenebilir aralık
+  tablosu (ana / etkilenen ilk / düzeltilmiş, + aralık), önlem (düz metin, regex'e kaçışlanır), "aralıkta olmayan ana sürümler" seçimi. İstek artık
+  `ZafiyetIstek {saat, kural | ozel: ZfOzel}`. KAYIT: POST `/api/zafiyet/kural` (ZfOzel; Id = CVE / addan slug), DELETE `/api/zafiyet/kural/{id}` (Yetki:Topoloji);
+  tablo `Zafiyet:KuralTablosu` dbo.DF_ZAFIYET_KURAL (`sql/zafiyet_kural.sql`: ID, KURAL JSON, TARIH, KAYDEDEN; yoksa / yazılamazsa bellekte + uyarı), 5 dk önbellek;
+  kural listesi = kayıtlı + ayar / yerleşik (aynı Id'de kayıtlı geçerli). "✎ Kopyala / düzenle" hazır kuralı forma alır, "🗑 Sil" yalnız kayıtlıda. Sahte AI ile backend
+  (uydurma sürüm / önlem atıldı), mock'la arayüz denendi.
 - **VIP**: sorgulanan IP VIP ise üyeler + GW'ler aynı sorguya eklenir, üyeler "VIP ÜYESİ" (GW→üye trafiği varsa ✓).
   Gidilen IP VIP ise "VIP → n ÜYE"; gelen IP LB GW ise "LB GW"; sorgulanan sunucu havuz üyesiyse VIP kartı.
 - **Uygulama görünümü** (`/api/apps`, `/api/app`): `[kullanan uygulamalar] → [UYGULAMA: VIP'ler + segment grupları] → [bağımlı olunanlar]`,

@@ -102,6 +102,16 @@
   .drawer dl { display: grid; grid-template-columns: 150px 1fr; gap: 6px 12px; margin: 0; }
   .drawer dt { color: var(--muted); } .drawer dd { margin: 0; word-break: break-word; }
   .drawer pre { white-space: pre-wrap; word-break: break-all; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; font-size: 12px; margin: 4px 0 0; }
+  textarea { font: inherit; color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; width: 100%; resize: vertical; font-size: 12.5px; }
+  .aibox { border: 1px dashed var(--line); border-radius: 10px; padding: 10px 12px; margin-bottom: 10px; display: grid; gap: 8px; background: var(--bg); }
+  label.blk { display: grid; gap: 4px; font-size: 12px; color: var(--muted); }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip { display: inline-flex; gap: 6px; align-items: center; border: 1px solid var(--line); border-radius: 999px; padding: 3px 10px; font-size: 12.5px; background: var(--panel); cursor: pointer; }
+  .chip.yok { border-style: dashed; color: var(--muted); }
+  .chip b { font-family: Consolas, ui-monospace, monospace; }
+  .chip .k { font-size: 10.5px; color: var(--muted); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; }
+  .arl { margin: 10px 0; display: grid; gap: 6px; justify-items: start; }
+  table.mini { width: auto; } table.mini th { position: static; padding: 4px 8px; } table.mini td { padding: 3px 6px; border: none; } table.mini input { width: 150px; padding: 4px 8px; }
   @media (max-width: 700px) { main { padding: 12px 16px 30px; } .drawer dl { grid-template-columns: 1fr; } }
 </style>
 </head>
@@ -122,12 +132,31 @@
     </div>
     <div class="row" id="kuralRow">
       <label>Kural<select id="kural" style="min-width:380px"></select></label>
+      <button type="button" id="duzenle" title="Bu kuralı 'Süreç adıyla ara' formuna kopyala (değiştirip tarayabilir ya da yeni kural olarak kaydedebilirsiniz)">✎ Kopyala / düzenle</button>
+      <button type="button" id="sil" hidden title="Kayıtlı kuralı sil">🗑 Sil</button>
     </div>
-    <div class="row" id="anlikRow" hidden>
-      <label>Exe adları (virgülle; * joker)<input id="exeler" placeholder="ör. nginx, httpd, openssl, tomcat*" style="min-width:300px"></label>
-      <label title="Boş bırakılırsa sürüm değerlendirmesi yapılmaz, yalnız nerede çalıştığı ve maruziyeti listelenir">Etkilenen ilk sürüm (isteğe bağlı)<input id="min" placeholder="ör. 1.20.0" style="width:150px"></label>
-      <label title="Bu sürüm ve sonrası yamalı sayılır">Düzeltilmiş sürüm (isteğe bağlı)<input id="fix" placeholder="ör. 1.24.1" style="width:150px"></label>
-      <label>Ad (isteğe bağlı)<input id="ad" placeholder="ör. CVE-2026-xxxx nginx" style="width:220px"></label>
+    <div id="anlikRow" hidden>
+      <div class="aibox">
+        <label class="blk">CVE duyurusu — açıklama ve etkilenen / düzeltilmiş sürümler bölümünü yapıştırın (isteğe bağlı)
+          <textarea id="cveMetin" rows="5" placeholder="ör. A heap buffer overflow in the Base64 decoder of OpenJDK 17.0.6 and later … Fixed in 17.0.21.1, 21.0.13.1 …"></textarea></label>
+        <div class="row"><button type="button" id="aiDoldur">🤖 AI ile doldur</button><span class="sub" id="aiDurum">AI yalnız aşağıdaki alanları doldurur; kontrol edip taramayı siz başlatırsınız.</span></div>
+        <div id="aiSonuc"></div>
+      </div>
+      <div class="row">
+        <label>Ad<input id="ad" placeholder="ör. nginx bellek taşması" style="width:240px"></label>
+        <label>CVE<input id="cve" placeholder="CVE-2026-…" style="width:170px"></label>
+        <label>Exe adları (virgülle; * joker; .exe gerekmez)<input id="exeler" placeholder="ör. nginx, httpd, tomcat*" style="min-width:340px"></label>
+      </div>
+      <div class="arl">
+        <div class="sub">Sürüm aralıkları — boş bırakılırsa sürüm değerlendirilmez, yalnız nerede çalıştığı ve maruziyeti listelenir. Birden çok dal varsa (Java 17 / 21…) "Ana sürüm" doldurun.</div>
+        <table class="mini"><thead><tr><th>Ana sürüm</th><th>Etkilenen ilk sürüm</th><th>Düzeltilmiş sürüm</th><th></th></tr></thead><tbody id="arTb"></tbody></table>
+        <button type="button" id="arEkle">+ aralık</button>
+      </div>
+      <div class="row">
+        <label>Geçici önlem — komut satırında aranacak parametreler (virgülle)<input id="onlem" placeholder="ör. -XX:-UseBASE64Intrinsics" style="min-width:340px"></label>
+        <label title="Aralık tablosunda olmayan ana sürümler (ör. desteği bitmiş 18, 19, 20)">Aralıkta olmayan ana sürümler<select id="diger"><option value="0">etkilenmez say</option><option value="1">etkilenen say (destek dışı)</option></select></label>
+        <button type="button" id="kaydet" title="Bu formu hazır kural olarak kaydet (DF_ZAFIYET_KURAL)">💾 Kural olarak kaydet</button>
+      </div>
     </div>
     <div class="row" style="margin-top:10px">
       <label>Ağ olayı penceresi<select id="saat"><option value="24">Son 24 saat</option><option value="72">Son 72 saat</option><option value="168">Son 7 gün</option></select></label>
@@ -173,7 +202,7 @@ const ONC_IPUCU = {
   dusuk: "Etkilenmez / yamalı ya da sürüm bilinmiyor ve port dinlemiyor"
 };
 const DUR = { etkilenen: "etkilenen", olasi: "olası", yamali: "yamalı", etkilenmez: "etkilenmez", bilinmiyor: "sürüm bilinmiyor", bilgi: "değerlendirilmedi" };
-const st = { onlemF: false, mod: "kural", veri: null, yetki: {}, onc: "", limit: 500, sec: null, timer: null };
+const st = { ar: [{ ana: "", min: "", duzeltilmis: "" }], ai: null, onlemF: false, mod: "kural", veri: null, yetki: {}, onc: "", limit: 500, sec: null, timer: null };
 
 function kuralAciklama(k) {
   if (!k) return "";
@@ -184,14 +213,98 @@ function kuralAciklama(k) {
     + (k.onlemNot ? `<br>Geçici önlem (komut satırında aranır): <span class="mono">${esc(k.onlemNot)}</span>` : "");
 }
 
+function arCiz() {
+  if (!st.ar.length) st.ar.push({ ana: "", min: "", duzeltilmis: "" });
+  $("#arTb").innerHTML = st.ar.map((a, i) => `<tr>
+    <td><input data-ar="${i}" data-k="ana" value="${esc(a.ana ?? "")}" placeholder="ör. 17" style="width:80px"></td>
+    <td><input data-ar="${i}" data-k="min" value="${esc(a.min ?? "")}" placeholder="ör. 17.0.6"></td>
+    <td><input data-ar="${i}" data-k="duzeltilmis" value="${esc(a.duzeltilmis ?? "")}" placeholder="ör. 17.0.21.1"></td>
+    <td><button type="button" data-arsil="${i}" title="Satırı sil">×</button></td></tr>`).join("");
+}
+
+function ozel() {
+  return { ad: $("#ad").value.trim(), cve: $("#cve").value.trim(), aciklama: st.ai?.ozet || null, exeler: $("#exeler").value.trim(),
+    araliklar: st.ar.filter(a => String(a.min || a.duzeltilmis || "").trim()).map(a => ({ ana: String(a.ana ?? "").trim() === "" ? null : +a.ana, min: String(a.min || "").trim() || null, duzeltilmis: String(a.duzeltilmis || "").trim() || null })),
+    onlem: $("#onlem").value.trim(), digerEtkilenir: $("#diger").value === "1" };
+}
+
+function aiCiz() {
+  const a = st.ai;
+  if (!a) { $("#aiSonuc").innerHTML = ""; return; }
+  const kaynakAd = { AI: "AI", "sözlük": "sözlük", envanter: "envanter" };
+  $("#aiSonuc").innerHTML = `<div class="small">${a.urun ? `<b>${esc(a.urun)}</b>` : ""}${a.cve ? " · " + esc(a.cve) : ""}${a.ozet ? `<div>${esc(a.ozet)}</div>` : ""}
+      ${a.kutuphane ? `<div style="color:var(--warn)">📚 Kütüphane açığı: ${esc(a.kutuphaneNot || "ayrı süreci yok, onu kullanan süreçler aranır")}</div>` : ""}</div>
+    <div class="sub">Önerilen süreçler — işaretliler "Exe adları"na yazılır. Sayı: servis imzası kaydında${a.envanterTarihi ? " (" + esc(a.envanterTarihi) + ")" : ""} bu exe'nin görüldüğü sunucu.</div>
+    <div class="chips">${a.exeler.map((e, i) => `<label class="chip ${e.sunucu ? "" : "yok"}" title="${esc([e.neden, ...(e.ornek || [])].filter(Boolean).join("\n"))}">
+      <input type="checkbox" data-aiexe="${i}" ${e.sec ? "checked" : ""}><b>${esc(e.ad)}</b>${e.sunucu ? `${e.sunucu} sunucu` : "görülmedi"}<span class="k">${kaynakAd[e.kaynak] || esc(e.kaynak)}</span></label>`).join("") || '<span class="muted small">öneri yok</span>'}</div>
+    ${a.uyarilar?.length ? `<div class="warn">${a.uyarilar.map(u => `<div>${esc(u)}</div>`).join("")}</div>` : ""}`;
+}
+
+function aiExeYaz() { $("#exeler").value = (st.ai?.exeler || []).filter(e => e.sec).map(e => e.ad).join(", "); }
+
+async function aiDoldur() {
+  const metin = $("#cveMetin").value.trim();
+  if (metin.length < 30) { alert("CVE duyurusunun açıklama ve sürüm bölümünü yapıştırın."); return; }
+  $("#aiDoldur").disabled = true; $("#aiDurum").innerHTML = '<span class="spinner"></span> AI metni okuyor (bir dakika sürebilir)…';
+  try {
+    const r = await fetch("api/zafiyet/ai", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ metin }) });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.error || "HTTP " + r.status);
+    j.exeler.forEach(e => e.sec = e.kaynak === "AI" || (e.kaynak === "sözlük" && e.sunucu > 0));
+    st.ai = j;
+    if (j.cve) $("#cve").value = j.cve;
+    if (j.urun && !$("#ad").value.trim()) $("#ad").value = j.urun;
+    aiExeYaz();
+    st.ar = j.araliklar.length ? j.araliklar.map(a => ({ ana: a.ana ?? "", min: a.min ?? "", duzeltilmis: a.duzeltilmis ?? "" })) : [{ ana: "", min: "", duzeltilmis: "" }];
+    arCiz();
+    $("#onlem").value = (j.onlem || []).join(", ");
+    $("#diger").value = j.digerEtkilenir ? "1" : "0";
+    $("#aiDurum").textContent = "Doldurdu — alanları kontrol edin, gerekirse düzeltin, sonra taramayı başlatın.";
+  } catch (e) { $("#aiDurum").innerHTML = `<span style="color:var(--err)">AI: ${esc(e.message)}</span>`; }
+  finally { $("#aiDoldur").disabled = !st.yetki.topoloji; }
+  aiCiz();
+}
+
+function kuralKopyala() {
+  const k = seciliKural(); if (!k) return;
+  st.mod = "anlik"; st.ai = null; aiCiz();
+  $("#ad").value = k.ad || ""; $("#cve").value = k.cve || ""; $("#exeler").value = (k.exeler || []).join(", ");
+  st.ar = (k.araliklar || []).map(a => ({ ana: a.ana ?? "", min: a.min ?? "", duzeltilmis: a.duzeltilmis ?? "" }));
+  arCiz();
+  $("#onlem").value = k.onlemNot || "";
+  $("#diger").value = k.destekDisiEtkilenir && k.anaMin != null ? "1" : "0";
+  formCiz();
+}
+
+async function kaydet() {
+  const o = ozel();
+  if (!o.exeler) { alert("Exe adı yazın."); return; }
+  if (!o.ad && !o.cve) { alert("Kurala bir ad ya da CVE verin."); return; }
+  const r = await fetch("api/zafiyet/kural", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(o) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) { alert(j.error || "HTTP " + r.status); return; }
+  await yukle();
+  $("#kural").value = j.id; st.mod = "kural"; formCiz();
+}
+
+async function sil() {
+  const k = seciliKural(); if (!k || !confirm(`"${k.ad}" kuralı silinsin mi?`)) return;
+  const r = await fetch("api/zafiyet/kural/" + encodeURIComponent(k.id), { method: "DELETE" });
+  if (!r.ok) { const j = await r.json().catch(() => ({})); alert(j.error || "HTTP " + r.status); }
+  $("#kural").value = ""; yukle();
+}
+
 function seciliKural() { return (st.veri?.kurallar || []).find(k => k.id === $("#kural").value); }
 
 function formCiz() {
   $("#kuralRow").hidden = st.mod !== "kural";
   $("#anlikRow").hidden = st.mod !== "anlik";
   document.querySelectorAll("[data-mod]").forEach(b => b.classList.toggle("on", b.dataset.mod === st.mod));
-  $("#desc").innerHTML = st.mod === "kural" ? kuralAciklama(seciliKural())
-    : "Exe adını yazın (\".exe\" gerekmez, Linux süreçleri de bulunur). Sürüm aralığı verirseniz yoldan / komut satırından okunan sürüm değerlendirilir; vermezseniz yalnız nerede çalıştığı, hangi portu dinlediği ve dışarıya açık olup olmadığı listelenir.";
+  const k = seciliKural();
+  $("#sil").hidden = !(k?.kaynak || "").startsWith("kayıtlı") || !st.yetki.topoloji;
+  $("#kaydet").disabled = $("#aiDoldur").disabled = !st.yetki.topoloji;
+  $("#desc").innerHTML = st.mod === "kural" ? kuralAciklama(k) + (k?.kaynak ? `<br><span class="small">Kaynak: ${esc(k.kaynak)}${k.kaydeden ? " · " + esc(k.kaydeden) : ""}${k.tarih ? " · " + esc(new Date(k.tarih).toLocaleString("tr-TR")) : ""}</span>` : "")
+    : "Exe adını yazın (\".exe\" gerekmez, Linux süreçleri de bulunur) ya da CVE duyurusunu yapıştırıp AI'a doldurtun. Sürüm aralığı verirseniz yoldan / komut satırından okunan sürüm değerlendirilir; vermezseniz yalnız nerede çalıştığı, hangi portu dinlediği ve dışarıya açık olup olmadığı listelenir.";
 }
 
 function runCiz() {
@@ -307,8 +420,8 @@ async function yukle() {
     st.veri = await r.json();
   } catch (e) { $("#run").innerHTML = `<div class="run err">${esc(e.message)}</div>`; return; }
   const ks = $("#kural"), sec = ks.value;
-  if (!ks.options.length || ks.options.length !== st.veri.kurallar.length)
-    ks.innerHTML = st.veri.kurallar.map(k => `<option value="${esc(k.id)}">${esc((k.cve ? k.cve + " · " : "") + k.ad)}</option>`).join("");
+  if (!ks.options.length || ks.options.length !== st.veri.kurallar.length || [...ks.options].some((o, i) => o.value !== st.veri.kurallar[i]?.id))
+    ks.innerHTML = st.veri.kurallar.map(k => `<option value="${esc(k.id)}">${esc((k.cve ? k.cve + " · " : "") + k.ad + ((k.kaynak || "").startsWith("kayıtlı") ? "  (kayıtlı)" : ""))}</option>`).join("");
   if (sec) ks.value = sec;
   formCiz(); runCiz(); uyariCiz(); ciz();
   clearTimeout(st.timer);
@@ -319,8 +432,8 @@ async function tara() {
   const body = { saat: +$("#saat").value };
   if (st.mod === "kural") body.kural = $("#kural").value;
   else {
-    body.exeler = $("#exeler").value.trim(); body.min = $("#min").value.trim(); body.duzeltilmis = $("#fix").value.trim(); body.ad = $("#ad").value.trim();
-    if (!body.exeler) { alert("Exe adı yazın."); return; }
+    body.ozel = ozel();
+    if (!body.ozel.exeler) { alert("Exe adı yazın."); return; }
   }
   const r = await fetch("api/zafiyet/tara", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
   if (!r.ok) { const j = await r.json().catch(() => ({})); alert(j.error || ("HTTP " + r.status)); return; }
@@ -356,6 +469,18 @@ document.addEventListener("click", e => {
 document.addEventListener("keydown", e => { if (e.key === "Escape") detay(null); });
 ["#q", "#durumF", "#kurumF", "#dinleyen", "#testG"].forEach(s => $(s).addEventListener(s === "#q" ? "input" : "change", () => { st.limit = 500; ciz(); }));
 $("#kural").addEventListener("change", formCiz);
+$("#aiDoldur").addEventListener("click", aiDoldur);
+$("#kaydet").addEventListener("click", kaydet);
+$("#sil").addEventListener("click", sil);
+$("#duzenle").addEventListener("click", kuralKopyala);
+$("#arEkle").addEventListener("click", () => { st.ar.push({ ana: "", min: "", duzeltilmis: "" }); arCiz(); });
+document.addEventListener("input", e => { const t = e.target.closest("[data-ar]"); if (t) st.ar[+t.dataset.ar][t.dataset.k] = t.value; });
+document.addEventListener("change", e => {
+  const c = e.target.closest("[data-aiexe]");
+  if (c) { st.ai.exeler[+c.dataset.aiexe].sec = c.checked; aiExeYaz(); }
+});
+document.addEventListener("click", e => { const b = e.target.closest("[data-arsil]"); if (b) { st.ar.splice(+b.dataset.arsil, 1); arCiz(); } });
+arCiz();
 $("#tara").addEventListener("click", tara);
 $("#durdur").addEventListener("click", () => fetch("api/zafiyet/durdur", { method: "POST" }).then(yukle));
 $("#more").addEventListener("click", () => { st.limit += 1000; ciz(); });
@@ -365,7 +490,7 @@ fetch("api/me").then(r => r.ok ? r.json() : null).then(me => {
   st.yetki = me?.yetki || {};
   $("#csv").hidden = !st.yetki.disari;
   $("#yetkiNot").textContent = st.yetki.topoloji ? "" : "Tarama başlatma yetkiniz yok (DokuPanel: Yetki:Topoloji); son taramanın sonucunu görebilirsiniz.";
-  runCiz();
+  runCiz(); formCiz();
 }).catch(() => {});
 yukle();
 </script>
