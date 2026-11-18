@@ -533,6 +533,11 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
   Tablo hücresi `tagGrup`: aynı kökün etiketleri TEK rozet ("IRAK › ALTYAPI · › BAGDAT › ACTIVE DIRECTORY"), her başlık `data-etag` (tıkla → `egPop` açılır pencere:
   yeni yol (datalist), "Bu sunucuda" / "Seçili N sunucuda" (POST /api/etiket {ekle: yeni, kaldir: eski}) / "Tüm sunucularda (N)" (egDuzenle → /api/etiket/duzenle
   önizlemeli), Enter / Esc), × ile kaldır. "Etiketleri düzenle" paneli yeniden "Etiket açıklamaları" (✎ kaldırıldı). Seçili hap okunur (`.eg-pill.on .eg-tag`).
+- **Segment getir'de MSY / ÇSY** (kullanıcı: "bir segment ERT'de hiç yok, sunucu gelmiyor; ÇSY envanterinde var, ERT'de olmayabilir, MSY ÇSY'den de gelmesi lazım"):
+  `SanalEnvanter` (Etiket.cs; işlev haritasıyla aynı tablolar `Islev:Tablolar:Msy` / `Csy`, SELECT * kolon adla, IP alanı virgül / boşlukla bölünür, `Etiket:SanalOnbellekDakika`=30),
+  GET `/api/etiket/sanal?cidr=a,b` → CIDR'a düşen VM'ler {ip, ad (VM / DNS), kaynak MSY | ÇSY, not (Annotation + klasör)}. etiket.js `egSegGetir`: ağ taraması hata verirse
+  (yetki / yok) CIDR'lar `egSegCidr` (segment listesi ya da yazılan CIDR) ile ERT + MSY / ÇSY yine gelir, bilgi satırında kırmızı uyarı; satırda sunucu adının yanında
+  kaynak ("ÇSY", "MSY", "ağda görüldü"), Uygulamalar hücresinde (ERT'de değilse) VM notu; bilgi satırında ÇSY / MSY sayıları. Etiketleri DF_ETIKET_EK'e (ERT dışı) yazılır.
 - **Etiketleme segment süzgecinde CIDR** (kullanıcı: "segmenti CIDR olarak filtreleyemiyoruz"): `EtiketService.SegmentUyar` — "a.b.c.d/n" (virgül / boşlukla birden çok)
   → IP aralıkta mı (segment kaydından bağımsız), "10.71.51." gibi IP öneki → IP / segment CIDR'ı bununla başlıyor mu, diğer metin → segment adı ya da CIDR'ında geçiyor mu.
   `EtiketSunucu.Cidr` (segment CIDR'ı), etiket.js segment hücresinde altta küçük CIDR, placeholder güncellendi.

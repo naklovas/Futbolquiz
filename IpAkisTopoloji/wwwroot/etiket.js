@@ -282,8 +282,8 @@ function etqUpdate() {
   $("#egBody").innerHTML = etq.rows.length ? etq.rows.map(r => `<tr class="${etq.selected.has(r.ip) ? "sel" : ""}">
       ${w ? `<td class="cb"><input type="checkbox" data-sel="${esc(r.ip)}"${etq.selected.has(r.ip) ? " checked" : ""}></td>` : ""}
       <td class="ip"><a href="${esc(ipTabUrl(r.ip))}" target="_blank" rel="noopener" title="Topolojisini yeni sekmede aç">${esc(r.ip)}</a></td>
-      <td>${esc(r.hostname ?? "")}</td>
-      <td class="app">${r.apps.map(a => `<span>${esc(a)}</span>`).join("") || `<span class="dim">—</span>`}</td>
+      <td>${esc(r.hostname ?? "")}${r.kaynak ? ` <span class="dim" style="font-size:11px">· ${esc(r.kaynak)}</span>` : ""}</td>
+      <td class="app">${r.apps.map(a => `<span>${esc(a)}</span>`).join("") || (r.not ? `<span class="dim" style="border:none;background:none;white-space:normal" title="${esc(r.not)}">${esc(r.not.length > 90 ? r.not.slice(0, 90) + "…" : r.not)}</span>` : `<span class="dim">—</span>`)}</td>
       <td class="${r.muhafiz ? "" : "dim"}">${esc(r.muhafiz ?? "—")}</td>
       <td class="${r.segment ? "" : "dim"}">${esc(r.segment ?? "—")}${r.cidr ? `<div class="dim" style="font-size:11px">${esc(r.cidr)}</div>` : ""}</td>
       <td>${r.ertYok ? `<span class="eg-yok" title="ERT_HOSTIPADDRESS tablosunda yok (ağda görüldü); etiketi DeltaFlow'un kendi tablosunda (DF_ETIKET_EK) tutulur">ERT'de yok</span> ` : ""}${tagGrup(r.tags, r.ip, w) || (r.ertYok ? "" : `<span class="dim">—</span>`)}</td>
@@ -445,8 +445,9 @@ function egSegRender() {
   const a = egs.aktif;
   $("#egSegInfo").innerHTML = egs.yukleniyor ? `<span class="spinner"></span> ${esc(egs.ilerleme)}`
     : egs.hata ? `<span style="color:var(--err)">${esc(egs.hata)}</span>`
-    : a ? esc(`${a.ad}${a.cidrler.length ? " · " + a.cidrler.join(", ") : ""} · ${fmt(egs.liste.length)} IP (${fmt(egs.yok)} tanesi ERT'de yok)${a.tarih ? ` · ${a.tarih} tarihli kayıt` : ""}`)
-    : "Segmentteki bütün IP'ler tabloya gelir; ERT'de olmayanlar da";
+    : a ? esc(`${a.ad}${a.cidrler.length ? " · " + a.cidrler.join(", ") : ""} · ${fmt(egs.liste.length)} IP (${fmt(egs.yok)} tanesi ERT'de yok${a.csy || a.msy ? `; ÇSY ${fmt(a.csy)}, MSY ${fmt(a.msy)}` : ""})${a.tarih ? ` · ${a.tarih} tarihli kayıt` : ""}`)
+      + (a.uyari ? ` <span style="color:var(--err)">${esc(a.uyari)}</span>` : "")
+    : "Segmentteki bütün IP'ler tabloya gelir: ERT, ağda görülenler ve MSY / ÇSY sanal sunucu envanteri";
 }
 
 async function egSegGetir(seg, mod) {
@@ -456,27 +457,53 @@ async function egSegGetir(seg, mod) {
   egSegRender();
   const json = async r => { const b = await r.json().catch(() => ({ error: `HTTP ${r.status}` })); if (!r.ok) throw new Error(b.error || `HTTP ${r.status}`); return b; };
   try {
-    let d = await json(await fetch("api/segment/tarama", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ segment: seg, saat: 24, mod }) }));
-    while (d.calisiyor) {
-      if (my !== egs.seq) return;
-      egs.ilerleme = `Getiriliyor…${d.toplam ? ` ${fmt(d.biten)} / ${fmt(d.toplam)}` : ""}`;
-      egSegRender();
-      await new Promise(res => setTimeout(res, 2000));
-      d = await json(await fetch("api/segment/tarama/" + encodeURIComponent(d.id)));
-    }
-    if (d.hata) throw new Error(d.hata);
-    if (!d.sonuc) throw new Error(d.asama || "Sonuç gelmedi.");
-    const s = d.sonuc, ert = new Map(), q = s.cidrler?.length ? s.cidrler.join(",") : seg;
+    // 1) ağ taraması (kayıtlı varsa ondan); alınamazsa ERT + MSY / ÇSY ile devam edilir
+    let s = null, kayit = null, taramaHata = null;
+    try {
+      let d = await json(await fetch("api/segment/tarama", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ segment: seg, saat: 24, mod }) }));
+      while (d.calisiyor) {
+        if (my !== egs.seq) return;
+        egs.ilerleme = `Getiriliyor…${d.toplam ? ` ${fmt(d.biten)} / ${fmt(d.toplam)}` : ""}`;
+        egSegRender();
+        await new Promise(res => setTimeout(res, 2000));
+        d = await json(await fetch("api/segment/tarama/" + encodeURIComponent(d.id)));
+      }
+      if (d.hata) throw new Error(d.hata);
+      if (!d.sonuc) throw new Error(d.asama || "Sonuç gelmedi.");
+      s = d.sonuc; kayit = d.kayit;
+    } catch (e) { taramaHata = e.message; }
+    if (my !== egs.seq) return;
+    const cidrler = s?.cidrler?.length ? s.cidrler : egSegCidr(seg);
+    if (!s && !cidrler.length) throw new Error(taramaHata || "Segment bulunamadı.");
+    // 2) ERT'deki sunucular
+    const ert = new Map(), q = cidrler.length ? cidrler.join(",") : seg;
     for (let page = 1; page <= 40; page++) {
       const b = await json(await fetch("api/etiket/sunucular?" + new URLSearchParams({ segment: q, sayfa: page, boyut: 500, sirala: "ip" })));
       for (const r of b.sunucular) ert.set(r.ip, r);
       if (page * 500 >= b.toplam) break;
     }
+    // 3) MSY / ÇSY sanal sunucu envanterleri (ERT'de olmayan VM'ler; kullanıcı: "ERT'de hiç yok ama ÇSY envanterinde var")
+    let sanal = [], sanalUyari = null;
+    if (cidrler.length) {
+      try { const b = await json(await fetch("api/etiket/sanal?" + new URLSearchParams({ cidr: cidrler.join(",") }))); sanal = b.sunucular || []; sanalUyari = b.uyari; }
+      catch (e) { sanalUyari = "MSY / ÇSY okunamadı: " + e.message; }
+    }
     if (my !== egs.seq) return;
-    const liste = [...ert.values()];
-    for (const x of s.sunucular || []) if (!ert.has(x.ip))
-      liste.push({ ip: x.ip, hostname: x.sunucu, apps: [], muhafiz: null, segment: x.segment, cidr: null, tags: [], ertYok: true });
-    Object.assign(egs, { aktif: { ad: s.segment, cidrler: s.cidrler || [], tarih: d.kayit?.tarih ? new Date(d.kayit.tarih).toLocaleString("tr-TR") : null },
+    const liste = [...ert.values()], var_ = new Map(liste.map(r => [r.ip, r]));
+    const segAd = s?.segment ?? seg;
+    for (const x of s?.sunucular || []) if (!var_.has(x.ip)) {
+      const r = { ip: x.ip, hostname: x.sunucu, apps: [], muhafiz: null, segment: x.segment ?? segAd, cidr: null, tags: tagMap?.[x.ip] ?? [], ertYok: true, kaynak: "ağda görüldü" };
+      liste.push(r); var_.set(x.ip, r);
+    }
+    for (const v of sanal) {
+      const r = var_.get(v.ip);
+      if (r) { if (r.ertYok) { r.hostname ||= v.ad; r.kaynak = r.kaynak === "ağda görüldü" ? v.kaynak + " · ağda görüldü" : r.kaynak || v.kaynak; r.not ||= v.not; } continue; }
+      const y = { ip: v.ip, hostname: v.ad, apps: [], muhafiz: null, segment: segAd, cidr: null, tags: tagMap?.[v.ip] ?? [], ertYok: true, kaynak: v.kaynak, not: v.not };
+      liste.push(y); var_.set(v.ip, y);
+    }
+    const say = k => liste.filter(r => r.ertYok && (r.kaynak || "").includes(k)).length;
+    Object.assign(egs, { aktif: { ad: segAd, cidrler, tarih: kayit?.tarih ? new Date(kayit.tarih).toLocaleString("tr-TR") : null,
+        msy: say("MSY"), csy: say("ÇSY"), uyari: [taramaHata ? "Ağ taraması alınamadı: " + taramaHata : null, sanalUyari].filter(Boolean).join(" · ") || null },
       liste, yok: liste.filter(r => r.ertYok).length, yukleniyor: false });
     etq.page = 1;
   } catch (e) {
@@ -493,7 +520,7 @@ function egSegYerel() {
   const u = ip => ip.split(".").reduce((a, b) => a * 256 + (+b || 0), 0);
   let rows = egs.liste.map(r => ({ ...r, tags: tagsOf(r) }));
   const tum = rows.length, etiketli = rows.filter(r => r.tags.length).length;
-  rows = rows.filter(r => has(r.ip, f.ip) && has(r.hostname, f.sunucu) && has(r.apps.join(" "), f.uygulama) && has(r.muhafiz, f.muhafiz)
+  rows = rows.filter(r => has(r.ip, f.ip) && has(r.hostname, f.sunucu) && has(r.apps.join(" ") + " " + (r.not || ""), f.uygulama) && has(r.muhafiz, f.muhafiz)
     && (has(r.segment, f.segment) || has(r.cidr, f.segment))
     && (!f.etiket || (f.etiket === "!ert" ? r.ertYok : f.etiket === "*" ? r.tags.length > 0 : f.etiket === "-" ? !r.tags.length
       : r.tags.some(t => tagUnder(t, f.etiket)))));
@@ -643,4 +670,11 @@ function egPop(el, eski, ip) {
   box.querySelectorAll("[data-k]").forEach(b => b.addEventListener("click", () => yap(b.dataset.k)));
   inp.addEventListener("keydown", e => { if (e.key === "Enter") yap("bu"); if (e.key === "Escape") egPopKapat(); });
   setTimeout(() => document.addEventListener("mousedown", function dis(e) { if (!box.contains(e.target)) { egPopKapat(); document.removeEventListener("mousedown", dis); } }), 0);
+}
+
+// Segment getir: tarama alınamazsa CIDR'lar segment listesinden ya da yazılan CIDR'dan
+function egSegCidr(seg) {
+  const p = seg.split(/[,;\s]+/).filter(Boolean);
+  if (p.length && p.every(x => /^\d{1,3}(\.\d{1,3}){3}\/\d{1,2}$/.test(x))) return p;
+  return (egs.segs || []).find(x => x.ad.toLocaleUpperCase("tr") === seg.toLocaleUpperCase("tr"))?.cidrler || [];
 }

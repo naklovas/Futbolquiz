@@ -694,6 +694,18 @@ app.MapPost("/api/etiket/duzenle", async (EtiketDuzenIstek req, HttpContext ctx,
     catch (InvalidOperationException ex) { return Results.BadRequest(new { error = ex.Message }); }
     catch (Microsoft.Data.SqlClient.SqlException ex) { return Results.Json(new { error = "SQL: " + ex.Message }, statusCode: 502); }
 });
+// Segment getir: MSY / ÇSY sanal sunucu envanterlerinde CIDR'lara düşen VM'ler (ERT'de olmayanlar için; Etiket.cs SanalEnvanter)
+app.MapGet("/api/etiket/sanal", async (string? cidr, IConfiguration cfg, CancellationToken ct) =>
+{
+    var cidrler = (cidr ?? "").Split(new[] { ',', ';', ' ' }, StringSplitOptions.RemoveEmptyEntries).ToList();
+    if (cidrler.Count == 0) return Results.BadRequest(new { error = "cidr gerekli (ör. 10.1.2.0/24)." });
+    try
+    {
+        var (l, uyari) = await SanalEnvanter.TumuAsync(cfg, app.Logger, ct);
+        return Results.Ok(new { sunucular = SanalEnvanter.Cidrde(l, cidrler), uyari });
+    }
+    catch (Exception ex) { return Results.Json(new { error = ex.Message }, statusCode: 502); }
+});
 // Zincirleme etiket birleştirme (Etiket.cs EtiketZincir): önizleme ve uygulama
 app.MapGet("/api/etiket/zincir", async (EnvanterService envanter, CancellationToken ct) =>
 {

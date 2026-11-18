@@ -467,3 +467,59 @@ static class EtiketDuzen
         }
     }
 }
+
+// MSY / ÇSY sanal sunucu envanterleri (kullanıcı: "bir segment ERT'de hiç yok, ÇSY envanterinde var; bunlar ERT'de olmayabilir, MSY ÇSY'den de gelmesi lazım"):
+// segment getir'de segmentin CIDR'larına düşen VM'ler. Tablolar işlev haritasıyla aynı (Islev:Tablolar:Msy dbo.Envanter, Islev:Tablolar:Csy dbo.CsyEnvanter),
+// SELECT * + kolon adla (MSY Ip / Vm / DnsName / Annotation; ÇSY Primary_IP_Address / VM / DNS_Name / Folder / Islev:CsyNotKolonu); bellekte 30 dk. Yalnız okur.
+record SanalSunucu(string Ip, string? Ad, string Kaynak, string? Not);
+static class SanalEnvanter
+{
+    static readonly Regex SafeTable = new(@"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*){0,2}$");
+    static List<SanalSunucu>? _liste; static DateTime _at; static string? _uyari;
+    static readonly SemaphoreSlim Gate = new(1, 1);
+
+    public static async Task<(List<SanalSunucu> Liste, string? Uyari)> TumuAsync(IConfiguration cfg, ILogger log, CancellationToken ct)
+    {
+        if (_liste != null && DateTime.UtcNow - _at < TimeSpan.FromMinutes(cfg.GetValue("Etiket:SanalOnbellekDakika", 30))) return (_liste, _uyari);
+        await Gate.WaitAsync(ct);
+        try
+        {
+            if (_liste != null && DateTime.UtcNow - _at < TimeSpan.FromMinutes(cfg.GetValue("Etiket:SanalOnbellekDakika", 30))) return (_liste, _uyari);
+            string T(string k, string d) => cfg[$"Islev:Tablolar:{k}"] is { } t && SafeTable.IsMatch(t) ? t : d;
+            string csyNot = cfg["Islev:CsyNotKolonu"] is { Length: > 0 } cn ? cn : "Annotation";
+            var l = new List<SanalSunucu>(); var uy = new List<string>();
+            await using var conn = new SqlConnection(cfg.GetConnectionString("Envanter"));
+            await conn.OpenAsync(ct);
+            foreach (var (kaynak, tablo, ipK, adK, ad2K, notK, klasorK) in new[] {
+                ("MSY", T("Msy", "dbo.Envanter"), "Ip", "Vm", "DnsName", "Annotation", ""),
+                ("ÇSY", T("Csy", "dbo.CsyEnvanter"), "Primary_IP_Address", "VM", "DNS_Name", csyNot, "Folder") })
+            {
+                try
+                {
+                    await using var cmd = new SqlCommand($"SELECT * FROM {tablo} WITH (NOLOCK)", conn) { CommandTimeout = 120 };
+                    await using var r = await cmd.ExecuteReaderAsync(ct);
+                    var k = Enumerable.Range(0, r.FieldCount).ToDictionary(i => r.GetName(i), i => i, StringComparer.OrdinalIgnoreCase);
+                    string? S(string ad) => ad.Length > 0 && k.TryGetValue(ad, out int i) && !r.IsDBNull(i) ? Convert.ToString(r.GetValue(i))?.Trim() is { Length: > 0 } v ? v : null : null;
+                    while (await r.ReadAsync(ct))
+                    {
+                        if (S(ipK) is not { } ipler) continue;
+                        string? ad = S(adK) ?? S(ad2K), not = string.Join(" · ", new[] { S(notK), S(klasorK) is { } f ? "klasör " + f : null }.OfType<string>());
+                        foreach (var ip in ipler.Split(new[] { ',', ';', ' ', '\n', '\r', '\t' }, StringSplitOptions.RemoveEmptyEntries))
+                            if (LookupQuery.TryParseIpv4(ip, out _)) l.Add(new SanalSunucu(ip, ad, kaynak, not.Length > 0 ? not[..Math.Min(not.Length, 300)] : null));
+                    }
+                }
+                catch (SqlException ex) { uy.Add($"{kaynak} ({tablo}) okunamadı: {ex.Message}"); log.LogInformation("Sanal envanter {K} okunamadı: {M}", kaynak, ex.Message); }
+            }
+            (_liste, _at, _uyari) = (l, DateTime.UtcNow, uy.Count > 0 ? string.Join("; ", uy) : null);
+            return (l, _uyari);
+        }
+        finally { Gate.Release(); }
+    }
+
+    public static List<SanalSunucu> Cidrde(List<SanalSunucu> l, IEnumerable<string> cidrler)
+    {
+        var aralik = cidrler.Select(c => EnvanterSnapshot.TryParseCidr(c.Trim(), out uint n, out int p) ? (n, p) : ((uint, int)?)null).OfType<(uint n, int p)>().ToList();
+        return l.Where(x => EnvanterSnapshot.TryToUInt(x.Ip, out uint u) && aralik.Any(a => a.p == 0 || (u >> (32 - a.p)) == (a.n >> (32 - a.p))))
+            .GroupBy(x => (x.Ip, x.Kaynak)).Select(g => g.First()).ToList();
+    }
+}
