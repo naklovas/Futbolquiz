@@ -137,6 +137,12 @@ topoloji çizer ve şirket içi AI'a etki analizi yaptırır. Canlıda IIS'te, W
   Cihaz adları `GET /devices` (esnek okunur; canlıda parametresiz 400 verdi → `Opinnate:CihazSorgusu` ya da ?virtualAreaId=, ?page=1&per_page=1000 sırayla denenir). Karar: engel kuralı → "Kural engelliyor"; izin + trafik yok → "Kural açık — bu aralıkta trafik
   görülmedi"; hiç kural yok + trafik yok → "Erişim tanımlı değil"; trafikle çelişirse uyarı. Gövde StringContent (Content-Length'lı).
   Swagger'da yalnızca okuma uçları kullanılır (policy/get, rule-history ileride); görev/kural değiştiren uçlar kullanılmaz.
+  ESNEK OKUMA + TANI (kullanıcı: "tcp_11880: policyResultData boş", "cihaz adı gelmedi"): yanıt alanları büyük / küçük harf ve _ farkı gözetmeden, iç içe
+  (data / result sarmalayıcı) aranır (`Get`, `FindArr`, `Yollar`); adımda cihaz adı varsa (device_name / hostname / device{name}) o, yoksa /devices.
+  Yol yoksa `Opinnate:VirtualAreaIdler` ve /devices'ta görülen virtual area id'leri (`MaxAlanDenemesi`=4) sırayla denenir; bulunursa "VirtualAreaId = X yapın" mesajı.
+  Boş yanıtta mesajda Opinnate'in kendi mesajı, yanıt alanları, ilk 200 karakter. /devices: `CihazOku` (id + ad alanlı ilk dizi, iç içe; ya da id → ad sözlüğü),
+  400 / 404 / 405 / 422'de sıradaki sorgu, `Opinnate:CihazYolu` (/devices); ad bulunamazsa ilk kaydın alan adları mesajda.
+  `GET /api/opinnate/tani?src=&dst=&port=` düz metin: giriş, rule-checker gövdesi + ham yanıt (her alan için), /devices sorguları + ham yanıt.
 - **SQL (doku DB)** — tablo adları `Envanter:*` ayarında:
   - `dbo.KonsolideSegmentler4` (SEGMENT=CIDR, VLAN, Tenant, ApplicationProfile, EPGName, BD, GW, Description, Domain):
     IP → en uzun prefix eşleşmesi. Segment adı = EPGName > ApplicationProfile > Description > CIDR.

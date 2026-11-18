@@ -417,6 +417,16 @@ app.MapGet("/api/erisim", async (string? src, string? dst, string? port, string?
     return Results.Ok(Erisim.Build(Erisim.Uc(q!.Ip, env), Erisim.Uc(dstIp, env), p, q!, fw?[0], fw?[1], cb, fwSt, cbSt, envSt, sw.ElapsedMilliseconds, wf?[0], wf?[1], wafSt, op, opSt));
 });
 
+// Opinnate tanı: rule-checker ve /devices ham yanıtları (düz metin; token / şifre yazılmaz)
+app.MapGet("/api/opinnate/tani", async (string? src, string? dst, string? port, IConfiguration cfg, IHttpClientFactory factory, CancellationToken ct) =>
+{
+    if (!OpinnateService.Enabled(cfg)) return Results.BadRequest(new { error = "Opinnate tanımlı değil (Opinnate:BaseUrl)." });
+    if (!LookupQuery.TryParseIpv4(src, out string s) || !LookupQuery.TryParseIpv4(dst, out string d))
+        return Results.BadRequest(new { error = "src ve dst geçerli IPv4 olmalı." });
+    string? p = int.TryParse(port, out int pn) && pn is > 0 and < 65536 ? pn.ToString() : null;
+    return Results.Text(await OpinnateService.TaniAsync(s, d, p, cfg, factory.CreateClient("opinnate"), ct), "text/plain; charset=utf-8");
+});
+
 // Uçtan uca yolculuk: sorgulanan sunucudan geriye (dış IP'ler) ve ileriye (DB) durak durak oturum eşleştirmesi.
 // Her seviye ayrı veri çekimi olduğu için aralık kısa tutulur (Yolculuk:Dakika, varsayılan 5).
 app.MapGet("/api/yolculuk", async (string? ip, string? start, string? end, int? appliance, string? sources, bool? dis,
