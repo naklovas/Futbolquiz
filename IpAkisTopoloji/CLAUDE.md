@@ -1025,7 +1025,8 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
   (önceki kuraldan kalan değer kalmaz; metinde CVE yoksa boş). (5) AI "javac" önerdi ("Compiler" = HotSpot JIT, javac değil) → `JdkAraclari` (javac, jar, keytool,
   jshell…) kaynak "AI · geliştirme aracı", işaretsiz, notlu; prompt kuralı.
   VLAN + DOMAIN (kullanıcı: "VLAN bilgilerini de çeksene domain bilgisiyle beraber"): `ZfSatir.Vlan / Domain / Cidr` (segment kaydından); tabloda sunucu hücresinde,
-  sağ panelde "VLAN / domain", aramada ve CSV'de (VLAN, DOMAIN, CIDR).
+  kullanıcı: "gride ayrı kolon, filtreleyebileyim, panele gerek yok" → tabloda ayrı VLAN ve Domain kolonları (CIDR VLAN hücresinin ipucunda), araç çubuğunda
+  "Domain" / "VLAN" seçicileri (satır sayısıyla, boşlar "(yok)"); sunucu hücresindeki ve sağ paneldeki VLAN satırı kaldırıldı; arama ve CSV'de duruyor.
 - **VIP**: sorgulanan IP VIP ise üyeler + GW'ler aynı sorguya eklenir, üyeler "VIP ÜYESİ" (GW→üye trafiği varsa ✓).
   Gidilen IP VIP ise "VIP → n ÜYE"; gelen IP LB GW ise "LB GW"; sorgulanan sunucu havuz üyesiyse VIP kartı.
 - **Uygulama görünümü** (`/api/apps`, `/api/app`): `[kullanan uygulamalar] → [UYGULAMA: VIP'ler + segment grupları] → [bağımlı olunanlar]`,

@@ -176,13 +176,15 @@
       <input type="search" id="q" placeholder="IP, sunucu, uygulama, muhafız, VLAN, domain, exe yolu, ürün, sürüm, port ara…" style="min-width:320px">
       <select id="durumF"><option value="">Tüm durumlar</option><option value="etkilenen">Etkilenen sürüm</option><option value="olasi">Olası (alt sürüm bilinmiyor)</option><option value="bilinmiyor">Sürüm bilinmiyor</option><option value="yamali">Yamalı görünüyor</option><option value="etkilenmez">Etkilenmez</option><option value="bilgi">Değerlendirilmedi</option></select>
       <select id="kurumF"><option value="">Kurum: Tümü</option></select>
+      <select id="domainF"><option value="">Domain: Tümü</option></select>
+      <select id="vlanF"><option value="">VLAN: Tümü</option></select>
       <label><input type="checkbox" id="dinleyen"> Yalnız port dinleyenler</label>
       <label><input type="checkbox" id="testG" checked> Test sunucuları</label>
       <span class="sp"></span>
       <button type="button" id="csv" hidden>Excel'e aktar</button>
     </div>
     <div class="grid"><table>
-      <thead><tr><th>Öncelik</th><th>Sunucu</th><th>Uygulama (ERT)</th><th>Süreç</th><th>Sürüm · durum</th><th>Dinlediği portlar</th><th>Giden</th><th>Önlem</th><th>Son görülme</th><th>Kaynak</th></tr></thead>
+      <thead><tr><th>Öncelik</th><th>Sunucu</th><th>VLAN</th><th>Domain</th><th>Uygulama (ERT)</th><th>Süreç</th><th>Sürüm · durum</th><th>Dinlediği portlar</th><th>Giden</th><th>Önlem</th><th>Son görülme</th><th>Kaynak</th></tr></thead>
       <tbody id="tb"></tbody>
     </table></div>
     <div class="foot"><span id="sayi"></span><button type="button" id="more" hidden>Daha fazla göster</button></div>
@@ -325,8 +327,8 @@ function runCiz() {
 
 function suz() {
   const l = st.veri?.satirlar || [];
-  const q = $("#q").value.trim().toLowerCase(), d = $("#durumF").value, k = $("#kurumF").value;
-  return l.filter(r => (!st.onc || r.oncelik === st.onc) && (!st.onlemF || r.onlem === "var") && (!d || r.durum === d) && (!k || r.kurum === k)
+  const q = $("#q").value.trim().toLowerCase(), d = $("#durumF").value, k = $("#kurumF").value, dm = $("#domainF").value, vl = $("#vlanF").value;
+  return l.filter(r => (!st.onc || r.oncelik === st.onc) && (!dm || (r.domain || "(yok)") === dm) && (!vl || (r.vlan || "(yok)") === vl) && (!st.onlemF || r.onlem === "var") && (!d || r.durum === d) && (!k || r.kurum === k)
     && (!$("#dinleyen").checked || r.portlar.length) && ($("#testG").checked || !r.test)
     && (!q || [r.ip, r.sunucu, r.bilgisayar, r.segment, r.vlan, r.domain, r.cidr, r.muhafiz, r.yol, r.urun, r.surum, r.jar, ...(r.uygulamalar || []), ...r.portlar.map(p => p.port + " " + (p.ert || "") + " " + p.vip.join(" "))]
       .some(x => String(x ?? "").toLowerCase().includes(q))));
@@ -364,12 +366,23 @@ function ciz() {
   const kurumlar = [...new Set((v.satirlar || []).map(r => r.kurum).filter(Boolean))].sort();
   const sk = $("#kurumF").value;
   $("#kurumF").innerHTML = '<option value="">Kurum: Tümü</option>' + kurumlar.map(k => `<option ${k === sk ? "selected" : ""}>${esc(k)}</option>`).join("");
+  // Domain / VLAN seçenekleri: satır sayısıyla; VLAN sayısal sıralı; boşlar "(yok)"
+  const secenek = (sel, bas, alan, sayisal) => {
+    const say = new Map();
+    for (const r of v.satirlar || []) { const x = r[alan] || "(yok)"; say.set(x, (say.get(x) || 0) + 1); }
+    const eski = $(sel).value;
+    const l = [...say.keys()].sort((a, b) => a === "(yok)" ? 1 : b === "(yok)" ? -1 : sayisal ? (parseInt(a) || 0) - (parseInt(b) || 0) || a.localeCompare(b) : a.localeCompare(b, "tr"));
+    $(sel).innerHTML = `<option value="">${bas}: Tümü</option>` + l.map(x => `<option value="${esc(x)}" ${x === eski ? "selected" : ""}>${esc(x)} (${say.get(x)})</option>`).join("");
+  };
+  secenek("#domainF", "Domain", "domain", false);
+  secenek("#vlanF", "VLAN", "vlan", true);
   const l = suz();
   $("#tb").innerHTML = l.length ? l.slice(0, st.limit).map((r, i) => `<tr data-i="${(v.satirlar).indexOf(r)}">
     <td><span class="p ${r.oncelik}" title="${esc(ONC_IPUCU[r.oncelik])}">${ONC[r.oncelik]}</span></td>
     <td><div class="mono">${r.ip ? `<a href="./?ip=${encodeURIComponent(r.ip)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${esc(r.ip)}</a>` : '<span class="muted">IP yok</span>'}</div>
-        <div class="small">${esc(r.sunucu || "")}${r.test ? ' <span class="d">test</span>' : ""}</div><div class="small muted">${esc(r.kurum || "")}${r.segment ? " · " + esc(r.segment) : ""}</div>
-        ${r.vlan || r.domain || r.cidr ? `<div class="small muted mono" title="Segment kaydından (KonsolideSegmentler4)">${[r.vlan ? "VLAN " + esc(r.vlan) : "", esc(r.domain || ""), esc(r.cidr || "")].filter(Boolean).join(" · ")}</div>` : ""}</td>
+        <div class="small">${esc(r.sunucu || "")}${r.test ? ' <span class="d">test</span>' : ""}</div><div class="small muted">${esc(r.kurum || "")}${r.segment ? " · " + esc(r.segment) : ""}</div></td>
+    <td class="mono small" title="${esc(r.cidr || "")}">${esc(r.vlan || "") || '<span class="muted">—</span>'}</td>
+    <td class="small">${esc(r.domain || "") || '<span class="muted">—</span>'}</td>
     <td class="small">${esc((r.uygulamalar || []).slice(0, 3).join(" | ")) || '<span class="muted">—</span>'}${r.muhafiz ? `<div class="muted">${esc(r.muhafiz)}</div>` : ""}</td>
     <td><b>${esc(r.exe)}</b>${r.urun ? ` <span class="d">${esc(r.urun)}</span>` : ""}<div class="small muted mono" title="${esc(r.yol)}" style="max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(r.yol)}</div>${r.jar ? `<div class="small muted">-jar ${esc(r.jar)}</div>` : ""}</td>
     <td><span class="mono">${esc(r.surum || "?")}</span> <span class="d ${r.durum}" title="${esc(r.durumNot)}">${DUR[r.durum] || r.durum}</span>${r.surumKaynak ? `<div class="small muted">${esc(r.surumKaynak)}</div>` : ""}</td>
@@ -378,7 +391,7 @@ function ciz() {
     <td class="small o ${r.onlem}" title="Komut satırında geçici önlem parametresi">${r.onlem === "var" ? "✔ var" : r.onlem === "yok" ? "yok" : r.onlem === "bilinmiyor" ? '<span class="muted">bilinmiyor</span>' : '<span class="muted">—</span>'}</td>
     <td class="small">${esc(r.son || "")}${r.baslangic ? `<div class="muted">başlangıç ${esc(r.baslangic)}</div>` : ""}</td>
     <td class="small muted">${esc(r.kaynak)}</td></tr>`).join("")
-    : `<tr><td colspan="10" class="empty">${v.satirlar?.length ? "Süzgece uyan süreç yok." : "Bu aralıkta Carbon Black'te kurala uyan süreç görülmedi."}</td></tr>`;
+    : `<tr><td colspan="12" class="empty">${v.satirlar?.length ? "Süzgece uyan süreç yok." : "Bu aralıkta Carbon Black'te kurala uyan süreç görülmedi."}</td></tr>`;
   $("#sayi").textContent = `${Math.min(l.length, st.limit).toLocaleString("tr-TR")} / ${l.length.toLocaleString("tr-TR")} satır gösteriliyor`;
   $("#more").hidden = l.length <= st.limit;
 }
@@ -398,7 +411,6 @@ function detay(r) {
       <dt>Geçici önlem</dt><dd>${r.onlem === "var" ? "✔ komut satırında var" : r.onlem === "yok" ? "komut satırında yok" : r.onlem === "bilinmiyor" ? "bilinmiyor (pencerede süreç başlangıcı görülmedi)" : "—"}</dd>
       <dt>Bilgisayar (CB)</dt><dd>${esc(r.bilgisayar || "—")}</dd>
       <dt>Kurum / segment</dt><dd>${esc(r.kurum || "")}${r.segment ? " · " + esc(r.segment) : ""}${r.test ? " · test" : ""}</dd>
-      <dt>VLAN / domain</dt><dd>${esc(r.vlan || "—")} · ${esc(r.domain || "—")}${r.cidr ? ` · <span class="mono">${esc(r.cidr)}</span>` : ""}</dd>
       <dt>ERT uygulamaları</dt><dd>${esc((r.uygulamalar || []).join(" | ")) || "—"}${r.muhafiz ? `<div class="small muted">Muhafız: ${esc(r.muhafiz)}</div>` : ""}</dd>
       <dt>Dinlediği portlar</dt><dd>${portlar || "— (yalnız giden bağlantı)"}</dd>
       <dt>Giden bağlantı</dt><dd>${(r.giden || 0).toLocaleString("tr-TR")}</dd>
@@ -471,7 +483,7 @@ document.addEventListener("click", e => {
   if (tr) { document.querySelectorAll("tr.sel").forEach(x => x.classList.remove("sel")); tr.classList.add("sel"); detay(st.veri.satirlar[+tr.dataset.i]); }
 });
 document.addEventListener("keydown", e => { if (e.key === "Escape") detay(null); });
-["#q", "#durumF", "#kurumF", "#dinleyen", "#testG"].forEach(s => $(s).addEventListener(s === "#q" ? "input" : "change", () => { st.limit = 500; ciz(); }));
+["#q", "#durumF", "#kurumF", "#domainF", "#vlanF", "#dinleyen", "#testG"].forEach(s => $(s).addEventListener(s === "#q" ? "input" : "change", () => { st.limit = 500; ciz(); }));
 $("#kural").addEventListener("change", formCiz);
 $("#aiDoldur").addEventListener("click", aiDoldur);
 $("#kaydet").addEventListener("click", kaydet);
