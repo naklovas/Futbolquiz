@@ -1,0 +1,373 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DeltaFlow · Açıklık taraması</title>
+<link rel="icon" href="deltaflow.svg">
+<script>
+  try { const t = localStorage.getItem("deltaflow.theme"); if (t === "light" || t === "dark") document.documentElement.dataset.theme = t; } catch {}
+</script>
+<!--
+  Açıklık taraması (Zafiyet.cs): bir kurala (hazır CVE kuralı ya da anlık exe listesi) uyan süreçler TÜM sunucularda, Carbon Black'ten toplu.
+  Satır = sunucu × süreç yolu: sürüm (yoldan / komut satırından), durum (etkilenen / olası / yamalı / etkilenmez / bilinmiyor), dinlediği
+  portlar (VIP, dış istemci), geçici önlem, öncelik.
+-->
+<style>
+  :root {
+    --bg: #f5f6f8; --panel: #ffffff; --text: #1d2330; --muted: #677084; --line: #dde1e8;
+    --in: #2f6fd6; --in-soft: #e5eefc; --ok: #2e8b57; --err: #c8353a; --warn: #b7791f; --crit: #9b1c1f;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #14171d; --panel: #1c2028; --text: #e4e7ec; --muted: #9098a8; --line: #2d333e;
+      --in: #6ea0f0; --in-soft: #1f2d45; --ok: #5cc28a; --err: #ef6b6f; --warn: #e0b050; --crit: #ff8a8d;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #14171d; --panel: #1c2028; --text: #e4e7ec; --muted: #9098a8; --line: #2d333e;
+    --in: #6ea0f0; --in-soft: #1f2d45; --ok: #5cc28a; --err: #ef6b6f; --warn: #e0b050; --crit: #ff8a8d;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 "Segoe UI", system-ui, sans-serif; }
+  header { padding: 14px 20px; background: var(--panel); border-bottom: 1px solid var(--line); display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
+  header img { width: 30px; height: 30px; }
+  header h1 { margin: 0; font-size: 19px; }
+  header a { color: var(--muted); text-decoration: none; font-size: 13px; }
+  header a:hover { color: var(--in); }
+  header .sp { flex: 1; }
+  #me { font-size: 12.5px; color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 4px 12px; }
+  main { padding: 18px 20px 40px; max-width: 1800px; margin: 0 auto; display: grid; gap: 14px; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; }
+  .sub { color: var(--muted); font-size: 12.5px; }
+  input, select, button { font: inherit; color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; }
+  button { cursor: pointer; } button:disabled { opacity: .5; cursor: default; }
+  button.primary { background: var(--in); border-color: var(--in); color: #fff; font-weight: 600; }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: end; }
+  .row label { display: grid; gap: 3px; font-size: 12px; color: var(--muted); }
+  .mod { display: flex; gap: 6px; margin-bottom: 10px; }
+  .mod button.on { background: var(--in); border-color: var(--in); color: #fff; }
+  .desc { margin-top: 10px; font-size: 13px; color: var(--muted); }
+  .desc b { color: var(--text); }
+  .run { border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; background: var(--bg); font-size: 13px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .warn { border: 1px solid var(--warn); background: color-mix(in srgb, var(--warn) 12%, transparent); border-radius: 10px; padding: 8px 14px; font-size: 12.5px; }
+  .warn div + div { margin-top: 3px; }
+  .err { border-color: var(--err); background: color-mix(in srgb, var(--err) 10%, transparent); }
+  .stats { display: flex; gap: 10px; flex-wrap: wrap; }
+  .stat { border: 1px solid var(--line); border-radius: 10px; padding: 8px 14px; min-width: 112px; background: var(--bg); cursor: pointer; }
+  .stat b { display: block; font-size: 20px; font-variant-numeric: tabular-nums; }
+  .stat span { color: var(--muted); font-size: 11.5px; text-transform: uppercase; letter-spacing: .04em; }
+  .stat.on { border-color: var(--in); box-shadow: 0 0 0 1px var(--in) inset; }
+  .stat.kritik b { color: var(--crit); } .stat.yuksek b { color: var(--err); } .stat.orta b { color: var(--warn); } .stat.incele b { color: var(--in); }
+  .sep { width: 1px; background: var(--line); margin: 0 4px; }
+  .tools { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 12px 0; }
+  .tools label { display: flex; gap: 6px; align-items: center; font-size: 13px; }
+  .tools .sp { flex: 1; }
+  .grid { border: 1px solid var(--line); border-radius: 10px; overflow: auto; max-height: calc(100vh - 260px); }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  th { position: sticky; top: 0; background: var(--bg); color: var(--muted); font-size: 11.5px; text-transform: uppercase; letter-spacing: .04em; text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--line); z-index: 1; white-space: nowrap; }
+  td { padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  tbody tr { cursor: pointer; }
+  tbody tr:hover td { background: var(--in-soft); }
+  tr.sel td { background: var(--in-soft); }
+  .mono { font-family: Consolas, ui-monospace, monospace; }
+  .small { font-size: 12px; } .muted { color: var(--muted); }
+  .p { display: inline-block; font-size: 11px; font-weight: 700; border-radius: 999px; padding: 1px 9px; border: 1px solid; white-space: nowrap; }
+  .p.kritik { color: #fff; background: var(--crit); border-color: var(--crit); }
+  .p.yuksek { color: var(--err); border-color: var(--err); }
+  .p.orta { color: var(--warn); border-color: var(--warn); }
+  .p.incele { color: var(--in); border-color: var(--in); }
+  .p.dusuk { color: var(--muted); border-color: var(--line); }
+  .d { display: inline-block; font-size: 11px; border-radius: 4px; padding: 0 6px; border: 1px solid var(--line); white-space: nowrap; }
+  .d.etkilenen { color: var(--err); border-color: var(--err); }
+  .d.olasi { color: var(--warn); border-color: var(--warn); }
+  .d.yamali { color: var(--ok); border-color: var(--ok); }
+  .d.etkilenmez { color: var(--muted); }
+  .d.bilinmiyor { color: var(--in); border-color: var(--in); }
+  .d.bilgi { color: var(--text); }
+  .o.var { color: var(--ok); font-weight: 600; } .o.yok { color: var(--err); }
+  .pt { display: inline-block; font-family: Consolas, ui-monospace, monospace; font-size: 12px; border: 1px solid var(--line); border-radius: 4px; padding: 0 5px; margin: 1px 3px 1px 0; }
+  .pt.dis { border-color: var(--err); color: var(--err); }
+  .pt.vip { border-color: var(--warn); }
+  .empty { padding: 40px; text-align: center; color: var(--muted); }
+  .spinner { display: inline-block; width: 12px; height: 12px; border: 2px solid var(--line); border-top-color: var(--in); border-radius: 50%; animation: sp .8s linear infinite; vertical-align: -2px; }
+  @keyframes sp { to { transform: rotate(360deg); } }
+  .foot { display: flex; justify-content: space-between; align-items: center; margin-top: 10px; color: var(--muted); font-size: 12.5px; gap: 10px; flex-wrap: wrap; }
+  .drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(640px, 100vw); background: var(--panel); border-left: 1px solid var(--line);
+    box-shadow: -12px 0 32px rgba(0,0,0,.18); z-index: 50; display: flex; flex-direction: column; }
+  .drawer .dh { padding: 14px 18px; border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; gap: 10px; align-items: start; }
+  .drawer .dh h3 { margin: 0; font-size: 17px; word-break: break-all; }
+  .drawer .db { padding: 12px 18px; overflow: auto; flex: 1; font-size: 13px; }
+  .drawer dl { display: grid; grid-template-columns: 150px 1fr; gap: 6px 12px; margin: 0; }
+  .drawer dt { color: var(--muted); } .drawer dd { margin: 0; word-break: break-word; }
+  .drawer pre { white-space: pre-wrap; word-break: break-all; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; font-size: 12px; margin: 4px 0 0; }
+  @media (max-width: 700px) { main { padding: 12px 16px 30px; } .drawer dl { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<header>
+  <img src="deltaflow.svg" alt="">
+  <div><h1>Açıklık taraması</h1>
+    <div class="sub">Bir açıklığın etkilediği süreçler tüm sunucularda · Carbon Black'ten toplu · sürüm, dinlediği portlar, dışarıya açıklık, geçici önlem</div></div>
+  <span class="sp"></span>
+  <a href="./">← DeltaFlow</a>
+  <span id="me"></span>
+</header>
+<main>
+  <section class="panel">
+    <div class="mod">
+      <button type="button" data-mod="kural" class="on">Hazır kural (CVE)</button>
+      <button type="button" data-mod="anlik" title="Herhangi bir exe adıyla: hangi sunucuda çalışıyor, hangi sürüm, hangi portu dinliyor">Süreç adıyla ara</button>
+    </div>
+    <div class="row" id="kuralRow">
+      <label>Kural<select id="kural" style="min-width:380px"></select></label>
+    </div>
+    <div class="row" id="anlikRow" hidden>
+      <label>Exe adları (virgülle; * joker)<input id="exeler" placeholder="ör. nginx, httpd, openssl, tomcat*" style="min-width:300px"></label>
+      <label title="Boş bırakılırsa sürüm değerlendirmesi yapılmaz, yalnız nerede çalıştığı ve maruziyeti listelenir">Etkilenen ilk sürüm (isteğe bağlı)<input id="min" placeholder="ör. 1.20.0" style="width:150px"></label>
+      <label title="Bu sürüm ve sonrası yamalı sayılır">Düzeltilmiş sürüm (isteğe bağlı)<input id="fix" placeholder="ör. 1.24.1" style="width:150px"></label>
+      <label>Ad (isteğe bağlı)<input id="ad" placeholder="ör. CVE-2026-xxxx nginx" style="width:220px"></label>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <label>Ağ olayı penceresi<select id="saat"><option value="24">Son 24 saat</option><option value="72">Son 72 saat</option><option value="168">Son 7 gün</option></select></label>
+      <button type="button" class="primary" id="tara">Taramayı başlat</button>
+      <button type="button" id="durdur" hidden>Durdur</button>
+      <span class="sub" id="yetkiNot"></span>
+    </div>
+    <div class="desc" id="desc"></div>
+  </section>
+
+  <div id="run"></div>
+  <div id="warn"></div>
+
+  <section class="panel" id="sonuc" hidden>
+    <div class="stats" id="stats"></div>
+    <div class="tools">
+      <input type="search" id="q" placeholder="IP, sunucu, uygulama, muhafız, exe yolu, ürün, sürüm, port ara…" style="min-width:320px">
+      <select id="durumF"><option value="">Tüm durumlar</option><option value="etkilenen">Etkilenen sürüm</option><option value="olasi">Olası (alt sürüm bilinmiyor)</option><option value="bilinmiyor">Sürüm bilinmiyor</option><option value="yamali">Yamalı görünüyor</option><option value="etkilenmez">Etkilenmez</option><option value="bilgi">Değerlendirilmedi</option></select>
+      <select id="kurumF"><option value="">Kurum: Tümü</option></select>
+      <label><input type="checkbox" id="dinleyen"> Yalnız port dinleyenler</label>
+      <label><input type="checkbox" id="testG" checked> Test sunucuları</label>
+      <span class="sp"></span>
+      <button type="button" id="csv" hidden>Excel'e aktar</button>
+    </div>
+    <div class="grid"><table>
+      <thead><tr><th>Öncelik</th><th>Sunucu</th><th>Uygulama (ERT)</th><th>Süreç</th><th>Sürüm · durum</th><th>Dinlediği portlar</th><th>Giden</th><th>Önlem</th><th>Son görülme</th><th>Kaynak</th></tr></thead>
+      <tbody id="tb"></tbody>
+    </table></div>
+    <div class="foot"><span id="sayi"></span><button type="button" id="more" hidden>Daha fazla göster</button></div>
+  </section>
+</main>
+<div class="drawer" id="drawer" hidden></div>
+
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const ONC = { kritik: "Kritik", yuksek: "Yüksek", orta: "Orta", incele: "İncele", dusuk: "Düşük" };
+const ONC_IPUCU = {
+  kritik: "Etkilenen sürüm + dışarıdan erişilen port (VIP üyesi ya da özel olmayan IP'den bağlantı)",
+  yuksek: "Etkilenen sürüm + port dinliyor",
+  orta: "Etkilenen sürüm ama port dinlemiyor (yalnız giden) ya da geçici önlem var",
+  incele: "Sürüm okunamadı ve port dinliyor — Nessus / ürün sürümünden doğrulayın",
+  dusuk: "Etkilenmez / yamalı ya da sürüm bilinmiyor ve port dinlemiyor"
+};
+const DUR = { etkilenen: "etkilenen", olasi: "olası", yamali: "yamalı", etkilenmez: "etkilenmez", bilinmiyor: "sürüm bilinmiyor", bilgi: "değerlendirilmedi" };
+const st = { onlemF: false, mod: "kural", veri: null, yetki: {}, onc: "", limit: 500, sec: null, timer: null };
+
+function kuralAciklama(k) {
+  if (!k) return "";
+  const ar = (k.araliklar || []).map(a => `${a.ana != null ? "Java " + a.ana + ": " : ""}${a.min ? a.min + " ve sonrası" : "tüm sürümler"}${a.duzeltilmis ? " · düzeltilmiş " + a.duzeltilmis : ""}`);
+  return `${k.cve ? `<b>${esc(k.cve)}</b> · ` : ""}<b>${esc(k.ad)}</b><br>${k.aciklama ? esc(k.aciklama) + "<br>" : ""}`
+    + `Aranan süreçler: <span class="mono">${esc(k.exeler.join(", "))}</span>`
+    + (ar.length ? `<br>Etkilenen: ${esc(ar.join(" | "))}` : "")
+    + (k.onlemNot ? `<br>Geçici önlem (komut satırında aranır): <span class="mono">${esc(k.onlemNot)}</span>` : "");
+}
+
+function seciliKural() { return (st.veri?.kurallar || []).find(k => k.id === $("#kural").value); }
+
+function formCiz() {
+  $("#kuralRow").hidden = st.mod !== "kural";
+  $("#anlikRow").hidden = st.mod !== "anlik";
+  document.querySelectorAll("[data-mod]").forEach(b => b.classList.toggle("on", b.dataset.mod === st.mod));
+  $("#desc").innerHTML = st.mod === "kural" ? kuralAciklama(seciliKural())
+    : "Exe adını yazın (\".exe\" gerekmez, Linux süreçleri de bulunur). Sürüm aralığı verirseniz yoldan / komut satırından okunan sürüm değerlendirilir; vermezseniz yalnız nerede çalıştığı, hangi portu dinlediği ve dışarıya açık olup olmadığı listelenir.";
+}
+
+function runCiz() {
+  const is = st.veri?.is;
+  const calisiyor = is?.durum === "calisiyor";
+  $("#tara").disabled = calisiyor || !st.yetki.topoloji;
+  $("#durdur").hidden = !calisiyor;
+  if (!is) { $("#run").innerHTML = ""; return; }
+  const sure = is.bitis ? Math.round((new Date(is.bitis) - new Date(is.baslangic)) / 1000) : Math.round((Date.now() - new Date(is.baslangic)) / 1000);
+  const ss = sure >= 60 ? `${Math.floor(sure / 60)} dk ${sure % 60} sn` : `${sure} sn`;
+  $("#run").innerHTML = `<div class="run ${is.durum === "hata" ? "err" : ""}">${calisiyor ? '<span class="spinner"></span>' : is.durum === "bitti" ? "✔" : is.durum === "hata" ? "✖" : "■"}
+    <b>${esc(is.kural?.cve ? is.kural.cve + " · " : "")}${esc(is.kural?.ad)}</b>
+    <span>${esc(is.asama)}</span><span class="muted">· ${ss} · ağ olayları son ${is.saat} saat, süreç başlangıçları son ${is.surecSaat} saat${is.kaydeden ? " · " + esc(is.kaydeden) : ""}</span>
+    ${is.hata ? `<div style="flex-basis:100%;color:var(--err)">${esc(is.hata)}</div>` : ""}</div>`;
+}
+
+function suz() {
+  const l = st.veri?.satirlar || [];
+  const q = $("#q").value.trim().toLowerCase(), d = $("#durumF").value, k = $("#kurumF").value;
+  return l.filter(r => (!st.onc || r.oncelik === st.onc) && (!st.onlemF || r.onlem === "var") && (!d || r.durum === d) && (!k || r.kurum === k)
+    && (!$("#dinleyen").checked || r.portlar.length) && ($("#testG").checked || !r.test)
+    && (!q || [r.ip, r.sunucu, r.bilgisayar, r.segment, r.muhafiz, r.yol, r.urun, r.surum, r.jar, ...(r.uygulamalar || []), ...r.portlar.map(p => p.port + " " + (p.ert || "") + " " + p.vip.join(" "))]
+      .some(x => String(x ?? "").toLowerCase().includes(q))));
+}
+
+function statsCiz() {
+  const l = (st.veri?.satirlar || []).filter(r => $("#testG").checked || !r.test);
+  const say = f => l.filter(f).length;
+  const kart = (key, n, et, ip) => `<div class="stat ${key} ${st.onc === key ? "on" : ""}" data-onc="${key}" title="${esc(ip || "")}"><b>${n.toLocaleString("tr-TR")}</b><span>${et}</span></div>`;
+  const sunucu = new Set(l.map(r => r.ip || r.bilgisayar)).size;
+  $("#stats").innerHTML = kart("", l.length, `süreç · ${sunucu} sunucu`, "Tümü")
+    + Object.keys(ONC).map(o => kart(o, say(r => r.oncelik === o), ONC[o], ONC_IPUCU[o])).join("")
+    + '<span class="sep"></span>'
+    + `<div class="stat" data-dur="etkilenen"><b style="color:var(--err)">${say(r => r.durum === "etkilenen" || r.durum === "olasi")}</b><span>etkilenen / olası</span></div>`
+    + `<div class="stat" data-dur="bilinmiyor"><b>${say(r => r.durum === "bilinmiyor")}</b><span>sürüm bilinmiyor</span></div>`
+    + `<div class="stat" data-dur="yamali"><b style="color:var(--ok)">${say(r => r.durum === "yamali")}</b><span>yamalı görünüyor</span></div>`
+    + `<div class="stat ${st.onlemF ? "on" : ""}" data-onlem="1"><b>${say(r => r.onlem === "var")}</b><span>geçici önlem var</span></div>`;
+}
+
+function portHtml(r) {
+  if (!r.portlar.length) return '<span class="muted small">— yalnız giden</span>';
+  const g = r.portlar.slice(0, 6).map(p => {
+    const dis = p.dis.length, vip = p.vip.length;
+    const ip = [`${p.baglanti.toLocaleString("tr-TR")} bağlantı, ${p.istemci} istemci`, p.ert ? "ERT: " + p.ert : "", vip ? "VIP: " + p.vip.join(", ") : "", dis ? "dış istemci: " + p.dis.join(", ") : ""].filter(Boolean).join("\n");
+    return `<span class="pt ${dis ? "dis" : vip ? "vip" : ""}" title="${esc(ip)}">${esc(p.port)}${vip ? " ⇄VIP" : ""}${dis ? " 🌐" : ""}</span>`;
+  }).join("");
+  return g + (r.portlar.length > 6 ? `<span class="muted small">+${r.portlar.length - 6}</span>` : "");
+}
+
+function ciz() {
+  const v = st.veri;
+  $("#sonuc").hidden = !(v?.satirlar?.length) && v?.is?.durum !== "bitti";
+  if ($("#sonuc").hidden) return;
+  statsCiz();
+  const kurumlar = [...new Set((v.satirlar || []).map(r => r.kurum).filter(Boolean))].sort();
+  const sk = $("#kurumF").value;
+  $("#kurumF").innerHTML = '<option value="">Kurum: Tümü</option>' + kurumlar.map(k => `<option ${k === sk ? "selected" : ""}>${esc(k)}</option>`).join("");
+  const l = suz();
+  $("#tb").innerHTML = l.length ? l.slice(0, st.limit).map((r, i) => `<tr data-i="${(v.satirlar).indexOf(r)}">
+    <td><span class="p ${r.oncelik}" title="${esc(ONC_IPUCU[r.oncelik])}">${ONC[r.oncelik]}</span></td>
+    <td><div class="mono">${r.ip ? `<a href="./?ip=${encodeURIComponent(r.ip)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${esc(r.ip)}</a>` : '<span class="muted">IP yok</span>'}</div>
+        <div class="small">${esc(r.sunucu || "")}${r.test ? ' <span class="d">test</span>' : ""}</div><div class="small muted">${esc(r.kurum || "")}${r.segment ? " · " + esc(r.segment) : ""}</div></td>
+    <td class="small">${esc((r.uygulamalar || []).slice(0, 3).join(" | ")) || '<span class="muted">—</span>'}${r.muhafiz ? `<div class="muted">${esc(r.muhafiz)}</div>` : ""}</td>
+    <td><b>${esc(r.exe)}</b>${r.urun ? ` <span class="d">${esc(r.urun)}</span>` : ""}<div class="small muted mono" title="${esc(r.yol)}" style="max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(r.yol)}</div>${r.jar ? `<div class="small muted">-jar ${esc(r.jar)}</div>` : ""}</td>
+    <td><span class="mono">${esc(r.surum || "?")}</span> <span class="d ${r.durum}" title="${esc(r.durumNot)}">${DUR[r.durum] || r.durum}</span>${r.surumKaynak ? `<div class="small muted">${esc(r.surumKaynak)}</div>` : ""}</td>
+    <td>${portHtml(r)}</td>
+    <td class="small">${r.giden ? r.giden.toLocaleString("tr-TR") : '<span class="muted">—</span>'}</td>
+    <td class="small o ${r.onlem}" title="Komut satırında geçici önlem parametresi">${r.onlem === "var" ? "✔ var" : r.onlem === "yok" ? "yok" : r.onlem === "bilinmiyor" ? '<span class="muted">bilinmiyor</span>' : '<span class="muted">—</span>'}</td>
+    <td class="small">${esc(r.son || "")}${r.baslangic ? `<div class="muted">başlangıç ${esc(r.baslangic)}</div>` : ""}</td>
+    <td class="small muted">${esc(r.kaynak)}</td></tr>`).join("")
+    : `<tr><td colspan="10" class="empty">${v.satirlar?.length ? "Süzgece uyan süreç yok." : "Bu aralıkta Carbon Black'te kurala uyan süreç görülmedi."}</td></tr>`;
+  $("#sayi").textContent = `${Math.min(l.length, st.limit).toLocaleString("tr-TR")} / ${l.length.toLocaleString("tr-TR")} satır gösteriliyor`;
+  $("#more").hidden = l.length <= st.limit;
+}
+
+function detay(r) {
+  const d = $("#drawer");
+  if (!r) { d.hidden = true; return; }
+  const portlar = r.portlar.map(p => `<div><span class="pt ${p.dis.length ? "dis" : ""}">${esc(p.port)}</span> ${p.baglanti.toLocaleString("tr-TR")} bağlantı · ${p.istemci} istemci${p.ert ? " · ERT: " + esc(p.ert) : ""}
+      ${p.vip.length ? `<div class="small">VIP: ${esc(p.vip.join(", "))}</div>` : ""}${p.dis.length ? `<div class="small" style="color:var(--err)">Dış istemci: ${esc(p.dis.join(", "))}</div>` : ""}</div>`).join("");
+  d.innerHTML = `<div class="dh"><div><h3>${esc(r.exe)} · ${esc(r.ip || r.bilgisayar || "")}</h3><div class="sub">${esc(r.sunucu || "")}</div></div><button type="button" id="kapat">Kapat</button></div>
+    <div class="db"><dl>
+      <dt>Öncelik</dt><dd><span class="p ${r.oncelik}">${ONC[r.oncelik]}</span> <span class="small muted">${esc(ONC_IPUCU[r.oncelik])}</span></dd>
+      <dt>Sürüm</dt><dd><span class="mono">${esc(r.surum || "okunamadı")}</span> <span class="d ${r.durum}">${DUR[r.durum] || r.durum}</span><div class="small muted">${esc(r.durumNot)}${r.surumKaynak ? " · kaynak: " + esc(r.surumKaynak) : ""}</div></dd>
+      <dt>Süreç yolu</dt><dd class="mono small">${esc(r.yol)}</dd>
+      ${r.urun ? `<dt>Ürün</dt><dd>${esc(r.urun)}</dd>` : ""}
+      ${r.jar ? `<dt>-jar</dt><dd class="mono small">${esc(r.jar)}</dd>` : ""}
+      <dt>Geçici önlem</dt><dd>${r.onlem === "var" ? "✔ komut satırında var" : r.onlem === "yok" ? "komut satırında yok" : r.onlem === "bilinmiyor" ? "bilinmiyor (pencerede süreç başlangıcı görülmedi)" : "—"}</dd>
+      <dt>Bilgisayar (CB)</dt><dd>${esc(r.bilgisayar || "—")}</dd>
+      <dt>Kurum / segment</dt><dd>${esc(r.kurum || "")}${r.segment ? " · " + esc(r.segment) : ""}${r.test ? " · test" : ""}</dd>
+      <dt>ERT uygulamaları</dt><dd>${esc((r.uygulamalar || []).join(" | ")) || "—"}${r.muhafiz ? `<div class="small muted">Muhafız: ${esc(r.muhafiz)}</div>` : ""}</dd>
+      <dt>Dinlediği portlar</dt><dd>${portlar || "— (yalnız giden bağlantı)"}</dd>
+      <dt>Giden bağlantı</dt><dd>${(r.giden || 0).toLocaleString("tr-TR")}</dd>
+      <dt>Son görülme</dt><dd>${esc(r.son || "—")}${r.baslangic ? ` · süreç başlangıcı ${esc(r.baslangic)}` : ""}</dd>
+      <dt>Kaynak</dt><dd>${esc(r.kaynak)}</dd>
+    </dl>
+    <div style="margin-top:12px"><b>Komut satırı</b>${r.komut ? `<pre>${esc(r.komut)}</pre>` : '<div class="muted small">Pencerede süreç başlangıcı görülmedi (uzun süredir çalışan süreç). Ağ olayı penceresini genişletmek komut satırını getirmez; süreç yeniden başlayınca görünür.</div>'}</div>
+    ${r.ip ? `<div style="margin-top:12px"><a href="./?ip=${encodeURIComponent(r.ip)}" target="_blank" rel="noopener">Bu IP'nin topolojisini aç ↗</a></div>` : ""}
+    </div>`;
+  d.hidden = false;
+  $("#kapat").onclick = () => detay(null);
+}
+
+function uyariCiz() {
+  const m = st.veri?.mesajlar || [];
+  $("#warn").innerHTML = m.length ? `<div class="warn">${m.map(x => `<div>${esc(x)}</div>`).join("")}</div>` : "";
+}
+
+async function yukle() {
+  try {
+    const r = await fetch("api/zafiyet");
+    if (r.status === 404) { $("#run").innerHTML = '<div class="run err">Sunucudaki DeltaFlow sürümünde bu sayfa yok (DLL güncel değil).</div>'; return; }
+    st.veri = await r.json();
+  } catch (e) { $("#run").innerHTML = `<div class="run err">${esc(e.message)}</div>`; return; }
+  const ks = $("#kural"), sec = ks.value;
+  if (!ks.options.length || ks.options.length !== st.veri.kurallar.length)
+    ks.innerHTML = st.veri.kurallar.map(k => `<option value="${esc(k.id)}">${esc((k.cve ? k.cve + " · " : "") + k.ad)}</option>`).join("");
+  if (sec) ks.value = sec;
+  formCiz(); runCiz(); uyariCiz(); ciz();
+  clearTimeout(st.timer);
+  if (st.veri.is?.durum === "calisiyor") st.timer = setTimeout(yukle, 3000);
+}
+
+async function tara() {
+  const body = { saat: +$("#saat").value };
+  if (st.mod === "kural") body.kural = $("#kural").value;
+  else {
+    body.exeler = $("#exeler").value.trim(); body.min = $("#min").value.trim(); body.duzeltilmis = $("#fix").value.trim(); body.ad = $("#ad").value.trim();
+    if (!body.exeler) { alert("Exe adı yazın."); return; }
+  }
+  const r = await fetch("api/zafiyet/tara", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  if (!r.ok) { const j = await r.json().catch(() => ({})); alert(j.error || ("HTTP " + r.status)); return; }
+  detay(null);
+  yukle();
+}
+
+function csv() {
+  if (!st.yetki.disari) return;
+  const q = v => `"${String(v ?? "").replace(/"/g, '""')}"`;
+  const lines = [["ÖNCELİK", "IP", "SUNUCU", "BİLGİSAYAR (CB)", "KURUM", "SEGMENT", "TEST", "ERT UYGULAMALARI", "MUHAFIZ", "EXE", "EXE YOLU", "ÜRÜN", "-JAR", "SÜRÜM", "SÜRÜM KAYNAĞI", "DURUM", "DURUM NOTU",
+    "DİNLEDİĞİ PORTLAR", "VIP", "DIŞ İSTEMCİ", "GİDEN BAĞLANTI", "GEÇİCİ ÖNLEM", "SON GÖRÜLME", "SÜREÇ BAŞLANGICI", "KAYNAK", "KOMUT SATIRI"].join(";"),
+    ...suz().map(r => [ONC[r.oncelik], r.ip, r.sunucu, r.bilgisayar, r.kurum, r.segment, r.test ? "evet" : "", (r.uygulamalar || []).join(" | "), r.muhafiz, r.exe, r.yol, r.urun, r.jar,
+      r.surum, r.surumKaynak, DUR[r.durum] || r.durum, r.durumNot, r.portlar.map(p => p.port).join(", "), [...new Set(r.portlar.flatMap(p => p.vip))].join(", "),
+      [...new Set(r.portlar.flatMap(p => p.dis))].join(", "), r.giden, r.onlem, r.son, r.baslangic, r.kaynak, r.komut].map(q).join(";"))];
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob(["﻿" + lines.join("\r\n")], { type: "text/csv;charset=utf-8" }));
+  a.download = `aciklik_${(st.veri?.is?.kural?.cve || st.veri?.is?.kural?.id || "tarama").replace(/[^\w.-]+/g, "_")}.csv`;
+  a.click();
+}
+
+document.addEventListener("click", e => {
+  const m = e.target.closest("[data-mod]");
+  if (m) { st.mod = m.dataset.mod; formCiz(); return; }
+  const o = e.target.closest("[data-onc]");
+  if (o) { st.onc = o.dataset.onc; st.onlemF = false; st.limit = 500; ciz(); return; }
+  const du = e.target.closest("[data-dur]");
+  if (du) { $("#durumF").value = du.dataset.dur; st.onc = ""; st.onlemF = false; st.limit = 500; ciz(); return; }
+  if (e.target.closest("[data-onlem]")) { st.onlemF = !st.onlemF; st.onc = ""; st.limit = 500; st.veri && ciz(); return; }
+  const tr = e.target.closest("tr[data-i]");
+  if (tr) { document.querySelectorAll("tr.sel").forEach(x => x.classList.remove("sel")); tr.classList.add("sel"); detay(st.veri.satirlar[+tr.dataset.i]); }
+});
+document.addEventListener("keydown", e => { if (e.key === "Escape") detay(null); });
+["#q", "#durumF", "#kurumF", "#dinleyen", "#testG"].forEach(s => $(s).addEventListener(s === "#q" ? "input" : "change", () => { st.limit = 500; ciz(); }));
+$("#kural").addEventListener("change", formCiz);
+$("#tara").addEventListener("click", tara);
+$("#durdur").addEventListener("click", () => fetch("api/zafiyet/durdur", { method: "POST" }).then(yukle));
+$("#more").addEventListener("click", () => { st.limit += 1000; ciz(); });
+$("#csv").addEventListener("click", csv);
+fetch("api/me").then(r => r.ok ? r.json() : null).then(me => {
+  if (me?.name) $("#me").textContent = "👤 " + me.name;
+  st.yetki = me?.yetki || {};
+  $("#csv").hidden = !st.yetki.disari;
+  $("#yetkiNot").textContent = st.yetki.topoloji ? "" : "Tarama başlatma yetkiniz yok (DokuPanel: Yetki:Topoloji); son taramanın sonucunu görebilirsiniz.";
+  runCiz();
+}).catch(() => {});
+yukle();
+</script>
+</body>
+</html>

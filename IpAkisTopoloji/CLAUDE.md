@@ -48,6 +48,7 @@ topoloji çizer ve şirket içi AI'a etki analizi yaptırır. Canlıda IIS'te, W
 | `Imza.cs` | Servis imzası: tüm ERT IP + port → Carbon Black exe + IIS uygulamaları, boş satırlara aynı servisin ERT adı (`wwwroot/imza.html`, DF_SERVIS_IMZA) |
 | `HttpSys.cs` | HTTP.sys (ntoskrnl) port → asıl exe: Carbon Black zaman korelasyonu (`HttpSysEslesme`), sonucun kaydı (`HttpSysKayitService`, DF_HTTPSYS_KORELASYON) |
 | `araclar/HttpSysTopla.ps1` | İSTEĞE BAĞLI: sunucularda elle `netsh http show servicestate` → DF_HTTPSYS_URL (DeltaFlow bağlanmaz) |
+| `Zafiyet.cs` | Açıklık taraması: kurala (CVE) ya da anlık exe listesine uyan süreçler tüm sunucularda, Carbon Black toplu (`wwwroot/zafiyet.html`) |
 | `Nessus.cs` | Nessus / Tenable.sc: repository'deki tarama sonuçlarından teknoloji, sertifika, OS, kurulu yazılım |
 | `Yetki.cs` | İşlem yetkileri (yazma, topoloji, dışa aktarma, toplu tahmin) — DokuPanel site kayıtları |
 | `AuthHelper.cs` | Kullanıcının verdiği DokuPanel yetki helper'ı (namespace `AppRel`), anahtar config'den |
@@ -987,6 +988,22 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
   yüklemeden çizer, tüm input / select / button pasif, bölümler açılmaz, kilit mesajı (`#fzShell.fz-kapali`). Arayüz: cihaz detayında "✎ Elle değer" formu
   (boyut başına — / 0–5, gerekçe, kaldır; yetkisizse pasif), "elle" rozeti; "Değer kuralları"nda "💾 Değerleri kaydet", "📊 Excel (güncel)", CSV, denetim
   kayıtları tablosu (kayıt başına Excel), elle değerler listesi. Sahte veriyle Excel (openpyxl ile açıldı) ve Playwright'la yetkisiz / yetkili akış test edildi.
+- **Açıklık taraması** (`Zafiyet.cs`, `wwwroot/zafiyet.html`, sekme çubuğunda "Açıklık taraması ↗"; kullanıcı: CVE-2026-114938 "Java4Shell" acil — "tek tek sunucu
+  işimizi görmez, CB'den toplu almamız lazım"; "sadece Java için değil herhangi bir process için"): KURAL tabanlı (`ZfKural`: Id, Ad, Cve, Aciklama, Exeler (ad, * joker,
+  .exe isteğe bağlı), SurumDesenleri, AnaMin, Araliklar [{Ana, Min, Duzeltilmis}], Onlem (komut satırı regex'leri), OnlemNot, Java, DestekDisiEtkilenir, Anahtar).
+  Hazır kurallar `Zafiyet:Kurallar` (boşsa varsayılan Java4Shell: java / javaw / tomcat* / prunsrv; AnaMin 17; 17: 17.0.6 → 17.0.21.1, 21 → 21.0.13.1, 25 → 25.0.5.1,
+  27 → 27.0.1.1; aralıkta olmayan ≥17 ana sürüm (18–20, 22…) destek dışı = etkilenen; önlem -XX:-UseBASE64Intrinsics / -XX:UseAVX=0..2). Sayfadan anlık kural:
+  exe adları (+ isteğe bağlı en düşük etkilenen / düzeltilmiş sürüm; verilmezse durum "bilgi", yalnız maruziyet). Arka plan işi (tek; bellekte son tarama):
+  POST `/api/zafiyet/tara {saat, kural | exeler, min, duzeltilmis, ad}` (Yetki:Topoloji), GET `/api/zafiyet` (iş, satırlar, mesajlar, kurallar), POST `/durdur`.
+  (1) CB ağ olayları TOPLU (tüm sunucular, `Zafiyet:Saat`=24, en çok `MaxSaat`=168; anahtar kelimeler + `where match(lower(yol), …)`; local_ip × yön × lp × yol,
+  örnek istemciler, computer_name), (2) CB `ingress.event.procstart` (`SurecSaat`=168) bilgisayar × yol → son komut satırı (ilk 1500 karakter), önlem bayrağı,
+  -jar, jdk yolu; (3) servis imzası kaydı (`ServisImzaService.TaramaAsync`) CB'de görünmeyen IP'ler için; ağ olayı olmayan procstart'lar ERT UNIXNAME → IP.
+  Sorgu başına `Zafiyet:SureSaniye`=900. Sürüm: yol → komut satırı (Java kalıpları jdk-17.0.10 / jdk1.8.0_202 / java-17-openjdk-17.0.9… / zulu / corretto; genel kural
+  ilk a.b[.c]). Gömülü JRE (…\jre\bin\java.exe) ve tomcat / prunsrv sarmalayıcısında not. Öncelik: etkilenen / olası + VIP üyesi ya da özel olmayan istemci → kritik,
+  + port → yüksek, yalnız giden → orta; sürüm bilinmiyor + port → incele; önlem varsa en çok orta. Dinamik port (≥49152, ≤1 istemci) atılır. AVX-512 bilgisi yok.
+  Arayüz: kural / "Süreç adıyla ara" modu, ilerleme bandı (3 sn), uyarılar, öncelik + durum kartları (tıkla süz), arama / durum / kurum / yalnız dinleyen / test,
+  tablo (sunucu, ERT uygulaması + muhafız, süreç + ürün + yol, sürüm + durum, portlar (🌐 dış, ⇄VIP), giden, önlem, son görülme, kaynak), satıra tıkla → sağ panel
+  (komut satırı dahil), CSV (Yetki:Disari). Sürüm / kural mantığı yansıma testiyle, arayüz Playwright + mock'la denendi; gerçek Splunk'ta denenmedi.
 - **VIP**: sorgulanan IP VIP ise üyeler + GW'ler aynı sorguya eklenir, üyeler "VIP ÜYESİ" (GW→üye trafiği varsa ✓).
   Gidilen IP VIP ise "VIP → n ÜYE"; gelen IP LB GW ise "LB GW"; sorgulanan sunucu havuz üyesiyse VIP kartı.
 - **Uygulama görünümü** (`/api/apps`, `/api/app`): `[kullanan uygulamalar] → [UYGULAMA: VIP'ler + segment grupları] → [bağımlı olunanlar]`,

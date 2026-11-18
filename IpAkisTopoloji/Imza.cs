@@ -424,6 +424,13 @@ xlog"];
         return sb.ToString();
     }
 
+    // Açıklık taraması (Zafiyet.cs) için kayıtlı ham tarama (yeni sorgu yok)
+    public async Task<ImzaTarama?> TaramaAsync(CancellationToken ct)
+    {
+        ImzaTarama? t; lock (_gate) t = _son;
+        return t ?? await OkuAsync(ct);
+    }
+
     public async Task<ImzaSonuc> SonucAsync(CancellationToken ct)
     {
         ImzaTarama? t; lock (_gate) t = _son;

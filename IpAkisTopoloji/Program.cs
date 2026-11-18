@@ -45,6 +45,7 @@ builder.Services.AddSingleton<SegmentTaramaService>();
 builder.Services.AddSingleton<ServisImzaService>();
 builder.Services.AddSingleton<NessusService>();
 builder.Services.AddSingleton<FizikselService>();
+builder.Services.AddSingleton<ZafiyetService>();
 builder.Services.AddMemoryCache();
 
 // Windows Authentication: IIS'te IIS'in Windows Auth'u, Kestrel'de Negotiate kullanılır.
@@ -415,6 +416,21 @@ app.MapGet("/api/erisim", async (string? src, string? dst, string? port, string?
     var cbSt = !useCb ? SourceStatus.Skipped : new SourceStatus(cbErr == null, cbErr, cb?.Messages ?? [], cb?.ElapsedMs, cb?.Rows.Count ?? 0);
     var (_, _, envSt) = Statuses(wanted, null, null, null, null, env, envErr);
     return Results.Ok(Erisim.Build(Erisim.Uc(q!.Ip, env), Erisim.Uc(dstIp, env), p, q!, fw?[0], fw?[1], cb, fwSt, cbSt, envSt, sw.ElapsedMilliseconds, wf?[0], wf?[1], wafSt, op, opSt));
+});
+
+// Açıklık taraması (Zafiyet.cs, wwwroot/zafiyet.html): kurala (ya da anlık exe listesine) uyan süreçler tüm sunucularda (Carbon Black, toplu)
+app.MapGet("/api/zafiyet", (ZafiyetService z) => Results.Ok(z.Sonuc()));
+app.MapPost("/api/zafiyet/tara", (ZafiyetIstek? req, HttpContext ctx, IConfiguration cfg, ZafiyetService z) =>
+{
+    if (!Yetki.Var(cfg, ctx, Yetki.Topoloji)) return Yetki.Red(ctx, "Açıklık taraması");
+    var k = z.KuralBul(req ?? new ZafiyetIstek(null, null, null, null, null, null), out var hata);
+    if (k == null) return Results.BadRequest(new { error = hata });
+    return Results.Ok(z.Baslat(k, req?.Saat ?? 0, ctx.User?.Identity?.Name));
+});
+app.MapPost("/api/zafiyet/durdur", (HttpContext ctx, IConfiguration cfg, ZafiyetService z) =>
+{
+    if (!Yetki.Var(cfg, ctx, Yetki.Topoloji)) return Yetki.Red(ctx, "Açıklık taraması");
+    z.Durdur(); return Results.Ok();
 });
 
 // Opinnate tanı: rule-checker ve /devices ham yanıtları (düz metin; token / şifre yazılmaz)
