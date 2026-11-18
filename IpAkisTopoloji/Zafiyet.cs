@@ -24,10 +24,11 @@ record ZfSatir(string? Ip, string? Sunucu, string? Bilgisayar, string? Kurum, st
     string Exe, string Yol, string? Urun, string? Surum, string? SurumKaynak, string Durum, string DurumNot,
     List<ZfPort> Portlar, long Giden, string Onlem, string? Komut, string? Jar, string? Son, string? Baslangic, string Oncelik, string Kaynak,
     string? Vlan = null, string? Domain = null, string? Cidr = null, string? Dagitim = null, string? Nessus = null);
-record ZfIs(string Durum, string Asama, DateTime Baslangic, DateTime? Bitis, string? Hata, string? Kaydeden, int Saat, int SurecSaat, ZfKural Kural);
+record ZfIs(string Durum, string Asama, DateTime Baslangic, DateTime? Bitis, string? Hata, string? Kaydeden, int Saat, int SurecSaat, ZfKural Kural, string? Kapsam = null);
 // Sayfadan elle / AI ile doldurulmuş kural: exe adları virgülle, önlem ifadeleri virgülle (DÜZ METİN; regex'e kaçışlanır)
 record ZfOzel(string? Ad, string? Cve, string? Aciklama, string? Exeler, List<ZfAralik>? Araliklar, string? Onlem, bool DigerEtkilenir, string? NessusAnahtarlar = null);
-record ZafiyetIstek(int? Saat, string? Kural, ZfOzel? Ozel);
+// Ipler: yalnız bu IP'ler (tekil tarama); Ekle: sonuç mevcut listeye eklenir (o IP'lerin eski satırları değişir); SonKural: son taramanın kuralı
+record ZafiyetIstek(int? Saat, string? Kural, ZfOzel? Ozel, string? Ipler = null, bool Ekle = false, bool SonKural = false);
 record ZafiyetAiIstek(string? Metin);
 // AI ile doldurma sonucu (kullanıcı onaylayıp düzenler; tarama kendiliğinden başlamaz)
 record ZfAiExe(string Ad, string? Neden, string Kaynak, int Sunucu, List<string> Ornek);
@@ -213,6 +214,7 @@ sealed class ZafiyetService(IConfiguration cfg, IHttpClientFactory factory, Enva
     // İstekte kural id'si ya da sayfada doldurulmuş kural
     public async Task<(ZfKural? Kural, string? Hata)> KuralBulAsync(ZafiyetIstek r, CancellationToken ct)
     {
+        if (r.SonKural) { lock (_gate) if (_is?.Kural is { } son) return (son, null); return (null, "Önce bir tarama yapılmalı (son taramanın kuralı yok)."); }
         if (r.Ozel != null) return OzelKural(r.Ozel, "anlik");
         var l = await KurallarAsync(ct);
         return (l.FirstOrDefault(x => string.Equals(x.Id, r.Kural ?? "", StringComparison.OrdinalIgnoreCase)) ?? l.First(), null);
@@ -239,7 +241,19 @@ sealed class ZafiyetService(IConfiguration cfg, IHttpClientFactory factory, Enva
                 .Distinct(StringComparer.OrdinalIgnoreCase).ToList() is { Count: > 0 } na ? na : null), null);
     }
 
-    public ZfIs Baslat(ZfKural kural, int saat, string? user)
+    // IP listesi: virgül / boşluk / satırla; yalnız IPv4, en çok Zafiyet:MaxIp (50)
+    public List<string>? IpListesi(string? metin, out string? hata)
+    {
+        hata = null;
+        if (string.IsNullOrWhiteSpace(metin)) return null;
+        var l = Regex.Matches(metin, @"\b(?:\d{1,3}\.){3}\d{1,3}\b").Select(m => m.Value).Where(v => v.Split('.').All(x => int.Parse(x) <= 255)).Distinct().ToList();
+        int max = cfg.GetValue("Zafiyet:MaxIp", 50);
+        if (l.Count == 0) hata = "Geçerli IPv4 adresi bulunamadı.";
+        else if (l.Count > max) hata = $"En çok {max} IP girilebilir (Zafiyet:MaxIp); tüm sunucular için IP kutusunu boş bırakın.";
+        return hata == null ? l : null;
+    }
+
+    public ZfIs Baslat(ZfKural kural, int saat, string? user, List<string>? ipler = null, bool ekle = false)
     {
         lock (_gate)
         {
@@ -248,18 +262,22 @@ sealed class ZafiyetService(IConfiguration cfg, IHttpClientFactory factory, Enva
             saat = Math.Clamp(saat <= 0 ? cfg.GetValue("Zafiyet:Saat", 24) : saat, 1, maxSaat);
             int surecSaat = Math.Max(saat, cfg.GetValue("Zafiyet:SurecSaat", 168));
             _cts = new CancellationTokenSource();
-            _is = new ZfIs("calisiyor", "Başlıyor", DateTime.Now, null, null, user, saat, surecSaat, kural);
-            _satir = []; _mesaj = [];
+            string kapsam = ipler == null ? "tüm sunucular" : $"{ipler.Count} IP: {string.Join(", ", ipler.Take(5))}{(ipler.Count > 5 ? " …" : "")}" + (ekle ? " (listeye ekleniyor)" : "");
+            _is = new ZfIs("calisiyor", "Başlıyor", DateTime.Now, null, null, user, saat, surecSaat, kural, kapsam);
+            var eski = ekle && ipler != null ? _satir : [];
+            var eskiMesaj = ekle && ipler != null ? _mesaj : [];
+            if (!(ekle && ipler != null)) { _satir = []; _mesaj = []; }
             var ct = _cts.Token;
-            _ = Task.Run(() => CalisAsync(kural, saat, surecSaat, ct));
+            _ = Task.Run(() => CalisAsync(kural, saat, surecSaat, ct, ipler, eski, eskiMesaj));
             return _is;
         }
     }
     void Set(Func<ZfIs, ZfIs> f) { lock (_gate) if (_is != null) _is = f(_is); }
 
-    async Task CalisAsync(ZfKural k, int saat, int surecSaat, CancellationToken ct)
+    async Task CalisAsync(ZfKural k, int saat, int surecSaat, CancellationToken ct, List<string>? ipler = null, List<ZfSatir>? eski = null, List<string>? eskiMesaj = null)
     {
         var mesaj = new List<string>();
+        var ipSet = ipler?.ToHashSet();
         try
         {
             var s = cfg.GetSection("Splunk");
@@ -270,9 +288,13 @@ sealed class ZafiyetService(IConfiguration cfg, IHttpClientFactory factory, Enva
             var bit = DateTimeOffset.Now;
             string exeler = string.Join(", ", Temiz(k.Exeler));
 
-            Set(i => i with { Asama = $"Carbon Black: {exeler} süreçlerinin ağ olayları (son {saat} saat, tüm sunucular)" });
+            // Tekil / birkaç IP: TERM(ip) ile indeksten süzülür + local_ip eşitliği
+            string ipAra = ipler == null ? "" : "(" + string.Join(" OR ", ipler.Select(i => $"TERM({i})")) + ")";
+            string ipKos = ipler == null ? "" : "| where " + string.Join(" OR ", ipler.Select(i => $"local_ip=\"{i}\""));
+            Set(i => i with { Asama = $"Carbon Black: {exeler} süreçlerinin ağ olayları (son {saat} saat, {(ipler == null ? "tüm sunucular" : ipler.Count + " IP")})" });
             string spl1 = $"""
-                search index={index} sourcetype="{st}" {anahtar}
+                search index={index} sourcetype="{st}" {anahtar} {ipAra}
+                {ipKos}
                 | eval yol=coalesce(process_path, process_name, "")
                 | where match(lower(yol), "{desen}")
                 | eval yon=if(lower(direction)=="outbound", "out", "in"), lp=if(yon=="in", local_port, "-")
@@ -284,8 +306,20 @@ sealed class ZafiyetService(IConfiguration cfg, IHttpClientFactory factory, Enva
 
             Set(i => i with { Asama = $"Carbon Black: süreç başlangıçları / komut satırları (son {surecSaat} saat)" });
             string onlemRx = k.Onlem is { Count: > 0 } o ? string.Join("|", o).Replace("\\", "\\\\").Replace("\"", "\\\"") : "";
+            // IP kipinde süreç başlangıcında IP yok: bilgisayar adları (ağ olaylarından + ERT UNIXNAME) ile süzülür
+            string pcAra = "";
+            bool surecAtla = false;
+            if (ipler != null)
+            {
+                var envOn = await envanter.GetAsync(false, ct);
+                var pcler = r1.Rows.Select(r => V(r, "pc")?.Split("|||")[0]).OfType<string>()
+                    .Concat(ipler.SelectMany(ip => envOn.AppsOnIp(ip).Select(a => a.UnixName).OfType<string>()))
+                    .Select(KisaPc).Where(x => Regex.IsMatch(x, @"^[a-z0-9_\-]{3,}$")).Distinct().Take(50).ToList();
+                if (pcler.Count == 0) { surecAtla = true; mesaj.Add("Süreç başlangıçları atlandı: bu IP'lerin Carbon Black bilgisayar adı / ERT sunucu adı bulunamadı."); }
+                else pcAra = "(" + string.Join(" OR ", pcler.Select(x => $"TERM({x})")) + ")";
+            }
             string spl2 = $"""
-                search index={index} sourcetype="{st}" TERM(ingress.event.procstart) {anahtar}
+                search index={index} sourcetype="{st}" TERM(ingress.event.procstart) {anahtar} {pcAra}
                 | eval yol=coalesce(process_path, process_name, ""), cmd=coalesce(cmdline, command_line, process_cmdline, "")
                 | where match(lower(yol), "{desen}")
                 | eval onlem={(onlemRx == "" ? "-1" : $"if(match(cmd, \"{onlemRx}\"), 1, 0)")}
@@ -295,7 +329,7 @@ sealed class ZafiyetService(IConfiguration cfg, IHttpClientFactory factory, Enva
                 | stats latest(cmd) as cmd max(onlem) as onlem latest(jar) as jar latest(jhome) as jhome max(_time) as bas count by computer_name yol
                 """;
             List<Dictionary<string, string>> r2Rows = [];
-            try
+            if (!surecAtla) try
             {
                 var r2 = await SplunkService.ExportAsync(spl2, new LookupQuery("0.0.0.0", bit.AddHours(-surecSaat), bit), cfg, http, ct, "Carbon Black (süreç başlangıcı)", sure);
                 r2Rows = r2.Rows; mesaj.AddRange(r2.Messages);
@@ -311,7 +345,7 @@ sealed class ZafiyetService(IConfiguration cfg, IHttpClientFactory factory, Enva
                     if (k.Cve != null)
                     {
                         Set(i => i with { Asama = $"Nessus: {k.Cve} bulguları (tüm repo)" });
-                        var (l, kesik) = await nessus.CveAsync(k.Cve, ct);
+                        var (l, kesik) = await nessus.CveAsync(k.Cve, ct, ipler);
                         nCve = l;
                         mesaj.Add(l.Count > 0 ? $"Nessus: {k.Cve} için {l.Select(x => x.Ip).Distinct().Count()} IP'de bulgu."
                             : $"Nessus: {k.Cve} için bulgu yok (Tenable'ın bu CVE için kontrolü henüz yayımlanmamış ya da taranmamış olabilir).");
@@ -322,7 +356,7 @@ sealed class ZafiyetService(IConfiguration cfg, IHttpClientFactory factory, Enva
                     {
                         Set(i => i with { Asama = $"Nessus: plugin adında {string.Join(", ", kelimeler)} geçen bulgular (tüm repo)" });
                         var haric = k.Java ? new Regex("javascript|jquery|json", RegexOptions.IgnoreCase) : null;
-                        var (l, kelSay, kesik) = await nessus.UrunlerAsync(kelimeler, haric, ct);
+                        var (l, kelSay, kesik) = await nessus.UrunlerAsync(kelimeler, haric, ct, ipler);
                         nUrun = l;
                         mesaj.Add($"Nessus ürün araması — {l.Select(x => x.Ip).Distinct().Count()} IP, {l.Count} bulgu ({l.Count(x => x.Kurulumlar.Count > 0)} sürümlü) · eşleşen plugin: "
                             + string.Join(", ", kelSay.Select(x => $"{x.Key} {x.Value}")) + (kesik ? " · sayfa sınırında kesildi (Zafiyet:NessusMaxSayfa)" : ""));
@@ -336,11 +370,27 @@ sealed class ZafiyetService(IConfiguration cfg, IHttpClientFactory factory, Enva
             var env = await envanter.GetAsync(false, ct);
             ImzaTarama? imzaT = null;
             try { imzaT = await imza.TaramaAsync(ct); } catch (Exception ex) when (ex is not OperationCanceledException) { mesaj.Add("Servis imzası kaydı okunamadı: " + ex.Message); }
+            if (ipSet != null && imzaT != null) imzaT = imzaT with { Sunucular = imzaT.Sunucular.Where(x => ipSet.Contains(x.Ip)).ToList() };
             var satir = Birlestir(k, env, r1.Rows, r2Rows, imzaT, mesaj, nCve, nUrun);
+            int yeni = satir.Count;
+            if (ipSet != null)
+            {
+                satir = satir.Where(r => r.Ip != null && ipSet.Contains(r.Ip)).ToList();
+                yeni = satir.Count;
+                var bos = ipler!.Where(ip => !satir.Any(r => r.Ip == ip)).ToList();
+                if (bos.Count > 0) mesaj.Add($"Kurala uyan süreç / kurulum bulunamayan IP'ler: {string.Join(", ", bos)} (Carbon Black'te bu aralıkta olay yok ve Nessus'ta bulgu yok).");
+                if (eski is { Count: > 0 })
+                {
+                    string[] sira = ["kritik", "yuksek", "orta", "incele", "dusuk"];
+                    satir = eski.Where(r => r.Ip == null || !ipSet.Contains(r.Ip)).Concat(satir)
+                        .OrderBy(x => Array.IndexOf(sira, x.Oncelik)).ThenByDescending(x => x.Portlar.Sum(p => p.Baglanti)).ThenBy(x => x.Ip).ToList();
+                    mesaj.Insert(0, $"Tekil tarama listeye eklendi: {string.Join(", ", ipler!)} → {yeni} satır (bu IP'lerin eski satırları yenilendi).");
+                }
+            }
             lock (_gate)
             {
-                _satir = satir; _mesaj = mesaj.Distinct().ToList();
-                _is = _is! with { Durum = "bitti", Asama = $"Bitti: {satir.Count} süreç", Bitis = DateTime.Now };
+                _satir = satir; _mesaj = (eskiMesaj ?? []).Concat(mesaj).Distinct().ToList();
+                _is = _is! with { Durum = "bitti", Asama = ipSet != null ? $"Bitti: {yeni} satır ({ipler!.Count} IP)" : $"Bitti: {satir.Count} süreç", Bitis = DateTime.Now };
             }
         }
         catch (OperationCanceledException) { lock (_gate) { _mesaj = mesaj; _is = _is! with { Durum = "durduruldu", Asama = "Durduruldu", Bitis = DateTime.Now }; } }

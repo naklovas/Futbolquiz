@@ -140,7 +140,10 @@ sealed class NessusService(IConfiguration cfg, IHttpClientFactory factory, ILogg
     // Ürün araması (kullanıcı: "tarama ekseninde gidelim"; canlıda pluginName "~=" süzgeci YOK SAYILDI — her kelime aynı 50.000 bulguyu döndürdü):
     // plugin adı KODDA eşlenir (sumid özeti), bulgular pluginID ile istenir, bulgu adı yine kodda doğrulanır.
     // Dönüş: bulgular + kelime başına eşleşen plugin sayısı.
-    public async Task<(List<NessusBulgu> L, Dictionary<string, int> Kelime, bool Kesik)> UrunlerAsync(IReadOnlyList<string> kelimeler, Regex? haric, CancellationToken ct)
+    static JsonObject IpFiltre(IEnumerable<string> ips) => new() { ["filterName"] = "ip", ["operator"] = "=", ["value"] = string.Join(",", ips) };
+
+    public async Task<(List<NessusBulgu> L, Dictionary<string, int> Kelime, bool Kesik)> UrunlerAsync(IReadOnlyList<string> kelimeler, Regex? haric, CancellationToken ct,
+        IReadOnlyCollection<string>? ips = null)
     {
         var ozet = await PluginOzetiAsync(ct);
         bool Uyar(string ad, string k) => Regex.IsMatch(ad, $@"(?<![A-Za-z]){Regex.Escape(k)}", RegexOptions.IgnoreCase) && !(haric?.IsMatch(ad) ?? false);
@@ -150,7 +153,10 @@ sealed class NessusService(IConfiguration cfg, IHttpClientFactory factory, ILogg
         bool kesik = false;
         foreach (var parca in ids.Chunk(150))
         {
-            var (l, k) = await AraAsync(new JsonArray { new JsonObject { ["filterName"] = "pluginID", ["operator"] = "=", ["value"] = string.Join(",", parca) } }, ct);
+            var f = new JsonArray { new JsonObject { ["filterName"] = "pluginID", ["operator"] = "=", ["value"] = string.Join(",", parca) } };
+            if (ips is { Count: > 0 }) f.Add(IpFiltre(ips));
+            var (l, k) = await AraAsync(f, ct);
+            if (ips is { Count: > 0 }) l = l.Where(b => ips.Contains(b.Ip)).ToList();   // ip süzgeci de yok sayılırsa
             list.AddRange(l.Where(b => kelimeler.Any(w => Uyar(b.PluginAd, w))));   // süzgeç yine yok sayılırsa alakasız bulgu girmesin
             kesik |= k;
         }
@@ -177,8 +183,13 @@ sealed class NessusService(IConfiguration cfg, IHttpClientFactory factory, ILogg
     }
 
     // CVE numarasına göre bulgular (plugin yayımlanmamışsa boş)
-    public Task<(List<NessusBulgu> L, bool Kesik)> CveAsync(string cve, CancellationToken ct) =>
-        AraAsync(new JsonArray { new JsonObject { ["filterName"] = "cveID", ["operator"] = "=", ["value"] = cve } }, ct);
+    public async Task<(List<NessusBulgu> L, bool Kesik)> CveAsync(string cve, CancellationToken ct, IReadOnlyCollection<string>? ips = null)
+    {
+        var f = new JsonArray { new JsonObject { ["filterName"] = "cveID", ["operator"] = "=", ["value"] = cve } };
+        if (ips is { Count: > 0 }) f.Add(IpFiltre(ips));
+        var (l, k) = await AraAsync(f, ct);
+        return (ips is { Count: > 0 } ? l.Where(b => ips.Contains(b.Ip)).ToList() : l, k);
+    }
 
     // Plugin adında kelime geçen bulgular — TÜM ciddiyetler (kullanıcı: "tarama ekseninde gidelim"): "… Detection" bilgi bulguları kurulumu,
     // "Oracle Java SE … CPU" gibi eski açıklık bulguları da kurulu sürümü söyler. yalnizBilgi=true → yalnız severity 0.

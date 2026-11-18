@@ -1053,6 +1053,12 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
   önbellek, `Zafiyet:NessusPluginSayfa`=40 × 5000) → plugin adı KODDA eşlenir (kelime solunda harf yok; Java kuralında javascript / jquery / json hariç) →
   `UrunlerAsync` bulguları pluginID ile (150'lik parçalar) ister ve bulgu adını yine kodda doğrular (süzgeç yok sayılsa da alakasız bulgu girmez). Mesajda kelime başına
   eşleşen plugin sayısı. JavaNessus'a OpenJDK eklendi. Ad süzgecini yok sayan sahte Tenable.sc ile denendi (JavaScript ve Windows yazılım listesi elendi).
+  TEKİL IP TARAMASI + LİSTEYE EKLE (kullanıcı: "tekil IP taraması olsa, gelen IP'den listeye ekleyebileyim"): `ZafiyetIstek.Ipler` (virgül / boşluk / satır, IPv4,
+  en çok `Zafiyet:MaxIp`=50; `IpListesi`), `Ekle` (sonuç mevcut listeye; o IP'lerin eski satırları yenilenir, diğerleri kalır, mesajlar birleşir), `SonKural` (son
+  taramanın kuralı). IP kipinde CB ağ sorgusu `(TERM(ip) OR …)` + `where local_ip=…`; süreç başlangıcı ağ olaylarındaki computer_name + ERT UNIXNAME ile
+  `(TERM(pc) OR …)` (ad yoksa atlanır + mesaj); Nessus CVE / ürün sorgularına `ip` süzgeci (sonuç kodda da IP'ye süzülür); servis imzası yalnız o IP'ler;
+  sonuçta bulgu çıkmayan IP'ler mesajda. `ZfIs.Kapsam` ("tüm sunucular" / "N IP: …"). Arayüz: "IP'ler (isteğe bağlı)" kutusu + "Mevcut listeye ekle" (varsayılan
+  işaretli; liste boşsa yok sayılır), ilerleme bandında kapsam, satır panelinde "↻ Bu IP'yi yeniden tara" (sonKural + ekle). Mock'la istekler denendi.
 - **VIP**: sorgulanan IP VIP ise üyeler + GW'ler aynı sorguya eklenir, üyeler "VIP ÜYESİ" (GW→üye trafiği varsa ✓).
   Gidilen IP VIP ise "VIP → n ÜYE"; gelen IP LB GW ise "LB GW"; sorgulanan sunucu havuz üyesiyse VIP kartı.
 - **Uygulama görünümü** (`/api/apps`, `/api/app`): `[kullanan uygulamalar] → [UYGULAMA: VIP'ler + segment grupları] → [bağımlı olunanlar]`,

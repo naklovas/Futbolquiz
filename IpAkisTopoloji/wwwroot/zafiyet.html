@@ -46,6 +46,7 @@
   button.primary { background: var(--in); border-color: var(--in); color: #fff; font-weight: 600; }
   .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: end; }
   .row label { display: grid; gap: 3px; font-size: 12px; color: var(--muted); }
+  .row label.chk { align-self: center; } .row label.chk span { display: flex; gap: 6px; align-items: center; font-size: 13px; color: var(--text); padding-top: 14px; }
   .mod { display: flex; gap: 6px; margin-bottom: 10px; }
   .mod button.on { background: var(--in); border-color: var(--in); color: #fff; }
   .desc { margin-top: 10px; font-size: 13px; color: var(--muted); }
@@ -161,6 +162,8 @@
     </div>
     <div class="row" style="margin-top:10px">
       <label>Ağ olayı penceresi<select id="saat"><option value="24">Son 24 saat</option><option value="72">Son 72 saat</option><option value="168">Son 7 gün</option></select></label>
+      <label title="Boş: tüm sunucular. Dolu: yalnız bu IP'ler (virgül / boşluk / satırla, en çok 50) — Carbon Black ve Nessus sorguları bu IP'lerle sınırlanır, hızlı biter">IP'ler (isteğe bağlı)<input id="ipler" placeholder="ör. 10.1.2.3, 10.1.2.4" style="width:260px"></label>
+      <label class="chk" title="İşaretliyse IP taramasının sonucu mevcut listeye eklenir (bu IP'lerin eski satırları yenilenir); değilse liste yalnız bu IP'lerle değişir"><span><input type="checkbox" id="ekle" checked> Mevcut listeye ekle</span></label>
       <button type="button" class="primary" id="tara">Taramayı başlat</button>
       <button type="button" id="durdur" hidden>Durdur</button>
       <span class="sub" id="yetkiNot"></span>
@@ -326,7 +329,7 @@ function runCiz() {
   const ss = sure >= 60 ? `${Math.floor(sure / 60)} dk ${sure % 60} sn` : `${sure} sn`;
   $("#run").innerHTML = `<div class="run ${is.durum === "hata" ? "err" : ""}">${calisiyor ? '<span class="spinner"></span>' : is.durum === "bitti" ? "✔" : is.durum === "hata" ? "✖" : "■"}
     <b>${esc(is.kural?.cve ? is.kural.cve + " · " : "")}${esc(is.kural?.ad)}</b>
-    <span>${esc(is.asama)}</span><span class="muted">· ${ss} · ağ olayları son ${is.saat} saat, süreç başlangıçları son ${is.surecSaat} saat${is.kaydeden ? " · " + esc(is.kaydeden) : ""}</span>
+    <span>${esc(is.asama)}</span><span class="muted">· ${ss}${is.kapsam ? " · " + esc(is.kapsam) : ""} · ağ olayları son ${is.saat} saat, süreç başlangıçları son ${is.surecSaat} saat${is.kaydeden ? " · " + esc(is.kaydeden) : ""}</span>
     ${is.hata ? `<div style="flex-basis:100%;color:var(--err)">${esc(is.hata)}</div>` : ""}</div>`;
 }
 
@@ -439,10 +442,13 @@ function detay(r) {
       ${r.nessus ? `<dt>Nessus</dt><dd>${esc(r.nessus)}</dd>` : ""}
     </dl>
     <div style="margin-top:12px"><b>Komut satırı</b>${r.komut ? `<pre>${esc(r.komut)}</pre>` : '<div class="muted small">Pencerede süreç başlangıcı görülmedi (uzun süredir çalışan süreç). Ağ olayı penceresini genişletmek komut satırını getirmez; süreç yeniden başlayınca görünür.</div>'}</div>
-    ${r.ip ? `<div style="margin-top:12px"><a href="./?ip=${encodeURIComponent(r.ip)}" target="_blank" rel="noopener">Bu IP'nin topolojisini aç ↗</a></div>` : ""}
+    ${r.ip ? `<div style="margin-top:12px;display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+      <button type="button" id="ipTara" ${st.yetki.topoloji && st.veri?.is?.durum !== "calisiyor" ? "" : "disabled"} title="Son taramanın kuralıyla yalnız bu IP'yi yeniden tarar; sonuç listeye eklenir (bu IP'nin satırları yenilenir)">↻ Bu IP'yi yeniden tara</button>
+      <a href="./?ip=${encodeURIComponent(r.ip)}" target="_blank" rel="noopener">Bu IP'nin topolojisini aç ↗</a></div>` : ""}
     </div>`;
   d.hidden = false;
   $("#kapat").onclick = () => detay(null);
+  if ($("#ipTara")) $("#ipTara").onclick = () => ipTara(r.ip);
 }
 
 function uyariCiz() {
@@ -466,7 +472,8 @@ async function yukle() {
 }
 
 async function tara() {
-  const body = { saat: +$("#saat").value };
+  const ipMetin = $("#ipler").value.trim();
+  const body = { saat: +$("#saat").value, ipler: ipMetin || null, ekle: !!ipMetin && $("#ekle").checked && !!st.veri?.satirlar?.length };
   if (st.mod === "kural") body.kural = $("#kural").value;
   else {
     body.ozel = ozel();
@@ -476,6 +483,14 @@ async function tara() {
   if (!r.ok) { const j = await r.json().catch(() => ({})); alert(j.error || ("HTTP " + r.status)); return; }
   detay(null);
   yukle();
+}
+
+// Satır panelinden: son taramanın kuralıyla tek IP, listeye ekleyerek
+async function ipTara(ip) {
+  const r = await fetch("api/zafiyet/tara", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ saat: st.veri?.is?.saat || +$("#saat").value, sonKural: true, ipler: ip, ekle: true }) });
+  if (!r.ok) { const j = await r.json().catch(() => ({})); alert(j.error || ("HTTP " + r.status)); return; }
+  detay(null); yukle();
 }
 
 function csv() {

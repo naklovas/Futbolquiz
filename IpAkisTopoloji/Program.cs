@@ -425,7 +425,9 @@ app.MapPost("/api/zafiyet/tara", async (ZafiyetIstek? req, HttpContext ctx, ICon
     if (!Yetki.Var(cfg, ctx, Yetki.Topoloji)) return Yetki.Red(ctx, "Açıklık taraması");
     var (k, hata) = await z.KuralBulAsync(req ?? new ZafiyetIstek(null, null, null), ct);
     if (k == null) return Results.BadRequest(new { error = hata });
-    return Results.Ok(z.Baslat(k, req?.Saat ?? 0, ctx.User?.Identity?.Name));
+    var ipler = z.IpListesi(req?.Ipler, out var ipHata);
+    if (ipHata != null) return Results.BadRequest(new { error = ipHata });
+    return Results.Ok(z.Baslat(k, req?.Saat ?? 0, ctx.User?.Identity?.Name, ipler, req?.Ekle == true));
 });
 app.MapPost("/api/zafiyet/durdur", (HttpContext ctx, IConfiguration cfg, ZafiyetService z) =>
 {
