@@ -1024,6 +1024,8 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
   (3) Java 8 biçimi `8u511b33-perf` → `NormSurum` 1.8.0.511 (metinde "8u511" geçmesi yeterli; elle girişte de). (4) AI ile doldurma Ad / CVE'yi her zaman yazar
   (önceki kuraldan kalan değer kalmaz; metinde CVE yoksa boş). (5) AI "javac" önerdi ("Compiler" = HotSpot JIT, javac değil) → `JdkAraclari` (javac, jar, keytool,
   jshell…) kaynak "AI · geliştirme aracı", işaretsiz, notlu; prompt kuralı.
+  VLAN + DOMAIN (kullanıcı: "VLAN bilgilerini de çeksene domain bilgisiyle beraber"): `ZfSatir.Vlan / Domain / Cidr` (segment kaydından); tabloda sunucu hücresinde,
+  sağ panelde "VLAN / domain", aramada ve CSV'de (VLAN, DOMAIN, CIDR).
 - **VIP**: sorgulanan IP VIP ise üyeler + GW'ler aynı sorguya eklenir, üyeler "VIP ÜYESİ" (GW→üye trafiği varsa ✓).
   Gidilen IP VIP ise "VIP → n ÜYE"; gelen IP LB GW ise "LB GW"; sorgulanan sunucu havuz üyesiyse VIP kartı.
 - **Uygulama görünümü** (`/api/apps`, `/api/app`): `[kullanan uygulamalar] → [UYGULAMA: VIP'ler + segment grupları] → [bağımlı olunanlar]`,
