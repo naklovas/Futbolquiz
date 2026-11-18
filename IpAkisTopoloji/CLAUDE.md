@@ -1059,6 +1059,12 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
   `(TERM(pc) OR …)` (ad yoksa atlanır + mesaj); Nessus CVE / ürün sorgularına `ip` süzgeci (sonuç kodda da IP'ye süzülür); servis imzası yalnız o IP'ler;
   sonuçta bulgu çıkmayan IP'ler mesajda. `ZfIs.Kapsam` ("tüm sunucular" / "N IP: …"). Arayüz: "IP'ler (isteğe bağlı)" kutusu + "Mevcut listeye ekle" (varsayılan
   işaretli; liste boşsa yok sayılır), ilerleme bandında kapsam, satır panelinde "↻ Bu IP'yi yeniden tara" (sonKural + ekle). Mock'la istekler denendi.
+  NGINX (kullanıcı: "CVE-2026-123633 ve CVE-2026-123007 de çıktı, ekleyelim"): yerleşik kural `NginxHttp2` ("nginx-http2-2026"; nginx, openresty; SurumDesenleri
+  nginx-1.24.0 / openresty-1.25.3.1 / nginx/1.x; aralıklar: dal 1.30 → 1.30.7, dal 1.31 → 1.31.9, diğer 1.9.5 … son 1.31.8; Nessus kelimeleri nginx, OpenResty; önlem =
+  HTTP/2'yi kapatmak, yapılandırmada → ölçülmez; NGINX Plus R37 sürümü yoldan çıkmaz). `ZfAralik.Dal` (sürüm bu önekle başlıyorsa; "1.30" tek başına → olası); aralık
+  seçimi dal > ana > genel. Yerleşik kurallar (`Yerlesik` = Java4Shell, NginxHttp2) artık HER ZAMAN listede (ayarda aynı Id varsa o). Kural birden çok CVE taşır
+  (Cve "A, B"; Nessus'ta her biri ayrı). AI doldurmada metindeki tüm CVE'ler; çoklu aralıkta ana hep aynıysa (NGINX) düzeltilmiş sürümlü aralıklar dala bağlanır, genel
+  aralık dalsız kalır. Arayüzde aralık tablosunda "Ana sürüm / dal" (17 ya da 1.30). Nessus satırının süreç adı kuralın ilk exe'si ("nginx (Nessus)"). Sürüm mantığı yansıma testiyle.
 - **VIP**: sorgulanan IP VIP ise üyeler + GW'ler aynı sorguya eklenir, üyeler "VIP ÜYESİ" (GW→üye trafiği varsa ✓).
   Gidilen IP VIP ise "VIP → n ÜYE"; gelen IP LB GW ise "LB GW"; sorgulanan sunucu havuz üyesiyse VIP kartı.
 - **Uygulama görünümü** (`/api/apps`, `/api/app`): `[kullanan uygulamalar] → [UYGULAMA: VIP'ler + segment grupları] → [bağımlı olunanlar]`,

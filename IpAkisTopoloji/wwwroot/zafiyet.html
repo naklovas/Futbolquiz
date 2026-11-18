@@ -150,7 +150,7 @@
       </div>
       <div class="arl">
         <div class="sub">Sürüm aralıkları — boş bırakılırsa sürüm değerlendirilmez, yalnız nerede çalıştığı ve maruziyeti listelenir. Birden çok dal varsa (Java 17 / 21…) "Ana sürüm" doldurun.</div>
-        <table class="mini"><thead><tr><th>Ana sürüm</th><th title="Bu sürümden önceki sürümler etkilenmez">Etkilenen ilk sürüm</th><th title="Bu sürüm dahil önceki sürümler etkilenir (Oracle: &quot;Supported versions that are affected are X&quot;)">Son etkilenen (dahil)</th><th title="Bu sürüm ve sonrası yamalı">Düzeltilmiş sürüm</th><th></th></tr></thead><tbody id="arTb"></tbody></table>
+        <table class="mini"><thead><tr><th title="Java gibi ürünlerde ana sürüm (17, 21); NGINX gibi ana sürümü hep 1 olanlarda dal (1.30, 1.31). Boş: diğer tüm sürümler">Ana sürüm / dal</th><th title="Bu sürümden önceki sürümler etkilenmez">Etkilenen ilk sürüm</th><th title="Bu sürüm dahil önceki sürümler etkilenir (Oracle: &quot;Supported versions that are affected are X&quot;)">Son etkilenen (dahil)</th><th title="Bu sürüm ve sonrası yamalı">Düzeltilmiş sürüm</th><th></th></tr></thead><tbody id="arTb"></tbody></table>
         <button type="button" id="arEkle">+ aralık</button>
       </div>
       <div class="row">
@@ -214,7 +214,7 @@ const st = { ar: [{ ana: "", min: "", son: "", duzeltilmis: "" }], ai: null, onl
 
 function kuralAciklama(k) {
   if (!k) return "";
-  const ar = (k.araliklar || []).map(a => `${a.ana != null ? "Ana sürüm " + a.ana + ": " : ""}${a.min ? a.min + " ve sonrası" : "önceki sürümler"}${a.son ? " · " + a.son + " dahil öncesi" : ""}${a.duzeltilmis ? " · düzeltilmiş " + a.duzeltilmis : ""}`);
+  const ar = (k.araliklar || []).map(a => `${a.dal ? a.dal + ".x: " : a.ana != null ? "Ana sürüm " + a.ana + ": " : (k.araliklar.length > 1 ? "diğer sürümler: " : "")}${a.min ? a.min + " ve sonrası" : "önceki sürümler"}${a.son ? " · " + a.son + " dahil öncesi" : ""}${a.duzeltilmis ? " · düzeltilmiş " + a.duzeltilmis : ""}`);
   return `${k.cve ? `<b>${esc(k.cve)}</b> · ` : ""}<b>${esc(k.ad)}</b><br>${k.aciklama ? esc(k.aciklama) + "<br>" : ""}`
     + `Aranan süreçler: <span class="mono">${esc(k.exeler.join(", "))}</span>`
     + (ar.length ? `<br>Etkilenen: ${esc(ar.join(" | "))}` : "")
@@ -225,7 +225,7 @@ function kuralAciklama(k) {
 function arCiz() {
   if (!st.ar.length) st.ar.push({ ana: "", min: "", son: "", duzeltilmis: "" });
   $("#arTb").innerHTML = st.ar.map((a, i) => `<tr>
-    <td><input data-ar="${i}" data-k="ana" value="${esc(a.ana ?? "")}" placeholder="ör. 17" style="width:80px"></td>
+    <td><input data-ar="${i}" data-k="ana" value="${esc(a.ana ?? "")}" placeholder="ör. 17 / 1.30" style="width:100px"></td>
     <td><input data-ar="${i}" data-k="min" value="${esc(a.min ?? "")}" placeholder="ör. 17.0.6"></td>
     <td><input data-ar="${i}" data-k="son" value="${esc(a.son ?? "")}" placeholder="ör. 17.0.21.0.3"></td>
     <td><input data-ar="${i}" data-k="duzeltilmis" value="${esc(a.duzeltilmis ?? "")}" placeholder="ör. 17.0.21.1"></td>
@@ -234,7 +234,8 @@ function arCiz() {
 
 function ozel() {
   return { ad: $("#ad").value.trim(), cve: $("#cve").value.trim(), aciklama: st.ai?.ozet || null, exeler: $("#exeler").value.trim(),
-    araliklar: st.ar.filter(a => String(a.min || a.duzeltilmis || a.son || "").trim()).map(a => ({ ana: String(a.ana ?? "").trim() === "" ? null : +a.ana, min: String(a.min || "").trim() || null, son: String(a.son || "").trim() || null, duzeltilmis: String(a.duzeltilmis || "").trim() || null })),
+    araliklar: st.ar.filter(a => String(a.min || a.duzeltilmis || a.son || "").trim()).map(a => ({
+      ana: /^\d+$/.test(String(a.ana ?? "").trim()) ? +a.ana : null, dal: /^\d+\.\d+/.test(String(a.ana ?? "").trim()) ? String(a.ana).trim() : null, min: String(a.min || "").trim() || null, son: String(a.son || "").trim() || null, duzeltilmis: String(a.duzeltilmis || "").trim() || null })),
     onlem: $("#onlem").value.trim(), digerEtkilenir: $("#diger").value === "1", nessusAnahtarlar: $("#nessusKel").value.trim() || null };
 }
 
@@ -266,7 +267,7 @@ async function aiDoldur() {
     $("#cve").value = j.cve || "";
     $("#ad").value = j.urun || "";
     aiExeYaz();
-    st.ar = j.araliklar.length ? j.araliklar.map(a => ({ ana: a.ana ?? "", min: a.min ?? "", son: a.son ?? "", duzeltilmis: a.duzeltilmis ?? "" })) : [{ ana: "", min: "", son: "", duzeltilmis: "" }];
+    st.ar = j.araliklar.length ? j.araliklar.map(a => ({ ana: a.dal ?? a.ana ?? "", min: a.min ?? "", son: a.son ?? "", duzeltilmis: a.duzeltilmis ?? "" })) : [{ ana: "", min: "", son: "", duzeltilmis: "" }];
     arCiz();
     $("#onlem").value = (j.onlem || []).join(", ");
     $("#diger").value = j.digerEtkilenir ? "1" : "0";
@@ -280,7 +281,7 @@ function kuralKopyala() {
   const k = seciliKural(); if (!k) return;
   st.mod = "anlik"; st.ai = null; aiCiz();
   $("#ad").value = k.ad || ""; $("#cve").value = k.cve || ""; $("#exeler").value = (k.exeler || []).join(", ");
-  st.ar = (k.araliklar || []).map(a => ({ ana: a.ana ?? "", min: a.min ?? "", son: a.son ?? "", duzeltilmis: a.duzeltilmis ?? "" }));
+  st.ar = (k.araliklar || []).map(a => ({ ana: a.dal ?? a.ana ?? "", min: a.min ?? "", son: a.son ?? "", duzeltilmis: a.duzeltilmis ?? "" }));
   arCiz();
   $("#onlem").value = k.onlemNot || "";
   $("#nessusKel").value = (k.nessusAnahtarlar || []).join(", ");

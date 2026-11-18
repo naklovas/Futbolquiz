@@ -14,7 +14,8 @@ using System.Text.RegularExpressions;
 // SurumDesenleri ya da yoldaki ilk a.b[.c] sayısı). Sonuç bellekte (son tarama); DeltaFlow hiçbir yere yazmaz.
 // ---------------------------------------------------------------------------
 // Min = etkilenen ilk sürüm, Duzeltilmis = düzeltmeyi içeren ilk sürüm, Son = etkilenen SON sürüm, dahil (Oracle CPU duyuruları: "Supported versions that are affected are X")
-record ZfAralik(int? Ana, string? Min, string? Duzeltilmis, string? Son = null);
+// Dal: sürüm bu önekle başlıyorsa (ör. "1.30" → 1.30.x) bu aralık geçerli — NGINX gibi ana sürümü hep 1 olan ürünlerde dal başına düzeltilmiş sürüm
+record ZfAralik(int? Ana, string? Min, string? Duzeltilmis, string? Son = null, string? Dal = null);
 record ZfKural(string Id, string Ad, string? Cve, string? Aciklama, List<string> Exeler, List<string>? SurumDesenleri = null,
     int? AnaMin = null, List<ZfAralik>? Araliklar = null, List<string>? Onlem = null, string? OnlemNot = null, bool Java = false,
     bool DestekDisiEtkilenir = true, string? Anahtar = null, string? Kaynak = null, string? Kaydeden = null, DateTime? Tarih = null,
@@ -58,6 +59,17 @@ sealed class ZafiyetService(IConfiguration cfg, IHttpClientFactory factory, Enva
         ["java", "javaw", "tomcat*", "prunsrv"], Java: true, AnaMin: 17,
         Araliklar: [new(17, "17.0.6", "17.0.21.1"), new(21, null, "21.0.13.1"), new(25, null, "25.0.5.1"), new(27, null, "27.0.1.1")],
         Onlem: [@"-XX:-UseBASE64Intrinsics", @"-XX:UseAVX=[0-2]\b"], OnlemNot: "-XX:-UseBASE64Intrinsics, -XX:UseAVX=2", NessusAnahtarlar: JavaNessus);
+    // CVE-2026-123007 (HTTP/2 tamsayı taşması) + CVE-2026-123633 (HTTP/2 use-after-free): NGINX OSS 1.9.5–1.31.8; düzeltilmiş 1.30.7 (stable) / 1.31.9 (mainline);
+    // diğer dallar (1.28, 1.29…) yamasız → son etkilenen 1.31.8. NGINX Plus R37 ayrıca (37.0.8.1 / 37.2.0.1 / 37.3.0.1 — sürüm "nginx-plus-r37" biçiminde, yoldan çıkmaz).
+    static readonly ZfKural NginxHttp2 = new("nginx-http2-2026", "NGINX HTTP/2 uzaktan kod çalıştırma", "CVE-2026-123007, CVE-2026-123633",
+        "NGINX Open Source 1.9.5–1.31.8 ve NGINX Plus; HTTP/2 açık ve upstream'e (proxy) yönlendiren yapılandırmada. Düzeltilmiş: 1.30.7 (stable), 1.31.9 (mainline). "
+        + "Geçici önlem: etkilenen dinleyicilerde HTTP/2'yi kapatmak — yapılandırma dosyasında, komut satırında görünmez. OpenResty / Kong / ingress gibi NGINX tabanlı ürünler de etkilenir.",
+        ["nginx", "openresty"],
+        SurumDesenleri: [@"nginx[-_/]?(\d+\.\d+\.\d+)", @"openresty[-_/]?(\d+\.\d+\.\d+)", @"nginx/(\d+\.\d+\.\d+)"],
+        Araliklar: [new(null, null, "1.30.7", Dal: "1.30"), new(null, null, "1.31.9", Dal: "1.31"), new(null, "1.9.5", null, Son: "1.31.8")],
+        DestekDisiEtkilenir: false, NessusAnahtarlar: ["nginx", "OpenResty"]);
+    static readonly ZfKural[] Yerlesik = [Java4Shell, NginxHttp2];
+
     static readonly List<string> JavaNessus = ["Java", "OpenJDK", "JDK", "JRE", "Corretto", "Temurin", "Zulu", "GraalVM"];
     // Kuralda Nessus kelimesi yoksa (eski kayıtlı kurallar da): Java kuralında Java kelimeleri, diğerlerinde exe adları
     static List<string> NessusKelimeleri(ZfKural k) => k.NessusAnahtarlar is { Count: > 0 } l ? l
@@ -68,7 +80,9 @@ sealed class ZafiyetService(IConfiguration cfg, IHttpClientFactory factory, Enva
     {
         var l = cfg.GetSection("Zafiyet:Kurallar").Get<List<ZfKural>>()?.Where(k => !string.IsNullOrWhiteSpace(k.Id) && k.Exeler is { Count: > 0 })
             .Select(k => k with { Kaynak = "ayar" }).ToList();
-        return l is { Count: > 0 } ? l : [Java4Shell with { Kaynak = "yerleşik" }];
+        var ayar = l ?? [];
+        // yerleşik kurallar her zaman listede (ayarda aynı Id'li kural varsa o geçerli)
+        return ayar.Concat(Yerlesik.Where(y => !ayar.Any(a => a.Id.Equals(y.Id, StringComparison.OrdinalIgnoreCase))).Select(y => y with { Kaynak = "yerleşik" })).ToList();
     }
     public async Task<List<ZfKural>> KurallarAsync(CancellationToken ct)
     {
@@ -119,9 +133,11 @@ sealed class ZafiyetService(IConfiguration cfg, IHttpClientFactory factory, Enva
         if (ana < 0) return ("bilinmiyor", "sürüm çözülemedi");
         if (k.AnaMin is { } am && ana < am) return ("etkilenmez", $"{ana} < {am}");
         bool altYok = Parca(surum).Count < 2;
-        var a = k.Araliklar?.FirstOrDefault(x => x.Ana == ana) ?? k.Araliklar?.FirstOrDefault(x => x.Ana == null);
+        var a = k.Araliklar?.FirstOrDefault(x => x.Dal != null && (surum == x.Dal || surum.StartsWith(x.Dal + ".")))
+            ?? k.Araliklar?.FirstOrDefault(x => x.Dal == null && x.Ana == ana) ?? k.Araliklar?.FirstOrDefault(x => x.Dal == null && x.Ana == null);
         if (a == null)
             return k.DestekDisiEtkilenir && k.AnaMin != null ? ("etkilenen", $"{ana} için düzeltilmiş sürüm yok (destek dışı sürüm)") : ("etkilenmez", $"{ana} aralıkta değil");
+        if (a.Dal != null && surum == a.Dal) return ("olasi", $"{surum} — {a.Dal} dalı, alt sürüm bilinmiyor" + (a.Duzeltilmis != null ? $"; düzeltilmiş {a.Duzeltilmis}" : ""));
         if (altYok) return ("olasi", $"{surum} — alt sürüm bilinmiyor" + (a.Duzeltilmis != null ? $"; düzeltilmiş {a.Duzeltilmis}" : a.Son != null ? $"; son etkilenen {a.Son}" : ""));
         if (a.Min != null && Karsilastir(surum, a.Min) < 0) return ("etkilenmez", $"{surum} < {a.Min} (etkilenen ilk sürüm)");
         if (a.Duzeltilmis != null && Karsilastir(surum, a.Duzeltilmis) >= 0) return ("yamali", $"{surum} ≥ {a.Duzeltilmis} (dağıtıcının yamasıyla doğrulayın)");
@@ -227,9 +243,10 @@ sealed class ZafiyetService(IConfiguration cfg, IHttpClientFactory factory, Enva
         if (ex.Any(e => e.Trim('*').Length < 3)) return (null, "Exe adları en az 3 harf olmalı (çok geniş arama olmasın).");
         static string? T(string? x) => string.IsNullOrWhiteSpace(x) ? null : x.Trim();
         var ham = (o.Araliklar ?? []).Where(a => T(a.Min) != null || T(a.Duzeltilmis) != null || T(a.Son) != null).ToList();
+        if (ham.Any(a => T(a.Dal) is { } d && !Regex.IsMatch(d, @"^\d+(\.\d+){0,2}$"))) return (null, "Dal \"1.30\" biçiminde olmalı.");
         if (ham.SelectMany(a => new[] { T(a.Min), T(a.Duzeltilmis), T(a.Son) }).OfType<string>().Any(v => NormSurum(v) == null))
             return (null, "Sürümler rakam ve . _ - + ile yazılmalı (ör. 17.0.6) ya da Java 8 biçiminde (8u511).");
-        var ar = ham.Select(a => new ZfAralik(a.Ana, NormSurum(T(a.Min)), NormSurum(T(a.Duzeltilmis)), NormSurum(T(a.Son)))).ToList();
+        var ar = ham.Select(a => new ZfAralik(a.Ana, NormSurum(T(a.Min)), NormSurum(T(a.Duzeltilmis)), NormSurum(T(a.Son)), T(a.Dal))).ToList();
         var onlem = (o.Onlem ?? "").Split(new[] { ',', '\n' }, StringSplitOptions.RemoveEmptyEntries).Select(x => x.Trim()).Where(x => x.Length >= 3).Distinct().ToList();
         bool java = ex.Any(e => e is "java" or "javaw");
         int? anaMin = ar.Any(a => a.Ana != null) ? ar.Where(a => a.Ana != null).Min(a => a.Ana) : null;
@@ -342,14 +359,14 @@ sealed class ZafiyetService(IConfiguration cfg, IHttpClientFactory factory, Enva
             {
                 try
                 {
-                    if (k.Cve != null)
+                    foreach (var cve in Regex.Matches(k.Cve ?? "", @"CVE-\d{4}-\d{4,}", RegexOptions.IgnoreCase).Select(m => m.Value.ToUpperInvariant()).Distinct())
                     {
-                        Set(i => i with { Asama = $"Nessus: {k.Cve} bulguları (tüm repo)" });
-                        var (l, kesik) = await nessus.CveAsync(k.Cve, ct, ipler);
-                        nCve = l;
-                        mesaj.Add(l.Count > 0 ? $"Nessus: {k.Cve} için {l.Select(x => x.Ip).Distinct().Count()} IP'de bulgu."
-                            : $"Nessus: {k.Cve} için bulgu yok (Tenable'ın bu CVE için kontrolü henüz yayımlanmamış ya da taranmamış olabilir).");
-                        if (kesik) mesaj.Add("Nessus CVE bulguları sayfa sınırında kesildi (Zafiyet:NessusMaxSayfa).");
+                        Set(i => i with { Asama = $"Nessus: {cve} bulguları" });
+                        var (l, kesik) = await nessus.CveAsync(cve, ct, ipler);
+                        nCve.AddRange(l);
+                        mesaj.Add(l.Count > 0 ? $"Nessus: {cve} için {l.Select(x => x.Ip).Distinct().Count()} IP'de bulgu."
+                            : $"Nessus: {cve} için bulgu yok (Tenable'ın bu CVE için kontrolü henüz yayımlanmamış ya da taranmamış olabilir).");
+                        if (kesik) mesaj.Add($"Nessus {cve} bulguları sayfa sınırında kesildi (Zafiyet:NessusMaxSayfa).");
                     }
                     var kelimeler = NessusKelimeleri(k);
                     if (kelimeler.Count > 0)
@@ -618,7 +635,8 @@ sealed class ZafiyetService(IConfiguration cfg, IHttpClientFactory factory, Enva
         var apps = env.AppsOnIp(b.Ip);
         var vip = env.MemberOf(b.Ip).Select(v => $"{(v.Pool ?? "").Replace("/Common/", "")} · {v.LbIp}:{v.LbPort}").Distinct().ToList();
         string dom = (seg?.Domain ?? "").ToLowerInvariant();
-        string exe = k.Java ? "java (Nessus)" : yol.StartsWith("(") ? "(Nessus)" : ExeAd(yol.TrimEnd('\\', '/')) is { Length: > 0 } e ? e : yol;
+        string exe = k.Java ? "java (Nessus)" : yol.StartsWith("(") ? $"{Temiz(k.Exeler).FirstOrDefault(x => !x.Contains('*')) ?? ""} (Nessus)".Trim()
+            : ExeAd(yol.TrimEnd('\\', '/')) is { Length: > 0 } e ? e : yol;
         var portlar = vip.Count > 0 ? new List<ZfPort> { new("VIP", 0, 0, null, vip, []) } : [];
         var r = new ZfSatir(b.Ip, apps.Select(a => a.UnixName).FirstOrDefault(a => !string.IsNullOrWhiteSpace(a)) ?? b.Dns ?? b.Netbios, b.Netbios ?? b.Dns,
             KurumBilgi.Of(cfg, env, b.Ip), seg?.Label, test.Any(x => x.Length > 0 && dom.Contains(x)),
@@ -854,7 +872,9 @@ sealed class ZafiyetService(IConfiguration cfg, IHttpClientFactory factory, Enva
         var uyari = new List<string>();
         string? urun = IslevService.Str(j, "urun"), cve = IslevService.Str(j, "cve"), ozet = IslevService.Str(j, "ozet");
         if (cve != null && !metin.Contains(cve, StringComparison.OrdinalIgnoreCase)) { uyari.Add($"AI'ın yazdığı CVE ({cve}) metinde geçmiyor, alınmadı."); cve = null; }
-        cve ??= Regex.Match(metin, @"CVE-\d{4}-\d{4,}", RegexOptions.IgnoreCase) is { Success: true } cm ? cm.Value.ToUpperInvariant() : null;
+        // metinde birden çok CVE varsa hepsi (ör. NGINX: CVE-2026-123007, CVE-2026-123633)
+        var cveler = Regex.Matches(metin, @"CVE-\d{4}-\d{4,}", RegexOptions.IgnoreCase).Select(m => m.Value.ToUpperInvariant()).Distinct().Take(10).ToList();
+        if (cveler.Count > 0) cve = string.Join(", ", cveler);
         bool kut = IslevService.Prop(j, "kutuphane") is { ValueKind: System.Text.Json.JsonValueKind.True };
         string? kutNot = IslevService.Str(j, "kutuphaneNot");
 
@@ -882,7 +902,14 @@ sealed class ZafiyetService(IConfiguration cfg, IHttpClientFactory factory, Enva
                 if (min != null || fix != null || son != null) ar.Add(new ZfAralik(ana, min, fix, son));
             }
         if (ar.Count > 1)   // birden çok dal: ana numarası sürümden (Java'da 1.8 → 8)
+        {
             ar = ar.Select(a => a.Ana != null ? a : a with { Ana = (a.Duzeltilmis ?? a.Son ?? a.Min) is { } v && Parca(v) is { Count: > 0 } pp ? (pp[0] == 1 && pp.Count > 1 ? pp[1] : pp[0]) : null }).ToList();
+            // ana sürüm hepsinde aynı (NGINX 1.30.7 / 1.31.9): dal = ilk iki parça
+            // yalnız düzeltilmiş sürümü olan aralık dala bağlanır; "1.9.5 – 1.31.8" gibi genel aralık dalsız kalır (diğer dallar için)
+            if (ar.Select(a => a.Ana).Distinct().Count() == 1 && ar.Count(a => a.Duzeltilmis != null && Parca(a.Duzeltilmis).Count >= 3) >= 2)
+                ar = ar.Select(a => a.Duzeltilmis != null && Parca(a.Duzeltilmis).Count >= 3
+                    ? a with { Ana = null, Dal = string.Join('.', Parca(a.Duzeltilmis).Take(2)) } : a with { Ana = null }).ToList();
+        }
         else if (ar.Count == 1 && ar[0].Ana != null && IslevService.Str(j, "digerAnaSurumler") is not "etkilenen") ar[0] = ar[0] with { Ana = null };
         if (ar.Count == 0) uyari.Add("Metinden sürüm aralığı çıkmadı: tarama yalnız nerede çalıştığını listeler (sürüm değerlendirmesi için aralığı elle girin).");
         bool diger = IslevService.Str(j, "digerAnaSurumler")?.StartsWith("etkilenen", StringComparison.OrdinalIgnoreCase) == true;
