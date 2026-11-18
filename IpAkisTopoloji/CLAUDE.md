@@ -1016,6 +1016,14 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
   tablo `Zafiyet:KuralTablosu` dbo.DF_ZAFIYET_KURAL (`sql/zafiyet_kural.sql`: ID, KURAL JSON, TARIH, KAYDEDEN; yoksa / yazılamazsa bellekte + uyarı), 5 dk önbellek;
   kural listesi = kayıtlı + ayar / yerleşik (aynı Id'de kayıtlı geçerli). "✎ Kopyala / düzenle" hazır kuralı forma alır, "🗑 Sil" yalnız kayıtlıda. Sahte AI ile backend
   (uydurma sürüm / önlem atıldı), mock'la arayüz denendi.
+  CANLI DÜZELTMELER (kullanıcının yapıştırdığı Oracle CPU metni, Java SE "component: Compiler"): (1) AI tomcat'i eklemedi → Java çalışma ortamı sözlük kalıbı
+  (openjdk / java se / jdk / jre / jvm / java N / java.util…) artık java, javaw, tomcat*, prunsrv, elasticsearch-service-* önerir (JVM'i kendi içinde çalıştıran
+  Windows servisleri: CB'de java.exe görünmez) + prompt kuralı; sözlük önerisi envanter yoksa da işaretli. (2) Oracle "Supported versions that are affected are X" =
+  X ve ÖNCESİ: AI bunu min'e yazdı (her şey "etkilenmez" çıkacaktı) → `ZfAralik.Son` (son etkilenen, dahil): sürüm ≤ Son → etkilenen, > Son → yamalı; AI cevabında
+  yalnız min dolu ve metinde "versions that are affected are" varsa min → son'a taşınır; prompt'ta açıklama; arayüzde "Son etkilenen (dahil)" kolonu.
+  (3) Java 8 biçimi `8u511b33-perf` → `NormSurum` 1.8.0.511 (metinde "8u511" geçmesi yeterli; elle girişte de). (4) AI ile doldurma Ad / CVE'yi her zaman yazar
+  (önceki kuraldan kalan değer kalmaz; metinde CVE yoksa boş). (5) AI "javac" önerdi ("Compiler" = HotSpot JIT, javac değil) → `JdkAraclari` (javac, jar, keytool,
+  jshell…) kaynak "AI · geliştirme aracı", işaretsiz, notlu; prompt kuralı.
 - **VIP**: sorgulanan IP VIP ise üyeler + GW'ler aynı sorguya eklenir, üyeler "VIP ÜYESİ" (GW→üye trafiği varsa ✓).
   Gidilen IP VIP ise "VIP → n ÜYE"; gelen IP LB GW ise "LB GW"; sorgulanan sunucu havuz üyesiyse VIP kartı.
 - **Uygulama görünümü** (`/api/apps`, `/api/app`): `[kullanan uygulamalar] → [UYGULAMA: VIP'ler + segment grupları] → [bağımlı olunanlar]`,

@@ -13,7 +13,8 @@ using System.Text.RegularExpressions;
 // Sürüm exe yolundan, yoksa komut satırından (Java kuralında jdk-17.0.10 / jdk1.8.0_202 / java-17-openjdk-… kalıpları; diğerlerinde kuralın
 // SurumDesenleri ya da yoldaki ilk a.b[.c] sayısı). Sonuç bellekte (son tarama); DeltaFlow hiçbir yere yazmaz.
 // ---------------------------------------------------------------------------
-record ZfAralik(int? Ana, string? Min, string? Duzeltilmis);
+// Min = etkilenen ilk sürüm, Duzeltilmis = düzeltmeyi içeren ilk sürüm, Son = etkilenen SON sürüm, dahil (Oracle CPU duyuruları: "Supported versions that are affected are X")
+record ZfAralik(int? Ana, string? Min, string? Duzeltilmis, string? Son = null);
 record ZfKural(string Id, string Ad, string? Cve, string? Aciklama, List<string> Exeler, List<string>? SurumDesenleri = null,
     int? AnaMin = null, List<ZfAralik>? Araliklar = null, List<string>? Onlem = null, string? OnlemNot = null, bool Java = false,
     bool DestekDisiEtkilenir = true, string? Anahtar = null, string? Kaynak = null, string? Kaydeden = null, DateTime? Tarih = null);
@@ -78,6 +79,15 @@ sealed class ZafiyetService(IConfiguration cfg, IHttpClientFactory factory, Enva
     }
     static string Anahtar(ZfKural k) => k.Anahtar ?? "(" + string.Join(" OR ", Temiz(k.Exeler).Select(e => e.Contains('*') ? e : $"\"{e}\"")) + ")";
 
+    // "8u511b33-perf" → 1.8.0.511 (Java 8 / 7 biçimi); düz sürüm olduğu gibi; geçersizse null
+    static string? NormSurum(string? v)
+    {
+        if (string.IsNullOrWhiteSpace(v)) return null;
+        v = v.Trim();
+        if (Regex.Match(v, @"^(?:1\.)?([5-8])u(\d+)", RegexOptions.IgnoreCase) is { Success: true } m) return $"1.{m.Groups[1].Value}.0.{m.Groups[2].Value}";
+        return Regex.IsMatch(v, @"^\d+([._\-+]\d+)*$") ? v : null;
+    }
+
     static List<int> Parca(string v) => Regex.Split(v, @"[._+\-]").Select(x => int.TryParse(x, out int n) ? n : -1).TakeWhile(n => n >= 0).ToList();
     static int Karsilastir(string a, string b)
     {
@@ -104,9 +114,12 @@ sealed class ZafiyetService(IConfiguration cfg, IHttpClientFactory factory, Enva
         var a = k.Araliklar?.FirstOrDefault(x => x.Ana == ana) ?? k.Araliklar?.FirstOrDefault(x => x.Ana == null);
         if (a == null)
             return k.DestekDisiEtkilenir && k.AnaMin != null ? ("etkilenen", $"{ana} için düzeltilmiş sürüm yok (destek dışı sürüm)") : ("etkilenmez", $"{ana} aralıkta değil");
-        if (altYok) return ("olasi", $"{surum} — alt sürüm bilinmiyor" + (a.Duzeltilmis != null ? $"; düzeltilmiş {a.Duzeltilmis}" : ""));
+        if (altYok) return ("olasi", $"{surum} — alt sürüm bilinmiyor" + (a.Duzeltilmis != null ? $"; düzeltilmiş {a.Duzeltilmis}" : a.Son != null ? $"; son etkilenen {a.Son}" : ""));
         if (a.Min != null && Karsilastir(surum, a.Min) < 0) return ("etkilenmez", $"{surum} < {a.Min} (etkilenen ilk sürüm)");
         if (a.Duzeltilmis != null && Karsilastir(surum, a.Duzeltilmis) >= 0) return ("yamali", $"{surum} ≥ {a.Duzeltilmis} (dağıtıcının yamasıyla doğrulayın)");
+        if (a.Son != null)
+            return Karsilastir(surum, a.Son) <= 0 ? ("etkilenen", $"{surum} ≤ {a.Son} (son etkilenen sürüm)")
+                : ("yamali", $"{surum} > {a.Son} (son etkilenen sürümden yeni; dağıtıcının yamasıyla doğrulayın)");
         return ("etkilenen", a.Duzeltilmis != null ? $"{surum} < {a.Duzeltilmis}" : $"{surum} etkilenen aralıkta (düzeltilmiş sürüm verilmedi)");
     }
 
@@ -175,9 +188,10 @@ sealed class ZafiyetService(IConfiguration cfg, IHttpClientFactory factory, Enva
         if (ex.Count == 0) return (null, "Geçerli exe adı yok (harf, rakam, . _ - ve * kullanılabilir).");
         if (ex.Any(e => e.Trim('*').Length < 3)) return (null, "Exe adları en az 3 harf olmalı (çok geniş arama olmasın).");
         static string? T(string? x) => string.IsNullOrWhiteSpace(x) ? null : x.Trim();
-        var ar = (o.Araliklar ?? []).Select(a => new ZfAralik(a.Ana, T(a.Min), T(a.Duzeltilmis))).Where(a => a.Min != null || a.Duzeltilmis != null || a.Ana != null).ToList();
-        if (ar.SelectMany(a => new[] { a.Min, a.Duzeltilmis }).OfType<string>().Any(v => !Regex.IsMatch(v, @"^\d+([._\-+]\d+)*$")))
-            return (null, "Sürümler yalnız rakam ve . _ - + içermeli (ör. 17.0.6).");
+        var ham = (o.Araliklar ?? []).Where(a => T(a.Min) != null || T(a.Duzeltilmis) != null || T(a.Son) != null).ToList();
+        if (ham.SelectMany(a => new[] { T(a.Min), T(a.Duzeltilmis), T(a.Son) }).OfType<string>().Any(v => NormSurum(v) == null))
+            return (null, "Sürümler rakam ve . _ - + ile yazılmalı (ör. 17.0.6) ya da Java 8 biçiminde (8u511).");
+        var ar = ham.Select(a => new ZfAralik(a.Ana, NormSurum(T(a.Min)), NormSurum(T(a.Duzeltilmis)), NormSurum(T(a.Son)))).ToList();
         var onlem = (o.Onlem ?? "").Split(new[] { ',', '\n' }, StringSplitOptions.RemoveEmptyEntries).Select(x => x.Trim()).Where(x => x.Length >= 3).Distinct().ToList();
         bool java = ex.Any(e => e is "java" or "javaw");
         int? anaMin = ar.Any(a => a.Ana != null) ? ar.Where(a => a.Ana != null).Min(a => a.Ana) : null;
@@ -492,7 +506,10 @@ sealed class ZafiyetService(IConfiguration cfg, IHttpClientFactory factory, Enva
     // (kaç sunucuda görüldü); ayrıca küçük ürün → exe sözlüğü ve ürün adının exe yollarında geçtiği süreçler (envanter) öneriye eklenir.
     static readonly (string Desen, string[] Exeler, string? Not)[] UrunExe =
     [
-        (@"\b(openjdk|java se|jdk|jre|java runtime|hotspot)\b", ["java", "javaw"], null),
+        // Java çalışma ortamı açığı: java.exe'nin yanında JVM'i KENDİ İÇİNDE çalıştıran Windows servisleri de (Carbon Black'te java.exe görünmez):
+        // Tomcat (tomcatN.exe), Apache procrun (prunsrv.exe), Elasticsearch servisi (elasticsearch-service-x64.exe)
+        (@"\b(openjdk|java se|jdk|jre|java runtime|hotspot|jvm|java ?\d{1,2}|java\.(util|lang|io|net|security)\.)", ["java", "javaw", "tomcat*", "prunsrv", "elasticsearch-service-*"],
+            "Java'yı çalıştıran süreç (Tomcat / procrun / Elasticsearch servisleri JVM'i kendi içinde çalıştırır; Carbon Black'te java.exe görünmez)"),
         (@"\btomcat\b", ["tomcat*", "java"], "Windows'ta Tomcat servisi tomcatN.exe içinde JVM çalıştırır"),
         (@"\b(jboss|wildfly|weblogic|websphere|jetty|glassfish|payara|elasticsearch|logstash|kafka|zookeeper|jenkins|keycloak|solr|cassandra|activemq|confluence|jira|bitbucket)\b", ["java"], "Java tabanlı ürün"),
         (@"\blog4j\b", ["java", "javaw", "tomcat*"], "log4j bir Java kütüphanesi: onu kullanan Java süreçleri"),
@@ -519,6 +536,8 @@ sealed class ZafiyetService(IConfiguration cfg, IHttpClientFactory factory, Enva
         (@"\bsamba\b", ["smbd"], null),
         (@"\bbind\b", ["named"], null),
     ];
+    static readonly HashSet<string> JdkAraclari = new(StringComparer.OrdinalIgnoreCase)
+    { "javac", "jar", "javadoc", "javap", "jarsigner", "keytool", "jshell", "jlink", "jdeps", "jps", "jstack", "jmap", "jstat", "jcmd", "jconsole", "jdb", "jinfo", "jhsdb", "jpackage", "serialver", "rmic" };
     static readonly HashSet<string> GenelUrunKelime = new(StringComparer.OrdinalIgnoreCase)
     { "server", "servers", "service", "services", "microsoft", "oracle", "apache", "windows", "linux", "edition", "enterprise", "standard", "client", "agent",
       "version", "versions", "software", "foundation", "community", "platform", "framework", "runtime", "openjdk", "java", "library", "remote", "code", "execution" };
@@ -571,14 +590,20 @@ sealed class ZafiyetService(IConfiguration cfg, IHttpClientFactory factory, Enva
             etkilenebilecek SÜREÇLERİ aramak için bir arama kuralı çıkarmak.
             YALNIZ şu JSON nesnesini döndür (yorum, açıklama, markdown yok):
             {"urun": "...", "cve": "CVE-....", "ozet": "Türkçe 1-2 cümle: açık ne, ne zaman etkiler", "kutuphane": false, "kutuphaneNot": "",
-             "exeler": [{"ad": "...", "neden": "..."}], "araliklar": [{"ana": 17, "min": "17.0.6", "duzeltilmis": "17.0.21.1"}],
+             "exeler": [{"ad": "...", "neden": "..."}], "araliklar": [{"ana": 17, "min": "17.0.6", "son": null, "duzeltilmis": "17.0.21.1"}],
              "digerAnaSurumler": "etkilenen | etkilenmez | bilinmiyor", "onlem": ["..."]}
             Kurallar:
             - exeler: Windows ve Linux'ta bu ürünü çalıştıran sürecin DOSYA ADI, .exe olmadan, küçük harf (ör. java, javaw, httpd, apache2, nginx, sqlservr, w3wp, tomcat9).
               Joker * kullanılabilir (tomcat*). Emin olmadığın adı yazma. svchost, explorer gibi genel adları yazma.
+            - Oracle duyurularındaki "component: Compiler / Hotspot" Java çalışırken kodu derleyen JIT derleyicisidir (her Java sürecinin içinde); javac DEĞİLDİR.
+              javac, jar, keytool gibi geliştirme araçlarını yazma (kısa süre çalışırlar, ağdan veri almazlar).
+            - Açık Java çalışma ortamındaysa (OpenJDK / JRE / JVM): java ve javaw'ın yanında JVM'i kendi içinde çalıştıran Windows servislerini de yaz
+              (tomcat* — Tomcat servisi tomcat9.exe içinde çalışır —, prunsrv, elasticsearch-service-*); bunlarda Carbon Black'te java.exe görünmez.
             - Açık bir KÜTÜPHANEDE ya da çalışma ortamı bileşenindeyse (OpenSSL, log4j, zlib, glibc, Java'nın bir sınıfı…): kutuphane=true; exeler'e o kütüphaneyi
               kullanan bilinen süreçleri yaz; kutuphaneNot'ta kısaca açıkla.
-            - araliklar: YALNIZ metinde geçen sürüm numaralarını HARFİ HARFİNE yaz; metinde yoksa boş dizi. Tahmin etme. min = etkilenen ilk sürüm, duzeltilmis = düzeltmeyi
+            - araliklar: YALNIZ metinde geçen sürüm numaralarını HARFİ HARFİNE yaz; metinde yoksa boş dizi. Tahmin etme. min = etkilenen ilk sürüm, son = etkilenen SON sürüm
+              (dahil). Oracle duyurularındaki "Supported versions that are affected are X, Y" ifadesi o sürüm ve ÖNCESİ demektir: son = X, min = null (min'e YAZMA).
+              Java 8 sürümü "8u511" biçimindeyse öyle yaz, ana = 8. duzeltilmis = düzeltmeyi
               içeren ilk sürüm. Birden çok ana sürüm dalı varsa (17, 21, 25…) her dal ayrı satır, "ana" alanı o dalın numarası; tek dal varsa ana null.
             - digerAnaSurumler: listede olmayan diğer (daha yeni / desteği bitmiş) ana sürümler metne göre etkileniyorsa "etkilenen", etkilenmiyorsa "etkilenmez", bilinmiyorsa "bilinmiyor".
             - onlem: metinde geçen geçici önlemin süreç KOMUT SATIRINDA görülebilecek parametreleri, harfi harfine (ör. -XX:-UseBASE64Intrinsics, -Dlog4j2.formatMsgNoLookups=true).
@@ -602,18 +627,26 @@ sealed class ZafiyetService(IConfiguration cfg, IHttpClientFactory factory, Enva
         if (IslevService.Prop(j, "araliklar") is { ValueKind: System.Text.Json.JsonValueKind.Array } aa)
             foreach (var a in aa.EnumerateArray())
             {
-                string? min = IslevService.Str(a, "min"), fix = IslevService.Str(a, "duzeltilmis");
-                foreach (var (ad, v) in new[] { ("etkilenen ilk", min), ("düzeltilmiş", fix) })
-                    if (v != null && (!Regex.IsMatch(v, @"^\d+([._\-+]\d+)*$") || !MetindeVar(metin, v)))
-                    {
-                        uyari.Add($"AI'ın {ad} sürümü \"{v}\" metinde birebir geçmiyor, alınmadı — kontrol edip elle girin.");
-                        if (ad == "etkilenen ilk") min = null; else fix = null;
-                    }
+                string? min = IslevService.Str(a, "min"), fix = IslevService.Str(a, "duzeltilmis"), son = IslevService.Str(a, "son");
+                string? Dogrula(string ad, string? v)
+                {
+                    if (v == null) return null;
+                    // Java 8 biçimi (8u511b33-perf): metinde "8u511" geçmeli; 1.8.0.511'e çevrilir
+                    string? n = NormSurum(v);
+                    string kok = Regex.Match(v, @"^(?:1\.)?[5-8]u\d+", RegexOptions.IgnoreCase) is { Success: true } jm ? jm.Value : v;
+                    if (n != null && (metin.Contains(kok, StringComparison.OrdinalIgnoreCase) || MetindeVar(metin, v))) return n;
+                    uyari.Add($"AI'ın {ad} sürümü \"{v}\" metinde birebir geçmiyor, alınmadı — kontrol edip elle girin.");
+                    return null;
+                }
+                min = Dogrula("etkilenen ilk", min); fix = Dogrula("düzeltilmiş", fix); son = Dogrula("son etkilenen", son);
                 int? ana = IslevService.Prop(a, "ana") is { ValueKind: System.Text.Json.JsonValueKind.Number } an && an.TryGetInt32(out int ai) ? ai : null;
-                if (min != null || fix != null) ar.Add(new ZfAralik(ana, min, fix));
+                // Oracle "affected are X" yanlışlıkla min'e yazılmışsa (son ve düzeltilmiş boş, metinde "versions that are affected are") son'a taşınır
+                if (min != null && son == null && fix == null && Regex.IsMatch(metin, @"versions?\s+that\s+are\s+affected\s+are", RegexOptions.IgnoreCase))
+                { son = min; min = null; }
+                if (min != null || fix != null || son != null) ar.Add(new ZfAralik(ana, min, fix, son));
             }
         if (ar.Count > 1)   // birden çok dal: ana numarası sürümden (Java'da 1.8 → 8)
-            ar = ar.Select(a => a.Ana != null ? a : a with { Ana = (a.Duzeltilmis ?? a.Min) is { } v && Parca(v) is { Count: > 0 } pp ? (pp[0] == 1 && pp.Count > 1 ? pp[1] : pp[0]) : null }).ToList();
+            ar = ar.Select(a => a.Ana != null ? a : a with { Ana = (a.Duzeltilmis ?? a.Son ?? a.Min) is { } v && Parca(v) is { Count: > 0 } pp ? (pp[0] == 1 && pp.Count > 1 ? pp[1] : pp[0]) : null }).ToList();
         else if (ar.Count == 1 && ar[0].Ana != null && IslevService.Str(j, "digerAnaSurumler") is not "etkilenen") ar[0] = ar[0] with { Ana = null };
         if (ar.Count == 0) uyari.Add("Metinden sürüm aralığı çıkmadı: tarama yalnız nerede çalıştığını listeler (sürüm değerlendirmesi için aralığı elle girin).");
         bool diger = IslevService.Str(j, "digerAnaSurumler")?.StartsWith("etkilenen", StringComparison.OrdinalIgnoreCase) == true;
@@ -639,8 +672,13 @@ sealed class ZafiyetService(IConfiguration cfg, IHttpClientFactory factory, Enva
         }
         if (IslevService.Prop(j, "exeler") is { ValueKind: System.Text.Json.JsonValueKind.Array } ea)
             foreach (var e in ea.EnumerateArray())
-                if (e.ValueKind == System.Text.Json.JsonValueKind.String) Oner(e.GetString()!, null, "AI");
-                else if (IslevService.Str(e, "ad") is { } ad) Oner(ad, IslevService.Str(e, "neden"), "AI");
+                if ((e.ValueKind == System.Text.Json.JsonValueKind.String ? e.GetString() : IslevService.Str(e, "ad")) is { } ad)
+                {
+                    // JDK geliştirme araçları (javac, jar, keytool…) kısa süre çalışır, ağdan veri almaz: öneride kalır ama işaretsiz gelir
+                    bool arac = JdkAraclari.Contains(ExeAd0(ad));
+                    Oner(ad, arac ? "JDK geliştirme aracı — kısa süre çalışır, ağdan veri almaz; aramaya genelde gerek yok"
+                        : e.ValueKind == System.Text.Json.JsonValueKind.Object ? IslevService.Str(e, "neden") : null, arac ? "AI · geliştirme aracı" : "AI");
+                }
         string bakilan = ((urun ?? "") + " " + (metin.Length > 1500 ? metin[..1500] : metin)).ToLowerInvariant();
         foreach (var (desen, exeler, not) in UrunExe)
             if (Regex.IsMatch(bakilan, desen)) foreach (var e in exeler) Oner(e, not ?? "ürün → süreç sözlüğü", "sözlük");

@@ -149,7 +149,7 @@
       </div>
       <div class="arl">
         <div class="sub">Sürüm aralıkları — boş bırakılırsa sürüm değerlendirilmez, yalnız nerede çalıştığı ve maruziyeti listelenir. Birden çok dal varsa (Java 17 / 21…) "Ana sürüm" doldurun.</div>
-        <table class="mini"><thead><tr><th>Ana sürüm</th><th>Etkilenen ilk sürüm</th><th>Düzeltilmiş sürüm</th><th></th></tr></thead><tbody id="arTb"></tbody></table>
+        <table class="mini"><thead><tr><th>Ana sürüm</th><th title="Bu sürümden önceki sürümler etkilenmez">Etkilenen ilk sürüm</th><th title="Bu sürüm dahil önceki sürümler etkilenir (Oracle: &quot;Supported versions that are affected are X&quot;)">Son etkilenen (dahil)</th><th title="Bu sürüm ve sonrası yamalı">Düzeltilmiş sürüm</th><th></th></tr></thead><tbody id="arTb"></tbody></table>
         <button type="button" id="arEkle">+ aralık</button>
       </div>
       <div class="row">
@@ -202,11 +202,11 @@ const ONC_IPUCU = {
   dusuk: "Etkilenmez / yamalı ya da sürüm bilinmiyor ve port dinlemiyor"
 };
 const DUR = { etkilenen: "etkilenen", olasi: "olası", yamali: "yamalı", etkilenmez: "etkilenmez", bilinmiyor: "sürüm bilinmiyor", bilgi: "değerlendirilmedi" };
-const st = { ar: [{ ana: "", min: "", duzeltilmis: "" }], ai: null, onlemF: false, mod: "kural", veri: null, yetki: {}, onc: "", limit: 500, sec: null, timer: null };
+const st = { ar: [{ ana: "", min: "", son: "", duzeltilmis: "" }], ai: null, onlemF: false, mod: "kural", veri: null, yetki: {}, onc: "", limit: 500, sec: null, timer: null };
 
 function kuralAciklama(k) {
   if (!k) return "";
-  const ar = (k.araliklar || []).map(a => `${a.ana != null ? "Java " + a.ana + ": " : ""}${a.min ? a.min + " ve sonrası" : "tüm sürümler"}${a.duzeltilmis ? " · düzeltilmiş " + a.duzeltilmis : ""}`);
+  const ar = (k.araliklar || []).map(a => `${a.ana != null ? "Ana sürüm " + a.ana + ": " : ""}${a.min ? a.min + " ve sonrası" : "önceki sürümler"}${a.son ? " · " + a.son + " dahil öncesi" : ""}${a.duzeltilmis ? " · düzeltilmiş " + a.duzeltilmis : ""}`);
   return `${k.cve ? `<b>${esc(k.cve)}</b> · ` : ""}<b>${esc(k.ad)}</b><br>${k.aciklama ? esc(k.aciklama) + "<br>" : ""}`
     + `Aranan süreçler: <span class="mono">${esc(k.exeler.join(", "))}</span>`
     + (ar.length ? `<br>Etkilenen: ${esc(ar.join(" | "))}` : "")
@@ -214,24 +214,25 @@ function kuralAciklama(k) {
 }
 
 function arCiz() {
-  if (!st.ar.length) st.ar.push({ ana: "", min: "", duzeltilmis: "" });
+  if (!st.ar.length) st.ar.push({ ana: "", min: "", son: "", duzeltilmis: "" });
   $("#arTb").innerHTML = st.ar.map((a, i) => `<tr>
     <td><input data-ar="${i}" data-k="ana" value="${esc(a.ana ?? "")}" placeholder="ör. 17" style="width:80px"></td>
     <td><input data-ar="${i}" data-k="min" value="${esc(a.min ?? "")}" placeholder="ör. 17.0.6"></td>
+    <td><input data-ar="${i}" data-k="son" value="${esc(a.son ?? "")}" placeholder="ör. 17.0.21.0.3"></td>
     <td><input data-ar="${i}" data-k="duzeltilmis" value="${esc(a.duzeltilmis ?? "")}" placeholder="ör. 17.0.21.1"></td>
     <td><button type="button" data-arsil="${i}" title="Satırı sil">×</button></td></tr>`).join("");
 }
 
 function ozel() {
   return { ad: $("#ad").value.trim(), cve: $("#cve").value.trim(), aciklama: st.ai?.ozet || null, exeler: $("#exeler").value.trim(),
-    araliklar: st.ar.filter(a => String(a.min || a.duzeltilmis || "").trim()).map(a => ({ ana: String(a.ana ?? "").trim() === "" ? null : +a.ana, min: String(a.min || "").trim() || null, duzeltilmis: String(a.duzeltilmis || "").trim() || null })),
+    araliklar: st.ar.filter(a => String(a.min || a.duzeltilmis || a.son || "").trim()).map(a => ({ ana: String(a.ana ?? "").trim() === "" ? null : +a.ana, min: String(a.min || "").trim() || null, son: String(a.son || "").trim() || null, duzeltilmis: String(a.duzeltilmis || "").trim() || null })),
     onlem: $("#onlem").value.trim(), digerEtkilenir: $("#diger").value === "1" };
 }
 
 function aiCiz() {
   const a = st.ai;
   if (!a) { $("#aiSonuc").innerHTML = ""; return; }
-  const kaynakAd = { AI: "AI", "sözlük": "sözlük", envanter: "envanter" };
+  const kaynakAd = { AI: "AI", "AI · geliştirme aracı": "AI · geliştirme aracı", "sözlük": "sözlük", envanter: "envanter" };
   $("#aiSonuc").innerHTML = `<div class="small">${a.urun ? `<b>${esc(a.urun)}</b>` : ""}${a.cve ? " · " + esc(a.cve) : ""}${a.ozet ? `<div>${esc(a.ozet)}</div>` : ""}
       ${a.kutuphane ? `<div style="color:var(--warn)">📚 Kütüphane açığı: ${esc(a.kutuphaneNot || "ayrı süreci yok, onu kullanan süreçler aranır")}</div>` : ""}</div>
     <div class="sub">Önerilen süreçler — işaretliler "Exe adları"na yazılır. Sayı: servis imzası kaydında${a.envanterTarihi ? " (" + esc(a.envanterTarihi) + ")" : ""} bu exe'nin görüldüğü sunucu.</div>
@@ -250,12 +251,13 @@ async function aiDoldur() {
     const r = await fetch("api/zafiyet/ai", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ metin }) });
     const j = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(j.error || "HTTP " + r.status);
-    j.exeler.forEach(e => e.sec = e.kaynak === "AI" || (e.kaynak === "sözlük" && e.sunucu > 0));
+    // Sözlük önerisi: envanterde görülüyorsa ya da envanter (servis imzası kaydı) yoksa doğrulanamadığı için işaretli gelir
+    j.exeler.forEach(e => e.sec = e.kaynak === "AI" || (e.kaynak === "sözlük" && (e.sunucu > 0 || !j.envanterTarihi)));
     st.ai = j;
-    if (j.cve) $("#cve").value = j.cve;
-    if (j.urun && !$("#ad").value.trim()) $("#ad").value = j.urun;
+    $("#cve").value = j.cve || "";
+    $("#ad").value = j.urun || "";
     aiExeYaz();
-    st.ar = j.araliklar.length ? j.araliklar.map(a => ({ ana: a.ana ?? "", min: a.min ?? "", duzeltilmis: a.duzeltilmis ?? "" })) : [{ ana: "", min: "", duzeltilmis: "" }];
+    st.ar = j.araliklar.length ? j.araliklar.map(a => ({ ana: a.ana ?? "", min: a.min ?? "", son: a.son ?? "", duzeltilmis: a.duzeltilmis ?? "" })) : [{ ana: "", min: "", son: "", duzeltilmis: "" }];
     arCiz();
     $("#onlem").value = (j.onlem || []).join(", ");
     $("#diger").value = j.digerEtkilenir ? "1" : "0";
@@ -269,7 +271,7 @@ function kuralKopyala() {
   const k = seciliKural(); if (!k) return;
   st.mod = "anlik"; st.ai = null; aiCiz();
   $("#ad").value = k.ad || ""; $("#cve").value = k.cve || ""; $("#exeler").value = (k.exeler || []).join(", ");
-  st.ar = (k.araliklar || []).map(a => ({ ana: a.ana ?? "", min: a.min ?? "", duzeltilmis: a.duzeltilmis ?? "" }));
+  st.ar = (k.araliklar || []).map(a => ({ ana: a.ana ?? "", min: a.min ?? "", son: a.son ?? "", duzeltilmis: a.duzeltilmis ?? "" }));
   arCiz();
   $("#onlem").value = k.onlemNot || "";
   $("#diger").value = k.destekDisiEtkilenir && k.anaMin != null ? "1" : "0";
@@ -473,7 +475,7 @@ $("#aiDoldur").addEventListener("click", aiDoldur);
 $("#kaydet").addEventListener("click", kaydet);
 $("#sil").addEventListener("click", sil);
 $("#duzenle").addEventListener("click", kuralKopyala);
-$("#arEkle").addEventListener("click", () => { st.ar.push({ ana: "", min: "", duzeltilmis: "" }); arCiz(); });
+$("#arEkle").addEventListener("click", () => { st.ar.push({ ana: "", min: "", son: "", duzeltilmis: "" }); arCiz(); });
 document.addEventListener("input", e => { const t = e.target.closest("[data-ar]"); if (t) st.ar[+t.dataset.ar][t.dataset.k] = t.value; });
 document.addEventListener("change", e => {
   const c = e.target.closest("[data-aiexe]");
