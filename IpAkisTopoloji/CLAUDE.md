@@ -1027,6 +1027,11 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
   VLAN + DOMAIN (kullanıcı: "VLAN bilgilerini de çeksene domain bilgisiyle beraber"): `ZfSatir.Vlan / Domain / Cidr` (segment kaydından); tabloda sunucu hücresinde,
   kullanıcı: "gride ayrı kolon, filtreleyebileyim, panele gerek yok" → tabloda ayrı VLAN ve Domain kolonları (CIDR VLAN hücresinin ipucunda), araç çubuğunda
   "Domain" / "VLAN" seçicileri (satır sayısıyla, boşlar "(yok)"); sunucu hücresindeki ve sağ paneldeki VLAN satırı kaldırıldı; arama ve CSV'de duruyor.
+  DAĞITIM (kullanıcı: "dağıtımları bulabiliyor muyuz"; Temurin / Red Hat'in yaması henüz yok, Oracle / Corretto / Zulu'nun var): `Dagitim(yol)` Java kuralında exe yolundan,
+  yoksa komut satırındaki JVM yolundan (Eclipse Temurin, Amazon Corretto, Azul Zulu, Microsoft OpenJDK, IBM Semeru, Liberica, SapMachine, GraalVM, Red Hat (…el8),
+  Debian / Ubuntu, "Oracle (muhtemel)" = program files\java\jdk…, "ürünle gelen (gömülü)"); `ZfSatir.Dagitim`, tabloda kolon + "Dağıtım" süzgeci, CSV, sağ panel.
+  HATA DÜZELTİLDİ: Temurin / Microsoft klasörü "jdk-17.0.21.9-hotspot"ta son parça YAPI numarası (17.0.21+9) — 17.0.21.9 okunup 17.0.21.1'den büyük, "yamalı"
+  sayılıyordu → "-hotspot" / "-openj9" ile biten 4+ parçalı sürümde son parça atılır. Oracle dışı dağıtımda "yamalı" notuna "dağıtıcının kendi düzeltilmiş sürümüyle karşılaştırın".
 - **VIP**: sorgulanan IP VIP ise üyeler + GW'ler aynı sorguya eklenir, üyeler "VIP ÜYESİ" (GW→üye trafiği varsa ✓).
   Gidilen IP VIP ise "VIP → n ÜYE"; gelen IP LB GW ise "LB GW"; sorgulanan sunucu havuz üyesiyse VIP kartı.
 - **Uygulama görünümü** (`/api/apps`, `/api/app`): `[kullanan uygulamalar] → [UYGULAMA: VIP'ler + segment grupları] → [bağımlı olunanlar]`,

@@ -22,7 +22,7 @@ record ZfPort(string Port, long Baglanti, int Istemci, string? Ert, List<string>
 record ZfSatir(string? Ip, string? Sunucu, string? Bilgisayar, string? Kurum, string? Segment, bool Test, List<string> Uygulamalar, string? Muhafiz,
     string Exe, string Yol, string? Urun, string? Surum, string? SurumKaynak, string Durum, string DurumNot,
     List<ZfPort> Portlar, long Giden, string Onlem, string? Komut, string? Jar, string? Son, string? Baslangic, string Oncelik, string Kaynak,
-    string? Vlan = null, string? Domain = null, string? Cidr = null);
+    string? Vlan = null, string? Domain = null, string? Cidr = null, string? Dagitim = null);
 record ZfIs(string Durum, string Asama, DateTime Baslangic, DateTime? Bitis, string? Hata, string? Kaydeden, int Saat, int SurecSaat, ZfKural Kural);
 // Sayfadan elle / AI ile doldurulmuş kural: exe adları virgülle, önlem ifadeleri virgülle (DÜZ METİN; regex'e kaçışlanır)
 record ZfOzel(string? Ad, string? Cve, string? Aciklama, string? Exeler, List<ZfAralik>? Araliklar, string? Onlem, bool DigerEtkilenir);
@@ -133,6 +133,30 @@ sealed class ZafiyetService(IConfiguration cfg, IHttpClientFactory factory, Enva
         new(@"(?:zulu|corretto|temurin|semeru|openjdk|microsoft-jdk|graalvm[\w-]*?|java)[-_]?(\d{1,2}(?:\.\d+){1,4})", RegexOptions.IgnoreCase),
         new(@"java-(\d{1,2})-openjdk", RegexOptions.IgnoreCase),                              // Debian: java-17-openjdk-amd64
     ];
+    // Java dağıtımı exe / JVM yolundan (kesin değil: "c:\program files\java\jdk…" çoğunlukla Oracle'dır ama başka kurulumlar da oraya kurulabilir)
+    static readonly (string Desen, string Ad)[] Dagitimlar =
+    [
+        (@"eclipse adoptium|temurin|adoptopenjdk", "Eclipse Temurin"),
+        (@"amazon corretto|corretto", "Amazon Corretto"),
+        (@"[\\/]zulu|azul", "Azul Zulu"),
+        (@"microsoft[\\/]jdk|msopenjdk|microsoft-jdk", "Microsoft OpenJDK"),
+        (@"semeru|[\\/]ibm[\\/].*java|ibm-java|openj9", "IBM Semeru / IBM Java"),
+        (@"liberica|bellsoft", "BellSoft Liberica"),
+        (@"sapmachine", "SapMachine"),
+        (@"graalvm", "GraalVM"),
+        (@"java-\d+-openjdk-\d[^\\/]*\.el\d|redhat|red hat", "Red Hat OpenJDK"),
+        (@"/usr/lib/jvm/java-\d+-openjdk-(amd64|arm64|i386)", "Debian / Ubuntu OpenJDK"),
+        (@"java-\d+-openjdk", "OpenJDK (Linux paketi)"),
+        (@"program files( \(x86\))?[\\/]java[\\/](jdk|jre)|/usr/java/(jdk|jre|latest)|/opt/oracle", "Oracle (muhtemel)"),
+    ];
+    static string? Dagitim(string? metin)
+    {
+        if (string.IsNullOrEmpty(metin)) return null;
+        string m = metin.ToLowerInvariant();
+        foreach (var (d, ad) in Dagitimlar) if (Regex.IsMatch(m, d)) return ad;
+        return Regex.IsMatch(m, @"[\\/](jre|jbr|jdk)[\\/]bin[\\/]") ? "ürünle gelen (gömülü)" : null;
+    }
+
     static readonly Regex GenelSurumRx = new(@"(?<![\d.])v?(\d+\.\d+(?:[._]\d+){0,3})(?![\d])", RegexOptions.IgnoreCase);
     static string? Surum(ZfKural k, string? metin)
     {
@@ -149,7 +173,12 @@ sealed class ZafiyetService(IConfiguration cfg, IHttpClientFactory factory, Enva
             foreach (var rx in JavaSurumRx)
                 if (rx.Match(metin) is { Success: true } m)
                 {
-                    string v = m.Groups[m.Groups.Count > 2 && m.Groups[2].Success ? 2 : 1].Value.Replace('_', '.');
+                    var gr = m.Groups[m.Groups.Count > 2 && m.Groups[2].Success ? 2 : 1];
+                    string v = gr.Value.Replace('_', '.');
+                    // Temurin / Microsoft OpenJDK klasörü "jdk-17.0.21.9-hotspot": son parça YAPI numarası (17.0.21+9) → atılır
+                    // (yoksa 17.0.21.9 > 17.0.21.1 diye yamalı sayılırdı)
+                    if (Regex.IsMatch(metin[(gr.Index + gr.Length)..], @"^-(hotspot|openj9)", RegexOptions.IgnoreCase) && Parca(v) is { Count: >= 4 } pp)
+                        v = string.Join('.', pp.Take(pp.Count - 1));
                     if (Ana(k, v) is >= 5 and <= 40) return v;
                 }
             return null;
@@ -374,6 +403,9 @@ sealed class ZafiyetService(IConfiguration cfg, IHttpClientFactory factory, Enva
             if (surum == null && k.Java && Surum(k, b == null ? null : V(b, "jhome")) is { } s2) { surum = s2; kaynakS = "komut satırı"; }
             if (surum == null && Surum(k, komut) is { } s3) { surum = s3; kaynakS = "komut satırı"; }
             var (durum, not) = Degerlendir(k, surum);
+            string? dagitim = k.Java ? Dagitim(g.Yol) ?? Dagitim(b == null ? null : V(b, "jhome")) : null;
+            // Düzeltilmiş sürümler çoğunlukla Oracle numarası: başka dağıtımda yamalı görünen sürüm dağıtıcının duyurusuyla doğrulanmalı
+            if (durum == "yamali" && dagitim != null && !dagitim.StartsWith("Oracle")) not += $" — {dagitim}: dağıtıcının kendi düzeltilmiş sürümüyle karşılaştırın";
             if (surum == null && k.Java && Regex.IsMatch(g.Yol.ToLowerInvariant(), @"[\\/](jre|jbr|jdk)[\\/]bin[\\/]"))
                 not = "ürünün içindeki gömülü Java (sürüm yolda yok; ürün sürümünden / Nessus'tan bakın)";
             else if (surum == null && k.Java && Regex.IsMatch(ExeAd(g.Yol).ToLowerInvariant(), @"^(tomcat|prunsrv)"))
@@ -402,7 +434,7 @@ sealed class ZafiyetService(IConfiguration cfg, IHttpClientFactory factory, Enva
                 apps.Select(a => a.VarlikMuhafizi).FirstOrDefault(a => !string.IsNullOrWhiteSpace(a)),
                 ExeAd(g.Yol), g.Yol, Urun(g.Yol, komut, jar), surum, kaynakS, durum, not,
                 portlar, g.Giden, onlem, komut, jar, g.Son > 0 ? Zaman(g.Son.ToString(System.Globalization.CultureInfo.InvariantCulture)) : null,
-                b == null ? null : Zaman(V(b, "bas")), oncelik, g.Kaynak, Vlan: seg?.Vlan, Domain: seg?.Domain, Cidr: seg?.Cidr));
+                b == null ? null : Zaman(V(b, "bas")), oncelik, g.Kaynak, Vlan: seg?.Vlan, Domain: seg?.Domain, Cidr: seg?.Cidr, Dagitim: dagitim));
         }
         string[] sira = ["kritik", "yuksek", "orta", "incele", "dusuk"];
         return sonuc.OrderBy(x => Array.IndexOf(sira, x.Oncelik)).ThenByDescending(x => x.Portlar.Sum(p => p.Baglanti)).ThenBy(x => x.Ip).ToList();
