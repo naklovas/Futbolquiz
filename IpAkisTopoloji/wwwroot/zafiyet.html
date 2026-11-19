@@ -210,6 +210,7 @@
       <label><input type="checkbox" id="testG" checked> Test sunucuları</label>
       <span class="sp"></span>
       <button type="button" id="birimAi" hidden title="ERT eksikleri gibi: uygulaması boş sunucuların portları için uygulama önerisi (ERT eksikleri motoru), sonra işleten birimi boş olanlar için birim tahmini. Öneriler ERT'ye yazılmaz.">🤖 Eksikleri tahmin et</button>
+      <button type="button" id="uygAi" hidden title="ERT'de uygulaması boş sunucuların uygulamasını AI'a sor (ERT eksikleri motoru, aynı kayıt). Seçim varsa yalnız seçililer, önerisi olsa da yeniden (onaylı / elle hariç); yoksa önerisi olmayanların hepsi.">🤖 AI ile uygulama ara</button>
       <button type="button" id="secTahmin" hidden title="Yalnız seçili sunucular: uygulaması boşsa uygulama önerisi (ERT eksikleri), sonra işleten birim">🤖 Seçilenleri tahmin et</button>
       <label class="small" id="secYenidenEt" hidden title="İşaretliyse seçili sunucularda önerisi olanlar da yeniden sorulur (onaylı / elle girilenler hariç)"><input type="checkbox" id="secYeniden"> önerisi olanları da yeniden sor</label>
       <button type="button" id="secTemizle" hidden title="Seçimi kaldır">✕ seçim</button>
@@ -427,9 +428,11 @@ function uygOnerileri(r) {
 }
 function uygHtml(r) {
   const ert = esc((r.uygulamalar || []).slice(0, 3).join(" | "));
-  const uo = uygOnerileri(r);
+  const uo = uygOnerileri(r), bulunan = uo.filter(x => x.uygulama), bos = uo.filter(x => !x.uygulama);
   const b = r.ip && st.bm?.[r.ip];
-  return (ert || (uo.length ? uo.slice(0, 2).map(x => `<div class="th" title="${esc("ERT eksikleri önerisi · port " + x.port + " · " + x.durum + (x.gerekce ? "\n" + x.gerekce : ""))}">🤖 ${esc(x.uygulama)} <span class="g">%${x.guven}${x.durum !== "AI" ? " · " + esc(x.durum) : ""}</span></div>`).join("") : '<span class="muted">—</span>'))
+  const ara = !ert && r.ip && st.yetki.yazma && b ? ` <button type="button" style="padding:0 5px;font-size:11px;margin-top:2px" data-bk="uyg" data-ip="${esc(r.ip)}" title="Bu sunucunun uygulamasını ERT eksikleri motoruyla AI'a sor (önerisi olsa da yeniden; onaylı / elle hariç)">🤖 AI ile ara</button>` : "";
+  return (ert || (bulunan.length ? bulunan.slice(0, 2).map(x => `<div class="th" title="${esc("ERT eksikleri önerisi · port " + x.port + " · " + x.durum + (x.gerekce ? "\n" + x.gerekce : ""))}">🤖 ${esc(x.uygulama)} <span class="g">%${x.guven}${x.durum !== "AI" ? " · " + esc(x.durum) : ""}</span></div>`).join("")
+      : bos.length ? `<div class="muted" title="${esc(bos.map(x => "port " + x.port + ": " + (x.gerekce || "")).join("\n"))}">🤖 bulunamadı <span class="g">(${bos.length} port · gerekçe için üstüne gelin)</span></div>` : '<span class="muted">—</span>') + ara)
     + (r.muhafiz ? `<div class="muted">${esc(r.muhafiz)}</div>` : b?.muhafizTahmin ? `<div class="th" title="${esc("Muhafız tahmini — " + (b.tahminKaynak || ""))}">🤖 ${esc(b.muhafizTahmin)}</div>` : "");
 }
 // Bu IP için yeniden tahmin: ERT'de uygulama boşsa önce uygulama önerisi (ERT eksikleri, satırın portları), bitince işleten birim (yeniden)
@@ -448,38 +451,59 @@ function satirPortlari(ip) {
 }
 // Uygulama tahmini gereken IP'ler: ERT'de uygulaması yok ve (yeniden değilse) önerisi yok; portu ya da ERT'de boş satırı olmalı
 function uygGerekenler(ips, yeniden) {
-  return ips.filter(ip => { const b = st.bm?.[ip]; return b && !(b.uygulamalar || []).length && (yeniden || !(b.uygOneri || []).length) && (satirPortlari(ip).length || b.ertKayit); });
+  return ips.filter(ip => { const b = st.bm?.[ip]; return b && !(b.uygulamalar || []).length && (yeniden || !(b.uygOneri || []).length); });
 }
 async function eksikBekle(not) {
   for (let i = 0; i < 1200; i++) {
     await bekle(3000);
     const d = await fetch("api/eksik/durum").then(x => x.ok ? x.json() : null).catch(() => null);
-    if (!d?.calisiyor) return;
+    if (!d?.calisiyor) return d;
     not(`uygulama tahmini… ${d.asama || ""}${d.toplam ? ` (${d.biten || 0} / ${d.toplam})` : ""}`);
   }
 }
-// ERT eksikleri motoruyla uygulama tahmini (aynı kayıt: DF_ERT_UYGULAMA_ONERI), 50 sunuculuk parçalar; sonra işleten birim
-async function tahminEt(ips, yeniden, not) {
+// AI ile uygulama ara (ERT eksikleri motoru, aynı kayıt DF_ERT_UYGULAMA_ONERI). Kullanıcı: "atlama yok" — port sırası: CB portları + Nessus bulgu portları + ERT'de boş
+// portlar; hiçbiri yoksa Nessus'un gördüğü / ERT portları (/api/birim/portlar), o da yoksa port 0 (sunucu düzeyi). 50 sunuculuk parçalar; sonuç ve hatalar yazılır.
+async function uygAra(ips, yeniden, not) {
   const ug = uygGerekenler(ips, yeniden);
-  const portlu = ug.filter(ip => satirPortlari(ip).length), ertli = ug.filter(ip => !satirPortlari(ip).length);
-  const parcalar = [];
-  for (let i = 0; i < portlu.length; i += 50) parcalar.push({ portlar: Object.fromEntries(portlu.slice(i, i + 50).map(ip => [ip, satirPortlari(ip)])), yeniden });
-  for (let i = 0; i < ertli.length; i += 50) parcalar.push({ ips: ertli.slice(i, i + 50), yeniden });
-  for (const [k, govde] of parcalar.entries()) {
-    if (st.tahminIptal) { not("durduruldu"); return; }
-    not(`uygulama tahmini ${k + 1} / ${parcalar.length}. parça başlıyor…`);
-    let r = await fetch("api/eksik/calistir", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(govde) });
-    if (r.status === 409) { not("ERT eksiklerinde başka bir iş çalışıyor, bitmesi bekleniyor…"); await eksikBekle(not);
-      r = await fetch("api/eksik/calistir", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(govde) }); }
-    if (!r.ok) { const j = await r.json().catch(() => ({})); alert("Uygulama tahmini başlatılamadı: " + (j.error || "HTTP " + r.status)); break; }
-    await eksikBekle(not);
+  if (!ug.length) { const m = "uygulama: sorulacak sunucu yok (ERT'de uygulaması var" + (yeniden ? ")" : " ya da önerisi zaten var — seçip yeniden sorabilirsiniz)"); not(m); return m; }
+  const pmap = {}, portsuz = [];
+  for (const ip of ug) { const ps = satirPortlari(ip); if (ps.length) pmap[ip] = ps; else portsuz.push(ip); }
+  if (portsuz.length) {
+    not(`${portsuz.length} sunucunun portu Nessus / ERT'den alınıyor…`);
+    const j = await fetch("api/birim/portlar", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ips: portsuz }) }).then(r => r.ok ? r.json() : {}).catch(() => ({}));
+    for (const ip of portsuz) pmap[ip] = j[ip]?.length ? j[ip] : ["0"];
   }
-  if (ug.length) await birimYukle(true);
-  if (st.tahminIptal) { not("durduruldu"); return; }
+  const hatalar = [], girdi = Object.entries(pmap);
+  const parcalar = [];
+  for (let i = 0; i < girdi.length; i += 50) parcalar.push(Object.fromEntries(girdi.slice(i, i + 50)));
+  for (const [k, portlar] of parcalar.entries()) {
+    if (st.tahminIptal) break;
+    not(`AI ile uygulama aranıyor: ${k + 1} / ${parcalar.length}. parça (${Object.keys(portlar).length} sunucu)…`);
+    const govde = JSON.stringify({ portlar, yeniden });
+    let r = await fetch("api/eksik/calistir", { method: "POST", headers: { "Content-Type": "application/json" }, body: govde });
+    if (r.status === 409) { not("ERT eksiklerinde başka bir iş çalışıyor, bitmesi bekleniyor…"); await eksikBekle(not);
+      r = await fetch("api/eksik/calistir", { method: "POST", headers: { "Content-Type": "application/json" }, body: govde }); }
+    if (!r.ok) { const j = await r.json().catch(() => ({})); hatalar.push(j.error || "HTTP " + r.status); continue; }
+    const d = await eksikBekle(not);
+    if (d?.asama === "Hata" && d.mesaj) hatalar.push(d.mesaj);
+    if (d?.hata) hatalar.push(...(d.hatalar || []).slice(0, 3));
+  }
+  await birimYukle(true);
+  let bul = 0, yok = 0, cevapsiz = 0;
+  for (const ip of ug) { const l = st.bm?.[ip]?.uygOneri || []; if (l.some(x => x.uygulama)) bul++; else if (l.length) yok++; else cevapsiz++; }
+  const m = `uygulama: ${ug.length} sunucu soruldu → ${bul} bulundu, ${yok} bulunamadı${cevapsiz ? `, ${cevapsiz} cevapsız` : ""}${portsuz.length ? ` (${portsuz.length} sunucuda port Nessus / ERT'den${girdi.some(([, p]) => p[0] === "0") ? ", portu hiç olmayanlar port 0 ile" : ""})` : ""}`
+    + (hatalar.length ? " · HATA: " + [...new Set(hatalar)].slice(0, 3).join(" | ") : "");
+  not(m); st.sonMesaj = m;
+  return m;
+}
+// Uygulama (uygAra) + ardından işleten birim
+async function tahminEt(ips, yeniden, not) {
+  const um = await uygAra(ips, yeniden, not);
+  if (st.tahminIptal) { not("durduruldu · " + um); return; }
   // birim: ERT'de boş, önerisi yok (yeniden: onaylı / elle hariç hepsi) ve uygulama önerisinden de gelmeyenler
   const bi = yeniden ? ips.filter(ip => !st.bm?.[ip]?.ert) : ips.filter(ip => { const x = birimBilgi({ ip }); return x?.tur === "bos" && !x.o; });
-  if (!bi.length) { not(ug.length ? `uygulama tahmini bitti (${ug.length} sunucu); birimi boş sunucu kalmadı` : "tahmin edilecek boş alan yok"); return; }
-  not(`işleten birim tahmini (${bi.length} sunucu)…`);
+  if (!bi.length) { not(um + " · birim: boş sunucu kalmadı"); return; }
+  not(um + ` · işleten birim tahmini (${bi.length} sunucu)…`);
   const r2 = await fetch("api/birim/calistir", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ips: bi, yeniden }) });
   if (!r2.ok) { const j = await r2.json().catch(() => ({})); alert(j.error || "HTTP " + r2.status); return; }
   birimDurumCiz(await r2.json());
@@ -540,9 +564,13 @@ function birimDurumCiz(d) {
   const sn = st.secili.size, mesgul = cal || st.tahminSuruyor;
   $("#secTahmin").hidden = $("#secYenidenEt").hidden = $("#secTemizle").hidden = !st.yetki.yazma || !sn;
   $("#secTahmin").disabled = mesgul;
+  const ugSec = sn ? uygGerekenler([...st.secili], true).length : uygGerekenler(tumIpler(), false).length;
+  $("#uygAi").hidden = !st.yetki.yazma || !ugSec;
+  $("#uygAi").disabled = mesgul;
+  $("#uygAi").textContent = sn ? `🤖 AI ile uygulama ara (seçili ${ugSec} sunucu)` : `🤖 AI ile uygulama ara (${ugSec} sunucu)`;
   $("#secTahmin").textContent = `🤖 Seçilenleri tahmin et (${sn} sunucu)`;
   $("#birimDur").hidden = !cal && !st.tahminSuruyor;
-  $("#birimNot").textContent = (cal ? `Birim tahmini: ${d.biten} / ${d.toplam}${d.son ? " · " + d.son : ""}`
+  $("#birimNot").textContent = (st.sonMesaj ? st.sonMesaj + " · " : "") + (cal ? `Birim tahmini: ${d.biten} / ${d.toplam}${d.son ? " · " + d.son : ""}`
     : d && d.durum !== "calisiyor" && d.bitis ? `Son birim tahmini ${d.durum}: ${d.kural} kural, ${d.ai} AI, ${d.bos} bulunamadı` : "") + (st.bmUyari ? " · ⚠ " + (st.bmUyari.length > 110 ? st.bmUyari.slice(0, 110) + "…" : st.bmUyari) : "");
   $("#birimNot").title = st.bmUyari || "";
   clearTimeout(st.bmTimer);
@@ -551,6 +579,14 @@ function birimDurumCiz(d) {
     if (j?.durum !== "calisiyor" || (j.biten % 10 === 0)) await birimYukle(true);
     birimDurumCiz(j);
   }, 3000);
+}
+async function uygAiTikla() {
+  const sn = st.secili.size, ips = sn ? [...st.secili] : tumIpler(), yeniden = sn > 0;
+  const n = uygGerekenler(ips, yeniden).length;
+  if (!n || !confirm(`${n} sunucunun uygulaması AI'a sorulacak (ERT eksikleri motoru; port yoksa Nessus / ERT portları, o da yoksa sunucu düzeyinde)${yeniden ? "; önerisi olanlar da yeniden (onaylı / elle hariç)" : ""}. Öneriler ERT'ye yazılmaz. Devam?`)) return;
+  st.tahminSuruyor = true; st.tahminIptal = false; $("#uygAi").disabled = true; $("#birimDur").hidden = false;
+  try { await uygAra(ips, yeniden, t => $("#birimNot").textContent = t); }
+  finally { st.tahminSuruyor = false; await birimYukle(true); birimDurumCiz(st.bmDurum); }
 }
 async function secTahmin() {
   const ips = [...st.secili], yeniden = $("#secYeniden").checked;
@@ -597,7 +633,7 @@ function suz() {
   const q = $("#q").value.trim().toLowerCase(), d = $("#durumF").value, k = $("#kurumF").value, dm = $("#domainF").value, vl = $("#vlanF").value, dg = $("#dagitimF").value, kn = $("#kaynakF").value;
   return l.filter(r => (!df || disUyar(r, df)) && (!rp || (r.repo || "(yok)") === rp) && (!bf || (r._birim || "(yok)") === bf) && (!st.onc || r.oncelik === st.onc) && (!dm || (r.domain || "(yok)") === dm) && (!vl || (r.vlan || "(yok)") === vl) && (!dg || (r.dagitim || "(yok)") === dg) && (!kn || kaynakGrup(r) === kn) && (!st.onlemF || r.onlem === "var") && (!d || r.durum === d) && (!k || r.kurum === k)
     && (!$("#dinleyen").checked || r.portlar.length) && ($("#testG").checked || !r.test)
-    && (!q || [r.ip, r.sunucu, r.bilgisayar, r.segment, r.vlan, r.domain, r.cidr, r.dagitim, r.muhafiz, r.yol, r.urun, r.surum, r.jar, r.repo, r._birim, ...uygOnerileri(r).map(x => x.uygulama), ...(r.uygulamalar || []), ...(r.disGiden || []), ...r.portlar.map(p => p.port + " " + (p.ert || "") + " " + p.vip.join(" "))]
+    && (!q || [r.ip, r.sunucu, r.bilgisayar, r.segment, r.vlan, r.domain, r.cidr, r.dagitim, r.muhafiz, r.yol, r.urun, r.surum, r.jar, r.repo, r._birim, ...uygOnerileri(r).map(x => x.uygulama).filter(Boolean), ...(r.uygulamalar || []), ...(r.disGiden || []), ...r.portlar.map(p => p.port + " " + (p.ert || "") + " " + p.vip.join(" "))]
       .some(x => String(x ?? "").toLowerCase().includes(q))));
 }
 
@@ -698,7 +734,7 @@ function detay(r) {
       <dt>Bilgisayar (CB)</dt><dd>${esc(r.bilgisayar || "—")}</dd>
       <dt>Kurum / segment</dt><dd>${esc(r.kurum || "")}${r.segment ? " · " + esc(r.segment) : ""}${r.test ? " · test" : ""}</dd>
       <dt>ERT uygulamaları</dt><dd>${esc((r.uygulamalar || []).join(" | ")) || "—"}${r.muhafiz ? `<div class="small muted">Muhafız: ${esc(r.muhafiz)}</div>` : ""}
-        ${!(r.uygulamalar || []).length && uygOnerileri(r).length ? `<div class="small th">🤖 Uygulama önerisi (ERT eksikleri): ${uygOnerileri(r).map(x => `${esc(x.uygulama)} · port ${esc(x.port)} · %${x.guven} · ${esc(x.durum)}`).join("<br>")}</div>` : ""}
+        ${!(r.uygulamalar || []).length && uygOnerileri(r).length ? `<div class="small th">🤖 Uygulama önerisi (ERT eksikleri): ${uygOnerileri(r).map(x => `${esc(x.uygulama || "bulunamadı")} · port ${esc(x.port)} · %${x.guven} · ${esc(x.durum)}${x.gerekce ? `<div class="muted">${esc(x.gerekce)}</div>` : ""}`).join("<br>")}</div>` : ""}
         ${st.bm?.[r.ip]?.muhafizTahmin && !r.muhafiz ? `<div class="small th">🤖 Muhafız tahmini: ${esc(st.bm[r.ip].muhafizTahmin)} <span class="g">(${esc(st.bm[r.ip].tahminKaynak || "")})</span></div>` : ""}</dd>
       <dt>İşleten birim</dt><dd>${birimHtml(r, true)}${r.ip ? ` <a class="small" href="api/birim/kanit?ip=${encodeURIComponent(r.ip)}" target="_blank" rel="noopener">kanıt ↗</a>` : ""}</dd>
       <dt>Dinlediği portlar</dt><dd>${portlar || "— (yalnız giden bağlantı)"}</dd>
@@ -772,7 +808,7 @@ function csv() {
     "DİNLEDİĞİ PORTLAR", "VIP", "DIŞ İSTEMCİ", "GİDEN BAĞLANTI", "GEÇİCİ ÖNLEM", "SON GÖRÜLME", "SÜREÇ BAŞLANGICI", "İŞLETEN BİRİM", "BİRİM KAYNAĞI", "UYGULAMA ÖNERİSİ (ERT boşsa)", "MUHAFIZ TAHMİNİ", "KAYNAK", "NESSUS REPOSITORY", "NESSUS", "DMZ", "DIŞ HEDEF SAYISI", "DIŞ HEDEFLER", "KOMUT SATIRI"].join(";"),
     ...suz().map(r => [ONC[r.oncelik], r.ip, r.sunucu, r.bilgisayar, r.kurum, r.segment, r.vlan, r.domain, r.cidr, r.test ? "evet" : "", (r.uygulamalar || []).join(" | "), r.muhafiz, r.exe, r.yol, r.urun, r.jar, r.dagitim,
       r.surum, r.surumKaynak, DUR[r.durum] || r.durum, r.durumNot, r.portlar.map(p => p.port).join(", "), [...new Set(r.portlar.flatMap(p => p.vip))].join(", "),
-      [...new Set(r.portlar.flatMap(p => p.dis))].join(", "), r.giden, r.onlem, r.son, r.baslangic, birimBilgi(r)?.ad, birimKaynak(r), uygOnerileri(r).map(x => `${x.uygulama} (port ${x.port}, %${x.guven}, ${x.durum})`).join(" | "), st.bm?.[r.ip]?.muhafizTahmin, r.kaynak, r.repo, r.nessus, r.dmz ? "evet" : "", r.disGidenSay || "", (r.disGiden || []).join(", "), r.komut].map(q).join(";"))];
+      [...new Set(r.portlar.flatMap(p => p.dis))].join(", "), r.giden, r.onlem, r.son, r.baslangic, birimBilgi(r)?.ad, birimKaynak(r), uygOnerileri(r).map(x => `${x.uygulama || "bulunamadı"} (port ${x.port}, %${x.guven}, ${x.durum})`).join(" | "), st.bm?.[r.ip]?.muhafizTahmin, r.kaynak, r.repo, r.nessus, r.dmz ? "evet" : "", r.disGidenSay || "", (r.disGiden || []).join(", "), r.komut].map(q).join(";"))];
   const a = document.createElement("a");
   a.href = URL.createObjectURL(new Blob(["﻿" + lines.join("\r\n")], { type: "text/csv;charset=utf-8" }));
   a.download = `aciklik_${(st.veri?.is?.kural?.cve || st.veri?.is?.kural?.id || "tarama").replace(/[^\w.-]+/g, "_")}.csv`;
@@ -787,7 +823,14 @@ document.addEventListener("click", e => {
   const du = e.target.closest("[data-dur]");
   if (du) { $("#durumF").value = du.dataset.dur; st.onc = ""; st.onlemF = false; st.limit = 500; ciz(); return; }
   const bk = e.target.closest("[data-bk]");
-  if (bk) { e.stopPropagation(); if (bk.dataset.bk === "tekrar") ipTahmin(bk.dataset.ip); else birimKarar(bk.dataset.ip, bk.dataset.bk); return; }
+  if (bk) {
+    e.stopPropagation();
+    const ip = bk.dataset.ip, not = t => $("#birimNot").textContent = `${ip}: ${t}`;
+    if (bk.dataset.bk === "tekrar") ipTahmin(ip);
+    else if (bk.dataset.bk === "uyg") { bk.disabled = true; uygAra([ip], true, not).finally(() => { birimDurumCiz(st.bmDurum); if (!$("#drawer").hidden && st.sec) detay(st.sec); }); }
+    else birimKarar(ip, bk.dataset.bk);
+    return;
+  }
   const dsf = e.target.closest("[data-disf]");
   if (dsf) { $("#disF").value = $("#disF").value === dsf.dataset.disf ? "" : dsf.dataset.disf; st.onc = ""; st.limit = 500; ciz(); return; }
   if (e.target.closest("[data-onlem]")) { st.onlemF = !st.onlemF; st.onc = ""; st.limit = 500; st.veri && ciz(); return; }
@@ -827,6 +870,7 @@ $("#more").addEventListener("click", () => { st.limit += 1000; ciz(); });
 $("#csv").addEventListener("click", csv);
 $("#birimAi").addEventListener("click", birimAi);
 $("#secTahmin").addEventListener("click", secTahmin);
+$("#uygAi").addEventListener("click", uygAiTikla);
 $("#secTemizle").addEventListener("click", () => { st.secili.clear(); ciz(); birimDurumCiz(st.bmDurum); });
 $("#birimDur").addEventListener("click", async () => {
   st.tahminIptal = true;

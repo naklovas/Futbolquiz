@@ -475,6 +475,7 @@ app.MapPost("/api/birim/satirlar", async (BirimIstek req, BirimService b, Cancel
     var (l, uyari) = await b.SatirlarAsync(req.Ips ?? [], ct);
     return Results.Ok(new { satirlar = l, uyari, durum = b.Durum() });
 });
+app.MapPost("/api/birim/portlar", async (BirimIstek req, BirimService b, CancellationToken ct) => Results.Ok(await b.PortlarAsync(req.Ips ?? [], ct)));
 app.MapGet("/api/birim/katalog", async (BirimService b, CancellationToken ct) => Results.Ok((await b.KatalogAsync(ct)).Select(x => new { birim = x.Birim, sunucu = x.Sunucu })));
 app.MapGet("/api/birim/durum", (BirimService b) => Results.Ok(b.Durum()));
 app.MapGet("/api/birim/kanit", async (string ip, BirimService b, CancellationToken ct) => Results.Text(await b.KanitMetniAsync(ip, ct), "text/plain; charset=utf-8"));

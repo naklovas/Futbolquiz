@@ -1128,6 +1128,12 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
   SEÇİM (kullanıcı: "sadece seçilenleri de aratabileyim"): tabloda ilk kolon onay kutusu (`data-sec`, IP bazında `st.secili`; başlıktaki `#secHepsi` süzülen satırların IP'leri),
   "🤖 Seçilenleri tahmin et (N sunucu)" (`secTahmin` → `tahminEt(seçili, yeniden)`) + "önerisi olanları da yeniden sor" (`#secYeniden`) + "✕ seçim"; toplu düğme "Tümünü tahmin et".
   Yeni tarama / kayıt açılınca seçim temizlenir. Mock'la denendi.
+  AI İLE UYGULAMA ARA (kullanıcı: "tek tek AI'a gönder, uygulama tahmini gelmedi, sadece ekip"; "atlama yok, AI ile uygulama ara nerede"): ayrı düğme `#uygAi` (seçim varsa
+  seçililer `yeniden:true`, yoksa ERT'de uygulaması boş ve önerisi olmayan tümü) + Uygulama hücresinde "🤖 AI ile ara" (`data-bk="uyg"`, tek IP yeniden). `uygAra`: HİÇBİR sunucu
+  atlanmaz — port: CB ∪ Nessus bulgu ∪ ERT boş portları; yoksa `POST /api/birim/portlar` (Nessus `SunucularAsync` portları, yoksa ERT portları; < dinamik), o da yoksa "0"
+  (sunucu düzeyi). Önceden sessiz kalan durumlar: AI'ın "bulunamadı" cevabı (Uygulama null) gösterilmiyordu → `BirimUygOneri.Uygulama` nullable, hücrede "🤖 bulunamadı" +
+  gerekçe ipucu; motor hatası ("sorulacak port yok", AI hatası) → `eksikBekle` son durumu döner, `asama Hata / mesaj / hatalar` özette. Özet `st.sonMesaj`: "N soruldu → X bulundu,
+  Y bulunamadı, Z cevapsız · HATA: …". `tahminEt` = `uygAra` + birim. Mock'la denendi.
 - **VIP**: sorgulanan IP VIP ise üyeler + GW'ler aynı sorguya eklenir, üyeler "VIP ÜYESİ" (GW→üye trafiği varsa ✓).
   Gidilen IP VIP ise "VIP → n ÜYE"; gelen IP LB GW ise "LB GW"; sorgulanan sunucu havuz üyesiyse VIP kartı.
 - **Uygulama görünümü** (`/api/apps`, `/api/app`): `[kullanan uygulamalar] → [UYGULAMA: VIP'ler + segment grupları] → [bağımlı olunanlar]`,

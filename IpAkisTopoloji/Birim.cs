@@ -13,14 +13,14 @@ using System.Text.RegularExpressions;
 record BirimOneri(string Ip, string? Birim, int Guven, string? Gerekce, string Kaynak, string Durum, DateTime Tarih, string? Kaydeden);
 // Kullanıcı: "yalnız SUNUCUISLETENBIRIM değil, uygulama ve VARLIKMUHAFIZI için de tahmin varsa getir": ERT boşsa uygulama = ERT eksiklerinin kayıtlı önerisi
 // (DF_ERT_UYGULAMA_ONERI, port başına; reddedilenler hariç), muhafız / birim = önerilen uygulamanın ana kaydından (ERT_APPLICATIONDETAIL) ya da diğer sunucularından
-record BirimUygOneri(string Port, string Uygulama, int Guven, string Durum, bool Yeni, string? Gerekce);
+record BirimUygOneri(string Port, string? Uygulama, int Guven, string Durum, bool Yeni, string? Gerekce);   // Uygulama null: AI sordu ama bulamadı (gerekçe)
 record BirimSatir(string Ip, string? Ert, BirimOneri? Oneri, List<string> Uygulamalar, string? Muhafiz, List<BirimUygOneri> UygOneri,
     string? MuhafizTahmin, string? BirimTahmin, string? TahminKaynak, bool ErtKayit = false, List<string>? BosPortlar = null);   // BosPortlar: ERT'de uygulaması boş portlar
 record BirimIstek(List<string>? Ips, bool Yeniden = false);
 record BirimKarar(string Ip, string Karar, string? Birim);
 record BirimIs(string Durum, int Toplam, int Biten, int Kural, int Ai, int Bos, string? Son, string? Hata, DateTime Baslangic, DateTime? Bitis, string? Kaydeden);
 
-sealed class BirimService(IConfiguration cfg, EnvanterService envanter, IslevService islev, EksikService eksik, ILogger<BirimService> log)
+sealed class BirimService(IConfiguration cfg, EnvanterService envanter, IslevService islev, EksikService eksik, NessusService nessus, ILogger<BirimService> log)
 {
     readonly object _gate = new();
     BirimIs? _is;
@@ -197,16 +197,17 @@ sealed class BirimService(IConfiguration cfg, EnvanterService envanter, IslevSer
             var rows = env.AppsOnIp(ip);
             var uyg = env.AppNamesOnIp(ip).Distinct().ToList();
             string? muh = rows.Select(r => Bos(r.VarlikMuhafizi)).FirstOrDefault(x => x != null);
-            var uol = (uo.GetValueOrDefault(ip) ?? []).Where(x => x.Value.Uygulama != null && x.Value.Durum != "Reddedildi")
-                .Select(x => new BirimUygOneri(x.Key, x.Value.Uygulama!, x.Value.Guven, x.Value.Durum, x.Value.Yeni, x.Value.Gerekce))
-                .OrderByDescending(x => x.Durum is "Onaylandı" or "Elle").ThenByDescending(x => x.Guven).ToList();
+            // bulunamadı (Uygulama null) cevapları da gelir (sayfada gerekçesiyle "bulunamadı"); reddedilenler hariç
+            var uol = (uo.GetValueOrDefault(ip) ?? []).Where(x => x.Value.Durum != "Reddedildi")
+                .Select(x => new BirimUygOneri(x.Key, x.Value.Uygulama, x.Value.Guven, x.Value.Durum, x.Value.Yeni, x.Value.Gerekce))
+                .OrderByDescending(x => x.Uygulama != null).ThenByDescending(x => x.Durum is "Onaylandı" or "Elle").ThenByDescending(x => x.Guven).ToList();
             // Önerilen uygulamadan muhafız / birim (ERT'de boşsa): ana kayıt, yoksa uygulamanın diğer sunucularındaki en sık birim
             string? mT = null, bT = null, kay = null;
-            foreach (var u in uol.Where(x => !x.Uygulama.StartsWith("Altyapı", StringComparison.OrdinalIgnoreCase)))
+            foreach (var u in uol.Where(x => x.Uygulama != null && !x.Uygulama.StartsWith("Altyapı", StringComparison.OrdinalIgnoreCase)))
             {
-                string ad = Regex.Replace(u.Uygulama, @"\s+Veritaban[ıi]$", "", RegexOptions.IgnoreCase);
+                string ad = Regex.Replace(u.Uygulama!, @"\s+Veritaban[ıi]$", "", RegexOptions.IgnoreCase);
                 env.Detay.TryGetValue(ad, out var det);
-                det ??= env.Detay.GetValueOrDefault(u.Uygulama);
+                det ??= env.Detay.GetValueOrDefault(u.Uygulama!);
                 string? m2 = Bos(det?.Muhafiz);
                 string? b2 = Bos(det?.Birim) ?? (d.Uygulama.TryGetValue(ad, out var ud) ? ud.OrderByDescending(x => x.Value).First().Key : null);
                 if (m2 == null && b2 == null) continue;
@@ -218,6 +219,24 @@ sealed class BirimService(IConfiguration cfg, EnvanterService envanter, IslevSer
                 rows.Where(r => string.IsNullOrWhiteSpace(r.AppName) && !string.IsNullOrWhiteSpace(r.Port)).Select(r => r.Port!.Trim()).Distinct().ToList()));
         }
         return (l, uyari);
+    }
+
+    // Uygulama tahmini için port (CB portu olmayan sunucular; kullanıcı: "atlama yok"): Nessus'un gördüğü portlar, yoksa ERT portları
+    public async Task<Dictionary<string, List<string>>> PortlarAsync(List<string> ips, CancellationToken ct)
+    {
+        var env = await envanter.GetAsync(false, ct);
+        ips = ips.Where(i => Regex.IsMatch(i, @"^\d+\.\d+\.\d+\.\d+$")).Distinct().Take(500).ToList();
+        Dictionary<string, NessusSunucu> nes = [];
+        if (nessus.Acik)
+            try { nes = await nessus.SunucularAsync(ips, null, ct); }
+            catch (Exception ex) when (ex is not OperationCanceledException) { log.LogWarning("Birim: Nessus portları okunamadı: {H}", ex.Message); }
+        int dyn = cfg.GetValue("Eksik:DinamikPortBaslangic", 49152);
+        return ips.ToDictionary(ip => ip, ip =>
+        {
+            var l = (nes.GetValueOrDefault(ip)?.Portlar ?? []).Select(p => p.Port).Where(p => int.TryParse(p, out int n) && n > 0 && n < dyn).Distinct().ToList();
+            if (l.Count == 0) l = env.AppsOnIp(ip).Select(r => r.Port?.Trim()).OfType<string>().Where(p => int.TryParse(p, out int n) && n > 0 && n < dyn).Distinct().ToList();
+            return l.OrderBy(p => int.Parse(p)).Take(20).ToList();
+        });
     }
 
     public async Task<string?> KararAsync(BirimKarar k, string? user, CancellationToken ct)
