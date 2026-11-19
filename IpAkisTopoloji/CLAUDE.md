@@ -1158,6 +1158,8 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
   BAŞTAN (kullanıcı: "tüm eksikleri baştan kontrol et seçeneği yok"): `#secYeniden` "baştan (önerisi olanları da yeniden sor)" her zaman görünür; işaretliyse "Tümünü baştan tahmin et"
   ve "AI ile uygulama ara — baştan" `yeniden:true` (uygulama: onaylı / elle uygulaması olan IP'ler hariç; birim `birimHedef`: ERT'de birimi boş, onaylı / elle birimi olmayanlar).
   Yeniden sorarken önceki iş önerilerinin portları da port listesine girer.
+  CSV (kullanıcı: "değişim kolonuna = yazmışsın, Excel formül sanıyor"): DEĞİŞİM sembolsüz (`DEG_DUZ`); `q()` = + @ ya da - ve harfle başlayan hücrenin başına boşluk koyar
+  (Excel formül sanmaz; komut satırı / Nessus metniyle formül enjeksiyonu da olmaz). imza.html / topoloji.html CSV'lerinde aynı koruma henüz yok.
 - **VIP**: sorgulanan IP VIP ise üyeler + GW'ler aynı sorguya eklenir, üyeler "VIP ÜYESİ" (GW→üye trafiği varsa ✓).
   Gidilen IP VIP ise "VIP → n ÜYE"; gelen IP LB GW ise "LB GW"; sorgulanan sunucu havuz üyesiyse VIP kartı.
 - **Uygulama görünümü** (`/api/apps`, `/api/app`): `[kullanan uygulamalar] → [UYGULAMA: VIP'ler + segment grupları] → [bağımlı olunanlar]`,

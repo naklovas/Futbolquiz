@@ -674,6 +674,7 @@ function disUyar(r, df) {
 }
 
 // ---- Önceki kayıtlı taramayla karşılaştırma (kullanıcı: "satırda eski ve yeni halini göreyim, eski versiyon yeni versiyon; tarih olarak da") ----
+const DEG_DUZ = { giderildi: "giderildi", onlem: "önlem alındı", degisti: "değişti", ayni: "aynı", yeni: "yeni", gorulmuyor: "artık görülmüyor" };   // Excel için sembolsüz
 const DEG = { giderildi: "✔ giderildi", onlem: "🛡 önlem alındı", degisti: "↕ değişti", ayni: "= aynı", yeni: "＋ yeni", gorulmuyor: "artık görülmüyor" };
 const karsAnahtar = r => `${r.ip || "pc:" + (r.bilgisayar || "")}|${String(r.yol || r.exe || "").toLowerCase().replace(/\\/g, "/")}`;
 function simdiTarih() { const i = st.veri?.is; return i?.kayitTarihi || i?.bitis || i?.baslangic; }
@@ -917,12 +918,13 @@ async function ipTara(ip) {
 
 function csv() {
   if (!st.yetki.disari) return;
-  const q = v => `"${String(v ?? "").replace(/"/g, '""')}"`;
+  // Excel formül sanmasın (= + @ ya da - ve harfle başlayan hücre; dışarıdan gelen komut satırı / Nessus metni de): başa boşluk
+  const q = v => { let t = String(v ?? ""); if (/^[=+@]|^-[^\d\s]/.test(t)) t = " " + t; return `"${t.replace(/"/g, '""')}"`; };
   const lines = [["ÖNCELİK", "IP", "SUNUCU", "BİLGİSAYAR (CB)", "KURUM", "SEGMENT", "VLAN", "DOMAIN", "CIDR", "TEST", "ERT UYGULAMALARI", "MUHAFIZ", "EXE", "EXE YOLU", "ÜRÜN", "-JAR", "DAĞITIM", "SÜRÜM", "SÜRÜM KAYNAĞI", "DURUM", "DURUM NOTU",
     "DİNLEDİĞİ PORTLAR", "VIP", "DIŞ İSTEMCİ", "GİDEN BAĞLANTI", "GEÇİCİ ÖNLEM", "SON GÖRÜLME", "SÜREÇ BAŞLANGICI", "ÖNCEKİ TARAMA", "ÖNCEKİ SÜRÜM", "ÖNCEKİ DURUM", "DEĞİŞİM", "İŞLETEN BİRİM", "BİRİM KAYNAĞI", "UYGULAMA ÖNERİSİ (ERT boşsa)", "MUHAFIZ TAHMİNİ", "KAYNAK", "NESSUS REPOSITORY", "NESSUS", "DMZ", "DIŞ HEDEF SAYISI", "DIŞ HEDEFLER", "KOMUT SATIRI"].join(";"),
     ...suz().map(r => [ONC[r.oncelik], r.ip, r.sunucu, r.bilgisayar, r.kurum, r.segment, r.vlan, r.domain, r.cidr, r.test ? "evet" : "", ertUyg(r).join(" | "), r.muhafiz || st.bm?.[r.ip]?.muhafiz, r.exe, r.yol, r.urun, r.jar, r.dagitim,
       r.surum, r.surumKaynak, DUR[r.durum] || r.durum, r.durumNot, r.portlar.map(p => p.port).join(", "), [...new Set(r.portlar.flatMap(p => p.vip))].join(", "),
-      [...new Set(r.portlar.flatMap(p => p.dis))].join(", "), r.giden, r.onlem, r.son, r.baslangic, st.kars ? trTarih(st.kars.tarih) : "", degisim(r)?.o && !r._hayalet ? degisim(r).o.surum : "", degisim(r)?.o && !r._hayalet ? (DUR[degisim(r).o.durum] || degisim(r).o.durum) : "", degisim(r) ? DEG[degisim(r).tur] : "",
+      [...new Set(r.portlar.flatMap(p => p.dis))].join(", "), r.giden, r.onlem, r.son, r.baslangic, st.kars ? trTarih(st.kars.tarih) : "", degisim(r)?.o && !r._hayalet ? degisim(r).o.surum : "", degisim(r)?.o && !r._hayalet ? (DUR[degisim(r).o.durum] || degisim(r).o.durum) : "", degisim(r) ? DEG_DUZ[degisim(r).tur] : "",
       birimBilgi(r)?.ad, birimKaynak(r), uygOnerileri(r).map(x => `${x.uygulama || "bulunamadı"} (port ${x.port}, %${x.guven}, ${x.durum})`).join(" | "), st.bm?.[r.ip]?.muhafizTahmin, r.kaynak, r.repo, r.nessus, r.dmz ? "evet" : "", r.disGidenSay || "", (r.disGiden || []).join(", "), r.komut].map(q).join(";"))];
   const a = document.createElement("a");
   a.href = URL.createObjectURL(new Blob(["﻿" + lines.join("\r\n")], { type: "text/csv;charset=utf-8" }));
