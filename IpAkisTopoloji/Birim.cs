@@ -15,8 +15,13 @@ record BirimOneri(string Ip, string? Birim, int Guven, string? Gerekce, string K
 // (DF_ERT_UYGULAMA_ONERI, port başına; reddedilenler hariç), muhafız / birim = önerilen uygulamanın ana kaydından (ERT_APPLICATIONDETAIL) ya da diğer sunucularından
 record BirimUygOneri(string Port, string? Uygulama, int Guven, string Durum, bool Yeni, string? Gerekce);   // Uygulama null: AI sordu ama bulamadı (gerekçe)
 record BirimSatir(string Ip, string? Ert, BirimOneri? Oneri, List<string> Uygulamalar, string? Muhafiz, List<BirimUygOneri> UygOneri,
-    string? MuhafizTahmin, string? BirimTahmin, string? TahminKaynak, bool ErtKayit = false, List<string>? BosPortlar = null);   // BosPortlar: ERT'de uygulaması boş portlar
-record BirimIstek(List<string>? Ips, bool Yeniden = false);
+    string? MuhafizTahmin, string? BirimTahmin, string? TahminKaynak, bool ErtKayit = false, List<string>? BosPortlar = null,   // BosPortlar: ERT'de uygulaması boş portlar
+    string? KuralBirim = null, string? KuralNeden = null);   // tanımlı ad kuralı (Birim:Kurallar) — ERT doluysa ve farklıysa sayfada uyarı
+// Adlar: IP → sayfadaki sunucu adı (ERT'de kaydı olmayan sunucularda ad kuralı için)
+record BirimIstek(List<string>? Ips, bool Yeniden = false, Dictionary<string, string>? Adlar = null);
+// Tanımlı birim kuralı (kullanıcı: "ZP ile başlayan ya da Ziraat PAY ile ilgili tüm sunucular Ziraat PAY Uygulamaları ekibinin olmalı"): Desen (regex, büyük / küçük harf
+// duyarsız) sunucu adına, uygulama adına ya da uygulama önerisine uyarsa birim kesin — AI'a sorulmaz
+record BirimKurali(string Desen, string Birim);
 record BirimKarar(string Ip, string Karar, string? Birim);
 record BirimIs(string Durum, int Toplam, int Biten, int Kural, int Ai, int Bos, string? Son, string? Hata, DateTime Baslangic, DateTime? Bitis, string? Kaydeden);
 
@@ -29,6 +34,32 @@ sealed class BirimService(IConfiguration cfg, EnvanterService envanter, IslevSer
     readonly Dictionary<string, BirimOneri> _bellek = new();
     static readonly JsonSerializerOptions Js = new(JsonSerializerDefaults.Web);
     string Tablo => cfg["Birim:OneriTablosu"] is { } t && Regex.IsMatch(t, @"^[\w.\[\]]+$") ? t : "dbo.DF_BIRIM_ONERI";
+
+    // ---------------- Tanımlı ad kuralları (Birim:Kurallar; boşsa varsayılan) ----------------
+    static readonly BirimKurali[] VarsayilanKurallar = [new(@"^zp|ziraat\s*-?\s*pay", "Ziraat PAY Uygulamaları")];
+    List<(Regex Rx, string Birim, string Desen)> Kurallar()
+    {
+        var l = cfg.GetSection("Birim:Kurallar").Get<List<BirimKurali>>()?.Where(k => !string.IsNullOrWhiteSpace(k.Desen) && !string.IsNullOrWhiteSpace(k.Birim)).ToList();
+        var r = new List<(Regex, string, string)>();
+        foreach (var k in l is { Count: > 0 } ? l : [.. VarsayilanKurallar])
+            try { r.Add((new Regex(k.Desen, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant), k.Birim.Trim(), k.Desen)); }
+            catch (ArgumentException ex) { log.LogWarning("Birim kuralı geçersiz ({D}): {H}", k.Desen, ex.Message); }
+        return r;
+    }
+    static string Turk(string s) => s.Replace('İ', 'I').Replace('ı', 'i');
+    static string Katla(string s) => Regex.Replace(Turk(s).ToLowerInvariant(), @"\s+", "");
+    // Kural birimi ERT kataloğunda varsa onun yazımıyla
+    static string KatalogYazimi(Dizin d, string b) => d.Katalog.Keys.FirstOrDefault(x => Katla(x) == Katla(b)) ?? b;
+    (string Birim, string Neden)? KuralBul(EnvanterSnapshot env, Dizin d, string ip, string? ad, IEnumerable<string> ekUygulamalar)
+    {
+        var adlar = env.AppsOnIp(ip).Select(r => r.UnixName).Append(ad).OfType<string>().Where(x => x.Trim().Length > 0).Select(x => ("sunucu adı", x.Trim()));
+        var uyg = env.AppNamesOnIp(ip).Concat(ekUygulamalar).Where(x => !string.IsNullOrWhiteSpace(x)).Select(x => ("uygulama", x.Trim()));
+        var metinler = adlar.Concat(uyg).Distinct().ToList();
+        foreach (var (rx, birim, desen) in Kurallar())
+            foreach (var (tur, m) in metinler)
+                if (rx.IsMatch(Turk(m))) return (KatalogYazimi(d, birim), $"tanımlı kural ({desen}): {tur} '{m}'");
+        return null;
+    }
 
     // ---------------- Envanter dizini (anlık görüntü başına) ----------------
     sealed class Dizin
@@ -181,7 +212,7 @@ sealed class BirimService(IConfiguration cfg, EnvanterService envanter, IslevSer
     }
 
     // Satırlar (açıklık taraması sayfası: tablo açılınca): ERT birimi / uygulamaları / muhafızı + kayıtlı birim önerisi + uygulama önerileri ve onlardan türeyen tahminler
-    public async Task<(List<BirimSatir> L, string? Uyari)> SatirlarAsync(List<string> ips, CancellationToken ct)
+    public async Task<(List<BirimSatir> L, string? Uyari)> SatirlarAsync(List<string> ips, CancellationToken ct, Dictionary<string, string>? adlar = null)
     {
         var env = await envanter.GetAsync(false, ct);
         var d = Dizi(env);
@@ -214,9 +245,11 @@ sealed class BirimService(IConfiguration cfg, EnvanterService envanter, IslevSer
                 mT ??= m2; bT ??= b2; kay ??= $"uygulama önerisinden: {u.Uygulama} (port {u.Port}, {u.Durum}, %{u.Guven})";
                 if (mT != null && bT != null) break;
             }
+            var kural = KuralBul(env, d, ip, adlar?.GetValueOrDefault(ip), uol.Select(x => x.Uygulama).OfType<string>());
             l.Add(new BirimSatir(ip, d.IpBirim.GetValueOrDefault(ip), on.GetValueOrDefault(ip), uyg, muh, uol,
                 muh == null ? mT : null, d.IpBirim.ContainsKey(ip) ? null : bT, kay, rows.Count > 0,
-                rows.Where(r => string.IsNullOrWhiteSpace(r.AppName) && !string.IsNullOrWhiteSpace(r.Port)).Select(r => r.Port!.Trim()).Distinct().ToList()));
+                rows.Where(r => string.IsNullOrWhiteSpace(r.AppName) && !string.IsNullOrWhiteSpace(r.Port)).Select(r => r.Port!.Trim()).Distinct().ToList(),
+                kural?.Birim, kural?.Neden));
         }
         return (l, uyari);
     }
@@ -271,7 +304,7 @@ sealed class BirimService(IConfiguration cfg, EnvanterService envanter, IslevSer
     // ---------------- Tahmin işi (tek seferde bir tane) ----------------
     public BirimIs? Durum() { lock (_gate) return _is; }
     public void Durdur() { lock (_gate) _cts?.Cancel(); }
-    public BirimIs Baslat(List<string> ips, bool yeniden, string? user)
+    public BirimIs Baslat(List<string> ips, bool yeniden, string? user, Dictionary<string, string>? adlar = null)
     {
         lock (_gate)
         {
@@ -281,13 +314,13 @@ sealed class BirimService(IConfiguration cfg, EnvanterService envanter, IslevSer
             _cts = new CancellationTokenSource();
             _is = new BirimIs("calisiyor", l.Count, 0, 0, 0, 0, null, null, DateTime.Now, null, user);
             var ct = _cts.Token;
-            _ = Task.Run(() => CalisAsync(l, yeniden, user, ct));
+            _ = Task.Run(() => CalisAsync(l, yeniden, user, ct, adlar));
             return _is;
         }
     }
     void Set(Func<BirimIs, BirimIs> f) { lock (_gate) if (_is != null) _is = f(_is); }
 
-    async Task CalisAsync(List<string> ips, bool yeniden, string? user, CancellationToken ct)
+    async Task CalisAsync(List<string> ips, bool yeniden, string? user, CancellationToken ct, Dictionary<string, string>? adlar = null)
     {
         try
         {
@@ -308,7 +341,7 @@ sealed class BirimService(IConfiguration cfg, EnvanterService envanter, IslevSer
                 await sem.WaitAsync(ct);
                 try
                 {
-                    var o = await TahminAsync(env, d, ip, katalog.Select(x => x.Key).ToList(), katMetin, bilgi, user, ct);
+                    var o = await TahminAsync(env, d, ip, katalog.Select(x => x.Key).ToList(), katMetin, bilgi, user, ct, adlar?.GetValueOrDefault(ip));
                     await YazAsync(o, ct);
                     Set(i => i with { Biten = i.Biten + 1, Kural = i.Kural + (o.Kaynak == "Kural" ? 1 : 0), Ai = i.Ai + (o.Kaynak == "AI" && o.Birim != null ? 1 : 0),
                         Bos = i.Bos + (o.Birim == null ? 1 : 0), Son = $"{ip} → {o.Birim ?? "bulunamadı"} ({o.Kaynak}, %{o.Guven})" });
@@ -333,22 +366,25 @@ sealed class BirimService(IConfiguration cfg, EnvanterService envanter, IslevSer
         return m + "\nKOD PUANLARI: " + string.Join(" | ", p.OrderByDescending(x => x.Value).Take(6).Select(x => $"{x.Key} {x.Value:0.0}"));
     }
 
-    async Task<BirimOneri> TahminAsync(EnvanterSnapshot env, Dizin d, string ip, List<string> katalog, string katMetin, string? bilgi, string? user, CancellationToken ct)
+    async Task<BirimOneri> TahminAsync(EnvanterSnapshot env, Dizin d, string ip, List<string> katalog, string katMetin, string? bilgi, string? user, CancellationToken ct,
+        string? ad = null)
     {
         string? dns = null;
         var (kanit, puan) = Kanit(env, d, ip, dns);
+        var oneriAdlari = new List<string>();
         // ERT eksiklerinin uygulama önerisi (ERT'de uygulama boşsa en iyi ipucu): önerilen uygulamanın birimi
         try
         {
             var uo = (await eksik.OnerilerAsync([ip], ct)).GetValueOrDefault(ip) ?? [];
             foreach (var (port, o) in uo.Where(x => x.Value.Uygulama != null && x.Value.Durum != "Reddedildi" && !x.Value.Uygulama!.StartsWith("Altyapı", StringComparison.OrdinalIgnoreCase)))
             {
-                string ad = Regex.Replace(o.Uygulama!, @"\s+Veritaban[ıi]$", "", RegexOptions.IgnoreCase);
+                string uad = Regex.Replace(o.Uygulama!, @"\s+Veritaban[ıi]$", "", RegexOptions.IgnoreCase);
+                oneriAdlari.Add(o.Uygulama!);
                 double w = o.Durum is "Onaylandı" or "Elle" ? 4 : 2.0 * Math.Clamp(o.Guven, 0, 100) / 100;
-                var ub = Bos(env.Detay.GetValueOrDefault(ad)?.Birim);
+                var ub = Bos(env.Detay.GetValueOrDefault(uad)?.Birim);
                 kanit += $"UYGULAMA ÖNERİSİ (ERT eksikleri, port {port}, {o.Durum}, güven %{o.Guven}): {o.Uygulama}{(ub != null ? " → ana kayıttaki birim " + ub : "")}\n";
                 if (ub != null) puan[ub] = puan.GetValueOrDefault(ub) + w;
-                else if (d.Uygulama.TryGetValue(ad, out var ud))
+                else if (d.Uygulama.TryGetValue(uad, out var ud))
                 {
                     kanit += $"   önerilen uygulamanın sunucularındaki birimler: {string.Join(" | ", ud.OrderByDescending(x => x.Value).Take(4).Select(x => $"{x.Key} ({x.Value})"))}\n";
                     foreach (var (bb, n) in ud) puan[bb] = puan.GetValueOrDefault(bb) + w * n / ud.Values.Sum();
@@ -356,6 +392,9 @@ sealed class BirimService(IConfiguration cfg, EnvanterService envanter, IslevSer
             }
         }
         catch (Exception ex) when (ex is not OperationCanceledException) { log.LogDebug("Birim: uygulama önerisi okunamadı: {H}", ex.Message); }
+        // Tanımlı ad kuralı (ZP… / Ziraat PAY → Ziraat PAY Uygulamaları): AI'a sorulmaz
+        if (KuralBul(env, d, ip, ad, oneriAdlari) is { } kb)
+            return new BirimOneri(ip, kb.Birim, 95, kb.Neden, "Kural", "AI", DateTime.Now, user);
         // Kural: güçlü kanıt (uygulama ana kaydı / aynı uygulama / benzer ad) tek birimi gösteriyor ve ikinci aday çok geride
         var sira = puan.OrderByDescending(x => x.Value).ToList();
         if (sira.Count > 0 && sira[0].Value >= cfg.GetValue("Birim:KuralEsik", 4.0) && (sira.Count == 1 || sira[0].Value >= 3 * sira[1].Value))

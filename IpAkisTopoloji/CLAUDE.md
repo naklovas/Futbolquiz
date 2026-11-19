@@ -1134,6 +1134,11 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
   (sunucu düzeyi). Önceden sessiz kalan durumlar: AI'ın "bulunamadı" cevabı (Uygulama null) gösterilmiyordu → `BirimUygOneri.Uygulama` nullable, hücrede "🤖 bulunamadı" +
   gerekçe ipucu; motor hatası ("sorulacak port yok", AI hatası) → `eksikBekle` son durumu döner, `asama Hata / mesaj / hatalar` özette. Özet `st.sonMesaj`: "N soruldu → X bulundu,
   Y bulunamadı, Z cevapsız · HATA: …". `tahminEt` = `uygAra` + birim. Mock'la denendi.
+  TANIMLI BİRİM KURALI (kullanıcı: "ZP ile başlayan ya da Ziraat PAY ile ilgili tüm sunucular Ziraat PAY Uygulamaları ekibinin olmalı"): `Birim:Kurallar` [{Desen (regex,
+  büyük / küçük harf duyarsız, İ/ı katlanır), Birim}]; boşsa varsayılan `^zp|ziraat\s*-?\s*pay` → "Ziraat PAY Uygulamaları" (ERT kataloğundaki yazımıyla, `KatalogYazimi`).
+  `KuralBul`: ERT sunucu adları + sayfadan gelen ad (`BirimIstek.Adlar` IP → CB bilgisayar / sunucu adı; ERT'de kaydı olmayan kutular için) + ERT uygulamaları + uygulama önerileri.
+  `TahminAsync`'te AI'dan ÖNCE (Kaynak "Kural", güven 95); `BirimSatir.KuralBirim / KuralNeden` → sayfada ERT boşsa "📏 X (kural)" (onaylı / elle öneri öncelikli, AI önerisinden
+  önce), ERT doluysa ve farklıysa "⚠ kurala göre X olmalı"; CSV BİRİM KAYNAĞI'nda. genelbilgiler.txt (Eksik:BilgiDosyasi) hem uygulama hem birim AI prompt'unun başında.
 - **VIP**: sorgulanan IP VIP ise üyeler + GW'ler aynı sorguya eklenir, üyeler "VIP ÜYESİ" (GW→üye trafiği varsa ✓).
   Gidilen IP VIP ise "VIP → n ÜYE"; gelen IP LB GW ise "LB GW"; sorgulanan sunucu havuz üyesiyse VIP kartı.
 - **Uygulama görünümü** (`/api/apps`, `/api/app`): `[kullanan uygulamalar] → [UYGULAMA: VIP'ler + segment grupları] → [bağımlı olunanlar]`,

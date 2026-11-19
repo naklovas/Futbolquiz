@@ -504,23 +504,27 @@ async function tahminEt(ips, yeniden, not) {
   const bi = yeniden ? ips.filter(ip => !st.bm?.[ip]?.ert) : ips.filter(ip => { const x = birimBilgi({ ip }); return x?.tur === "bos" && !x.o; });
   if (!bi.length) { not(um + " · birim: boş sunucu kalmadı"); return; }
   not(um + ` · işleten birim tahmini (${bi.length} sunucu)…`);
-  const r2 = await fetch("api/birim/calistir", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ips: bi, yeniden }) });
+  const r2 = await fetch("api/birim/calistir", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ips: bi, yeniden, adlar: adlarOf(bi) }) });
   if (!r2.ok) { const j = await r2.json().catch(() => ({})); alert(j.error || "HTTP " + r2.status); return; }
   birimDurumCiz(await r2.json());
 }
 async function ipTahmin(ip) { await tahminEt([ip], true, t => $("#birimNot").textContent = `${ip}: ${t}`); }
 
+const katla = s => String(s || "").replace(/İ/g, "I").replace(/ı/g, "i").toLowerCase().replace(/\s+/g, "");
 function birimBilgi(r) {
   const b = r.ip && st.bm?.[r.ip];
   if (!b) return null;
-  if (b.ert) return { ad: b.ert, tur: "ert" };
+  // ERT dolu ama tanımlı kural başka birim diyorsa uyarı
+  if (b.ert) return { ad: b.ert, tur: "ert", kuralFark: b.kuralBirim && katla(b.kuralBirim) !== katla(b.ert) ? b.kuralBirim : null, neden: b.kuralNeden };
+  if (b.oneri?.birim && (b.oneri.durum === "Onaylandı" || b.oneri.durum === "Elle")) return { ad: b.oneri.birim, tur: "oneri", o: b.oneri };
+  if (b.kuralBirim) return { ad: b.kuralBirim, tur: "kural", neden: b.kuralNeden, o: b.oneri };
   if (b.oneri?.birim && b.oneri.durum !== "Reddedildi") return { ad: b.oneri.birim, tur: "oneri", o: b.oneri };
   if (b.birimTahmin) return { ad: b.birimTahmin, tur: "uyg", kaynak: b.tahminKaynak, o: b.oneri };
   return { ad: null, tur: "bos", o: b.oneri };
 }
 function birimKaynak(r) {
   const x = birimBilgi(r);
-  return !x ? "" : x.tur === "ert" ? "ERT" : x.tur === "oneri" ? `${x.o.kaynak} önerisi (%${x.o.guven}, ${x.o.durum})` : x.tur === "uyg" ? x.kaynak : x.o ? `tahmin: bulunamadı (${x.o.durum})` : "";
+  return !x ? "" : x.tur === "ert" ? "ERT" + (x.kuralFark ? ` (kurala göre ${x.kuralFark} olmalı)` : "") : x.tur === "kural" ? x.neden : x.tur === "oneri" ? `${x.o.kaynak} önerisi (%${x.o.guven}, ${x.o.durum})` : x.tur === "uyg" ? x.kaynak : x.o ? `tahmin: bulunamadı (${x.o.durum})` : "";
 }
 function birimHtml(r, uzun) {
   if (!r.ip) return '<span class="muted">—</span>';
@@ -528,7 +532,9 @@ function birimHtml(r, uzun) {
   if (!x) return '<span class="muted small">…</span>';
   const yaz = !!st.yetki.yazma, ip = esc(r.ip);
   const elle = (yaz ? `<button type="button" data-bk="elle" data-ip="${ip}" title="Elle gir">✎</button>` : "") + tekrarBtn(r);
-  if (x.tur === "ert") return esc(x.ad) + (yaz && tekrarBtn(r) ? `<span class="bk">${tekrarBtn(r)}</span>` : "");
+  if (x.tur === "ert") return esc(x.ad) + (x.kuralFark ? ` <span style="color:var(--warn)" title="${esc((x.neden || "") + " — ERT'deki birim farklı")}">⚠ kurala göre ${esc(x.kuralFark)} olmalı</span>` : "")
+    + (yaz && tekrarBtn(r) ? `<span class="bk">${tekrarBtn(r)}</span>` : "");
+  if (x.tur === "kural") return `<span class="th" title="${esc(x.neden || "")}">📏 ${esc(x.ad)}</span> <span class="g">(kural)</span>${yaz ? `<span class="bk">${elle}</span>` : ""}`;
   if (x.tur === "oneri") {
     const o = x.o;
     return `<span class="th" title="${esc((o.kaynak === "Kural" ? "Kural (envanter kanıtı)" : o.kaynak) + " · " + o.durum + " · " + (o.gerekce || ""))}">🤖 ${esc(x.ad)}</span> <span class="g">%${o.guven}</span> <span class="dur ${esc(o.durum)}">${esc(o.durum === "AI" ? o.kaynak : o.durum)}</span>`
@@ -545,7 +551,7 @@ async function birimYukle(zorla) {
   st.bmAnahtar = anahtar;
   if (!ips.length) { st.bm = {}; return; }
   try {
-    const r = await fetch("api/birim/satirlar", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ips }) });
+    const r = await fetch("api/birim/satirlar", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ips, adlar: adlarOf(ips) }) });
     if (!r.ok) { st.bm = {}; $("#birimNot").textContent = r.status === 404 ? "Birim bilgisi: DLL güncel değil." : ""; return; }
     const j = await r.json();
     st.bm = Object.fromEntries(j.satirlar.map(x => [x.ip, x]));
@@ -554,6 +560,12 @@ async function birimYukle(zorla) {
   ciz();
 }
 function birimBoslar() { return [...new Set((st.veri?.satirlar || []).filter(r => r.ip && birimBilgi(r)?.tur === "bos" && !birimBilgi(r)?.o).map(r => r.ip))]; }
+// IP → sayfadaki sunucu adı (ERT'de kaydı olmayan sunucularda ad kuralı için: CB bilgisayar adı / Nessus DNS)
+function adlarOf(ips) {
+  const set = new Set(ips), m = {};
+  for (const r of st.veri?.satirlar || []) if (r.ip && set.has(r.ip) && !m[r.ip] && (r.sunucu || r.bilgisayar)) m[r.ip] = r.sunucu || r.bilgisayar;
+  return m;
+}
 function tumIpler() { return [...new Set((st.veri?.satirlar || []).map(r => r.ip).filter(Boolean))]; }
 function birimDurumCiz(d) {
   const cal = d?.durum === "calisiyor";

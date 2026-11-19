@@ -472,7 +472,7 @@ app.MapGet("/api/nessus/assetler", async (string? q, HttpContext ctx, IConfigura
 // Sunucu işleten birim (Birim.cs): ERT SUNUCUISLETENBIRIM + boşsa kayıtlı öneri (AI / kural); öneriler DF_BIRIM_ONERI'ye, ERT'ye yazılmaz
 app.MapPost("/api/birim/satirlar", async (BirimIstek req, BirimService b, CancellationToken ct) =>
 {
-    var (l, uyari) = await b.SatirlarAsync(req.Ips ?? [], ct);
+    var (l, uyari) = await b.SatirlarAsync(req.Ips ?? [], ct, req.Adlar);
     return Results.Ok(new { satirlar = l, uyari, durum = b.Durum() });
 });
 app.MapPost("/api/birim/portlar", async (BirimIstek req, BirimService b, CancellationToken ct) => Results.Ok(await b.PortlarAsync(req.Ips ?? [], ct)));
@@ -483,7 +483,7 @@ app.MapPost("/api/birim/calistir", (BirimIstek req, HttpContext ctx, IConfigurat
 {
     if (!Yetki.Var(cfg, ctx, Yetki.Yazma)) return Yetki.Red(ctx, "İşleten birim tahmini");
     if (req.Ips is not { Count: > 0 }) return Results.BadRequest(new { error = "Sunucu IP'si yok." });
-    return Results.Ok(b.Baslat(req.Ips, req.Yeniden, ctx.User?.Identity?.Name));
+    return Results.Ok(b.Baslat(req.Ips, req.Yeniden, ctx.User?.Identity?.Name, req.Adlar));
 });
 app.MapPost("/api/birim/durdur", (HttpContext ctx, IConfiguration cfg, BirimService b) =>
 {
