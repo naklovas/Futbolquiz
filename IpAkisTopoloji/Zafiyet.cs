@@ -1076,9 +1076,9 @@ sealed class ZafiyetService(IConfiguration cfg, IHttpClientFactory factory, Enva
     }
 
     // Kayıtlı taramayı sorgusuz açar: iş durumu "bitti" + Kayittan; süzgeçler, CSV ve "Bu IP'yi yeniden tara" (listeye ekle) bu liste üzerinde çalışır
-    public async Task<(ZfIs? Is, string? Hata)> KayitAcAsync(int id, CancellationToken ct)
+    // Kayıtlı taramanın gövdesi (servis durumuna dokunmaz)
+    async Task<(ZfKayitVeri? V, DateTime Tarih, string? Kaydeden, string? Hata)> KayitOkuAsync(int id, CancellationToken ct)
     {
-        lock (_gate) if (_is is { Durum: "calisiyor" }) return (null, "Şu an bir tarama çalışıyor; bitince ya da durdurunca açın.");
         byte[]? b = null; DateTime tarih = DateTime.Now; string? kaydeden = null;
         lock (_gate) if (_taramaBellek.FirstOrDefault(x => x.Ozet.Id == id) is { Veri: not null } m) { b = m.Veri; tarih = m.Ozet.Tarih; kaydeden = m.Ozet.Kaydeden; }
         if (b == null && id > 0)
@@ -1090,9 +1090,23 @@ sealed class ZafiyetService(IConfiguration cfg, IHttpClientFactory factory, Enva
             await using var rd = await cmd.ExecuteReaderAsync(ct);
             if (await rd.ReadAsync(ct)) { b = (byte[])rd[0]; tarih = rd.GetDateTime(1); kaydeden = rd.IsDBNull(2) ? null : rd.GetString(2); }
         }
-        if (b == null) return (null, "Kayıtlı tarama bulunamadı (silinmiş olabilir).");
+        if (b == null) return (null, tarih, kaydeden, "Kayıtlı tarama bulunamadı (silinmiş olabilir).");
         var v = Ac(b);
-        if (v == null) return (null, "Kayıt okunamadı.");
+        return v == null ? (null, tarih, kaydeden, "Kayıt okunamadı.") : (v, tarih, kaydeden, null);
+    }
+
+    // Karşılaştırma (kullanıcı: "satırda eski ve yeni halini göreyim, eski versiyon yeni versiyon; tarih olarak da"): kayıtlı taramanın satırları, açmadan
+    public async Task<(object? Veri, string? Hata)> KayitVeriAsync(int id, CancellationToken ct)
+    {
+        var (v, tarih, kaydeden, hata) = await KayitOkuAsync(id, ct);
+        return v == null ? (null, hata) : (new { id, tarih, kaydeden = v.Is.Kaydeden ?? kaydeden, kural = v.Is.Kural.Id, kapsam = v.Is.Kapsam, satirlar = v.Satirlar }, null);
+    }
+
+    public async Task<(ZfIs? Is, string? Hata)> KayitAcAsync(int id, CancellationToken ct)
+    {
+        lock (_gate) if (_is is { Durum: "calisiyor" }) return (null, "Şu an bir tarama çalışıyor; bitince ya da durdurunca açın.");
+        var (v, tarih, kaydeden, hata) = await KayitOkuAsync(id, ct);
+        if (v == null) return (null, hata);
         lock (_gate)
         {
             if (_is is { Durum: "calisiyor" }) return (null, "Şu an bir tarama çalışıyor.");

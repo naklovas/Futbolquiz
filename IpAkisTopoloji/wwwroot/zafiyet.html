@@ -94,6 +94,10 @@
   .dmz { display: inline-block; background: var(--crit); color: #fff; border-radius: 4px; font-size: 11px; font-weight: 700; padding: 0 5px; margin-left: 4px; }
   .dg { display: inline-block; border: 1px solid var(--err); color: var(--err); border-radius: 4px; font-size: 11.5px; padding: 0 5px; margin-top: 2px; }
   .stat.dmzk b, .stat.disk b { color: var(--crit); }
+  tr.hayalet td { opacity: .5; } tr.hayalet { background: var(--bg); }
+  .dg2 { display: inline-block; font-size: 11px; border-radius: 3px; padding: 0 4px; margin-left: 3px; border: 1px solid var(--line); }
+  .dg2.giderildi { border-color: var(--ok); color: var(--ok); } .dg2.onlem { border-color: var(--in); color: var(--in); }
+  .dg2.degisti { border-color: var(--warn); color: var(--warn); } .dg2.yeni { border-color: var(--err); color: var(--err); } .dg2.gorulmuyor { color: var(--muted); }
   .th { color: #6b3fa0; } .th .g { font-size: 11px; color: var(--muted); }
   .bk { display: inline-flex; gap: 2px; margin-left: 4px; } .bk button { padding: 0 4px; font-size: 11px; line-height: 16px; }
   .dur { font-size: 10.5px; border-radius: 3px; padding: 0 4px; border: 1px solid var(--line); color: var(--muted); }
@@ -217,6 +221,9 @@
       <button type="button" id="secTemizle" hidden title="Seçimi kaldır">✕ seçim</button>
       <button type="button" id="birimDur" hidden>Durdur</button>
       <span class="small muted" id="birimNot"></span>
+      <label class="small" title="Önceki bir kayıtlı taramayla satır satır karşılaştır (IP + süreç yolu): önceki sürüm / durum ve değişim">Karşılaştır <select id="karsF"><option value="">— yok —</option></select></label>
+      <select id="degF" hidden title="Önceki taramaya göre değişim"><option value="">Değişim: Tümü</option><option value="giderildi">✔ Giderildi (sürüm)</option><option value="onlem">🛡 Önlem alındı</option><option value="degisti">↕ Değişti</option><option value="ayni">= Aynı</option><option value="yeni">＋ Yeni</option><option value="gorulmuyor">Artık görülmüyor</option></select>
+      <span class="small muted" id="karsNot"></span>
       <button type="button" id="csv" hidden>Excel'e aktar</button>
     </div>
     <div class="grid"><table>
@@ -376,6 +383,7 @@ async function kayitYukle() {
     else { const j = await r.json(); st.kayitlar = j.kayitlar || []; st.kayitUyari = j.uyari; }
   } catch (e) { st.kayitlar = []; st.kayitUyari = e.message; }
   kayitCiz();
+  if (st.veri?.is && st.veri.is.durum !== "calisiyor") karsSecenekCiz();
 }
 function sonKayit() { const id = $("#kural").value + ($("#dmz").checked ? ":dmz" : ""); return st.kayitlar.find(k => k.kuralId === id); }
 function kayitCiz() {
@@ -651,6 +659,64 @@ function disUyar(r, df) {
   return r.dmz || r.disGidenSay > 0 || istemciDis(r);
 }
 
+// ---- Önceki kayıtlı taramayla karşılaştırma (kullanıcı: "satırda eski ve yeni halini göreyim, eski versiyon yeni versiyon; tarih olarak da") ----
+const DEG = { giderildi: "✔ giderildi", onlem: "🛡 önlem alındı", degisti: "↕ değişti", ayni: "= aynı", yeni: "＋ yeni", gorulmuyor: "artık görülmüyor" };
+const karsAnahtar = r => `${r.ip || "pc:" + (r.bilgisayar || "")}|${String(r.yol || r.exe || "").toLowerCase().replace(/\\/g, "/")}`;
+function simdiTarih() { const i = st.veri?.is; return i?.kayitTarihi || i?.bitis || i?.baslangic; }
+function karsAdaylari() {
+  const i = st.veri?.is; if (!i?.kural) return [];
+  const anlik = i.kural.id === "anlik";
+  return (st.kayitlar || []).filter(x => x.id !== i.kayitId && (anlik ? x.kuralId.startsWith("anlik:") && x.kuralAd === i.kural.ad : x.kuralId.replace(/:dmz$/, "") === i.kural.id));
+}
+function karsSecenekCiz() {
+  const l = karsAdaylari(), cur = simdiTarih();
+  if (st.karsOto !== false) {
+    // varsayılan: bu taramadan önceki en yeni kayıt
+    const once = l.find(x => !cur || new Date(x.tarih) < new Date(cur));
+    st.karsId = once ? String(once.id) : "";
+  }
+  $("#karsF").innerHTML = '<option value="">— yok —</option>' + l.map(x => `<option value="${x.id}" ${String(x.id) === st.karsId ? "selected" : ""}>${esc(trTarih(x.tarih))} · ${esc(x.kapsam || "")} · ${x.satir} satır</option>`).join("");
+  if (!l.some(x => String(x.id) === st.karsId)) st.karsId = "";
+  $("#karsF").value = st.karsId;
+  karsYukle();
+}
+async function karsYukle() {
+  const id = st.karsId;
+  if (!id) { if (st.kars) { st.kars = null; ciz(); } return; }
+  if (st.kars?.id === id) return;
+  try {
+    const r = await fetch("api/zafiyet/kayit/" + id);
+    if (!r.ok) { st.kars = null; $("#karsNot").textContent = r.status === 404 ? "kayıt okunamadı (DLL güncel değil ya da silinmiş)" : "HTTP " + r.status; return; }
+    const j = await r.json();
+    const m = new Map(); for (const x of j.satirlar || []) if (!m.has(karsAnahtar(x))) m.set(karsAnahtar(x), x);
+    st.kars = { id, tarih: j.tarih, map: m, satirlar: j.satirlar || [] };
+  } catch { st.kars = null; }
+  ciz();
+}
+// Satırın değişimi: giderildi (önce etkilenen / olası / bilinmiyor → şimdi yamalı / etkilenmez), önlem alındı, değişti, aynı, yeni; hayalet satır = artık görülmüyor
+function degisim(r) {
+  if (!st.kars) return null;
+  if (r._hayalet) return { tur: "gorulmuyor", o: r };
+  const o = st.kars.map.get(karsAnahtar(r));
+  if (!o) return { tur: "yeni" };
+  if (["yamali", "etkilenmez"].includes(r.durum) && ["etkilenen", "olasi", "bilinmiyor", "bilgi"].includes(o.durum)) return { tur: "giderildi", o };
+  if (o.onlem !== "var" && r.onlem === "var") return { tur: "onlem", o };
+  if ((o.surum || "") === (r.surum || "") && o.durum === r.durum) return { tur: "ayni", o };
+  return { tur: "degisti", o };
+}
+function hayaletler() {
+  if (!st.kars) return [];
+  const simdi = new Set((st.veri?.satirlar || []).map(karsAnahtar));
+  return st.kars.satirlar.filter(x => !simdi.has(karsAnahtar(x))).map(x => ({ ...x, _hayalet: true }));
+}
+function degisimHtml(r) {
+  const d = degisim(r);
+  if (!d) return "";
+  const once = d.o && !r._hayalet ? `<div class="small muted">önce (${esc(trTarih(st.kars.tarih))}): <span class="mono">${esc(d.o.surum || "?")}</span> ${esc(DUR[d.o.durum] || d.o.durum)}${d.o.onlem === "var" ? " · önlem var" : ""}</div>` : "";
+  const simdi = r._hayalet ? `<div class="small muted">şimdi (${esc(trTarih(simdiTarih()))}): görülmedi — kaldırılmış ya da durmuş olabilir, doğrulayın</div>` : "";
+  return once + simdi + `<span class="dg2 ${d.tur}">${DEG[d.tur]}</span>`;
+}
+
 function suz() {
   const l = st.veri?.satirlar || [];
   const df = $("#disF").value, rp = $("#repoF").value, bf = $("#birimF").value, mf = $("#muhafizF").value;
@@ -658,7 +724,9 @@ function suz() {
   return l.filter(r => (!df || disUyar(r, df)) && (!rp || (r.repo || "(yok)") === rp) && (!bf || (r._birim || "(yok)") === bf) && (!mf || (r._muhafiz || "(yok)") === mf) && (!st.onc || r.oncelik === st.onc) && (!dm || (r.domain || "(yok)") === dm) && (!vl || (r.vlan || "(yok)") === vl) && (!dg || (r.dagitim || "(yok)") === dg) && (!kn || kaynakGrup(r) === kn) && (!st.onlemF || r.onlem === "var") && (!d || r.durum === d) && (!k || r.kurum === k)
     && (!$("#dinleyen").checked || r.portlar.length) && ($("#testG").checked || !r.test)
     && (!q || [r.ip, r.sunucu, r.bilgisayar, r.segment, r.vlan, r.domain, r.cidr, r.dagitim, r.muhafiz, r.yol, r.urun, r.surum, r.jar, r.repo, r._birim, r._muhafiz, ...uygOnerileri(r).map(x => x.uygulama).filter(Boolean), ...(r.uygulamalar || []), ...(r.disGiden || []), ...r.portlar.map(p => p.port + " " + (p.ert || "") + " " + p.vip.join(" "))]
-      .some(x => String(x ?? "").toLowerCase().includes(q))));
+      .some(x => String(x ?? "").toLowerCase().includes(q))))
+    .concat(hayaletler().filter(r => !q || [r.ip, r.sunucu, r.yol, r.surum].some(x => String(x ?? "").toLowerCase().includes(q))))
+    .filter(r => !st.kars || !$("#degF").value || degisim(r)?.tur === $("#degF").value);
 }
 
 function statsCiz() {
@@ -718,8 +786,8 @@ function ciz() {
   for (const r of v.satirlar || []) r._muhafiz = muhafizBilgi(r)?.ad || "";
   secenek("#muhafizF", "Muhafız", "_muhafiz", false);
   const l = suz();
-  $("#tb").innerHTML = l.length ? l.slice(0, st.limit).map((r, i) => `<tr data-i="${(v.satirlar).indexOf(r)}">
-    <td>${r.ip ? `<input type="checkbox" data-sec="${esc(r.ip)}" ${st.secili.has(r.ip) ? "checked" : ""} title="Bu sunucuyu tahmin için seç">` : ""}</td>
+  $("#tb").innerHTML = l.length ? l.slice(0, st.limit).map((r, i) => `<tr ${r._hayalet ? 'class="hayalet" title="Önceki taramada vardı, bu taramada görülmedi"' : `data-i="${(v.satirlar).indexOf(r)}"`}>
+    <td>${r.ip && !r._hayalet ? `<input type="checkbox" data-sec="${esc(r.ip)}" ${st.secili.has(r.ip) ? "checked" : ""} title="Bu sunucuyu tahmin için seç">` : ""}</td>
     <td><span class="p ${r.oncelik}" title="${esc(ONC_IPUCU[r.oncelik])}">${ONC[r.oncelik]}</span></td>
     <td><div class="mono">${r.ip ? `<a href="./?ip=${encodeURIComponent(r.ip)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${esc(r.ip)}</a>` : '<span class="muted">IP yok</span>'}</div>
         <div class="small">${esc(r.sunucu || "")}${r.test ? ' <span class="d">test</span>' : ""}${r.dmz ? '<span class="dmz" title="Nessus DMZ asset\'inde">DMZ</span>' : ""}</div><div class="small muted">${esc(r.kurum || "")}${r.segment ? " · " + esc(r.segment) : ""}</div></td>
@@ -730,14 +798,19 @@ function ciz() {
     <td class="small">${birimHtml(r)}</td>
     <td><b>${esc(r.exe)}</b>${r.urun ? ` <span class="d">${esc(r.urun)}</span>` : ""}<div class="small muted mono" title="${esc(r.yol)}" style="max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(r.yol)}</div>${r.jar ? `<div class="small muted">-jar ${esc(r.jar)}</div>` : ""}</td>
     <td class="small">${esc(r.dagitim || "") || '<span class="muted">—</span>'}</td>
-    <td><span class="mono">${esc(r.surum || "?")}</span> <span class="d ${r.durum}" title="${esc(r.durumNot)}">${DUR[r.durum] || r.durum}</span>${r.surumKaynak ? `<div class="small muted">${esc(r.surumKaynak)}</div>` : ""}</td>
+    <td><span class="mono">${esc(r.surum || "?")}</span> <span class="d ${r.durum}" title="${esc(r.durumNot)}">${DUR[r.durum] || r.durum}</span>${r.surumKaynak ? `<div class="small muted">${esc(r.surumKaynak)}</div>` : ""}${degisimHtml(r)}</td>
     <td>${portHtml(r)}</td>
     <td class="small">${r.giden ? r.giden.toLocaleString("tr-TR") : '<span class="muted">—</span>'}${r.disGidenSay ? `<div><span class="dg" title="${esc("Dış (kurum dışı) hedefler:\n" + r.disGiden.join("\n") + (r.disGidenSay > r.disGiden.length ? "\n…" : ""))}">🌐 ${r.disGidenSay} dış hedef</span></div>` : ""}</td>
     <td class="small o ${r.onlem}" title="Komut satırında geçici önlem parametresi">${r.onlem === "var" ? "✔ var" : r.onlem === "yok" ? "yok" : r.onlem === "bilinmiyor" ? '<span class="muted">bilinmiyor</span>' : '<span class="muted">—</span>'}</td>
     <td class="small">${esc(r.son || "")}${r.baslangic ? `<div class="muted">başlangıç ${esc(r.baslangic)}</div>` : ""}</td>
     <td class="small muted">${esc(r.kaynak)}${r.repo ? `<div title="Nessus repository">📁 ${esc(r.repo)}</div>` : ""}${r.nessus ? `<div style="color:${r.nessus.includes("CVE bulgusu") ? "var(--err)" : "var(--muted)"}" title="${esc(r.nessus)}">🛡 ${esc(r.nessus.length > 70 ? r.nessus.slice(0, 70) + "…" : r.nessus)}</div>` : ""}</td></tr>`).join("")
     : `<tr><td colspan="16" class="empty">${v.satirlar?.length ? "Süzgece uyan süreç yok." : "Bu aralıkta Carbon Black'te kurala uyan süreç görülmedi."}</td></tr>`;
-  const gorunen = [...new Set(l.map(r => r.ip).filter(Boolean))];
+  $("#degF").hidden = !st.kars;
+  if (st.kars) {
+    const say = {}; for (const r of [...(v.satirlar || []), ...hayaletler()]) { const t = degisim(r)?.tur; say[t] = (say[t] || 0) + 1; }
+    $("#karsNot").textContent = `${trTarih(st.kars.tarih)} → ${trTarih(simdiTarih())}: ` + ["giderildi", "onlem", "degisti", "yeni", "gorulmuyor", "ayni"].filter(t => say[t]).map(t => `${DEG[t]} ${say[t]}`).join(" · ");
+  } else $("#karsNot").textContent = "";
+  const gorunen = [...new Set(l.filter(r => !r._hayalet).map(r => r.ip).filter(Boolean))];
   $("#secHepsi").checked = gorunen.length > 0 && gorunen.every(ip => st.secili.has(ip));
   $("#sayi").textContent = `${Math.min(l.length, st.limit).toLocaleString("tr-TR")} / ${l.length.toLocaleString("tr-TR")} satır gösteriliyor` + (st.secili.size ? ` · ${st.secili.size} sunucu seçili` : "");
   $("#more").hidden = l.length <= st.limit;
@@ -798,7 +871,7 @@ async function yukle() {
     ks.innerHTML = st.veri.kurallar.map(k => `<option value="${esc(k.id)}">${esc((k.cve ? k.cve + " · " : "") + k.ad + ((k.kaynak || "").startsWith("kayıtlı") ? "  (kayıtlı)" : ""))}</option>`).join("");
   if (sec) ks.value = sec;
   formCiz(); runCiz(); uyariCiz(); ciz();
-  if (st.veri.is?.durum !== "calisiyor") birimYukle();
+  if (st.veri.is?.durum !== "calisiyor") { birimYukle(); const k = `${st.veri.is?.kural?.id}|${st.veri.is?.kayitId}|${st.veri.is?.baslangic}`; if (k !== st.karsVeri) { st.karsVeri = k; st.karsOto = true; st.kars = null; karsSecenekCiz(); } }
   const d = st.veri.is?.durum;
   if (st.sonDurum === "calisiyor" && d !== "calisiyor") kayitYukle();   // sunucu kaydı "bitti"den önce yazar
   st.sonDurum = d; kayitCiz();
@@ -832,10 +905,11 @@ function csv() {
   if (!st.yetki.disari) return;
   const q = v => `"${String(v ?? "").replace(/"/g, '""')}"`;
   const lines = [["ÖNCELİK", "IP", "SUNUCU", "BİLGİSAYAR (CB)", "KURUM", "SEGMENT", "VLAN", "DOMAIN", "CIDR", "TEST", "ERT UYGULAMALARI", "MUHAFIZ", "EXE", "EXE YOLU", "ÜRÜN", "-JAR", "DAĞITIM", "SÜRÜM", "SÜRÜM KAYNAĞI", "DURUM", "DURUM NOTU",
-    "DİNLEDİĞİ PORTLAR", "VIP", "DIŞ İSTEMCİ", "GİDEN BAĞLANTI", "GEÇİCİ ÖNLEM", "SON GÖRÜLME", "SÜREÇ BAŞLANGICI", "İŞLETEN BİRİM", "BİRİM KAYNAĞI", "UYGULAMA ÖNERİSİ (ERT boşsa)", "MUHAFIZ TAHMİNİ", "KAYNAK", "NESSUS REPOSITORY", "NESSUS", "DMZ", "DIŞ HEDEF SAYISI", "DIŞ HEDEFLER", "KOMUT SATIRI"].join(";"),
+    "DİNLEDİĞİ PORTLAR", "VIP", "DIŞ İSTEMCİ", "GİDEN BAĞLANTI", "GEÇİCİ ÖNLEM", "SON GÖRÜLME", "SÜREÇ BAŞLANGICI", "ÖNCEKİ TARAMA", "ÖNCEKİ SÜRÜM", "ÖNCEKİ DURUM", "DEĞİŞİM", "İŞLETEN BİRİM", "BİRİM KAYNAĞI", "UYGULAMA ÖNERİSİ (ERT boşsa)", "MUHAFIZ TAHMİNİ", "KAYNAK", "NESSUS REPOSITORY", "NESSUS", "DMZ", "DIŞ HEDEF SAYISI", "DIŞ HEDEFLER", "KOMUT SATIRI"].join(";"),
     ...suz().map(r => [ONC[r.oncelik], r.ip, r.sunucu, r.bilgisayar, r.kurum, r.segment, r.vlan, r.domain, r.cidr, r.test ? "evet" : "", (r.uygulamalar || []).join(" | "), r.muhafiz || st.bm?.[r.ip]?.muhafiz, r.exe, r.yol, r.urun, r.jar, r.dagitim,
       r.surum, r.surumKaynak, DUR[r.durum] || r.durum, r.durumNot, r.portlar.map(p => p.port).join(", "), [...new Set(r.portlar.flatMap(p => p.vip))].join(", "),
-      [...new Set(r.portlar.flatMap(p => p.dis))].join(", "), r.giden, r.onlem, r.son, r.baslangic, birimBilgi(r)?.ad, birimKaynak(r), uygOnerileri(r).map(x => `${x.uygulama || "bulunamadı"} (port ${x.port}, %${x.guven}, ${x.durum})`).join(" | "), st.bm?.[r.ip]?.muhafizTahmin, r.kaynak, r.repo, r.nessus, r.dmz ? "evet" : "", r.disGidenSay || "", (r.disGiden || []).join(", "), r.komut].map(q).join(";"))];
+      [...new Set(r.portlar.flatMap(p => p.dis))].join(", "), r.giden, r.onlem, r.son, r.baslangic, st.kars ? trTarih(st.kars.tarih) : "", degisim(r)?.o && !r._hayalet ? degisim(r).o.surum : "", degisim(r)?.o && !r._hayalet ? (DUR[degisim(r).o.durum] || degisim(r).o.durum) : "", degisim(r) ? DEG[degisim(r).tur] : "",
+      birimBilgi(r)?.ad, birimKaynak(r), uygOnerileri(r).map(x => `${x.uygulama || "bulunamadı"} (port ${x.port}, %${x.guven}, ${x.durum})`).join(" | "), st.bm?.[r.ip]?.muhafizTahmin, r.kaynak, r.repo, r.nessus, r.dmz ? "evet" : "", r.disGidenSay || "", (r.disGiden || []).join(", "), r.komut].map(q).join(";"))];
   const a = document.createElement("a");
   a.href = URL.createObjectURL(new Blob(["﻿" + lines.join("\r\n")], { type: "text/csv;charset=utf-8" }));
   a.download = `aciklik_${(st.veri?.is?.kural?.cve || st.veri?.is?.kural?.id || "tarama").replace(/[^\w.-]+/g, "_")}.csv`;
@@ -895,6 +969,8 @@ $("#tara").addEventListener("click", tara);
 $("#durdur").addEventListener("click", () => fetch("api/zafiyet/durdur", { method: "POST" }).then(yukle));
 $("#more").addEventListener("click", () => { st.limit += 1000; ciz(); });
 $("#csv").addEventListener("click", csv);
+$("#karsF").addEventListener("change", () => { st.karsOto = false; st.karsId = $("#karsF").value; karsYukle(); });
+$("#degF").addEventListener("change", () => { st.limit = 500; ciz(); });
 $("#birimAi").addEventListener("click", birimAi);
 $("#secTahmin").addEventListener("click", secTahmin);
 $("#uygAi").addEventListener("click", uygAiTikla);

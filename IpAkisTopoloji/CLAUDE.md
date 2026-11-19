@@ -1141,6 +1141,12 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
   önce), ERT doluysa ve farklıysa "⚠ kurala göre X olmalı"; CSV BİRİM KAYNAĞI'nda. genelbilgiler.txt (Eksik:BilgiDosyasi) hem uygulama hem birim AI prompt'unun başında.
   VARLIK MUHAFIZI KOLONU (kullanıcı: "VARLIKMUHAFIZI kolonu kayboldu?" — Uygulama hücresinin altında küçük yazıydı, yeni düğmelerle görünmez oldu): ayrı "Varlık muhafızı" kolonu
   (`muhafizHtml` / `muhafizBilgi`: satırdaki ERT, yoksa `BirimSatir.Muhafiz` (eski kayıtlı taramalar), yoksa 🤖 önerilen uygulamadan tahmin), "Muhafız" süzgeci, aramada; CSV MUHAFIZ.
+  KARŞILAŞTIRMA (kullanıcı: "bulgusu giderilenleri nasıl anlayacağız" → "satırda eski ve yeni halini göreyim, eski versiyon yeni versiyon; tarih olarak da"): GET
+  `/api/zafiyet/kayit/{id}` (`KayitVeriAsync`, kayıtlı taramanın satırları, servis durumuna dokunmaz; `KayitOkuAsync` KayitAcAsync ile ortak). Araç çubuğunda "Karşılaştır" (aynı
+  kuralın kayıtlı taramaları, DMZ eki gözetilmez; varsayılan bu taramadan önceki en yeni kayıt, `st.karsOto`), eşleşme IP (yoksa CB bilgisayarı) + süreç yolu (küçük harf, \ → /).
+  `degisim`: giderildi (önce etkilenen / olası / bilinmiyor / bilgi → şimdi yamalı / etkilenmez), önlem alındı (önlem yok → var), değişti, aynı, yeni; önceki taramada olup şimdi
+  olmayanlar soluk "hayalet" satır (artık görülmüyor — doğrulanmalı; tıklanmaz, seçilmez). Sürüm hücresinde "önce (tarih): sürüm durum" + rozet, hayalette "şimdi (tarih): görülmedi";
+  "Değişim" süzgeci, özet (`#karsNot`: tarih → tarih: sayılar), CSV ÖNCEKİ TARAMA / ÖNCEKİ SÜRÜM / ÖNCEKİ DURUM / DEĞİŞİM (hayaletler dahil). Mock'la denendi.
 - **VIP**: sorgulanan IP VIP ise üyeler + GW'ler aynı sorguya eklenir, üyeler "VIP ÜYESİ" (GW→üye trafiği varsa ✓).
   Gidilen IP VIP ise "VIP → n ÜYE"; gelen IP LB GW ise "LB GW"; sorgulanan sunucu havuz üyesiyse VIP kartı.
 - **Uygulama görünümü** (`/api/apps`, `/api/app`): `[kullanan uygulamalar] → [UYGULAMA: VIP'ler + segment grupları] → [bağımlı olunanlar]`,

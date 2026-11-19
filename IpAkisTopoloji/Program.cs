@@ -499,6 +499,11 @@ app.MapPost("/api/birim/karar", async (BirimKarar req, HttpContext ctx, IConfigu
 // Kayıtlı açıklık taramaları (DF_ZAFIYET_TARAMA): liste (gövdesiz), sorgusuz aç, sil
 app.MapGet("/api/zafiyet/kayitlar", async (string? kural, ZafiyetService z, CancellationToken ct) =>
     Results.Ok(await z.KayitlarAsync(string.IsNullOrWhiteSpace(kural) ? null : kural.Trim(), ct)));
+app.MapGet("/api/zafiyet/kayit/{id:int}", async (int id, ZafiyetService z, CancellationToken ct) =>
+{
+    var (v, hata) = await z.KayitVeriAsync(id, ct);
+    return v == null ? Results.NotFound(new { error = hata }) : Results.Ok(v);
+});
 app.MapPost("/api/zafiyet/kayit/{id:int}/ac", async (int id, ZafiyetService z, CancellationToken ct) =>
 {
     var (i, hata) = await z.KayitAcAsync(id, ct);
