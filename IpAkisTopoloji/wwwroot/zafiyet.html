@@ -217,7 +217,7 @@
       <button type="button" id="birimAi" hidden title="ERT eksikleri gibi: uygulaması boş sunucuların portları için uygulama önerisi (ERT eksikleri motoru), sonra işleten birimi boş olanlar için birim tahmini. Öneriler ERT'ye yazılmaz.">🤖 Eksikleri tahmin et</button>
       <button type="button" id="uygAi" hidden title="ERT'de uygulaması boş sunucuların uygulamasını AI'a sor (ERT eksikleri motoru, aynı kayıt). Seçim varsa yalnız seçililer, önerisi olsa da yeniden (onaylı / elle hariç); yoksa önerisi olmayanların hepsi.">🤖 AI ile uygulama ara</button>
       <button type="button" id="secTahmin" hidden title="Yalnız seçili sunucular: uygulaması boşsa uygulama önerisi (ERT eksikleri), sonra işleten birim">🤖 Seçilenleri tahmin et</button>
-      <label class="small" id="secYenidenEt" hidden title="İşaretliyse seçili sunucularda önerisi olanlar da yeniden sorulur (onaylı / elle girilenler hariç)"><input type="checkbox" id="secYeniden"> önerisi olanları da yeniden sor</label>
+      <label class="small" id="secYenidenEt" hidden title="İşaretliyse 'Tümünü tahmin et', 'AI ile uygulama ara' ve 'Seçilenleri tahmin et' önerisi olanları da BAŞTAN sorar (eski Sistem Portudur / Altyapı cevapları dahil); onaylı / elle girilenlere dokunulmaz"><input type="checkbox" id="secYeniden"> baştan (önerisi olanları da yeniden sor)</label>
       <button type="button" id="secTemizle" hidden title="Seçimi kaldır">✕ seçim</button>
       <button type="button" id="birimDur" hidden>Durdur</button>
       <span class="small muted" id="birimNot"></span>
@@ -472,12 +472,14 @@ const bekle = ms => new Promise(r => setTimeout(r, ms));
 // Sıra: açıklığı taşıyan sürecin dinlediği portlar (CB) → ürünün Nessus bulgu portları → ERT'de uygulaması boş portlar; altyapı / sistem portları (st.tahminDisi) hariç
 function satirPortlari(ip) {
   const rs = (st.veri?.satirlar || []).filter(r => r.ip === ip && !r._hayalet);
-  return [...new Set([...rs.flatMap(r => r.portlar.map(p => p.port)), ...rs.flatMap(r => r.nessusPortlar || []), ...(st.bm?.[ip]?.bosPortlar || [])])]
+  return [...new Set([...rs.flatMap(r => r.portlar.map(p => p.port)), ...rs.flatMap(r => r.nessusPortlar || []), ...isOnerisi(st.bm?.[ip]?.uygOneri).map(x => x.port), ...(st.bm?.[ip]?.bosPortlar || [])])]
     .filter(p => /^\d+$/.test(p) && p !== "0" && +p < 49152 && !(st.tahminDisi?.has(p))).slice(0, 10);
 }
 // Uygulama tahmini gereken IP'ler: ERT'de uygulaması yok ve (yeniden değilse) önerisi yok; portu ya da ERT'de boş satırı olmalı
 function uygGerekenler(ips, yeniden) {
-  return ips.filter(ip => { const b = st.bm?.[ip]; return b && !(b.uygulamalar || []).length && (yeniden || !isOnerisi(b.uygOneri).length); });
+  // yeniden: önerisi olanlar da (onaylı / elle uygulaması olanlar hariç)
+  return ips.filter(ip => { const b = st.bm?.[ip]; return b && !(b.uygulamalar || []).length
+    && (yeniden ? !(b.uygOneri || []).some(x => x.uygulama && (x.durum === "Onaylandı" || x.durum === "Elle")) : !isOnerisi(b.uygOneri).length); });
 }
 async function eksikBekle(not) {
   for (let i = 0; i < 1200; i++) {
@@ -527,7 +529,7 @@ async function tahminEt(ips, yeniden, not) {
   const um = await uygAra(ips, yeniden, not);
   if (st.tahminIptal) { not("durduruldu · " + um); return; }
   // birim: ERT'de boş, önerisi yok (yeniden: onaylı / elle hariç hepsi) ve uygulama önerisinden de gelmeyenler
-  const bi = yeniden ? ips.filter(ip => !st.bm?.[ip]?.ert) : ips.filter(ip => { const x = birimBilgi({ ip }); return x?.tur === "bos" && !x.o; });
+  const bi = birimHedef(ips, yeniden);
   if (!bi.length) { not(um + " · birim: boş sunucu kalmadı"); return; }
   not(um + ` · işleten birim tahmini (${bi.length} sunucu)…`);
   const r2 = await fetch("api/birim/calistir", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ips: bi, yeniden, adlar: adlarOf(bi) }) });
@@ -596,17 +598,18 @@ function adlarOf(ips) {
 function tumIpler() { return [...new Set((st.veri?.satirlar || []).map(r => r.ip).filter(Boolean))]; }
 function birimDurumCiz(d) {
   const cal = d?.durum === "calisiyor";
-  const bos = birimBoslar(), ug = uygGerekenler(tumIpler(), false);
+  const bas = $("#secYeniden").checked, bos = birimHedef(tumIpler(), bas), ug = uygGerekenler(tumIpler(), bas);
   $("#birimAi").hidden = !st.yetki.yazma || cal || st.tahminSuruyor || (!bos.length && !ug.length);
-  $("#birimAi").textContent = `🤖 Tümünü tahmin et (uygulama ${ug.length} · birim ${bos.length} sunucu)`;
+  $("#birimAi").textContent = `🤖 Tümünü ${bas ? "baştan " : ""}tahmin et (uygulama ${ug.length} · birim ${bos.length} sunucu)`;
   st.bmDurum = d;
   const sn = st.secili.size, mesgul = cal || st.tahminSuruyor;
-  $("#secTahmin").hidden = $("#secYenidenEt").hidden = $("#secTemizle").hidden = !st.yetki.yazma || !sn;
+  $("#secTahmin").hidden = $("#secTemizle").hidden = !st.yetki.yazma || !sn;
+  $("#secYenidenEt").hidden = !st.yetki.yazma;
   $("#secTahmin").disabled = mesgul;
-  const ugSec = sn ? uygGerekenler([...st.secili], true).length : uygGerekenler(tumIpler(), false).length;
+  const ugSec = sn ? uygGerekenler([...st.secili], true).length : uygGerekenler(tumIpler(), bas).length;
   $("#uygAi").hidden = !st.yetki.yazma || !ugSec;
   $("#uygAi").disabled = mesgul;
-  $("#uygAi").textContent = sn ? `🤖 AI ile uygulama ara (seçili ${ugSec} sunucu)` : `🤖 AI ile uygulama ara (${ugSec} sunucu)`;
+  $("#uygAi").textContent = sn ? `🤖 AI ile uygulama ara (seçili ${ugSec} sunucu)` : `🤖 AI ile uygulama ara${bas ? " — baştan" : ""} (${ugSec} sunucu)`;
   $("#secTahmin").textContent = `🤖 Seçilenleri tahmin et (${sn} sunucu)`;
   $("#birimDur").hidden = !cal && !st.tahminSuruyor;
   $("#birimNot").textContent = (st.sonMesaj ? st.sonMesaj + " · " : "") + (cal ? `Birim tahmini: ${d.biten} / ${d.toplam}${d.son ? " · " + d.son : ""}`
@@ -620,7 +623,7 @@ function birimDurumCiz(d) {
   }, 3000);
 }
 async function uygAiTikla() {
-  const sn = st.secili.size, ips = sn ? [...st.secili] : tumIpler(), yeniden = sn > 0;
+  const sn = st.secili.size, ips = sn ? [...st.secili] : tumIpler(), yeniden = sn > 0 || $("#secYeniden").checked;
   const n = uygGerekenler(ips, yeniden).length;
   if (!n || !confirm(`${n} sunucunun uygulaması AI'a sorulacak (ERT eksikleri motoru; port yoksa Nessus / ERT portları, o da yoksa sunucu düzeyinde)${yeniden ? "; önerisi olanlar da yeniden (onaylı / elle hariç)" : ""}. Öneriler ERT'ye yazılmaz. Devam?`)) return;
   st.tahminSuruyor = true; st.tahminIptal = false; $("#uygAi").disabled = true; $("#birimDur").hidden = false;
@@ -636,12 +639,16 @@ async function secTahmin() {
   try { await tahminEt(ips, yeniden, t => $("#birimNot").textContent = `Seçili ${ips.length} sunucu: ${t}`); }
   finally { st.tahminSuruyor = false; await birimYukle(true); birimDurumCiz(st.bmDurum); }
 }
+// Birim tahmini hedefi: baştan değilse birimi boş ve önerisi olmayanlar; baştan ise ERT'de birimi boş ve onaylı / elle birimi olmayanların hepsi
+function birimHedef(ips, bas) {
+  return bas ? ips.filter(ip => { const b = st.bm?.[ip]; return b && !b.ert && !(b.oneri && (b.oneri.durum === "Onaylandı" || b.oneri.durum === "Elle")); }) : birimBoslar().filter(ip => ips.includes(ip));
+}
 async function birimAi() {
-  const ips = tumIpler(), ug = uygGerekenler(ips, false), bos = birimBoslar();
+  const bas = $("#secYeniden").checked, ips = tumIpler(), ug = uygGerekenler(ips, bas), bos = birimHedef(ips, bas);
   if (!ug.length && !bos.length) return;
-  if (!confirm(`ERT'de boş alanlar tahmin edilecek:\n• Uygulama: ${ug.length} sunucu (ERT eksikleri motoru, port başına; 50'lik parçalar)\n• İşleten birim: uygulama tahmininden sonra birimi hâlâ boş olanlar\nÖneriler ERT'ye yazılmaz. Devam?`)) return;
+  if (!confirm(`${bas ? "BAŞTAN — önerisi olanlar da yeniden sorulacak (onaylı / elle hariç):" : "ERT'de boş alanlar tahmin edilecek:"}\n• Uygulama: ${ug.length} sunucu (ERT eksikleri motoru, port başına; 50'lik parçalar)\n• İşleten birim: uygulama tahmininden sonra${bas ? " ERT'de birimi boş olanların hepsi" : " birimi hâlâ boş olanlar"}\nÖneriler ERT'ye yazılmaz. Devam?`)) return;
   st.tahminSuruyor = true; st.tahminIptal = false; $("#birimAi").hidden = true; $("#birimDur").hidden = false;
-  try { await tahminEt(ips, false, t => $("#birimNot").textContent = t); }
+  try { await tahminEt(ips, bas, t => $("#birimNot").textContent = t); }
   finally { st.tahminSuruyor = false; await birimYukle(true); }
 }
 async function birimKarar(ip, karar) {
@@ -980,6 +987,7 @@ $("#karsF").addEventListener("change", () => { st.karsOto = false; st.karsId = $
 $("#degF").addEventListener("change", () => { st.limit = 500; ciz(); });
 $("#birimAi").addEventListener("click", birimAi);
 $("#secTahmin").addEventListener("click", secTahmin);
+$("#secYeniden").addEventListener("change", () => birimDurumCiz(st.bmDurum));
 $("#uygAi").addEventListener("click", uygAiTikla);
 $("#secTemizle").addEventListener("click", () => { st.secili.clear(); ciz(); birimDurumCiz(st.bmDurum); });
 $("#birimDur").addEventListener("click", async () => {

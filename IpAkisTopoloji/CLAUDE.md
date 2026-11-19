@@ -1155,6 +1155,9 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
   (Uygulama:AltyapiPortlari ∪ Eksik:BilinenSistemPortlari ∪ 23, 111, 593, 1900, 3702, 5353, 5355; web portları GÖNDERİLİR) `/api/birim/portlar`'da ve sayfada (`satirPortlari`, yanıttaki
   `tahminDisi`) süzülür; sıra CB süreç portları → ürünün Nessus portları → ERT boş portları, en çok 10. (3) "Altyapı: / Sistem Portudur" cevapları ve sistem portundaki öneriler
   uygulama önerisi sayılmaz (`isOnerisi`, `BirimService.UygulamaDegil`; birim / muhafız bunlardan türetilmez, "tümü" yeniden sorabilir). Mock'la denendi.
+  BAŞTAN (kullanıcı: "tüm eksikleri baştan kontrol et seçeneği yok"): `#secYeniden` "baştan (önerisi olanları da yeniden sor)" her zaman görünür; işaretliyse "Tümünü baştan tahmin et"
+  ve "AI ile uygulama ara — baştan" `yeniden:true` (uygulama: onaylı / elle uygulaması olan IP'ler hariç; birim `birimHedef`: ERT'de birimi boş, onaylı / elle birimi olmayanlar).
+  Yeniden sorarken önceki iş önerilerinin portları da port listesine girer.
 - **VIP**: sorgulanan IP VIP ise üyeler + GW'ler aynı sorguya eklenir, üyeler "VIP ÜYESİ" (GW→üye trafiği varsa ✓).
   Gidilen IP VIP ise "VIP → n ÜYE"; gelen IP LB GW ise "LB GW"; sorgulanan sunucu havuz üyesiyse VIP kartı.
 - **Uygulama görünümü** (`/api/apps`, `/api/app`): `[kullanan uygulamalar] → [UYGULAMA: VIP'ler + segment grupları] → [bağımlı olunanlar]`,
