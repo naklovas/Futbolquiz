@@ -25,7 +25,7 @@ record ZfSatir(string? Ip, string? Sunucu, string? Bilgisayar, string? Kurum, st
     string Exe, string Yol, string? Urun, string? Surum, string? SurumKaynak, string Durum, string DurumNot,
     List<ZfPort> Portlar, long Giden, string Onlem, string? Komut, string? Jar, string? Son, string? Baslangic, string Oncelik, string Kaynak,
     string? Vlan = null, string? Domain = null, string? Cidr = null, string? Dagitim = null, string? Nessus = null,
-    bool Dmz = false, List<string>? DisGiden = null, int DisGidenSay = 0);   // Dmz: Nessus DMZ asset'inde; DisGiden: CB'de süreç dış IP'lere bağlanıyor ("derin dış")
+    bool Dmz = false, List<string>? DisGiden = null, int DisGidenSay = 0, string? Repo = null);   // Repo: Nessus bulgusunun repository adı (id)   // Dmz: Nessus DMZ asset'inde; DisGiden: CB'de süreç dış IP'lere bağlanıyor ("derin dış")
 record ZfIs(string Durum, string Asama, DateTime Baslangic, DateTime? Bitis, string? Hata, string? Kaydeden, int Saat, int SurecSaat, ZfKural Kural, string? Kapsam = null,
     int? KayitId = null, DateTime? KayitTarihi = null, bool Kayittan = false, bool Dmz = false);
 // Kayıtlı tarama (DF_ZAFIYET_TARAMA): liste satırı (sonuç gövdesi yok) ve gzip JSON gövdesi
@@ -310,8 +310,10 @@ sealed class ZafiyetService(IConfiguration cfg, IHttpClientFactory factory, Enva
         {
             // DMZ asset'i (Nessus ekibinin DMZ asset seti): satırlar işaretlenir; DMZ kipinde yalnız bu IP'ler
             Set(i => i with { Asama = "Nessus: DMZ asset'i okunuyor" });
-            var (dmzA, dmzIp, dmzHata) = await DmzAsync(ct);
-            if (dmzA != null) mesaj.Add($"DMZ asset'i: {dmzA.Asset.Ad} (id {dmzA.Asset.Id}) — {dmzA.Ipler.Count:N0} IP ({dmzA.Kaynak}{(dmzA.Kesik ? ", liste kesildi" : "")}).");
+            var (dmzA, dmzHata) = await DmzAsync(ct);
+            var dmzRepo = DmzRepolar;
+            if (dmzA != null) mesaj.Add($"DMZ asset'i: {dmzA.Asset.Ad} (id {dmzA.Asset.Id}){(dmzA.Asset.IpSayisi is { } n ? $" — Tenable'da {n:N0} IP" : "")} · {dmzA.Araliklar.Count:N0} IP aralığı, "
+                + $"{dmzA.RepoOzet.Count()} repository ({dmzA.Kaynak})" + (dmzRepo.Count > 0 ? $" · yalnız repository {string.Join(", ", dmzRepo)} (Zafiyet:DmzRepolar)" : "") + ".");
             else if (dmzHata != null) mesaj.Add("DMZ asset'i okunamadı: " + dmzHata);
             if (dmzKip && dmzA == null) throw new InvalidOperationException("Yalnız DMZ taraması yapılamadı — " + (dmzHata ?? "Zafiyet:DmzAsset tanımlı değil."));
             var s = cfg.GetSection("Splunk");
@@ -383,8 +385,17 @@ sealed class ZafiyetService(IConfiguration cfg, IHttpClientFactory factory, Enva
                     if (!dmzKip) takim.Add((null, ""));
                     if (dmzA != null && ipler == null) takim.Add((dmzA.Asset.Id, " (DMZ asset'i)"));
                     var gor = new HashSet<(string, string, string?)>();
-                    void Ekle(List<NessusBulgu> hedef, IEnumerable<NessusBulgu> l, string? asset)
+                    int dmzAtilan = 0;
+                    void Ekle(List<NessusBulgu> hedef, List<NessusBulgu> l, string? asset)
                     {
+                        // DMZ asset sorgusu tüm repository'lerde çalışır; kullanıcı: "fazla olanlar (Londra / Bulgaristan) olsun, repo adı yazsın" → ayıklanmaz,
+                        // satırda repository adı. İsteğe bağlı Zafiyet:DmzRepolar verilirse yalnız o repository'ler.
+                        if (asset != null && dmzRepo.Count > 0)
+                        {
+                            int once = l.Count;
+                            l = l.Where(b => b.RepoId == null || dmzRepo.Contains(b.RepoId)).ToList();
+                            dmzAtilan += once - l.Count;
+                        }
                         foreach (var b in l) if (gor.Add((b.Ip, b.PluginId, b.Port))) hedef.Add(b);
                         if (asset != null) dmzNessus.UnionWith(l.Select(b => b.Ip));
                     }
@@ -410,6 +421,8 @@ sealed class ZafiyetService(IConfiguration cfg, IHttpClientFactory factory, Enva
                                 + string.Join(", ", kelSay.Select(x => $"{x.Key} {x.Value}")) + (kesik ? " · sayfa sınırında kesildi (Zafiyet:NessusMaxSayfa)" : ""));
                         }
                     }
+                    if (dmzAtilan > 0) mesaj.Add($"DMZ asset sorgusunda {dmzAtilan} bulgu atıldı: repository Zafiyet:DmzRepolar'da yok.");
+                    mesaj.Add($"Nessus bulguları: son {nessus.AcikGun} günde görülenler (Zafiyet:NessusGun).");
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException) { mesaj.Add("Nessus sorgulanamadı (tarama Carbon Black'le devam etti): " + ex.Message); }
             }
@@ -422,7 +435,7 @@ sealed class ZafiyetService(IConfiguration cfg, IHttpClientFactory factory, Enva
             if (ipSet != null && imzaT != null) imzaT = imzaT with { Sunucular = imzaT.Sunucular.Where(x => ipSet.Contains(x.Ip)).ToList() };
             var satir = Birlestir(k, env, r1.Rows, r2Rows, imzaT, mesaj, nCve, nUrun);
             // DMZ işareti (asset IP listesi ya da DMZ asset sorgusundan gelen Nessus bulgusu) + dışa açıklık önceliği
-            satir = satir.Select(r => DisOncelik(r with { Dmz = r.Ip != null && (dmzIp.Contains(r.Ip) || dmzNessus.Contains(r.Ip)) })).ToList();
+            satir = satir.Select(r => DisOncelik(r with { Dmz = r.Ip != null && (dmzNessus.Contains(r.Ip) || dmzA?.Icerir(r.Ip, null, dmzRepo) == true) })).ToList();
             if (dmzKip)
             {
                 int once = satir.Count;
@@ -636,7 +649,7 @@ sealed class ZafiyetService(IConfiguration cfg, IHttpClientFactory factory, Enva
                 if (r.Surum == null)
                 {
                     var (d, n) = Degerlendir(k, sur);
-                    sonuc[i] = Oncelikle(r with { Surum = sur, SurumKaynak = "Nessus", Durum = d, DurumNot = n, Dagitim = r.Dagitim ?? (k.Java ? Dagitim(kur.Yol) : null) });
+                    sonuc[i] = Oncelikle(r with { Surum = sur, SurumKaynak = "Nessus", Durum = d, DurumNot = n, Dagitim = r.Dagitim ?? (k.Java ? Dagitim(kur.Yol) : null), Repo = r.Repo ?? RepoAdi(b) });
                     doldurulan++;
                 }
                 continue;
@@ -672,7 +685,7 @@ sealed class ZafiyetService(IConfiguration cfg, IHttpClientFactory factory, Enva
                 foreach (int i in idx)
                 {
                     var r = sonuc[i];
-                    sonuc[i] = Oncelikle(r with { Nessus = r.Nessus == null ? not : r.Nessus + " · " + not,
+                    sonuc[i] = Oncelikle(r with { Nessus = r.Nessus == null ? not : r.Nessus + " · " + not, Repo = r.Repo ?? RepoAdi(l[0]),
                         Durum = r.Durum is "etkilenmez" or "yamali" ? r.Durum : "etkilenen", DurumNot = r.DurumNot + " · Nessus açığı doğruladı" });
                 }
                 continue;
@@ -686,6 +699,8 @@ sealed class ZafiyetService(IConfiguration cfg, IHttpClientFactory factory, Enva
         }
         mesaj.Add($"Nessus birleştirme: {doldurulan} satırın sürümü Nessus'tan, {eklenen} yeni satır (Carbon Black'te görülmeyen kurulum / bulgu).");
     }
+
+    static string? RepoAdi(NessusBulgu b) => b.RepoAd == null && b.RepoId == null ? null : b.RepoAd == null ? b.RepoId : b.RepoId == null ? b.RepoAd : $"{b.RepoAd} ({b.RepoId})";
 
     // Nessus'tan gelen satır: dinlediği port bilinmez; maruziyet = VIP üyeliği
     ZfSatir NessusSatir(ZfKural k, EnvanterSnapshot env, string[] test, NessusBulgu b, string yol, string? surum, string durum, string not, string nessusNot, string kaynak)
@@ -702,7 +717,7 @@ sealed class ZafiyetService(IConfiguration cfg, IHttpClientFactory factory, Enva
             apps.Select(a => a.AppName).OfType<string>().Where(a => a.Length > 0).Distinct().Take(8).ToList(),
             apps.Select(a => a.VarlikMuhafizi).FirstOrDefault(a => !string.IsNullOrWhiteSpace(a)),
             exe, yol, null, surum, surum != null ? "Nessus" : null, durum, not, portlar, 0, "bilinmiyor", null, null, b.Son, null, "dusuk", kaynak,
-            Vlan: seg?.Vlan, Domain: seg?.Domain, Cidr: seg?.Cidr, Dagitim: k.Java ? Dagitim(yol) : null, Nessus: nessusNot);
+            Vlan: seg?.Vlan, Domain: seg?.Domain, Cidr: seg?.Cidr, Dagitim: k.Java ? Dagitim(yol) : null, Nessus: nessusNot, Repo: RepoAdi(b));
         return Oncelikle(r);
     }
 
@@ -725,14 +740,21 @@ sealed class ZafiyetService(IConfiguration cfg, IHttpClientFactory factory, Enva
             w = kel.FirstOrDefault(x => Regex.IsMatch(ad, $@"(?<![A-Za-z]){Regex.Escape(x)}", RegexOptions.IgnoreCase));
             return w != null && !(haric?.IsMatch(ad) ?? false);
         }
-        int gun = cfg.GetValue("Nessus:MaxGun", 30);
+        int gun = nessus.AcikGun;
         var repolar = nessus.RepoListesi;
+        var dmzRepo = DmzRepolar;
         var sb = new System.Text.StringBuilder();
         sb.AppendLine($"Kural: {k.Id} · {k.Ad}");
         sb.AppendLine($"Nessus kelimeleri: {string.Join(", ", kel)} · CVE: {string.Join(", ", cveler)}");
-        sb.AppendLine($"Taramadaki Nessus süzgeçleri: repository = {(repolar.Length > 0 ? string.Join(", ", repolar) : "(yok)")} (DMZ asset sorgusunda yok) · son görülme ≤ {gun} gün (Nessus:MaxGun)");
-        var (dmzA, dmzIp, dmzHata) = await DmzAsync(ct);
-        sb.AppendLine(dmzA != null ? $"DMZ asset'i: {dmzA.Asset.Ad} (id {dmzA.Asset.Id}) — {dmzIp.Count} IP" : "DMZ asset'i: " + (dmzHata ?? "tanımlı değil"));
+        sb.AppendLine($"Taramadaki Nessus süzgeçleri: repository = {(repolar.Length > 0 ? string.Join(", ", repolar) : "(yok)")} (DMZ asset sorgusunda yok) · son görülme ≤ {gun} gün (Zafiyet:NessusGun)"
+            + (dmzRepo.Count > 0 ? $" · DMZ'de yalnız repository {string.Join(", ", dmzRepo)} (Zafiyet:DmzRepolar)" : ""));
+        var (dmzA, dmzHata) = await DmzAsync(ct);
+        if (dmzA != null)
+        {
+            sb.AppendLine($"DMZ asset'i: {dmzA.Asset.Ad} (id {dmzA.Asset.Id}) · Tenable ipCount {dmzA.Asset.IpSayisi?.ToString() ?? "?"} · {dmzA.Araliklar.Count} aralık ({dmzA.Kaynak})");
+            foreach (var (repo, aralik, n) in dmzA.RepoOzet) sb.AppendLine($"   asset aralıkları · repository {repo}: {aralik} aralık, {n:N0} adres");
+        }
+        else sb.AppendLine("DMZ asset'i: " + (dmzHata ?? "tanımlı değil"));
         sb.AppendLine(son != null ? $"Son tarama (bellekte): {son.Kural.Id} · {son.Kapsam} · {son.Durum} · {son.Baslangic:dd.MM.yyyy HH:mm}{(son.Kayittan ? " (kayıttan açıldı)" : "")}" : "Bellekte tarama yok.");
         if (!nessus.Acik) { sb.AppendLine("Nessus tanımlı değil."); return sb.ToString(); }
         List<NessusService.NessusHam> ham; bool kesik;
@@ -744,9 +766,10 @@ sealed class ZafiyetService(IConfiguration cfg, IHttpClientFactory factory, Enva
         foreach (var ip in ips)
         {
             sb.AppendLine().AppendLine($"===== {ip} =====");
-            bool dmz = dmzIp.Contains(ip);
+            var dmzRepolari = dmzA?.Repolari(ip) ?? [];
+            bool dmz = dmzA?.Icerir(ip, null, dmzRepo) == true;
             var sat = satir.Where(r => r.Ip == ip).ToList();
-            sb.AppendLine($"DMZ asset'inde: {(dmz ? "evet" : "HAYIR")} · son taramada: {(sat.Count > 0 ? $"{sat.Count} satır ({string.Join(", ", sat.Select(r => r.Kaynak).Distinct())})" : "SATIR YOK")}");
+            sb.AppendLine($"DMZ asset aralığında: {(dmzRepolari.Count > 0 ? "evet — repository " + string.Join(", ", dmzRepolari) : "HAYIR")} · son taramada: {(sat.Count > 0 ? $"{sat.Count} satır ({string.Join(", ", sat.Select(r => r.Kaynak).Distinct())})" : "SATIR YOK")}");
             var l = ham.Where(x => x.Ip == ip).ToList();
             if (l.Count == 0) { sb.AppendLine("Nessus: bu IP için HİÇ bulgu yok (anahtarın görebildiği repository'lerde taranmamış ya da IP farklı)."); ozet.Add($"{ip}: Nessus'ta hiç bulgu yok"); continue; }
             sb.AppendLine($"Nessus: {l.Count} bulgu · repository: {string.Join(", ", l.Select(x => $"{x.RepoAd} ({x.RepoId})").Distinct())} · DNS: {l.Select(x => x.Dns).FirstOrDefault(x => !string.IsNullOrEmpty(x))}");
@@ -764,9 +787,10 @@ sealed class ZafiyetService(IConfiguration cfg, IHttpClientFactory factory, Enva
             foreach (var x in ilgili.GroupBy(x => (x.PluginId, x.Port)).Select(g => g.OrderByDescending(y => y.Son).First()))
             {
                 var r = new List<string>();
-                bool repoOk = repolar.Length == 0 || repolar.Contains(x.RepoId) || dmz;
-                if (!repoOk) r.Add($"repository {x.RepoAd} ({x.RepoId}) Nessus:Repolar'da yok{(dmzA != null ? " ve IP DMZ asset'inde değil" : "")}");
-                if (gun > 0 && x.Son > 0 && simdi - x.Son > gun * 86400L) r.Add($"son görülme {Tarih(x.Son)} — {gun} günden eski (Nessus:MaxGun)");
+                bool dmzBu = dmzA != null && (dmzRepo.Count == 0 || x.RepoId == null || dmzRepo.Contains(x.RepoId)) && (dmzA.Icerir(ip) || dmzRepolari.Count > 0);
+                bool repoOk = repolar.Length == 0 || repolar.Contains(x.RepoId) || dmzBu;
+                if (!repoOk) r.Add($"repository {x.RepoAd} ({x.RepoId}) Nessus:Repolar'da yok{(dmzA != null ? " ve IP DMZ asset aralığında değil" + (dmzRepo.Count > 0 ? " / Zafiyet:DmzRepolar dışında" : "") : "")}");
+                if (gun > 0 && x.Son > 0 && simdi - x.Son > gun * 86400L) r.Add($"son görülme {Tarih(x.Son)} — {gun} günden eski (Zafiyet:NessusGun)");
                 bool cveOk = cveler.Any(c => (x.Cve ?? "").Contains(c, StringComparison.OrdinalIgnoreCase));
                 bool kelOk = Kelime(x.PluginAd, out var w);
                 string kur = x.Kurulumlar.Count == 0 ? "kurulum / sürüm satırı yok"
@@ -808,24 +832,26 @@ sealed class ZafiyetService(IConfiguration cfg, IHttpClientFactory factory, Enva
     }
 
     // DMZ asset'i (Zafiyet:DmzAsset: Tenable.sc asset id'si ya da adı) → IP kümesi; Nessus kapalı / tanımsızsa boş
-    async Task<(NessusService.NessusAssetIp? A, HashSet<string> Ip, string? Hata)> DmzAsync(CancellationToken ct)
+    // Zafiyet:DmzRepolar: DMZ asset sorgusunda kabul edilen repository id'leri (boş = asset'in kendi repository aralıkları yeter)
+    List<string> DmzRepolar => cfg.GetSection("Zafiyet:DmzRepolar").GetChildren().Select(c => c.Value?.Trim()).OfType<string>().Where(v => v != "").ToList();
+    async Task<(NessusService.NessusAssetIp? A, string? Hata)> DmzAsync(CancellationToken ct)
     {
         string? tanim = cfg["Zafiyet:DmzAsset"];
-        if (string.IsNullOrWhiteSpace(tanim)) return (null, [], null);
-        if (!nessus.Acik) return (null, [], "Nessus tanımlı değil (Nessus:BaseUrl).");
+        if (string.IsNullOrWhiteSpace(tanim)) return (null, null);
+        if (!nessus.Acik) return (null, "Nessus tanımlı değil (Nessus:BaseUrl).");
         try
         {
             var (a, hata) = await nessus.AssetBulAsync(tanim, ct);
-            if (a == null) return (null, [], hata);
-            var ip = await nessus.AssetIpleriAsync(a, ct);
-            return (ip, ip.Ipler, null);
+            if (a == null) return (null, hata);
+            return (await nessus.AssetIpleriAsync(a, ct), null);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException) { return (null, [], ex.Message); }
+        catch (Exception ex) when (ex is not OperationCanceledException) { return (null, ex.Message); }
     }
     public async Task<object> DmzBilgiAsync(CancellationToken ct)
     {
-        var (a, ip, hata) = await DmzAsync(ct);
-        return new { tanimli = !string.IsNullOrWhiteSpace(cfg["Zafiyet:DmzAsset"]), asset = a?.Asset, ipSayisi = ip.Count, kaynak = a?.Kaynak, kesik = a?.Kesik, hata };
+        var (a, hata) = await DmzAsync(ct);
+        return new { tanimli = !string.IsNullOrWhiteSpace(cfg["Zafiyet:DmzAsset"]), asset = a?.Asset, ipSayisi = a?.Asset.IpSayisi ?? a?.IpSayisi ?? 0, aralik = a?.Araliklar.Count,
+            repolar = a?.RepoOzet.Select(x => new { x.Repo, x.Aralik, x.Ip }), kaynak = a?.Kaynak, hata };
     }
 
     // Nessus'la değişen satırların önceliği: CB satırında port / dış istemci bilgisi; Nessus satırında VIP üyeliği maruziyet sayılır

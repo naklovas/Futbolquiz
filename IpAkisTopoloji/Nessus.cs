@@ -17,7 +17,8 @@ record NessusPort(string Port, string Protokol, string? Servis, string? WebSunuc
 record NessusServis(string Ad, string? Gorunen, string? Yol, string? Hesap);
 // Açıklık taraması (Zafiyet.cs) için tüm repoda arama: CVE bulgusu ya da ürün adındaki bilgi / bulgu plugin'leri; Kurulumlar = çıktıdaki yol + sürüm çiftleri
 record NessusKurulum(string? Yol, string Surum, string? Duzeltilmis);
-record NessusBulgu(string Ip, string? Dns, string? Netbios, string PluginId, string PluginAd, string? Seviye, string? Port, string? Son, List<NessusKurulum> Kurulumlar);
+record NessusBulgu(string Ip, string? Dns, string? Netbios, string PluginId, string PluginAd, string? Seviye, string? Port, string? Son, List<NessusKurulum> Kurulumlar,
+    string? RepoId = null, string? RepoAd = null);
 record NessusSunucu(string Ip, string? Dns, string? Netbios, string? Os, bool? Kimlikli, string? Son, string? Repo,
     List<NessusPort> Portlar, List<string> Yazilim, List<string> Cpe,
     List<string> Veritabani, List<NessusServis> Servisler, List<string> Surecler, List<string> Paylasimlar, List<string> Urunler);
@@ -110,7 +111,8 @@ sealed class NessusService(IConfiguration cfg, IHttpClientFactory factory, ILogg
         bool assetVar = ekFiltre.Any(f => f?["filterName"]?.ToString() == "asset");
         if (Repolar.Length > 0 && (!assetVar || cfg.GetValue("Nessus:AssetteRepoSuzgeci", false)))
             filtre.Add(new JsonObject { ["filterName"] = "repository", ["operator"] = "=", ["value"] = new JsonArray(Repolar.Select(r => (JsonNode)new JsonObject { ["id"] = r }).ToArray()) });
-        int gun = cfg.GetValue("Nessus:MaxGun", 30);
+        // Açıklık taraması kendi süresiyle (kullanıcının DMZ karşılaştırması: DMZ 30 günden seyrek taranıyor, 06.10 bulguları 30 gün sınırında kalıyordu)
+        int gun = AcikGun;
         if (gun > 0) filtre.Add(new JsonObject { ["filterName"] = "lastSeen", ["operator"] = "=", ["value"] = $"0:{gun}" });
         return new JsonObject
         {
@@ -118,6 +120,8 @@ sealed class NessusService(IConfiguration cfg, IHttpClientFactory factory, ILogg
             ["query"] = new JsonObject { ["type"] = "vuln", ["tool"] = tool, ["startOffset"] = bas, ["endOffset"] = bit, ["filters"] = filtre }
         };
     }
+
+    public int AcikGun => cfg.GetValue("Zafiyet:NessusGun", 90);
 
     // Repodaki plugin özeti (tool sumid: plugin başına bir satır — pluginID, ad, ciddiyet, bulgu / host sayısı); 30 dk önbellek
     readonly Dictionary<string, (List<(string Id, string Ad, long Host)> L, DateTime T)> _pluginOzet = [];
@@ -182,7 +186,8 @@ sealed class NessusService(IConfiguration cfg, IHttpClientFactory factory, ILogg
             foreach (var x in res)
                 if (S(x, "ip") is { Length: > 0 } ip)
                     list.Add(new NessusBulgu(ip, S(x, "dnsName") is { Length: > 0 } d ? d : null, S(x, "netbiosName") is { Length: > 0 } nb ? nb : null,
-                        S(x, "pluginID") ?? "", S(x, "pluginName") ?? "", S(x, "severity"), S(x, "port"), Zaman(S(x, "lastSeen")), KurulumOku(Cikti(x))));
+                        S(x, "pluginID") ?? "", S(x, "pluginName") ?? "", S(x, "severity"), S(x, "port"), Zaman(S(x, "lastSeen")), KurulumOku(Cikti(x)),
+                        x["repository"]?["id"]?.ToString(), x["repository"]?["name"]?.ToString()));
             if (!long.TryParse(r?["totalRecords"]?.ToString(), out long top) || bas + sayfa >= top || res.Count == 0) break;
         }
         return (list, kesik);
@@ -192,7 +197,22 @@ sealed class NessusService(IConfiguration cfg, IHttpClientFactory factory, ILogg
     // Kullanıcı: Nessus ekibinin DMZ asset seti "DMZ - (ZB(Access&Hosting) ve ZI(Access&Hosting) ) [671]". Ayar Zafiyet:DmzAsset = asset id'si ya da adı
     // (sondaki "[n]" de olabilir: önce adla, sonra id ile eşlenir). IP'ler asset'in viewableIPs / definedIPs alanından, boşsa asset süzgeçli sumip analizinden.
     public record NessusAsset(string Id, string Ad, string? Tur, long? IpSayisi, string? Aciklama);
-    public record NessusAssetIp(NessusAsset Asset, HashSet<string> Ipler, string Kaynak, bool Kesik);
+    // Asset'in IP aralıkları REPOSITORY BAŞINA (viewableIPs: [{ipList, repository}]) — tek tek IP'ye açılmaz (canlıda 100.000 sınırında kesiliyordu)
+    public record NessusAralik(string? RepoId, string? RepoAd, uint Bas, uint Bit);
+    public record NessusAssetIp(NessusAsset Asset, List<NessusAralik> Araliklar, string Kaynak)
+    {
+        public long IpSayisi => Araliklar.Sum(a => (long)a.Bit - a.Bas + 1);
+        public bool RepoBilgisi => Araliklar.Any(a => a.RepoId != null);
+        // repoId verilirse yalnız o repository'nin aralıkları; izinli verilirse yalnız o repository'ler
+        public bool Icerir(string ip, string? repoId = null, IReadOnlyCollection<string>? izinli = null) =>
+            IpSayi(ip) is { } u && Araliklar.Any(a => u >= a.Bas && u <= a.Bit && (repoId == null || a.RepoId == null || a.RepoId == repoId)
+                && (izinli is not { Count: > 0 } || a.RepoId == null || izinli.Contains(a.RepoId)));
+        public List<string> Repolari(string ip) => IpSayi(ip) is { } u ? Araliklar.Where(a => u >= a.Bas && u <= a.Bit).Select(a => $"{a.RepoAd} ({a.RepoId})").Distinct().ToList() : [];
+        public IEnumerable<(string Repo, int Aralik, long Ip)> RepoOzet => Araliklar.GroupBy(a => $"{a.RepoAd} ({a.RepoId})")
+            .Select(g => (g.Key, g.Count(), g.Sum(a => (long)a.Bit - a.Bas + 1)));
+    }
+    internal static uint? IpSayi(string s) => System.Net.IPAddress.TryParse(s.Trim(), out var a) && a.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork
+        ? (uint)System.Buffers.Binary.BinaryPrimitives.ReadInt32BigEndian(a.GetAddressBytes()) : null;
     (List<NessusAsset> L, DateTime T)? _assetler;
     readonly Dictionary<string, (NessusAssetIp A, DateTime T)> _assetIp = [];
 
@@ -235,62 +255,59 @@ sealed class NessusService(IConfiguration cfg, IHttpClientFactory factory, ILogg
     public async Task<NessusAssetIp> AssetIpleriAsync(NessusAsset a, CancellationToken ct)
     {
         lock (_cache) if (_assetIp.TryGetValue(a.Id, out var c) && DateTime.UtcNow - c.T < TimeSpan.FromMinutes(cfg.GetValue("Nessus:AssetDakika", 60))) return c.A;
-        int max = cfg.GetValue("Nessus:AssetMaxIp", 100000);
-        var ipler = new HashSet<string>();
-        bool kesik = false;
+        var ar = new List<NessusAralik>();
         string kaynak = "asset tanımı";
         try
         {
             var r = (await GonderAsync(Istek(HttpMethod.Get, $"/rest/asset/{Uri.EscapeDataString(a.Id)}?fields=id,name,type,ipCount,viewableIPs,typeFields"), ct))["response"];
-            var listeler = new List<string>();
             if (r?["viewableIPs"] is JsonArray v)
-                foreach (var x in v) if (x is JsonObject o) listeler.Add(S(o, "ipList") ?? ""); else if (x != null) listeler.Add(x.ToString());
-            if (listeler.All(string.IsNullOrWhiteSpace) && S(r?["typeFields"], "definedIPs") is { Length: > 0 } d) listeler.Add(d);
-            foreach (var l in listeler) kesik |= !IpAc(l, ipler, max);
+                foreach (var x in v)
+                {
+                    string liste = x is JsonObject o ? S(o, "ipList") ?? "" : x?.ToString() ?? "";
+                    string? rid = x?["repository"]?["id"]?.ToString(), rad = x?["repository"]?["name"]?.ToString();
+                    ar.AddRange(Araliklar(liste).Select(z => new NessusAralik(rid, rad, z.Bas, z.Bit)));
+                }
+            if (ar.Count == 0 && S(r?["typeFields"], "definedIPs") is { Length: > 0 } d) ar.AddRange(Araliklar(d).Select(z => new NessusAralik(null, null, z.Bas, z.Bit)));
         }
         catch (Exception ex) when (ex is not OperationCanceledException) { log.LogWarning("Asset {Id} IP listesi okunamadı: {H}", a.Id, ex.Message); }
-        if (ipler.Count == 0)
+        if (ar.Count == 0)
         {
-            // Dinamik asset'te liste boş olabilir: asset süzgeçli analizde sonucu olan IP'ler (sumip)
+            // Dinamik asset'te liste boş olabilir: asset süzgeçli analizde sonucu olan IP'ler (sumip), repository'leriyle
             kaynak = "asset süzgeçli Nessus sonuçları (sumip)";
             int sayfa = 5000;
             for (int i = 0, bas = 0; i < 40; i++, bas += sayfa)
             {
                 var r = (await GonderAsync(Istek(HttpMethod.Post, "/rest/analysis", GenelSorgu(new JsonArray { AssetFiltre(a.Id) }, bas, bas + sayfa, "sumip")), ct))["response"];
                 var res = r?["results"]?.AsArray().OfType<JsonNode>().ToList() ?? [];
-                foreach (var x in res) if (S(x, "ip") is { Length: > 0 } ip) ipler.Add(ip);
+                foreach (var x in res)
+                    if (S(x, "ip") is { Length: > 0 } ip && IpSayi(ip) is { } u)
+                        ar.Add(new NessusAralik(x["repository"]?["id"]?.ToString(), x["repository"]?["name"]?.ToString(), u, u));
                 if (!long.TryParse(r?["totalRecords"]?.ToString(), out long top) || bas + sayfa >= top || res.Count == 0) break;
             }
         }
-        var sonuc = new NessusAssetIp(a, ipler, kaynak, kesik);
+        var sonuc = new NessusAssetIp(a, ar, kaynak);
         lock (_cache) _assetIp[a.Id] = (sonuc, DateTime.UtcNow);
         return sonuc;
     }
 
-    // "10.1.1.1, 10.1.1.5-10.1.1.9, 10.2.0.0/24" → tek tek IPv4 (en çok max; aşılırsa false)
-    internal static bool IpAc(string liste, HashSet<string> ipler, int max)
+    // "10.1.1.1, 10.1.1.5-10.1.1.9, 10.1.1.20-25, 10.2.0.0/24" → aralıklar
+    internal static List<(uint Bas, uint Bit)> Araliklar(string liste)
     {
-        static uint? U(string s) => System.Net.IPAddress.TryParse(s.Trim(), out var a) && a.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork
-            ? (uint)System.Buffers.Binary.BinaryPrimitives.ReadInt32BigEndian(a.GetAddressBytes()) : null;
-        static string Y(uint u) => $"{u >> 24}.{(u >> 16) & 255}.{(u >> 8) & 255}.{u & 255}";
+        var l = new List<(uint, uint)>();
         foreach (var p0 in liste.Split(new[] { ',', ';', ' ', '\n', '\r', '\t' }, StringSplitOptions.RemoveEmptyEntries))
         {
-            uint bas, bit;
             var p = p0.Trim();
-            if (p.Contains('/') && U(p.Split('/')[0]) is { } ag && int.TryParse(p.Split('/')[1], out int len) && len is >= 0 and <= 32)
-            { uint mask = len == 0 ? 0 : uint.MaxValue << (32 - len); bas = ag & mask; bit = bas | ~mask; }
-            else if (p.Contains('-') && U(p.Split('-')[0]) is { } a1)
+            if (p.Contains('/') && IpSayi(p.Split('/')[0]) is { } ag && int.TryParse(p.Split('/')[1], out int len) && len is >= 0 and <= 32)
+            { uint mask = len == 0 ? 0 : uint.MaxValue << (32 - len); l.Add((ag & mask, (ag & mask) | ~mask)); }
+            else if (p.Contains('-') && IpSayi(p.Split('-')[0]) is { } a1)
             {
                 string ikinci = p.Split('-')[1];
-                uint? a2 = U(ikinci) ?? (uint.TryParse(ikinci, out uint son) && son <= 255 ? (a1 & 0xFFFFFF00) | son : null);
-                if (a2 == null) continue;
-                bas = Math.Min(a1, a2.Value); bit = Math.Max(a1, a2.Value);
+                uint? a2 = IpSayi(ikinci) ?? (uint.TryParse(ikinci, out uint son) && son <= 255 ? (a1 & 0xFFFFFF00) | son : null);
+                if (a2 != null) l.Add((Math.Min(a1, a2.Value), Math.Max(a1, a2.Value)));
             }
-            else if (U(p) is { } t) bas = bit = t;
-            else continue;
-            for (ulong u = bas; u <= bit; u++) { if (ipler.Count >= max) return false; ipler.Add(Y((uint)u)); }
+            else if (IpSayi(p) is { } t) l.Add((t, t));
         }
-        return true;
+        return l;
     }
 
     // Tanı (açıklık taramasında eksik IP): verilen IP'lerin TÜM bulguları — repository / lastSeen süzgeci YOK; taramanın neden almadığı Zafiyet.cs'de yazılır

@@ -1096,6 +1096,13 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
   `NessusService.HamBulgularAsync` (yalnız ip süzgeci; repository / lastSeen YOK) ile IP başına: DMZ asset'inde mi, son taramada satır var mı, ilgili (kelime / CVE) bulgular +
   kurulum / okunan sürüm + "TARAMADA ALINIR / ALINMAZ: repository X Nessus:Repolar'da yok / son görülme N günden eski (Nessus:MaxGun) …"; ilgili bulgu yoksa IP'deki ürün plugin
   adları; sonda özet. Sahte Tenable.sc ile denendi.
+  CANLI TANI SONUCU: eksik 8 IP'nin bulguları repo 119 / 121 / 46'da, son görülme 06.10.2026 (DMZ 30 günden seyrek taranıyor) → açıklık taramasının Nessus sorguları
+  (`GenelSorgu`) artık `Zafiyet:NessusGun`=90 (`NessusService.AcikGun`; diğer sayfalar Nessus:MaxGun=30). Asset IP listesi 100.000 sınırında KESİLİYORDU (asset geniş aralıklarla
+  tanımlı) → `NessusAssetIp.Araliklar` (repository başına uint aralık, açılmaz; `Icerir(ip, repoId, izinli)`, `Repolari(ip)`, `RepoOzet`; `Nessus:AssetMaxIp` kaldırıldı).
+  Fazla 5 IP (192.168.0.x) Londra (72) / Bulgaristan (52) repolarından DMZ asset sorgusuyla geldi — kullanıcı: "fazla olanlar olsun, repo adını ekle" → ayıklanmaz;
+  `NessusBulgu.RepoId / RepoAd`, `ZfSatir.Repo` ("Ad (id)"; Nessus satırı, Nessus'tan sürüm alan ya da CVE ile işaretlenen CB satırı), sayfada "Repository" süzgeci, Kaynak
+  hücresinde 📁, sağ panel, CSV "NESSUS REPOSITORY". İsteğe bağlı `Zafiyet:DmzRepolar` (id listesi) DMZ asset sorgusunu o repolara indirir (boş = hepsi). Tanıda asset'in repo
+  başına aralık / adres sayısı, IP'nin hangi repo aralığında olduğu.
 - **VIP**: sorgulanan IP VIP ise üyeler + GW'ler aynı sorguya eklenir, üyeler "VIP ÜYESİ" (GW→üye trafiği varsa ✓).
   Gidilen IP VIP ise "VIP → n ÜYE"; gelen IP LB GW ise "LB GW"; sorgulanan sunucu havuz üyesiyse VIP kartı.
 - **Uygulama görünümü** (`/api/apps`, `/api/app`): `[kullanan uygulamalar] → [UYGULAMA: VIP'ler + segment grupları] → [bağımlı olunanlar]`,
