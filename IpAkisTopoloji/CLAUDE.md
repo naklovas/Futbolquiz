@@ -1103,6 +1103,22 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
   `NessusBulgu.RepoId / RepoAd`, `ZfSatir.Repo` ("Ad (id)"; Nessus satırı, Nessus'tan sürüm alan ya da CVE ile işaretlenen CB satırı), sayfada "Repository" süzgeci, Kaynak
   hücresinde 📁, sağ panel, CSV "NESSUS REPOSITORY". İsteğe bağlı `Zafiyet:DmzRepolar` (id listesi) DMZ asset sorgusunu o repolara indirir (boş = hepsi). Tanıda asset'in repo
   başına aralık / adres sayısı, IP'nin hangi repo aralığında olduğu.
+  İŞLETEN BİRİM + UYGULAMA / MUHAFIZ TAHMİNİ (kullanıcı: "SUNUCUISLETENBIRIM'i de ekle; ERT'de yoksa AI tahmini, ERT eksikleri yapısı"; "uygulama ve VARLIKMUHAFIZI için de
+  tahmin varsa getir"; "tekrar tahmin de yaptıralım, IP ile ilgili"): `Birim.cs` (`BirimService`; Eksik / Islev'e bağlı, döngü yok). Dizin (envanter anlık görüntüsü başına):
+  IP → ERT birimi (satırlarında en sık), birim kataloğu (sunucu sayısı + ERT_APPLICATIONDETAIL birimleri), uygulama / muhafız → birim dağılımı, ad kökü (`AdKoku`: ilk etiket,
+  sondaki numara atılır, ≥5 harf) → IP'ler. Kanıt + puan: uygulama ana kaydının birimi (4), aynı uygulamanın diğer sunucuları (3), adı benzeyen sunucular (3), ERT eksiklerinin
+  uygulama önerisi (onaylı 4 / AI güvenle), aynı VIP havuzu (2), muhafız (1,5), segment (1, zayıf). En yüksek puan ≥ `Birim:KuralEsik`=4 ve ikincinin ≥3 katı → AI'sız "Kural";
+  değilse AI (`IslevService.ChatAsync`; Eksik genel bilgi dosyası + birim listesi (`Birim:KatalogMax`=250) + kanıt + işlev profili `ProfileAsync`, `Birim:MaxKarakter`=6000) —
+  yalnız ERT'de VAR OLAN birim adı (kodda doğrulanır, yoksa "Yok sayıldı"). Kayıt `Birim:OneriTablosu` dbo.DF_BIRIM_ONERI (`sql/birim_oneri.sql`: IP PK, BIRIM, GUVEN, GEREKCE,
+  KAYNAK AI | Kural | Elle, DURUM AI | Onaylandı | Reddedildi | Elle; yoksa bellekte), ERT'ye yazılmaz. İş tek (`Birim:MaxIp`=300, `Birim:Paralel`=3): ERT'de birimi olan,
+  onaylı / elle ve (yeniden değilse) önerisi olan IP'ler atlanır. Uçlar: POST `/api/birim/satirlar {ips}` (IP başına ERT birimi / uygulamaları / muhafızı, birim önerisi, ERT
+  eksiklerinin uygulama önerileri (reddedilen hariç, onaylı önce), ERT'de boşsa önerilen uygulamanın ana kaydından muhafız / birim tahmini + kaynağı), GET `/api/birim/katalog`,
+  `/durum`, `/kanit?ip=` (düz metin), POST `/calistir {ips, yeniden}`, `/durdur`, `/karar {ip, karar: onay|red|elle|sil, birim}` (Yetki:Yazma). zafiyet.html: "İşleten birim" kolonu
+  (ERT düz; öneri 🤖 mor + güven + durum + ✓ ✗ ✎ 🗑 ↻; uygulama önerisinden gelen "(uygulama önerisinden)"), Uygulama hücresinde ERT boşsa 🤖 uygulama önerisi (satırın portları
+  önce) ve 🤖 muhafız tahmini, "Birim" süzgeci, "🤖 Birimi boş N sunucuyu tahmin et" + ilerleme / durdur, sağ panelde birim + gerekçe + kanıt ↗, CSV'de İŞLETEN BİRİM / BİRİM KAYNAĞI /
+  UYGULAMA ÖNERİSİ / MUHAFIZ TAHMİNİ. "↻ Bu IP için yeniden tahmin" (`ipTahmin`): ERT'de uygulama boşsa önce `/api/eksik/calistir {portlar: {ip: satırın portları}, yeniden}` →
+  `/api/eksik/durum` bitene kadar, sonra `/api/birim/calistir {ips:[ip], yeniden}`. Sahte envanter + sahte AI ile backend (benzer ad → birim, uydurma birim reddi, onaylıya dokunmama)
+  ve Playwright'la arayüz denendi.
 - **VIP**: sorgulanan IP VIP ise üyeler + GW'ler aynı sorguya eklenir, üyeler "VIP ÜYESİ" (GW→üye trafiği varsa ✓).
   Gidilen IP VIP ise "VIP → n ÜYE"; gelen IP LB GW ise "LB GW"; sorgulanan sunucu havuz üyesiyse VIP kartı.
 - **Uygulama görünümü** (`/api/apps`, `/api/app`): `[kullanan uygulamalar] → [UYGULAMA: VIP'ler + segment grupları] → [bağımlı olunanlar]`,

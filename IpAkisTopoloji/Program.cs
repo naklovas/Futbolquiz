@@ -46,6 +46,7 @@ builder.Services.AddSingleton<ServisImzaService>();
 builder.Services.AddSingleton<NessusService>();
 builder.Services.AddSingleton<FizikselService>();
 builder.Services.AddSingleton<ZafiyetService>();
+builder.Services.AddSingleton<BirimService>();
 builder.Services.AddMemoryCache();
 
 // Windows Authentication: IIS'te IIS'in Windows Auth'u, Kestrel'de Negotiate kullanılır.
@@ -467,6 +468,32 @@ app.MapGet("/api/nessus/assetler", async (string? q, HttpContext ctx, IConfigura
     if (!Yetki.Var(cfg, ctx, Yetki.Topoloji)) return Yetki.Red(ctx, "Nessus asset listesi");
     try { var l = await n.AssetlerAsync(ct); return Results.Ok(string.IsNullOrWhiteSpace(q) ? l : l.Where(x => x.Ad.Contains(q, StringComparison.OrdinalIgnoreCase)).ToList()); }
     catch (Exception ex) when (ex is not OperationCanceledException) { return Results.Json(new { error = ex.Message }, statusCode: 502); }
+});
+// Sunucu işleten birim (Birim.cs): ERT SUNUCUISLETENBIRIM + boşsa kayıtlı öneri (AI / kural); öneriler DF_BIRIM_ONERI'ye, ERT'ye yazılmaz
+app.MapPost("/api/birim/satirlar", async (BirimIstek req, BirimService b, CancellationToken ct) =>
+{
+    var (l, uyari) = await b.SatirlarAsync(req.Ips ?? [], ct);
+    return Results.Ok(new { satirlar = l, uyari, durum = b.Durum() });
+});
+app.MapGet("/api/birim/katalog", async (BirimService b, CancellationToken ct) => Results.Ok((await b.KatalogAsync(ct)).Select(x => new { birim = x.Birim, sunucu = x.Sunucu })));
+app.MapGet("/api/birim/durum", (BirimService b) => Results.Ok(b.Durum()));
+app.MapGet("/api/birim/kanit", async (string ip, BirimService b, CancellationToken ct) => Results.Text(await b.KanitMetniAsync(ip, ct), "text/plain; charset=utf-8"));
+app.MapPost("/api/birim/calistir", (BirimIstek req, HttpContext ctx, IConfiguration cfg, BirimService b) =>
+{
+    if (!Yetki.Var(cfg, ctx, Yetki.Yazma)) return Yetki.Red(ctx, "İşleten birim tahmini");
+    if (req.Ips is not { Count: > 0 }) return Results.BadRequest(new { error = "Sunucu IP'si yok." });
+    return Results.Ok(b.Baslat(req.Ips, req.Yeniden, ctx.User?.Identity?.Name));
+});
+app.MapPost("/api/birim/durdur", (HttpContext ctx, IConfiguration cfg, BirimService b) =>
+{
+    if (!Yetki.Var(cfg, ctx, Yetki.Yazma)) return Yetki.Red(ctx, "İşleten birim tahmini");
+    b.Durdur(); return Results.Ok();
+});
+app.MapPost("/api/birim/karar", async (BirimKarar req, HttpContext ctx, IConfiguration cfg, BirimService b, CancellationToken ct) =>
+{
+    if (!Yetki.Var(cfg, ctx, Yetki.Yazma)) return Yetki.Red(ctx, "İşleten birim kararı");
+    var hata = await b.KararAsync(req, ctx.User?.Identity?.Name, ct);
+    return hata == null ? Results.Ok() : Results.BadRequest(new { error = hata });
 });
 // Kayıtlı açıklık taramaları (DF_ZAFIYET_TARAMA): liste (gövdesiz), sorgusuz aç, sil
 app.MapGet("/api/zafiyet/kayitlar", async (string? kural, ZafiyetService z, CancellationToken ct) =>
