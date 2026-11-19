@@ -91,6 +91,9 @@
   .pt { display: inline-block; font-family: Consolas, ui-monospace, monospace; font-size: 12px; border: 1px solid var(--line); border-radius: 4px; padding: 0 5px; margin: 1px 3px 1px 0; }
   .pt.dis { border-color: var(--err); color: var(--err); }
   .pt.vip { border-color: var(--warn); }
+  .dmz { display: inline-block; background: var(--crit); color: #fff; border-radius: 4px; font-size: 11px; font-weight: 700; padding: 0 5px; margin-left: 4px; }
+  .dg { display: inline-block; border: 1px solid var(--err); color: var(--err); border-radius: 4px; font-size: 11.5px; padding: 0 5px; margin-top: 2px; }
+  .stat.dmzk b, .stat.disk b { color: var(--crit); }
   .empty { padding: 40px; text-align: center; color: var(--muted); }
   .spinner { display: inline-block; width: 12px; height: 12px; border: 2px solid var(--line); border-top-color: var(--in); border-radius: 50%; animation: sp .8s linear infinite; vertical-align: -2px; }
   @keyframes sp { to { transform: rotate(360deg); } }
@@ -171,10 +174,12 @@
     <div class="row" style="margin-top:10px">
       <label>Ağ olayı penceresi<select id="saat"><option value="24">Son 24 saat</option><option value="72">Son 72 saat</option><option value="168">Son 7 gün</option></select></label>
       <label title="Boş: tüm sunucular. Dolu: yalnız bu IP'ler (virgül / boşluk / satırla, en çok 50) — Carbon Black ve Nessus sorguları bu IP'lerle sınırlanır, hızlı biter">IP'ler (isteğe bağlı)<input id="ipler" placeholder="ör. 10.1.2.3, 10.1.2.4" style="width:260px"></label>
+      <label class="chk" id="dmzEt" title="Yalnız Nessus ekibinin DMZ asset setindeki IP'ler (Zafiyet:DmzAsset). Nessus bu asset'le, repository süzgeci olmadan sorgulanır; Carbon Black sonucu DMZ IP'lerine süzülür."><span><input type="checkbox" id="dmz"> Yalnız DMZ asset'leri</span></label>
       <label class="chk" title="İşaretliyse IP taramasının sonucu mevcut listeye eklenir (bu IP'lerin eski satırları yenilenir); değilse liste yalnız bu IP'lerle değişir"><span><input type="checkbox" id="ekle" checked> Mevcut listeye ekle</span></label>
       <button type="button" class="primary" id="tara" title="Carbon Black ve Nessus'u yeniden sorgular; bitince sonuç kaydedilir">🔄 Yeni tara</button>
       <button type="button" id="durdur" hidden>Durdur</button>
       <span class="sub" id="yetkiNot"></span>
+      <span class="sub" id="dmzNot"></span>
     </div>
     <div class="desc" id="desc"></div>
     <details class="kayit" id="kayitBox"><summary>Son taramalar <span class="sub" id="kayitSay"></span></summary><div id="kayitlar"></div></details>
@@ -186,12 +191,14 @@
   <section class="panel" id="sonuc" hidden>
     <div class="stats" id="stats"></div>
     <div class="tools">
-      <input type="search" id="q" placeholder="IP, sunucu, uygulama, muhafız, VLAN, domain, exe yolu, ürün, sürüm, port ara…" style="min-width:320px">
+      <input type="search" id="q" placeholder="IP, sunucu, uygulama, muhafız, VLAN, domain, exe yolu, ürün, sürüm, port, dış hedef ara…" style="min-width:320px">
       <select id="durumF"><option value="">Tüm durumlar</option><option value="etkilenen">Etkilenen sürüm</option><option value="olasi">Olası (alt sürüm bilinmiyor)</option><option value="bilinmiyor">Sürüm bilinmiyor</option><option value="yamali">Yamalı görünüyor</option><option value="etkilenmez">Etkilenmez</option><option value="bilgi">Değerlendirilmedi</option></select>
       <select id="kurumF"><option value="">Kurum: Tümü</option></select>
       <select id="domainF"><option value="">Domain: Tümü</option></select>
       <select id="vlanF"><option value="">VLAN: Tümü</option></select>
       <select id="dagitimF"><option value="">Dağıtım: Tümü</option></select>
+      <select id="disF" style="max-width:230px" title="DMZ: Nessus DMZ asset'indeki IP · Derin dış: Carbon Black'te süreç dış (kurum dışı) IP'lere bağlanıyor · Dış istemci / VIP: dinlediği porta dışarıdan bağlanılıyor ya da VIP üyesi">
+        <option value="">Dışa açıklık: Tümü</option><option value="dmz">DMZ asset'leri</option><option value="derin">Derin dış (dış IP'ye bağlanan)</option><option value="istemci">Dış istemci / VIP</option><option value="herhangi">DMZ ya da dışa açık (herhangi biri)</option></select>
       <select id="kaynakF" title="Carbon Black: süreç çalışırken görüldü · Nessus: CB ajanı olmayan sunucu / kutu ya da kurulu ama çalışmadığı görülen yazılım"><option value="">Kaynak: Tümü</option></select>
       <label><input type="checkbox" id="dinleyen"> Yalnız port dinleyenler</label>
       <label><input type="checkbox" id="testG" checked> Test sunucuları</label>
@@ -212,10 +219,10 @@ const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const ONC = { kritik: "Kritik", yuksek: "Yüksek", orta: "Orta", incele: "İncele", dusuk: "Düşük" };
 const ONC_IPUCU = {
-  kritik: "Etkilenen sürüm + dışarıdan erişilen port (VIP üyesi ya da özel olmayan IP'den bağlantı)",
+  kritik: "Etkilenen sürüm + dışa açık: DMZ asset'i, dışarıdan erişilen port (VIP üyesi / dış istemci) ya da dış IP'ye bağlanıyor (derin dış)",
   yuksek: "Etkilenen sürüm + port dinliyor",
   orta: "Etkilenen sürüm ama port dinlemiyor (yalnız giden) ya da geçici önlem var",
-  incele: "Sürüm okunamadı ve port dinliyor — Nessus / ürün sürümünden doğrulayın",
+  incele: "Sürüm okunamadı ve port dinliyor, DMZ'de ya da dışarı bağlanıyor — Nessus / ürün sürümünden doğrulayın",
   dusuk: "Etkilenmez / yamalı ya da sürüm bilinmiyor ve port dinlemiyor"
 };
 const DUR = { etkilenen: "etkilenen", olasi: "olası", yamali: "yamalı", etkilenmez: "etkilenmez", bilinmiyor: "sürüm bilinmiyor", bilgi: "değerlendirilmedi" };
@@ -356,7 +363,7 @@ async function kayitYukle() {
   } catch (e) { st.kayitlar = []; st.kayitUyari = e.message; }
   kayitCiz();
 }
-function sonKayit() { const id = $("#kural").value; return st.kayitlar.find(k => k.kuralId === id); }
+function sonKayit() { const id = $("#kural").value + ($("#dmz").checked ? ":dmz" : ""); return st.kayitlar.find(k => k.kuralId === id); }
 function kayitCiz() {
   const k = sonKayit(), calisiyor = st.veri?.is?.durum === "calisiyor";
   const b = $("#kayitGetir");
@@ -367,7 +374,7 @@ function kayitCiz() {
   const oz = o => ["kritik", "yuksek", "orta"].map(x => o?.[x] ? `<span class="oz ${x}" title="${ONC[x]}">${o[x]}</span>` : "").join("") || '<span class="muted">—</span>';
   $("#kayitlar").innerHTML = (st.kayitUyari ? `<div class="sub" style="color:var(--warn)">${esc(st.kayitUyari)}</div>` : "")
     + (st.kayitlar.length ? `<table class="kt"><thead><tr><th>Tarih</th><th>Kural</th><th>Kapsam</th><th>Ağ olayı</th><th>Satır</th><th title="kritik / yüksek / orta">Öncelik</th><th>Kaydeden</th><th></th></tr></thead><tbody>`
-      + st.kayitlar.map(x => `<tr class="${x.id === acik ? "acik" : ""}"><td>${esc(trTarih(x.tarih))}</td><td>${esc((x.cve ? x.cve + " · " : "") + (x.kuralAd || x.kuralId))}${x.kuralId.startsWith("anlik:") ? ' <span class="muted small">(süreç adıyla)</span>' : ""}</td>
+      + st.kayitlar.map(x => `<tr class="${x.id === acik ? "acik" : ""}"><td>${esc(trTarih(x.tarih))}</td><td>${esc((x.cve ? x.cve + " · " : "") + (x.kuralAd || x.kuralId))}${x.kuralId.startsWith("anlik:") ? ' <span class="muted small">(süreç adıyla)</span>' : ""}${x.kuralId.endsWith(":dmz") ? '<span class="dmz">DMZ</span>' : ""}</td>
         <td>${esc(x.kapsam || "")}</td><td>${x.saat ? x.saat + " saat" : ""}</td><td>${x.satir.toLocaleString("tr-TR")}</td><td>${oz(x.oncelik)}</td><td>${esc(x.kaydeden || "")}${x.id < 0 ? ' <span class="muted small">(bellekte)</span>' : ""}</td>
         <td style="white-space:nowrap"><button type="button" data-kac="${x.id}" ${calisiyor ? "disabled" : ""}>Aç</button> <button type="button" data-ksil="${x.id}" ${st.yetki.topoloji ? "" : "disabled"} title="Kaydı sil">🗑</button></td></tr>`).join("")
       + "</tbody></table>" : '<div class="sub">Henüz kaydedilmiş tarama yok — biten her tarama burada saklanır (kural başına son 5).</div>');
@@ -377,6 +384,7 @@ async function kayitAc(id) {
   if (!r.ok) { const j = await r.json().catch(() => ({})); alert(j.error || "HTTP " + r.status); return; }
   const j = await r.json();
   if (j.kural && !j.kural.id.startsWith("anlik") && [...$("#kural").options].some(o => o.value === j.kural.id)) { st.mod = "kural"; $("#kural").value = j.kural.id; }
+  if (!$("#dmz").disabled) $("#dmz").checked = !!j.dmz;
   st.onc = ""; st.onlemF = false; st.limit = 500; detay(null);
   await yukle();
 }
@@ -396,12 +404,21 @@ function kaynakGrup(r) {
   return r.nessus && r.nessus.includes("CVE bulgusu") ? "Carbon Black + Nessus CVE doğruladı" : "Carbon Black";
 }
 
+const istemciDis = r => r.portlar.some(p => p.dis.length || p.vip.length);
+function disUyar(r, df) {
+  if (df === "dmz") return r.dmz;
+  if (df === "derin") return r.disGidenSay > 0;
+  if (df === "istemci") return istemciDis(r);
+  return r.dmz || r.disGidenSay > 0 || istemciDis(r);
+}
+
 function suz() {
   const l = st.veri?.satirlar || [];
+  const df = $("#disF").value;
   const q = $("#q").value.trim().toLowerCase(), d = $("#durumF").value, k = $("#kurumF").value, dm = $("#domainF").value, vl = $("#vlanF").value, dg = $("#dagitimF").value, kn = $("#kaynakF").value;
-  return l.filter(r => (!st.onc || r.oncelik === st.onc) && (!dm || (r.domain || "(yok)") === dm) && (!vl || (r.vlan || "(yok)") === vl) && (!dg || (r.dagitim || "(yok)") === dg) && (!kn || kaynakGrup(r) === kn) && (!st.onlemF || r.onlem === "var") && (!d || r.durum === d) && (!k || r.kurum === k)
+  return l.filter(r => (!df || disUyar(r, df)) && (!st.onc || r.oncelik === st.onc) && (!dm || (r.domain || "(yok)") === dm) && (!vl || (r.vlan || "(yok)") === vl) && (!dg || (r.dagitim || "(yok)") === dg) && (!kn || kaynakGrup(r) === kn) && (!st.onlemF || r.onlem === "var") && (!d || r.durum === d) && (!k || r.kurum === k)
     && (!$("#dinleyen").checked || r.portlar.length) && ($("#testG").checked || !r.test)
-    && (!q || [r.ip, r.sunucu, r.bilgisayar, r.segment, r.vlan, r.domain, r.cidr, r.dagitim, r.muhafiz, r.yol, r.urun, r.surum, r.jar, ...(r.uygulamalar || []), ...r.portlar.map(p => p.port + " " + (p.ert || "") + " " + p.vip.join(" "))]
+    && (!q || [r.ip, r.sunucu, r.bilgisayar, r.segment, r.vlan, r.domain, r.cidr, r.dagitim, r.muhafiz, r.yol, r.urun, r.surum, r.jar, ...(r.uygulamalar || []), ...(r.disGiden || []), ...r.portlar.map(p => p.port + " " + (p.ert || "") + " " + p.vip.join(" "))]
       .some(x => String(x ?? "").toLowerCase().includes(q))));
 }
 
@@ -416,6 +433,9 @@ function statsCiz() {
     + `<div class="stat" data-dur="etkilenen"><b style="color:var(--err)">${say(r => r.durum === "etkilenen" || r.durum === "olasi")}</b><span>etkilenen / olası</span></div>`
     + `<div class="stat" data-dur="bilinmiyor"><b>${say(r => r.durum === "bilinmiyor")}</b><span>sürüm bilinmiyor</span></div>`
     + `<div class="stat" data-dur="yamali"><b style="color:var(--ok)">${say(r => r.durum === "yamali")}</b><span>yamalı görünüyor</span></div>`
+    + '<span class="sep"></span>'
+    + `<div class="stat dmzk ${$("#disF").value === "dmz" ? "on" : ""}" data-disf="dmz" title="Nessus DMZ asset'indeki IP'ler"><b>${say(r => r.dmz)}</b><span>DMZ asset'i</span></div>`
+    + `<div class="stat disk ${$("#disF").value === "derin" ? "on" : ""}" data-disf="derin" title="Carbon Black: süreç kurum dışı IP'lere bağlanıyor"><b>${say(r => r.disGidenSay > 0)}</b><span>derin dış</span></div>`
     + `<div class="stat ${st.onlemF ? "on" : ""}" data-onlem="1"><b>${say(r => r.onlem === "var")}</b><span>geçici önlem var</span></div>`;
 }
 
@@ -455,7 +475,7 @@ function ciz() {
   $("#tb").innerHTML = l.length ? l.slice(0, st.limit).map((r, i) => `<tr data-i="${(v.satirlar).indexOf(r)}">
     <td><span class="p ${r.oncelik}" title="${esc(ONC_IPUCU[r.oncelik])}">${ONC[r.oncelik]}</span></td>
     <td><div class="mono">${r.ip ? `<a href="./?ip=${encodeURIComponent(r.ip)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${esc(r.ip)}</a>` : '<span class="muted">IP yok</span>'}</div>
-        <div class="small">${esc(r.sunucu || "")}${r.test ? ' <span class="d">test</span>' : ""}</div><div class="small muted">${esc(r.kurum || "")}${r.segment ? " · " + esc(r.segment) : ""}</div></td>
+        <div class="small">${esc(r.sunucu || "")}${r.test ? ' <span class="d">test</span>' : ""}${r.dmz ? '<span class="dmz" title="Nessus DMZ asset\'inde">DMZ</span>' : ""}</div><div class="small muted">${esc(r.kurum || "")}${r.segment ? " · " + esc(r.segment) : ""}</div></td>
     <td class="mono small" title="${esc(r.cidr || "")}">${esc(r.vlan || "") || '<span class="muted">—</span>'}</td>
     <td class="small">${esc(r.domain || "") || '<span class="muted">—</span>'}</td>
     <td class="small">${esc((r.uygulamalar || []).slice(0, 3).join(" | ")) || '<span class="muted">—</span>'}${r.muhafiz ? `<div class="muted">${esc(r.muhafiz)}</div>` : ""}</td>
@@ -463,7 +483,7 @@ function ciz() {
     <td class="small">${esc(r.dagitim || "") || '<span class="muted">—</span>'}</td>
     <td><span class="mono">${esc(r.surum || "?")}</span> <span class="d ${r.durum}" title="${esc(r.durumNot)}">${DUR[r.durum] || r.durum}</span>${r.surumKaynak ? `<div class="small muted">${esc(r.surumKaynak)}</div>` : ""}</td>
     <td>${portHtml(r)}</td>
-    <td class="small">${r.giden ? r.giden.toLocaleString("tr-TR") : '<span class="muted">—</span>'}</td>
+    <td class="small">${r.giden ? r.giden.toLocaleString("tr-TR") : '<span class="muted">—</span>'}${r.disGidenSay ? `<div><span class="dg" title="${esc("Dış (kurum dışı) hedefler:\n" + r.disGiden.join("\n") + (r.disGidenSay > r.disGiden.length ? "\n…" : ""))}">🌐 ${r.disGidenSay} dış hedef</span></div>` : ""}</td>
     <td class="small o ${r.onlem}" title="Komut satırında geçici önlem parametresi">${r.onlem === "var" ? "✔ var" : r.onlem === "yok" ? "yok" : r.onlem === "bilinmiyor" ? '<span class="muted">bilinmiyor</span>' : '<span class="muted">—</span>'}</td>
     <td class="small">${esc(r.son || "")}${r.baslangic ? `<div class="muted">başlangıç ${esc(r.baslangic)}</div>` : ""}</td>
     <td class="small muted">${esc(r.kaynak)}${r.nessus ? `<div style="color:${r.nessus.includes("CVE bulgusu") ? "var(--err)" : "var(--muted)"}" title="${esc(r.nessus)}">🛡 ${esc(r.nessus.length > 70 ? r.nessus.slice(0, 70) + "…" : r.nessus)}</div>` : ""}</td></tr>`).join("")
@@ -490,7 +510,8 @@ function detay(r) {
       <dt>Kurum / segment</dt><dd>${esc(r.kurum || "")}${r.segment ? " · " + esc(r.segment) : ""}${r.test ? " · test" : ""}</dd>
       <dt>ERT uygulamaları</dt><dd>${esc((r.uygulamalar || []).join(" | ")) || "—"}${r.muhafiz ? `<div class="small muted">Muhafız: ${esc(r.muhafiz)}</div>` : ""}</dd>
       <dt>Dinlediği portlar</dt><dd>${portlar || "— (yalnız giden bağlantı)"}</dd>
-      <dt>Giden bağlantı</dt><dd>${(r.giden || 0).toLocaleString("tr-TR")}</dd>
+      <dt>Giden bağlantı</dt><dd>${(r.giden || 0).toLocaleString("tr-TR")}${r.disGidenSay ? `<div class="small" style="color:var(--err)">Derin dış — ${r.disGidenSay} dış hedef: ${esc(r.disGiden.join(", "))}${r.disGidenSay > r.disGiden.length ? " …" : ""}</div>` : ""}</dd>
+      ${r.dmz ? `<dt>DMZ</dt><dd><span class="dmz" style="margin:0">DMZ</span> Nessus DMZ asset'inde</dd>` : ""}
       <dt>Son görülme</dt><dd>${esc(r.son || "—")}${r.baslangic ? ` · süreç başlangıcı ${esc(r.baslangic)}` : ""}</dd>
       <dt>Kaynak</dt><dd>${esc(r.kaynak)}</dd>
       ${r.nessus ? `<dt>Nessus</dt><dd>${esc(r.nessus)}</dd>` : ""}
@@ -530,7 +551,7 @@ async function yukle() {
 
 async function tara() {
   const ipMetin = $("#ipler").value.trim();
-  const body = { saat: +$("#saat").value, ipler: ipMetin || null, ekle: !!ipMetin && $("#ekle").checked && !!st.veri?.satirlar?.length };
+  const body = { saat: +$("#saat").value, ipler: ipMetin || null, ekle: !!ipMetin && $("#ekle").checked && !!st.veri?.satirlar?.length, dmz: !ipMetin && $("#dmz").checked };
   if (st.mod === "kural") body.kural = $("#kural").value;
   else {
     body.ozel = ozel();
@@ -554,10 +575,10 @@ function csv() {
   if (!st.yetki.disari) return;
   const q = v => `"${String(v ?? "").replace(/"/g, '""')}"`;
   const lines = [["ÖNCELİK", "IP", "SUNUCU", "BİLGİSAYAR (CB)", "KURUM", "SEGMENT", "VLAN", "DOMAIN", "CIDR", "TEST", "ERT UYGULAMALARI", "MUHAFIZ", "EXE", "EXE YOLU", "ÜRÜN", "-JAR", "DAĞITIM", "SÜRÜM", "SÜRÜM KAYNAĞI", "DURUM", "DURUM NOTU",
-    "DİNLEDİĞİ PORTLAR", "VIP", "DIŞ İSTEMCİ", "GİDEN BAĞLANTI", "GEÇİCİ ÖNLEM", "SON GÖRÜLME", "SÜREÇ BAŞLANGICI", "KAYNAK", "NESSUS", "KOMUT SATIRI"].join(";"),
+    "DİNLEDİĞİ PORTLAR", "VIP", "DIŞ İSTEMCİ", "GİDEN BAĞLANTI", "GEÇİCİ ÖNLEM", "SON GÖRÜLME", "SÜREÇ BAŞLANGICI", "KAYNAK", "NESSUS", "DMZ", "DIŞ HEDEF SAYISI", "DIŞ HEDEFLER", "KOMUT SATIRI"].join(";"),
     ...suz().map(r => [ONC[r.oncelik], r.ip, r.sunucu, r.bilgisayar, r.kurum, r.segment, r.vlan, r.domain, r.cidr, r.test ? "evet" : "", (r.uygulamalar || []).join(" | "), r.muhafiz, r.exe, r.yol, r.urun, r.jar, r.dagitim,
       r.surum, r.surumKaynak, DUR[r.durum] || r.durum, r.durumNot, r.portlar.map(p => p.port).join(", "), [...new Set(r.portlar.flatMap(p => p.vip))].join(", "),
-      [...new Set(r.portlar.flatMap(p => p.dis))].join(", "), r.giden, r.onlem, r.son, r.baslangic, r.kaynak, r.nessus, r.komut].map(q).join(";"))];
+      [...new Set(r.portlar.flatMap(p => p.dis))].join(", "), r.giden, r.onlem, r.son, r.baslangic, r.kaynak, r.nessus, r.dmz ? "evet" : "", r.disGidenSay || "", (r.disGiden || []).join(", "), r.komut].map(q).join(";"))];
   const a = document.createElement("a");
   a.href = URL.createObjectURL(new Blob(["﻿" + lines.join("\r\n")], { type: "text/csv;charset=utf-8" }));
   a.download = `aciklik_${(st.veri?.is?.kural?.cve || st.veri?.is?.kural?.id || "tarama").replace(/[^\w.-]+/g, "_")}.csv`;
@@ -571,12 +592,14 @@ document.addEventListener("click", e => {
   if (o) { st.onc = o.dataset.onc; st.onlemF = false; st.limit = 500; ciz(); return; }
   const du = e.target.closest("[data-dur]");
   if (du) { $("#durumF").value = du.dataset.dur; st.onc = ""; st.onlemF = false; st.limit = 500; ciz(); return; }
+  const dsf = e.target.closest("[data-disf]");
+  if (dsf) { $("#disF").value = $("#disF").value === dsf.dataset.disf ? "" : dsf.dataset.disf; st.onc = ""; st.limit = 500; ciz(); return; }
   if (e.target.closest("[data-onlem]")) { st.onlemF = !st.onlemF; st.onc = ""; st.limit = 500; st.veri && ciz(); return; }
   const tr = e.target.closest("tr[data-i]");
   if (tr) { document.querySelectorAll("tr.sel").forEach(x => x.classList.remove("sel")); tr.classList.add("sel"); detay(st.veri.satirlar[+tr.dataset.i]); }
 });
 document.addEventListener("keydown", e => { if (e.key === "Escape") detay(null); });
-["#q", "#durumF", "#kurumF", "#domainF", "#vlanF", "#dagitimF", "#kaynakF", "#dinleyen", "#testG"].forEach(s => $(s).addEventListener(s === "#q" ? "input" : "change", () => { st.limit = 500; ciz(); }));
+["#q", "#disF", "#durumF", "#kurumF", "#domainF", "#vlanF", "#dagitimF", "#kaynakF", "#dinleyen", "#testG"].forEach(s => $(s).addEventListener(s === "#q" ? "input" : "change", () => { st.limit = 500; ciz(); }));
 $("#kural").addEventListener("change", () => { formCiz(); kayitCiz(); });
 $("#kayitGetir").addEventListener("click", () => { const k = sonKayit(); if (k) kayitAc(k.id); });
 document.addEventListener("click", e => {
@@ -608,6 +631,15 @@ fetch("api/me").then(r => r.ok ? r.json() : null).then(me => {
 }).catch(() => {});
 yukle();
 kayitYukle();
+$("#dmz").addEventListener("change", kayitCiz);
+fetch("api/zafiyet/dmz").then(r => r.ok ? r.json() : null).then(j => {
+  const tanimsiz = !j || !j.tanimli;
+  $("#dmz").disabled = tanimsiz || !!j?.hata;
+  $("#dmzNot").innerHTML = !j ? "" : tanimsiz ? "DMZ asset'i tanımlı değil (Zafiyet:DmzAsset)"
+    : j.hata ? `<span style="color:var(--err)">DMZ asset'i okunamadı: ${esc(j.hata)}</span>`
+    : `DMZ: ${esc(j.asset?.ad || "")} · ${j.ipSayisi.toLocaleString("tr-TR")} IP`;
+  if ($("#dmz").disabled) $("#dmz").checked = false;
+}).catch(() => {});
 </script>
 </body>
 </html>

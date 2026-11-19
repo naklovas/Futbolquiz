@@ -1075,6 +1075,21 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
   satırında "📂 Kayıtlıdan getir (tarih)" (seçili kuralın en son kaydı), "Taramayı başlat" → "🔄 Yeni tara"; katlanır "Son taramalar" (tarih, kural, kapsam, ağ olayı
   aralığı, satır, kritik / yüksek / orta, kaydeden, Aç / 🗑; açık olan vurgulu); bantta "📁 Kayıttan açıldı: tarih" ya da "💾 kaydedildi". Bellek yedeği (son 5, aç, sil)
   scratch test ucuyla, arayüz mock'la denendi; SQL yolu ortamda SQL Server olmadığı için denenmedi.
+  DMZ + DERİN DIŞ (kullanıcı: "DMZ çok kritik, ayrıca tarasak; dışa açık / dış IP'lerle iletişim kuranları cidden kritik ele almalıyız"; Nessus ekibinin DMZ asset seti
+  "DMZ - (ZB(Access&Hosting) ve ZI(Access&Hosting) ) [671]"): `Zafiyet:DmzAsset` = Tenable.sc asset adı ya da id'si (sondaki "[n]" olabilir; önce adla, sonra id ile eşlenir,
+  `NessusService.AssetBulAsync`; bulunamazsa "DMZ geçenler" listesiyle hata). `AssetlerAsync` (GET /rest/asset, usable + manageable, 30 dk), `AssetIpleriAsync` (GET /rest/asset/{id}
+  viewableIPs / typeFields.definedIPs → `IpAc` aralık / CIDR açar, `Nessus:AssetMaxIp`=100000; boşsa asset süzgeçli sumip; `Nessus:AssetDakika`=60). Asset süzgeci
+  `{"filterName":"asset","value":{"id":…}}`; asset süzgeçli sorguda repository süzgeci KONMAZ (DMZ başka repoda taranmış olabilir; `Nessus:AssetteRepoSuzgeci`=true ile konur).
+  `CveAsync` / `UrunlerAsync` / `PluginOzetiAsync` `assetId` alır. Taramada: tanımlıysa normal Nessus sorgularına EK olarak DMZ asset sorguları (ip + plugin + port tekilleştirilir;
+  önceki "DMZ diye ilettikleri gelmiyor" sorunu); `ZafiyetIstek.Dmz` (sayfada "Yalnız DMZ asset'leri") → yalnız asset sorguları + CB sonucu DMZ IP'lerine süzülür (CB yine toplu),
+  asset çözülemezse tarama hata verir. `ZfSatir.Dmz` (asset IP'si ya da DMZ sorgusundan gelen bulgu), `ZfIs.Dmz` (listeye eklenen tekil IP taraması listenin DMZ'sini korur), kayıt
+  anahtarı "<kural>:dmz" (Kayıtlıdan getir DMZ kutusuna göre). DERİN DIŞ: CB ağ SPL'inde giden olayların RFC1918 / loopback / link-local / multicast dışı hedefleri `dis` (ip:port,
+  ilk 300) → C#'ta `Ic(env, ip)` (Yolculuk'taki tanım: uygulama / LB GW / ≥/8 segment kaydı olan genel bloklar iç) → `ZfSatir.DisGiden` (ilk 50) / `DisGidenSay`; gelen
+  dış istemci listesi de artık `Ic` ile. `DisOncelik`: etkilenen / olası / bilgi + (DMZ | derin dış | dış istemci) → kritik; sürümü bilinmeyen ve düşük → incele; önlem varsa dokunmaz.
+  Uçlar `GET /api/zafiyet/dmz` (asset, IP sayısı, hata), `GET /api/nessus/assetler?q=` (ayarı doğru yazmak için). Arayüz: "Yalnız DMZ asset'leri" kutusu + yanında asset adı / IP sayısı
+  (tanımsız / okunamazsa pasif), "Dışa açıklık" süzgeci (DMZ / Derin dış / Dış istemci-VIP / herhangi), "DMZ asset'i" ve "derin dış" kartları, sunucuda kırmızı DMZ rozeti, Giden
+  hücresinde "🌐 N dış hedef" (ipucunda liste), sağ panelde hedefler, aramada dış hedef, CSV'de DMZ / DIŞ HEDEF SAYISI / DIŞ HEDEFLER. Sahte envanter + sahte Splunk + asset'li sahte
+  Tenable.sc ile uçtan uca ve Playwright'la denendi.
 - **VIP**: sorgulanan IP VIP ise üyeler + GW'ler aynı sorguya eklenir, üyeler "VIP ÜYESİ" (GW→üye trafiği varsa ✓).
   Gidilen IP VIP ise "VIP → n ÜYE"; gelen IP LB GW ise "LB GW"; sorgulanan sunucu havuz üyesiyse VIP kartı.
 - **Uygulama görünümü** (`/api/apps`, `/api/app`): `[kullanan uygulamalar] → [UYGULAMA: VIP'ler + segment grupları] → [bağımlı olunanlar]`,

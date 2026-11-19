@@ -24,9 +24,10 @@ record ZfPort(string Port, long Baglanti, int Istemci, string? Ert, List<string>
 record ZfSatir(string? Ip, string? Sunucu, string? Bilgisayar, string? Kurum, string? Segment, bool Test, List<string> Uygulamalar, string? Muhafiz,
     string Exe, string Yol, string? Urun, string? Surum, string? SurumKaynak, string Durum, string DurumNot,
     List<ZfPort> Portlar, long Giden, string Onlem, string? Komut, string? Jar, string? Son, string? Baslangic, string Oncelik, string Kaynak,
-    string? Vlan = null, string? Domain = null, string? Cidr = null, string? Dagitim = null, string? Nessus = null);
+    string? Vlan = null, string? Domain = null, string? Cidr = null, string? Dagitim = null, string? Nessus = null,
+    bool Dmz = false, List<string>? DisGiden = null, int DisGidenSay = 0);   // Dmz: Nessus DMZ asset'inde; DisGiden: CB'de süreç dış IP'lere bağlanıyor ("derin dış")
 record ZfIs(string Durum, string Asama, DateTime Baslangic, DateTime? Bitis, string? Hata, string? Kaydeden, int Saat, int SurecSaat, ZfKural Kural, string? Kapsam = null,
-    int? KayitId = null, DateTime? KayitTarihi = null, bool Kayittan = false);
+    int? KayitId = null, DateTime? KayitTarihi = null, bool Kayittan = false, bool Dmz = false);
 // Kayıtlı tarama (DF_ZAFIYET_TARAMA): liste satırı (sonuç gövdesi yok) ve gzip JSON gövdesi
 record ZfKayit(int Id, string KuralId, string? KuralAd, string? Cve, string? Kapsam, int Saat, int Satir, Dictionary<string, int> Oncelik, DateTime Tarih, string? Kaydeden);
 record ZfKayitVeri(ZfIs Is, List<ZfSatir> Satirlar, List<string> Mesajlar);
@@ -34,7 +35,8 @@ record ZfKayitListe(List<ZfKayit> Kayitlar, string? Uyari);
 // Sayfadan elle / AI ile doldurulmuş kural: exe adları virgülle, önlem ifadeleri virgülle (DÜZ METİN; regex'e kaçışlanır)
 record ZfOzel(string? Ad, string? Cve, string? Aciklama, string? Exeler, List<ZfAralik>? Araliklar, string? Onlem, bool DigerEtkilenir, string? NessusAnahtarlar = null);
 // Ipler: yalnız bu IP'ler (tekil tarama); Ekle: sonuç mevcut listeye eklenir (o IP'lerin eski satırları değişir); SonKural: son taramanın kuralı
-record ZafiyetIstek(int? Saat, string? Kural, ZfOzel? Ozel, string? Ipler = null, bool Ekle = false, bool SonKural = false);
+// Dmz: yalnız Nessus DMZ asset'indeki IP'ler (Zafiyet:DmzAsset)
+record ZafiyetIstek(int? Saat, string? Kural, ZfOzel? Ozel, string? Ipler = null, bool Ekle = false, bool SonKural = false, bool Dmz = false);
 record ZafiyetAiIstek(string? Metin);
 // AI ile doldurma sonucu (kullanıcı onaylayıp düzenler; tarama kendiliğinden başlamaz)
 record ZfAiExe(string Ad, string? Neden, string Kaynak, int Sunucu, List<string> Ornek);
@@ -275,33 +277,43 @@ sealed class ZafiyetService(IConfiguration cfg, IHttpClientFactory factory, Enva
         return hata == null ? l : null;
     }
 
-    public ZfIs Baslat(ZfKural kural, int saat, string? user, List<string>? ipler = null, bool ekle = false)
+    public ZfIs Baslat(ZfKural kural, int saat, string? user, List<string>? ipler = null, bool ekle = false, bool dmz = false)
     {
         lock (_gate)
         {
             if (_is is { Durum: "calisiyor" }) return _is;
+            // Listeye eklenen tekil IP taraması listenin kapsamını (DMZ) korur; IP kipinde DMZ süzgeci uygulanmaz
+            if (ipler != null) dmz = ekle && _satir.Count > 0 && _is?.Dmz == true;
             int maxSaat = cfg.GetValue("Zafiyet:MaxSaat", 168);
             saat = Math.Clamp(saat <= 0 ? cfg.GetValue("Zafiyet:Saat", 24) : saat, 1, maxSaat);
             int surecSaat = Math.Max(saat, cfg.GetValue("Zafiyet:SurecSaat", 168));
             _cts = new CancellationTokenSource();
-            string kapsam = ipler == null ? "tüm sunucular" : $"{ipler.Count} IP: {string.Join(", ", ipler.Take(5))}{(ipler.Count > 5 ? " …" : "")}" + (ekle ? " (listeye ekleniyor)" : "");
-            _is = new ZfIs("calisiyor", "Başlıyor", DateTime.Now, null, null, user, saat, surecSaat, kural, kapsam);
+            string kapsam = ipler == null ? (dmz ? "DMZ asset'leri" : "tüm sunucular") : $"{ipler.Count} IP: {string.Join(", ", ipler.Take(5))}{(ipler.Count > 5 ? " …" : "")}" + (ekle ? " (listeye ekleniyor)" : "");
+            _is = new ZfIs("calisiyor", "Başlıyor", DateTime.Now, null, null, user, saat, surecSaat, kural, kapsam, Dmz: dmz);
             var eski = ekle && ipler != null ? _satir : [];
             var eskiMesaj = ekle && ipler != null ? _mesaj : [];
             if (!(ekle && ipler != null)) { _satir = []; _mesaj = []; }
             var ct = _cts.Token;
-            _ = Task.Run(() => CalisAsync(kural, saat, surecSaat, ct, ipler, eski, eskiMesaj));
+            bool dmzKip = dmz && ipler == null;
+            _ = Task.Run(() => CalisAsync(kural, saat, surecSaat, ct, ipler, eski, eskiMesaj, dmzKip));
             return _is;
         }
     }
     void Set(Func<ZfIs, ZfIs> f) { lock (_gate) if (_is != null) _is = f(_is); }
 
-    async Task CalisAsync(ZfKural k, int saat, int surecSaat, CancellationToken ct, List<string>? ipler = null, List<ZfSatir>? eski = null, List<string>? eskiMesaj = null)
+    async Task CalisAsync(ZfKural k, int saat, int surecSaat, CancellationToken ct, List<string>? ipler = null, List<ZfSatir>? eski = null, List<string>? eskiMesaj = null,
+        bool dmzKip = false)
     {
         var mesaj = new List<string>();
         var ipSet = ipler?.ToHashSet();
         try
         {
+            // DMZ asset'i (Nessus ekibinin DMZ asset seti): satırlar işaretlenir; DMZ kipinde yalnız bu IP'ler
+            Set(i => i with { Asama = "Nessus: DMZ asset'i okunuyor" });
+            var (dmzA, dmzIp, dmzHata) = await DmzAsync(ct);
+            if (dmzA != null) mesaj.Add($"DMZ asset'i: {dmzA.Asset.Ad} (id {dmzA.Asset.Id}) — {dmzA.Ipler.Count:N0} IP ({dmzA.Kaynak}{(dmzA.Kesik ? ", liste kesildi" : "")}).");
+            else if (dmzHata != null) mesaj.Add("DMZ asset'i okunamadı: " + dmzHata);
+            if (dmzKip && dmzA == null) throw new InvalidOperationException("Yalnız DMZ taraması yapılamadı — " + (dmzHata ?? "Zafiyet:DmzAsset tanımlı değil."));
             var s = cfg.GetSection("Splunk");
             string index = s["Index"] ?? "carbonblack", st = s["Sourcetype"] ?? "bit9:carbonblack:json";
             string anahtar = Anahtar(k), desen = ExeDesen(k, true);
@@ -320,8 +332,9 @@ sealed class ZafiyetService(IConfiguration cfg, IHttpClientFactory factory, Enva
                 | eval yol=coalesce(process_path, process_name, "")
                 | where match(lower(yol), "{desen}")
                 | eval yon=if(lower(direction)=="outbound", "out", "in"), lp=if(yon=="in", local_port, "-")
-                | stats count dc(remote_ip) as peers values(remote_ip) as ornek max(_time) as son values(computer_name) as pc by local_ip yon lp yol
-                | eval ornek=mvjoin(mvindex(ornek, 0, 199), " "), pc=mvjoin(mvindex(pc, 0, 2), "|||")
+                | eval dis=if(yon=="out" AND isnotnull(remote_ip) AND NOT match(remote_ip, ":") AND NOT (cidrmatch("10.0.0.0/8", remote_ip) OR cidrmatch("172.16.0.0/12", remote_ip) OR cidrmatch("192.168.0.0/16", remote_ip) OR cidrmatch("127.0.0.0/8", remote_ip) OR cidrmatch("169.254.0.0/16", remote_ip) OR cidrmatch("0.0.0.0/8", remote_ip) OR cidrmatch("224.0.0.0/3", remote_ip)), remote_ip.":".remote_port, null())
+                | stats count dc(remote_ip) as peers values(remote_ip) as ornek max(_time) as son values(computer_name) as pc values(dis) as dis by local_ip yon lp yol
+                | eval ornek=mvjoin(mvindex(ornek, 0, 199), " "), pc=mvjoin(mvindex(pc, 0, 2), "|||"), dis=mvjoin(mvindex(dis, 0, 299), " ")
                 """;
             var r1 = await SplunkService.ExportAsync(spl1, new LookupQuery("0.0.0.0", bit.AddHours(-saat), bit), cfg, http, ct, "Carbon Black (ağ)", sure);
             mesaj.AddRange(r1.Messages);
@@ -360,28 +373,42 @@ sealed class ZafiyetService(IConfiguration cfg, IHttpClientFactory factory, Enva
 
             // 3) Nessus (Carbon Black ajanı olmayan sunucular / kutular — API gateway vb. — ve kurulu ama çalışmayan yazılım için)
             var nCve = new List<NessusBulgu>(); var nUrun = new List<NessusBulgu>();
+            var dmzNessus = new HashSet<string>();
             if (nessus.Acik && cfg.GetValue("Zafiyet:Nessus", true))
             {
                 try
                 {
-                    foreach (var cve in Regex.Matches(k.Cve ?? "", @"CVE-\d{4}-\d{4,}", RegexOptions.IgnoreCase).Select(m => m.Value.ToUpperInvariant()).Distinct())
+                    // Sorgu takımları: normal (Nessus:Repolar) + DMZ asset'i (repository süzgeçsiz; DMZ başka repoda taranmış olabilir). DMZ kipinde yalnız asset.
+                    var takim = new List<(string? Asset, string Et)>();
+                    if (!dmzKip) takim.Add((null, ""));
+                    if (dmzA != null && ipler == null) takim.Add((dmzA.Asset.Id, " (DMZ asset'i)"));
+                    var gor = new HashSet<(string, string, string?)>();
+                    void Ekle(List<NessusBulgu> hedef, IEnumerable<NessusBulgu> l, string? asset)
                     {
-                        Set(i => i with { Asama = $"Nessus: {cve} bulguları" });
-                        var (l, kesik) = await nessus.CveAsync(cve, ct, ipler);
-                        nCve.AddRange(l);
-                        mesaj.Add(l.Count > 0 ? $"Nessus: {cve} için {l.Select(x => x.Ip).Distinct().Count()} IP'de bulgu."
-                            : $"Nessus: {cve} için bulgu yok (Tenable'ın bu CVE için kontrolü henüz yayımlanmamış ya da taranmamış olabilir).");
-                        if (kesik) mesaj.Add($"Nessus {cve} bulguları sayfa sınırında kesildi (Zafiyet:NessusMaxSayfa).");
+                        foreach (var b in l) if (gor.Add((b.Ip, b.PluginId, b.Port))) hedef.Add(b);
+                        if (asset != null) dmzNessus.UnionWith(l.Select(b => b.Ip));
                     }
-                    var kelimeler = NessusKelimeleri(k);
-                    if (kelimeler.Count > 0)
+                    foreach (var (asset, et) in takim)
                     {
-                        Set(i => i with { Asama = $"Nessus: plugin adında {string.Join(", ", kelimeler)} geçen bulgular (tüm repo)" });
-                        var haric = k.Java ? new Regex("javascript|jquery|json", RegexOptions.IgnoreCase) : null;
-                        var (l, kelSay, kesik) = await nessus.UrunlerAsync(kelimeler, haric, ct, ipler);
-                        nUrun = l;
-                        mesaj.Add($"Nessus ürün araması — {l.Select(x => x.Ip).Distinct().Count()} IP, {l.Count} bulgu ({l.Count(x => x.Kurulumlar.Count > 0)} sürümlü) · eşleşen plugin: "
-                            + string.Join(", ", kelSay.Select(x => $"{x.Key} {x.Value}")) + (kesik ? " · sayfa sınırında kesildi (Zafiyet:NessusMaxSayfa)" : ""));
+                        foreach (var cve in Regex.Matches(k.Cve ?? "", @"CVE-\d{4}-\d{4,}", RegexOptions.IgnoreCase).Select(m => m.Value.ToUpperInvariant()).Distinct())
+                        {
+                            Set(i => i with { Asama = $"Nessus: {cve} bulguları{et}" });
+                            var (l, kesik) = await nessus.CveAsync(cve, ct, ipler, asset);
+                            Ekle(nCve, l, asset);
+                            mesaj.Add(l.Count > 0 ? $"Nessus{et}: {cve} için {l.Select(x => x.Ip).Distinct().Count()} IP'de bulgu."
+                                : $"Nessus{et}: {cve} için bulgu yok (Tenable'ın bu CVE için kontrolü henüz yayımlanmamış ya da taranmamış olabilir).");
+                            if (kesik) mesaj.Add($"Nessus{et} {cve} bulguları sayfa sınırında kesildi (Zafiyet:NessusMaxSayfa).");
+                        }
+                        var kelimeler = NessusKelimeleri(k);
+                        if (kelimeler.Count > 0)
+                        {
+                            Set(i => i with { Asama = $"Nessus: plugin adında {string.Join(", ", kelimeler)} geçen bulgular{(asset == null ? " (tüm repo)" : et)}" });
+                            var haric = k.Java ? new Regex("javascript|jquery|json", RegexOptions.IgnoreCase) : null;
+                            var (l, kelSay, kesik) = await nessus.UrunlerAsync(kelimeler, haric, ct, ipler, asset);
+                            Ekle(nUrun, l, asset);
+                            mesaj.Add($"Nessus ürün araması{et} — {l.Select(x => x.Ip).Distinct().Count()} IP, {l.Count} bulgu ({l.Count(x => x.Kurulumlar.Count > 0)} sürümlü) · eşleşen plugin: "
+                                + string.Join(", ", kelSay.Select(x => $"{x.Key} {x.Value}")) + (kesik ? " · sayfa sınırında kesildi (Zafiyet:NessusMaxSayfa)" : ""));
+                        }
                     }
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException) { mesaj.Add("Nessus sorgulanamadı (tarama Carbon Black'le devam etti): " + ex.Message); }
@@ -394,6 +421,14 @@ sealed class ZafiyetService(IConfiguration cfg, IHttpClientFactory factory, Enva
             try { imzaT = await imza.TaramaAsync(ct); } catch (Exception ex) when (ex is not OperationCanceledException) { mesaj.Add("Servis imzası kaydı okunamadı: " + ex.Message); }
             if (ipSet != null && imzaT != null) imzaT = imzaT with { Sunucular = imzaT.Sunucular.Where(x => ipSet.Contains(x.Ip)).ToList() };
             var satir = Birlestir(k, env, r1.Rows, r2Rows, imzaT, mesaj, nCve, nUrun);
+            // DMZ işareti (asset IP listesi ya da DMZ asset sorgusundan gelen Nessus bulgusu) + dışa açıklık önceliği
+            satir = satir.Select(r => DisOncelik(r with { Dmz = r.Ip != null && (dmzIp.Contains(r.Ip) || dmzNessus.Contains(r.Ip)) })).ToList();
+            if (dmzKip)
+            {
+                int once = satir.Count;
+                satir = satir.Where(r => r.Dmz).ToList();
+                mesaj.Insert(0, $"Yalnız DMZ asset'leri: {satir.Count} satır ({satir.Select(r => r.Ip).Distinct().Count()} IP); DMZ dışındaki {once - satir.Count} satır gösterilmiyor.");
+            }
             int yeni = satir.Count;
             if (ipSet != null)
             {
@@ -445,7 +480,7 @@ sealed class ZafiyetService(IConfiguration cfg, IHttpClientFactory factory, Enva
     {
         public string? Ip, Pc; public string Yol = "";
         public Dictionary<string, (long N, HashSet<string> Ist)> Port = new();
-        public long Giden; public HashSet<string> GidenHedef = new();
+        public long Giden; public HashSet<string> GidenHedef = new(); public HashSet<string> DisHedef = new();
         public double Son; public string Kaynak = "Carbon Black";
     }
 
@@ -475,6 +510,8 @@ sealed class ZafiyetService(IConfiguration cfg, IHttpClientFactory factory, Enva
                 t.Port[lp] = (pn + n, ist);
             }
             else { t.Giden += n; t.GidenHedef.UnionWith(ornek); }
+            foreach (var d in (V(r, "dis") ?? "").Split(' ', StringSplitOptions.RemoveEmptyEntries))
+                if (!Ic(env, d.Split(':')[0])) t.DisHedef.Add(d);   // kurum içinde kullanılan genel bloklar (segment / uygulama / LB GW kaydı olan) dış sayılmaz
             if (double.TryParse(V(r, "son"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var sn)) t.Son = Math.Max(t.Son, sn);
         }
 
@@ -541,7 +578,7 @@ sealed class ZafiyetService(IConfiguration cfg, IHttpClientFactory factory, Enva
                 .OrderByDescending(p => p.Value.N).Select(p => new ZfPort(p.Key, p.Value.N, p.Value.Ist.Count,
                     apps.Where(a => a.Port == p.Key).Select(a => a.AppName).FirstOrDefault(a => !string.IsNullOrWhiteSpace(a)),
                     vipler.Where(v => v.Port == p.Key).Select(v => $"{(v.Pool ?? "").Replace("/Common/", "")} · {v.LbIp}:{v.LbPort}").Distinct().ToList(),
-                    p.Value.Ist.Where(x => !Yolculuk.IsPrivate(x)).Take(10).ToList())).ToList();
+                    p.Value.Ist.Where(x => !Ic(env, x)).Take(10).ToList())).ToList();
             bool dinliyor = portlar.Count > 0, disari = portlar.Any(p => p.Vip.Count > 0 || p.Dis.Count > 0);
             // Öncelik: etkilenen sürümde dışarıdan erişilen > yalnız dinleyen > yalnız giden; sürüm aralığı verilmemiş aramada yalnız maruziyete göre
             bool risk = durum is "etkilenen" or "olasi" or "bilgi";
@@ -556,7 +593,8 @@ sealed class ZafiyetService(IConfiguration cfg, IHttpClientFactory factory, Enva
                 apps.Select(a => a.VarlikMuhafizi).FirstOrDefault(a => !string.IsNullOrWhiteSpace(a)),
                 ExeAd(g.Yol), g.Yol, Urun(g.Yol, komut, jar), surum, kaynakS, durum, not,
                 portlar, g.Giden, onlem, komut, jar, g.Son > 0 ? Zaman(g.Son.ToString(System.Globalization.CultureInfo.InvariantCulture)) : null,
-                b == null ? null : Zaman(V(b, "bas")), oncelik, g.Kaynak, Vlan: seg?.Vlan, Domain: seg?.Domain, Cidr: seg?.Cidr, Dagitim: dagitim));
+                b == null ? null : Zaman(V(b, "bas")), oncelik, g.Kaynak, Vlan: seg?.Vlan, Domain: seg?.Domain, Cidr: seg?.Cidr, Dagitim: dagitim,
+                DisGiden: g.DisHedef.Count > 0 ? g.DisHedef.OrderBy(x => x).Take(50).ToList() : null, DisGidenSay: g.DisHedef.Count));
         }
         NessusIsle(k, env, sonuc, nCve ?? [], nUrun ?? [], test, mesaj);
         string[] sira = ["kritik", "yuksek", "orta", "incele", "dusuk"];
@@ -661,6 +699,48 @@ sealed class ZafiyetService(IConfiguration cfg, IHttpClientFactory factory, Enva
             exe, yol, null, surum, surum != null ? "Nessus" : null, durum, not, portlar, 0, "bilinmiyor", null, null, b.Son, null, "dusuk", kaynak,
             Vlan: seg?.Vlan, Domain: seg?.Domain, Cidr: seg?.Cidr, Dagitim: k.Java ? Dagitim(yol) : null, Nessus: nessusNot);
         return Oncelikle(r);
+    }
+
+    // Kurum içi mi: özel IP ya da kurumda kullanılan genel blok (uygulama / LB GW / ≥/8 segment kaydı var) — Yolculuk'taki "dış" tanımı
+    static bool Ic(EnvanterSnapshot env, string ip)
+    {
+        if (Yolculuk.IsPrivate(ip)) return true;
+        if (env.AppNamesOnIp(ip).Count > 0 || env.IsVipGw(ip, out _)) return true;
+        var seg = env.FindSegment(ip);
+        return seg != null && int.TryParse(seg.Cidr.Split('/').ElementAtOrDefault(1), out int len) && len >= 8;
+    }
+
+    // Kullanıcı: "dışa açık, dış IP'lerle iletişim kuranları cidden kritik ele almalıyız": etkilenen / olası sürümde DMZ, dış istemci / VIP ya da
+    // dış IP'ye bağlanan ("derin dış") süreç → kritik; sürümü bilinmeyen DMZ / derin dış → en az incele. Geçici önlem varsa en çok orta (değişmez).
+    static ZfSatir DisOncelik(ZfSatir r)
+    {
+        if (r.Onlem == "var") return r;
+        bool disaAcik = r.Dmz || r.DisGidenSay > 0 || r.Portlar.Any(p => p.Dis.Count > 0);
+        if (!disaAcik) return r;
+        if (r.Durum is "etkilenen" or "olasi" or "bilgi") return r with { Oncelik = "kritik" };
+        if (r.Durum == "bilinmiyor" && r.Oncelik == "dusuk") return r with { Oncelik = "incele" };
+        return r;
+    }
+
+    // DMZ asset'i (Zafiyet:DmzAsset: Tenable.sc asset id'si ya da adı) → IP kümesi; Nessus kapalı / tanımsızsa boş
+    async Task<(NessusService.NessusAssetIp? A, HashSet<string> Ip, string? Hata)> DmzAsync(CancellationToken ct)
+    {
+        string? tanim = cfg["Zafiyet:DmzAsset"];
+        if (string.IsNullOrWhiteSpace(tanim)) return (null, [], null);
+        if (!nessus.Acik) return (null, [], "Nessus tanımlı değil (Nessus:BaseUrl).");
+        try
+        {
+            var (a, hata) = await nessus.AssetBulAsync(tanim, ct);
+            if (a == null) return (null, [], hata);
+            var ip = await nessus.AssetIpleriAsync(a, ct);
+            return (ip, ip.Ipler, null);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException) { return (null, [], ex.Message); }
+    }
+    public async Task<object> DmzBilgiAsync(CancellationToken ct)
+    {
+        var (a, ip, hata) = await DmzAsync(ct);
+        return new { tanimli = !string.IsNullOrWhiteSpace(cfg["Zafiyet:DmzAsset"]), asset = a?.Asset, ipSayisi = ip.Count, kaynak = a?.Kaynak, kesik = a?.Kesik, hata };
     }
 
     // Nessus'la değişen satırların önceliği: CB satırında port / dış istemci bilgisi; Nessus satırında VIP üyeliği maruziyet sayılır
@@ -794,7 +874,7 @@ sealed class ZafiyetService(IConfiguration cfg, IHttpClientFactory factory, Enva
 
     async Task<(int Id, DateTime Tarih)> TaramaKaydetAsync(ZfIs i, List<ZfSatir> satir, List<string> mesaj)
     {
-        string anahtar = KayitAnahtar(i.Kural);
+        string anahtar = KayitAnahtar(i.Kural) + (i.Dmz ? ":dmz" : "");
         var veri = Sikistir(new ZfKayitVeri(i with { KayitId = null, KayitTarihi = null, Kayittan = false }, satir, mesaj));
         string ozet = System.Text.Json.JsonSerializer.Serialize(OncelikSay(satir), Js);
         int id; DateTime tarih;

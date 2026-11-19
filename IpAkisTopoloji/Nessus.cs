@@ -106,7 +106,9 @@ sealed class NessusService(IConfiguration cfg, IHttpClientFactory factory, ILogg
     {
         var filtre = new JsonArray();
         foreach (var f in ekFiltre) filtre.Add(f!.DeepClone());
-        if (Repolar.Length > 0)
+        // Asset süzgeci varsa repository süzgeci konmaz (DMZ asset'i başka repository'lerde taranmış olabilir; Nessus:AssetteRepoSuzgeci=true ile konur)
+        bool assetVar = ekFiltre.Any(f => f?["filterName"]?.ToString() == "asset");
+        if (Repolar.Length > 0 && (!assetVar || cfg.GetValue("Nessus:AssetteRepoSuzgeci", false)))
             filtre.Add(new JsonObject { ["filterName"] = "repository", ["operator"] = "=", ["value"] = new JsonArray(Repolar.Select(r => (JsonNode)new JsonObject { ["id"] = r }).ToArray()) });
         int gun = cfg.GetValue("Nessus:MaxGun", 30);
         if (gun > 0) filtre.Add(new JsonObject { ["filterName"] = "lastSeen", ["operator"] = "=", ["value"] = $"0:{gun}" });
@@ -118,34 +120,37 @@ sealed class NessusService(IConfiguration cfg, IHttpClientFactory factory, ILogg
     }
 
     // Repodaki plugin özeti (tool sumid: plugin başına bir satır — pluginID, ad, ciddiyet, bulgu / host sayısı); 30 dk önbellek
-    (List<(string Id, string Ad, long Host)> L, DateTime T)? _pluginOzet;
-    public async Task<List<(string Id, string Ad, long Host)>> PluginOzetiAsync(CancellationToken ct)
+    readonly Dictionary<string, (List<(string Id, string Ad, long Host)> L, DateTime T)> _pluginOzet = [];
+    public async Task<List<(string Id, string Ad, long Host)>> PluginOzetiAsync(CancellationToken ct, string? assetId = null)
     {
-        lock (_cache) if (_pluginOzet is { } o && DateTime.UtcNow - o.T < TimeSpan.FromMinutes(30)) return o.L;
+        string anahtar = assetId ?? "";
+        lock (_cache) if (_pluginOzet.TryGetValue(anahtar, out var o) && DateTime.UtcNow - o.T < TimeSpan.FromMinutes(30)) return o.L;
+        var ek = assetId == null ? new JsonArray() : new JsonArray { AssetFiltre(assetId) };
         int sayfa = 5000, max = cfg.GetValue("Zafiyet:NessusPluginSayfa", 40);
         var l = new List<(string, string, long)>();
         for (int i = 0, bas = 0; i < max; i++, bas += sayfa)
         {
-            var r = (await GonderAsync(Istek(HttpMethod.Post, "/rest/analysis", GenelSorgu(new JsonArray(), bas, bas + sayfa, "sumid")), ct))["response"];
+            var r = (await GonderAsync(Istek(HttpMethod.Post, "/rest/analysis", GenelSorgu(ek, bas, bas + sayfa, "sumid")), ct))["response"];
             var res = r?["results"]?.AsArray().OfType<JsonNode>().ToList() ?? [];
             foreach (var x in res)
                 if ((S(x, "pluginID") ?? S(x, "id")) is { Length: > 0 } id)
                     l.Add((id, S(x, "name") ?? S(x, "pluginName") ?? "", long.TryParse(S(x, "hostTotal") ?? S(x, "total"), out long h) ? h : 0));
             if (!long.TryParse(r?["totalRecords"]?.ToString(), out long top) || bas + sayfa >= top || res.Count == 0) break;
         }
-        lock (_cache) _pluginOzet = (l, DateTime.UtcNow);
+        lock (_cache) _pluginOzet[anahtar] = (l, DateTime.UtcNow);
         return l;
     }
 
     // Ürün araması (kullanıcı: "tarama ekseninde gidelim"; canlıda pluginName "~=" süzgeci YOK SAYILDI — her kelime aynı 50.000 bulguyu döndürdü):
     // plugin adı KODDA eşlenir (sumid özeti), bulgular pluginID ile istenir, bulgu adı yine kodda doğrulanır.
     // Dönüş: bulgular + kelime başına eşleşen plugin sayısı.
+    static JsonObject AssetFiltre(string id) => new() { ["filterName"] = "asset", ["operator"] = "=", ["value"] = new JsonObject { ["id"] = id } };
     static JsonObject IpFiltre(IEnumerable<string> ips) => new() { ["filterName"] = "ip", ["operator"] = "=", ["value"] = string.Join(",", ips) };
 
     public async Task<(List<NessusBulgu> L, Dictionary<string, int> Kelime, bool Kesik)> UrunlerAsync(IReadOnlyList<string> kelimeler, Regex? haric, CancellationToken ct,
-        IReadOnlyCollection<string>? ips = null)
+        IReadOnlyCollection<string>? ips = null, string? assetId = null)
     {
-        var ozet = await PluginOzetiAsync(ct);
+        var ozet = await PluginOzetiAsync(ct, assetId);
         bool Uyar(string ad, string k) => Regex.IsMatch(ad, $@"(?<![A-Za-z]){Regex.Escape(k)}", RegexOptions.IgnoreCase) && !(haric?.IsMatch(ad) ?? false);
         var kel = kelimeler.ToDictionary(k => k, k => ozet.Count(p => Uyar(p.Ad, k)), StringComparer.OrdinalIgnoreCase);
         var ids = ozet.Where(p => kelimeler.Any(k => Uyar(p.Ad, k))).Select(p => p.Id).Distinct().ToList();
@@ -155,6 +160,7 @@ sealed class NessusService(IConfiguration cfg, IHttpClientFactory factory, ILogg
         {
             var f = new JsonArray { new JsonObject { ["filterName"] = "pluginID", ["operator"] = "=", ["value"] = string.Join(",", parca) } };
             if (ips is { Count: > 0 }) f.Add(IpFiltre(ips));
+            if (assetId != null) f.Add(AssetFiltre(assetId));
             var (l, k) = await AraAsync(f, ct);
             if (ips is { Count: > 0 }) l = l.Where(b => ips.Contains(b.Ip)).ToList();   // ip süzgeci de yok sayılırsa
             list.AddRange(l.Where(b => kelimeler.Any(w => Uyar(b.PluginAd, w))));   // süzgeç yine yok sayılırsa alakasız bulgu girmesin
@@ -182,11 +188,117 @@ sealed class NessusService(IConfiguration cfg, IHttpClientFactory factory, ILogg
         return (list, kesik);
     }
 
+    // ---------------- Asset'ler (Tenable.sc asset listeleri; açıklık taramasında DMZ kapsamı) ----------------
+    // Kullanıcı: Nessus ekibinin DMZ asset seti "DMZ - (ZB(Access&Hosting) ve ZI(Access&Hosting) ) [671]". Ayar Zafiyet:DmzAsset = asset id'si ya da adı
+    // (sondaki "[n]" de olabilir: önce adla, sonra id ile eşlenir). IP'ler asset'in viewableIPs / definedIPs alanından, boşsa asset süzgeçli sumip analizinden.
+    public record NessusAsset(string Id, string Ad, string? Tur, long? IpSayisi, string? Aciklama);
+    public record NessusAssetIp(NessusAsset Asset, HashSet<string> Ipler, string Kaynak, bool Kesik);
+    (List<NessusAsset> L, DateTime T)? _assetler;
+    readonly Dictionary<string, (NessusAssetIp A, DateTime T)> _assetIp = [];
+
+    public async Task<List<NessusAsset>> AssetlerAsync(CancellationToken ct)
+    {
+        if (!Acik) throw new InvalidOperationException("Nessus:BaseUrl tanımlı değil.");
+        lock (_cache) if (_assetler is { } a && DateTime.UtcNow - a.T < TimeSpan.FromMinutes(30)) return a.L;
+        var r = (await GonderAsync(Istek(HttpMethod.Get, "/rest/asset?fields=id,name,type,ipCount,description"), ct))["response"];
+        // yanıt {usable:[…], manageable:[…]} ya da düz dizi
+        IEnumerable<JsonNode> Dizi(JsonNode? n) => n is JsonArray d ? d.OfType<JsonNode>() : [];
+        var hepsi = r is JsonArray ? Dizi(r) : Dizi(r?["usable"]).Concat(Dizi(r?["manageable"]));
+        var l = hepsi.Where(x => S(x, "id") is { Length: > 0 }).GroupBy(x => S(x, "id")!).Select(g => g.First())
+            .Select(x => new NessusAsset(S(x, "id")!, S(x, "name") ?? "", S(x, "type"), long.TryParse(S(x, "ipCount"), out long n) ? n : null, S(x, "description")))
+            .OrderBy(x => x.Ad, StringComparer.OrdinalIgnoreCase).ToList();
+        lock (_cache) _assetler = (l, DateTime.UtcNow);
+        return l;
+    }
+
+    static string AdNorm(string s) => Regex.Replace(s.ToLowerInvariant(), @"\s+", " ").Trim();
+    public async Task<(NessusAsset? A, string? Hata)> AssetBulAsync(string tanim, CancellationToken ct)
+    {
+        var l = await AssetlerAsync(ct);
+        string t = tanim.Trim();
+        string? koseli = Regex.Match(t, @"\[(\d+)\]\s*$") is { Success: true } m ? m.Groups[1].Value : null;
+        string ad = AdNorm(Regex.Replace(t, @"\s*\[\d+\]\s*$", ""));
+        var a = l.FirstOrDefault(x => AdNorm(x.Ad) == ad)
+            ?? (Regex.IsMatch(t, @"^\d+$") ? l.FirstOrDefault(x => x.Id == t) : null)
+            ?? (koseli != null ? l.FirstOrDefault(x => x.Id == koseli) : null);
+        if (a == null && ad.Length >= 4)
+        {
+            var aday = l.Where(x => AdNorm(x.Ad).Contains(ad)).ToList();
+            if (aday.Count == 1) a = aday[0];
+            else if (aday.Count > 1) return (null, $"'{tanim}' birden çok asset'e uyuyor: " + string.Join(" | ", aday.Take(5).Select(x => $"{x.Ad} (id {x.Id})")));
+        }
+        if (a != null) return (a, null);
+        var benzer = l.Where(x => x.Ad.Contains("dmz", StringComparison.OrdinalIgnoreCase)).Take(8).Select(x => $"{x.Ad} (id {x.Id})").ToList();
+        return (null, $"Tenable.sc'de '{tanim}' asset'i bulunamadı (anahtarın görebildiği {l.Count} asset)." + (benzer.Count > 0 ? " DMZ geçenler: " + string.Join(" | ", benzer) : ""));
+    }
+
+    public async Task<NessusAssetIp> AssetIpleriAsync(NessusAsset a, CancellationToken ct)
+    {
+        lock (_cache) if (_assetIp.TryGetValue(a.Id, out var c) && DateTime.UtcNow - c.T < TimeSpan.FromMinutes(cfg.GetValue("Nessus:AssetDakika", 60))) return c.A;
+        int max = cfg.GetValue("Nessus:AssetMaxIp", 100000);
+        var ipler = new HashSet<string>();
+        bool kesik = false;
+        string kaynak = "asset tanımı";
+        try
+        {
+            var r = (await GonderAsync(Istek(HttpMethod.Get, $"/rest/asset/{Uri.EscapeDataString(a.Id)}?fields=id,name,type,ipCount,viewableIPs,typeFields"), ct))["response"];
+            var listeler = new List<string>();
+            if (r?["viewableIPs"] is JsonArray v)
+                foreach (var x in v) if (x is JsonObject o) listeler.Add(S(o, "ipList") ?? ""); else if (x != null) listeler.Add(x.ToString());
+            if (listeler.All(string.IsNullOrWhiteSpace) && S(r?["typeFields"], "definedIPs") is { Length: > 0 } d) listeler.Add(d);
+            foreach (var l in listeler) kesik |= !IpAc(l, ipler, max);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException) { log.LogWarning("Asset {Id} IP listesi okunamadı: {H}", a.Id, ex.Message); }
+        if (ipler.Count == 0)
+        {
+            // Dinamik asset'te liste boş olabilir: asset süzgeçli analizde sonucu olan IP'ler (sumip)
+            kaynak = "asset süzgeçli Nessus sonuçları (sumip)";
+            int sayfa = 5000;
+            for (int i = 0, bas = 0; i < 40; i++, bas += sayfa)
+            {
+                var r = (await GonderAsync(Istek(HttpMethod.Post, "/rest/analysis", GenelSorgu(new JsonArray { AssetFiltre(a.Id) }, bas, bas + sayfa, "sumip")), ct))["response"];
+                var res = r?["results"]?.AsArray().OfType<JsonNode>().ToList() ?? [];
+                foreach (var x in res) if (S(x, "ip") is { Length: > 0 } ip) ipler.Add(ip);
+                if (!long.TryParse(r?["totalRecords"]?.ToString(), out long top) || bas + sayfa >= top || res.Count == 0) break;
+            }
+        }
+        var sonuc = new NessusAssetIp(a, ipler, kaynak, kesik);
+        lock (_cache) _assetIp[a.Id] = (sonuc, DateTime.UtcNow);
+        return sonuc;
+    }
+
+    // "10.1.1.1, 10.1.1.5-10.1.1.9, 10.2.0.0/24" → tek tek IPv4 (en çok max; aşılırsa false)
+    internal static bool IpAc(string liste, HashSet<string> ipler, int max)
+    {
+        static uint? U(string s) => System.Net.IPAddress.TryParse(s.Trim(), out var a) && a.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork
+            ? (uint)System.Buffers.Binary.BinaryPrimitives.ReadInt32BigEndian(a.GetAddressBytes()) : null;
+        static string Y(uint u) => $"{u >> 24}.{(u >> 16) & 255}.{(u >> 8) & 255}.{u & 255}";
+        foreach (var p0 in liste.Split(new[] { ',', ';', ' ', '\n', '\r', '\t' }, StringSplitOptions.RemoveEmptyEntries))
+        {
+            uint bas, bit;
+            var p = p0.Trim();
+            if (p.Contains('/') && U(p.Split('/')[0]) is { } ag && int.TryParse(p.Split('/')[1], out int len) && len is >= 0 and <= 32)
+            { uint mask = len == 0 ? 0 : uint.MaxValue << (32 - len); bas = ag & mask; bit = bas | ~mask; }
+            else if (p.Contains('-') && U(p.Split('-')[0]) is { } a1)
+            {
+                string ikinci = p.Split('-')[1];
+                uint? a2 = U(ikinci) ?? (uint.TryParse(ikinci, out uint son) && son <= 255 ? (a1 & 0xFFFFFF00) | son : null);
+                if (a2 == null) continue;
+                bas = Math.Min(a1, a2.Value); bit = Math.Max(a1, a2.Value);
+            }
+            else if (U(p) is { } t) bas = bit = t;
+            else continue;
+            for (ulong u = bas; u <= bit; u++) { if (ipler.Count >= max) return false; ipler.Add(Y((uint)u)); }
+        }
+        return true;
+    }
+
     // CVE numarasına göre bulgular (plugin yayımlanmamışsa boş)
-    public async Task<(List<NessusBulgu> L, bool Kesik)> CveAsync(string cve, CancellationToken ct, IReadOnlyCollection<string>? ips = null)
+    public async Task<(List<NessusBulgu> L, bool Kesik)> CveAsync(string cve, CancellationToken ct, IReadOnlyCollection<string>? ips = null, string? assetId = null)
     {
         var f = new JsonArray { new JsonObject { ["filterName"] = "cveID", ["operator"] = "=", ["value"] = cve } };
         if (ips is { Count: > 0 }) f.Add(IpFiltre(ips));
+        if (assetId != null) f.Add(AssetFiltre(assetId));
         var (l, k) = await AraAsync(f, ct);
         return (ips is { Count: > 0 } ? l.Where(b => ips.Contains(b.Ip)).ToList() : l, k);
     }

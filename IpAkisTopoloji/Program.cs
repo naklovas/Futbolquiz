@@ -427,7 +427,7 @@ app.MapPost("/api/zafiyet/tara", async (ZafiyetIstek? req, HttpContext ctx, ICon
     if (k == null) return Results.BadRequest(new { error = hata });
     var ipler = z.IpListesi(req?.Ipler, out var ipHata);
     if (ipHata != null) return Results.BadRequest(new { error = ipHata });
-    return Results.Ok(z.Baslat(k, req?.Saat ?? 0, ctx.User?.Identity?.Name, ipler, req?.Ekle == true));
+    return Results.Ok(z.Baslat(k, req?.Saat ?? 0, ctx.User?.Identity?.Name, ipler, req?.Ekle == true, req?.Dmz == true));
 });
 app.MapPost("/api/zafiyet/durdur", (HttpContext ctx, IConfiguration cfg, ZafiyetService z) =>
 {
@@ -454,6 +454,14 @@ app.MapDelete("/api/zafiyet/kural/{id}", async (string id, HttpContext ctx, ICon
     return await z.SilAsync(id, ctx.User?.Identity?.Name, ct) ? Results.Ok() : Results.NotFound(new { error = "Kayıtlı kural bulunamadı (yerleşik / ayardaki kurallar silinemez)." });
 });
 
+// DMZ asset'i (Zafiyet:DmzAsset) durumu: hangi asset, kaç IP; asset listesi (ayarı doğru yazmak için, ?q= ad süzgeci)
+app.MapGet("/api/zafiyet/dmz", async (ZafiyetService z, CancellationToken ct) => Results.Ok(await z.DmzBilgiAsync(ct)));
+app.MapGet("/api/nessus/assetler", async (string? q, HttpContext ctx, IConfiguration cfg, NessusService n, CancellationToken ct) =>
+{
+    if (!Yetki.Var(cfg, ctx, Yetki.Topoloji)) return Yetki.Red(ctx, "Nessus asset listesi");
+    try { var l = await n.AssetlerAsync(ct); return Results.Ok(string.IsNullOrWhiteSpace(q) ? l : l.Where(x => x.Ad.Contains(q, StringComparison.OrdinalIgnoreCase)).ToList()); }
+    catch (Exception ex) when (ex is not OperationCanceledException) { return Results.Json(new { error = ex.Message }, statusCode: 502); }
+});
 // Kayıtlı açıklık taramaları (DF_ZAFIYET_TARAMA): liste (gövdesiz), sorgusuz aç, sil
 app.MapGet("/api/zafiyet/kayitlar", async (string? kural, ZafiyetService z, CancellationToken ct) =>
     Results.Ok(await z.KayitlarAsync(string.IsNullOrWhiteSpace(kural) ? null : kural.Trim(), ct)));
