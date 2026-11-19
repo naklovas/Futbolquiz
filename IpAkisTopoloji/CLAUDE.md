@@ -1065,6 +1065,16 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
   seçimi dal > ana > genel. Yerleşik kurallar (`Yerlesik` = Java4Shell, NginxHttp2) artık HER ZAMAN listede (ayarda aynı Id varsa o). Kural birden çok CVE taşır
   (Cve "A, B"; Nessus'ta her biri ayrı). AI doldurmada metindeki tüm CVE'ler; çoklu aralıkta ana hep aynıysa (NGINX) düzeltilmiş sürümlü aralıklar dala bağlanır, genel
   aralık dalsız kalır. Arayüzde aralık tablosunda "Ana sürüm / dal" (17 ya da 1.30). Nessus satırının süreç adı kuralın ilk exe'si ("nginx (Nessus)"). Sürüm mantığı yansıma testiyle.
+  KAYITLI TARAMALAR (kullanıcı: "son taramalar kayıtlı olsun, kayıtlıdan getir / yeni tara seçeneği olsun"): biten tarama "bitti"den ÖNCE ("Sonuç kaydediliyor")
+  `Zafiyet:TaramaTablosu` dbo.DF_ZAFIYET_TARAMA'ya (`sql/zafiyet_tarama.sql`: ID IDENTITY, KURAL_ID, KURAL_AD, CVE, KAPSAM, SAAT, SATIR, OZET (öncelik → sayı JSON),
+  SONUC VARBINARY gzip JSON `ZfKayitVeri` {is, satirlar, mesajlar}, TARIH, KAYDEDEN) yazılır; kural başına son `Zafiyet:KayitSayisi`=5 (eskiler silinir). Anahtar = kural Id,
+  anlık kuralda "anlik:" + Slug(cve ?? ad). Yalnız tüm sunucu taraması ve mevcut listeye EKLENEN tekil tarama (birleşik liste) kaydedilir; listesiz IP taraması
+  kaydedilmez ("Kayıtlıdan getir" tam listeyi açsın). Tablo yoksa / yazılamazsa bellekte (eksi Id) + `_taramaUyari` mesajda. `ZfIs.KayitId / KayitTarihi / Kayittan`.
+  Uçlar: GET `/api/zafiyet/kayitlar?kural=` (gövdesiz, en çok 200), POST `/api/zafiyet/kayit/{id}/ac` (sorgusuz; iş "bitti" + Kayittan, satırlar / mesajlar servise yüklenir →
+  süzgeçler, CSV, "Bu IP'yi yeniden tara" (sonKural + ekle) aynen çalışır; tarama çalışırken açılmaz), DELETE `/api/zafiyet/kayit/{id}` (Yetki:Topoloji). Arayüz: kural
+  satırında "📂 Kayıtlıdan getir (tarih)" (seçili kuralın en son kaydı), "Taramayı başlat" → "🔄 Yeni tara"; katlanır "Son taramalar" (tarih, kural, kapsam, ağ olayı
+  aralığı, satır, kritik / yüksek / orta, kaydeden, Aç / 🗑; açık olan vurgulu); bantta "📁 Kayıttan açıldı: tarih" ya da "💾 kaydedildi". Bellek yedeği (son 5, aç, sil)
+  scratch test ucuyla, arayüz mock'la denendi; SQL yolu ortamda SQL Server olmadığı için denenmedi.
 - **VIP**: sorgulanan IP VIP ise üyeler + GW'ler aynı sorguya eklenir, üyeler "VIP ÜYESİ" (GW→üye trafiği varsa ✓).
   Gidilen IP VIP ise "VIP → n ÜYE"; gelen IP LB GW ise "LB GW"; sorgulanan sunucu havuz üyesiyse VIP kartı.
 - **Uygulama görünümü** (`/api/apps`, `/api/app`): `[kullanan uygulamalar] → [UYGULAMA: VIP'ler + segment grupları] → [bağımlı olunanlar]`,

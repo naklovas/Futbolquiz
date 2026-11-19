@@ -112,6 +112,13 @@
   .chip b { font-family: Consolas, ui-monospace, monospace; }
   .chip .k { font-size: 10.5px; color: var(--muted); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; }
   .arl { margin: 10px 0; display: grid; gap: 6px; justify-items: start; }
+  details.kayit { margin-top: 12px; border-top: 1px solid var(--line); padding-top: 8px; }
+  details.kayit summary { cursor: pointer; font-weight: 600; font-size: 13.5px; }
+  table.kt { width: 100%; font-size: 12.5px; margin-top: 6px; } table.kt th { position: static; text-align: left; padding: 4px 8px; } table.kt td { padding: 4px 8px; border-top: 1px solid var(--line); }
+  table.kt tr.acik td { background: var(--in-soft); }
+  .oz { display: inline-block; min-width: 22px; padding: 0 5px; border-radius: 8px; font-size: 11.5px; text-align: center; margin-right: 3px; }
+  .oz.kritik { background: var(--crit); color: #fff; } .oz.yuksek { background: var(--err); color: #fff; } .oz.orta { background: var(--warn); color: #fff; }
+  .kb { background: var(--in-soft); border-radius: 6px; padding: 2px 8px; font-size: 12.5px; }
   table.mini { width: auto; } table.mini th { position: static; padding: 4px 8px; } table.mini td { padding: 3px 6px; border: none; } table.mini input { width: 150px; padding: 4px 8px; }
   @media (max-width: 700px) { main { padding: 12px 16px 30px; } .drawer dl { grid-template-columns: 1fr; } }
 </style>
@@ -135,6 +142,7 @@
       <label>Kural<select id="kural" style="min-width:380px"></select></label>
       <button type="button" id="duzenle" title="Bu kuralı 'Süreç adıyla ara' formuna kopyala (değiştirip tarayabilir ya da yeni kural olarak kaydedebilirsiniz)">✎ Kopyala / düzenle</button>
       <button type="button" id="sil" hidden title="Kayıtlı kuralı sil">🗑 Sil</button>
+      <button type="button" id="kayitGetir" title="Bu kuralın en son kaydedilen taramasını sorgu yapmadan açar (süzgeçler, Excel ve 'Bu IP'yi yeniden tara' çalışır)">📂 Kayıtlıdan getir</button>
     </div>
     <div id="anlikRow" hidden>
       <div class="aibox">
@@ -164,11 +172,12 @@
       <label>Ağ olayı penceresi<select id="saat"><option value="24">Son 24 saat</option><option value="72">Son 72 saat</option><option value="168">Son 7 gün</option></select></label>
       <label title="Boş: tüm sunucular. Dolu: yalnız bu IP'ler (virgül / boşluk / satırla, en çok 50) — Carbon Black ve Nessus sorguları bu IP'lerle sınırlanır, hızlı biter">IP'ler (isteğe bağlı)<input id="ipler" placeholder="ör. 10.1.2.3, 10.1.2.4" style="width:260px"></label>
       <label class="chk" title="İşaretliyse IP taramasının sonucu mevcut listeye eklenir (bu IP'lerin eski satırları yenilenir); değilse liste yalnız bu IP'lerle değişir"><span><input type="checkbox" id="ekle" checked> Mevcut listeye ekle</span></label>
-      <button type="button" class="primary" id="tara">Taramayı başlat</button>
+      <button type="button" class="primary" id="tara" title="Carbon Black ve Nessus'u yeniden sorgular; bitince sonuç kaydedilir">🔄 Yeni tara</button>
       <button type="button" id="durdur" hidden>Durdur</button>
       <span class="sub" id="yetkiNot"></span>
     </div>
     <div class="desc" id="desc"></div>
+    <details class="kayit" id="kayitBox"><summary>Son taramalar <span class="sub" id="kayitSay"></span></summary><div id="kayitlar"></div></details>
   </section>
 
   <div id="run"></div>
@@ -210,7 +219,7 @@ const ONC_IPUCU = {
   dusuk: "Etkilenmez / yamalı ya da sürüm bilinmiyor ve port dinlemiyor"
 };
 const DUR = { etkilenen: "etkilenen", olasi: "olası", yamali: "yamalı", etkilenmez: "etkilenmez", bilinmiyor: "sürüm bilinmiyor", bilgi: "değerlendirilmedi" };
-const st = { ar: [{ ana: "", min: "", son: "", duzeltilmis: "" }], ai: null, onlemF: false, mod: "kural", veri: null, yetki: {}, onc: "", limit: 500, sec: null, timer: null };
+const st = { ar: [{ ana: "", min: "", son: "", duzeltilmis: "" }], ai: null, onlemF: false, mod: "kural", veri: null, yetki: {}, onc: "", limit: 500, sec: null, timer: null, kayitlar: [], kayitUyari: null, sonDurum: null };
 
 function kuralAciklama(k) {
   if (!k) return "";
@@ -331,7 +340,51 @@ function runCiz() {
   $("#run").innerHTML = `<div class="run ${is.durum === "hata" ? "err" : ""}">${calisiyor ? '<span class="spinner"></span>' : is.durum === "bitti" ? "✔" : is.durum === "hata" ? "✖" : "■"}
     <b>${esc(is.kural?.cve ? is.kural.cve + " · " : "")}${esc(is.kural?.ad)}</b>
     <span>${esc(is.asama)}</span><span class="muted">· ${ss}${is.kapsam ? " · " + esc(is.kapsam) : ""} · ağ olayları son ${is.saat} saat, süreç başlangıçları son ${is.surecSaat} saat${is.kaydeden ? " · " + esc(is.kaydeden) : ""}</span>
+    ${is.kayittan ? `<span class="kb" title="Sorgu yapılmadı; kayıtlı sonuç gösteriliyor. Güncel durum için 'Yeni tara'.">📁 Kayıttan açıldı: ${esc(trTarih(is.kayitTarihi))}</span>`
+      : is.kayitId ? `<span class="kb" title="Son taramalar listesinden yeniden açılabilir">💾 kaydedildi${is.kayitId < 0 ? " (yalnız bellekte)" : ""}</span>` : ""}
     ${is.hata ? `<div style="flex-basis:100%;color:var(--err)">${esc(is.hata)}</div>` : ""}</div>`;
+}
+
+const trTarih = t => t ? new Date(t).toLocaleString("tr-TR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "";
+
+// ---- Kayıtlı taramalar (DF_ZAFIYET_TARAMA) ----
+async function kayitYukle() {
+  try {
+    const r = await fetch("api/zafiyet/kayitlar");
+    if (!r.ok) { st.kayitlar = []; st.kayitUyari = r.status === 404 ? "Sunucudaki DLL'de kayıtlı tarama yok (güncel değil)." : "HTTP " + r.status; }
+    else { const j = await r.json(); st.kayitlar = j.kayitlar || []; st.kayitUyari = j.uyari; }
+  } catch (e) { st.kayitlar = []; st.kayitUyari = e.message; }
+  kayitCiz();
+}
+function sonKayit() { const id = $("#kural").value; return st.kayitlar.find(k => k.kuralId === id); }
+function kayitCiz() {
+  const k = sonKayit(), calisiyor = st.veri?.is?.durum === "calisiyor";
+  const b = $("#kayitGetir");
+  b.disabled = !k || calisiyor;
+  b.textContent = k ? `📂 Kayıtlıdan getir (${trTarih(k.tarih)})` : "📂 Kayıtlı tarama yok";
+  $("#kayitSay").textContent = st.kayitlar.length ? `(${st.kayitlar.length})` : "";
+  const acik = st.veri?.is?.kayitId;
+  const oz = o => ["kritik", "yuksek", "orta"].map(x => o?.[x] ? `<span class="oz ${x}" title="${ONC[x]}">${o[x]}</span>` : "").join("") || '<span class="muted">—</span>';
+  $("#kayitlar").innerHTML = (st.kayitUyari ? `<div class="sub" style="color:var(--warn)">${esc(st.kayitUyari)}</div>` : "")
+    + (st.kayitlar.length ? `<table class="kt"><thead><tr><th>Tarih</th><th>Kural</th><th>Kapsam</th><th>Ağ olayı</th><th>Satır</th><th title="kritik / yüksek / orta">Öncelik</th><th>Kaydeden</th><th></th></tr></thead><tbody>`
+      + st.kayitlar.map(x => `<tr class="${x.id === acik ? "acik" : ""}"><td>${esc(trTarih(x.tarih))}</td><td>${esc((x.cve ? x.cve + " · " : "") + (x.kuralAd || x.kuralId))}${x.kuralId.startsWith("anlik:") ? ' <span class="muted small">(süreç adıyla)</span>' : ""}</td>
+        <td>${esc(x.kapsam || "")}</td><td>${x.saat ? x.saat + " saat" : ""}</td><td>${x.satir.toLocaleString("tr-TR")}</td><td>${oz(x.oncelik)}</td><td>${esc(x.kaydeden || "")}${x.id < 0 ? ' <span class="muted small">(bellekte)</span>' : ""}</td>
+        <td style="white-space:nowrap"><button type="button" data-kac="${x.id}" ${calisiyor ? "disabled" : ""}>Aç</button> <button type="button" data-ksil="${x.id}" ${st.yetki.topoloji ? "" : "disabled"} title="Kaydı sil">🗑</button></td></tr>`).join("")
+      + "</tbody></table>" : '<div class="sub">Henüz kaydedilmiş tarama yok — biten her tarama burada saklanır (kural başına son 5).</div>');
+}
+async function kayitAc(id) {
+  const r = await fetch(`api/zafiyet/kayit/${id}/ac`, { method: "POST" });
+  if (!r.ok) { const j = await r.json().catch(() => ({})); alert(j.error || "HTTP " + r.status); return; }
+  const j = await r.json();
+  if (j.kural && !j.kural.id.startsWith("anlik") && [...$("#kural").options].some(o => o.value === j.kural.id)) { st.mod = "kural"; $("#kural").value = j.kural.id; }
+  st.onc = ""; st.onlemF = false; st.limit = 500; detay(null);
+  await yukle();
+}
+async function kayitSil(id) {
+  if (!confirm("Bu kayıtlı tarama silinsin mi?")) return;
+  const r = await fetch(`api/zafiyet/kayit/${id}`, { method: "DELETE" });
+  if (!r.ok) { const j = await r.json().catch(() => ({})); alert(j.error || "HTTP " + r.status); }
+  kayitYukle();
 }
 
 // Kaynak süzgeci: Carbon Black / Nessus / Servis imzası kaydı (+ Carbon Black satırında Nessus CVE doğrulaması)
@@ -468,6 +521,9 @@ async function yukle() {
     ks.innerHTML = st.veri.kurallar.map(k => `<option value="${esc(k.id)}">${esc((k.cve ? k.cve + " · " : "") + k.ad + ((k.kaynak || "").startsWith("kayıtlı") ? "  (kayıtlı)" : ""))}</option>`).join("");
   if (sec) ks.value = sec;
   formCiz(); runCiz(); uyariCiz(); ciz();
+  const d = st.veri.is?.durum;
+  if (st.sonDurum === "calisiyor" && d !== "calisiyor") kayitYukle();   // sunucu kaydı "bitti"den önce yazar
+  st.sonDurum = d; kayitCiz();
   clearTimeout(st.timer);
   if (st.veri.is?.durum === "calisiyor") st.timer = setTimeout(yukle, 3000);
 }
@@ -521,7 +577,12 @@ document.addEventListener("click", e => {
 });
 document.addEventListener("keydown", e => { if (e.key === "Escape") detay(null); });
 ["#q", "#durumF", "#kurumF", "#domainF", "#vlanF", "#dagitimF", "#kaynakF", "#dinleyen", "#testG"].forEach(s => $(s).addEventListener(s === "#q" ? "input" : "change", () => { st.limit = 500; ciz(); }));
-$("#kural").addEventListener("change", formCiz);
+$("#kural").addEventListener("change", () => { formCiz(); kayitCiz(); });
+$("#kayitGetir").addEventListener("click", () => { const k = sonKayit(); if (k) kayitAc(k.id); });
+document.addEventListener("click", e => {
+  const a = e.target.closest("[data-kac]"); if (a) { kayitAc(+a.dataset.kac); return; }
+  const d = e.target.closest("[data-ksil]"); if (d) kayitSil(+d.dataset.ksil);
+});
 $("#aiDoldur").addEventListener("click", aiDoldur);
 $("#kaydet").addEventListener("click", kaydet);
 $("#sil").addEventListener("click", sil);
@@ -543,9 +604,10 @@ fetch("api/me").then(r => r.ok ? r.json() : null).then(me => {
   st.yetki = me?.yetki || {};
   $("#csv").hidden = !st.yetki.disari;
   $("#yetkiNot").textContent = st.yetki.topoloji ? "" : "Tarama başlatma yetkiniz yok (DokuPanel: Yetki:Topoloji); son taramanın sonucunu görebilirsiniz.";
-  runCiz(); formCiz();
+  runCiz(); formCiz(); kayitCiz();
 }).catch(() => {});
 yukle();
+kayitYukle();
 </script>
 </body>
 </html>

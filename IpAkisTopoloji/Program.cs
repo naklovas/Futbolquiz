@@ -454,6 +454,20 @@ app.MapDelete("/api/zafiyet/kural/{id}", async (string id, HttpContext ctx, ICon
     return await z.SilAsync(id, ctx.User?.Identity?.Name, ct) ? Results.Ok() : Results.NotFound(new { error = "Kayıtlı kural bulunamadı (yerleşik / ayardaki kurallar silinemez)." });
 });
 
+// Kayıtlı açıklık taramaları (DF_ZAFIYET_TARAMA): liste (gövdesiz), sorgusuz aç, sil
+app.MapGet("/api/zafiyet/kayitlar", async (string? kural, ZafiyetService z, CancellationToken ct) =>
+    Results.Ok(await z.KayitlarAsync(string.IsNullOrWhiteSpace(kural) ? null : kural.Trim(), ct)));
+app.MapPost("/api/zafiyet/kayit/{id:int}/ac", async (int id, ZafiyetService z, CancellationToken ct) =>
+{
+    var (i, hata) = await z.KayitAcAsync(id, ct);
+    return i == null ? Results.BadRequest(new { error = hata }) : Results.Ok(i);
+});
+app.MapDelete("/api/zafiyet/kayit/{id:int}", async (int id, HttpContext ctx, IConfiguration cfg, ZafiyetService z, CancellationToken ct) =>
+{
+    if (!Yetki.Var(cfg, ctx, Yetki.Topoloji)) return Yetki.Red(ctx, "Açıklık taraması kaydı silme");
+    return await z.KayitSilAsync(id, ctx.User?.Identity?.Name, ct) ? Results.Ok() : Results.NotFound(new { error = "Kayıt bulunamadı." });
+});
+
 // Opinnate tanı: rule-checker ve /devices ham yanıtları (düz metin; token / şifre yazılmaz)
 app.MapGet("/api/opinnate/tani", async (string? src, string? dst, string? port, IConfiguration cfg, IHttpClientFactory factory, CancellationToken ct) =>
 {

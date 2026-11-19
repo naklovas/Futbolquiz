@@ -25,7 +25,12 @@ record ZfSatir(string? Ip, string? Sunucu, string? Bilgisayar, string? Kurum, st
     string Exe, string Yol, string? Urun, string? Surum, string? SurumKaynak, string Durum, string DurumNot,
     List<ZfPort> Portlar, long Giden, string Onlem, string? Komut, string? Jar, string? Son, string? Baslangic, string Oncelik, string Kaynak,
     string? Vlan = null, string? Domain = null, string? Cidr = null, string? Dagitim = null, string? Nessus = null);
-record ZfIs(string Durum, string Asama, DateTime Baslangic, DateTime? Bitis, string? Hata, string? Kaydeden, int Saat, int SurecSaat, ZfKural Kural, string? Kapsam = null);
+record ZfIs(string Durum, string Asama, DateTime Baslangic, DateTime? Bitis, string? Hata, string? Kaydeden, int Saat, int SurecSaat, ZfKural Kural, string? Kapsam = null,
+    int? KayitId = null, DateTime? KayitTarihi = null, bool Kayittan = false);
+// Kayıtlı tarama (DF_ZAFIYET_TARAMA): liste satırı (sonuç gövdesi yok) ve gzip JSON gövdesi
+record ZfKayit(int Id, string KuralId, string? KuralAd, string? Cve, string? Kapsam, int Saat, int Satir, Dictionary<string, int> Oncelik, DateTime Tarih, string? Kaydeden);
+record ZfKayitVeri(ZfIs Is, List<ZfSatir> Satirlar, List<string> Mesajlar);
+record ZfKayitListe(List<ZfKayit> Kayitlar, string? Uyari);
 // Sayfadan elle / AI ile doldurulmuş kural: exe adları virgülle, önlem ifadeleri virgülle (DÜZ METİN; regex'e kaçışlanır)
 record ZfOzel(string? Ad, string? Cve, string? Aciklama, string? Exeler, List<ZfAralik>? Araliklar, string? Onlem, bool DigerEtkilenir, string? NessusAnahtarlar = null);
 // Ipler: yalnız bu IP'ler (tekil tarama); Ekle: sonuç mevcut listeye eklenir (o IP'lerin eski satırları değişir); SonKural: son taramanın kuralı
@@ -49,7 +54,7 @@ sealed class ZafiyetService(IConfiguration cfg, IHttpClientFactory factory, Enva
     public async Task<ZfSonuc> SonucAsync(CancellationToken ct)
     {
         var k = await KurallarAsync(ct);
-        lock (_gate) return new ZfSonuc(_is, _satir, _kayitUyari == null ? _mesaj : [.. _mesaj, _kayitUyari], k);
+        lock (_gate) return new ZfSonuc(_is, _satir, [.. _mesaj, .. new[] { _kayitUyari, _taramaUyari }.OfType<string>()], k);
     }
     public void Durdur() { lock (_gate) _cts?.Cancel(); }
 
@@ -404,11 +409,22 @@ sealed class ZafiyetService(IConfiguration cfg, IHttpClientFactory factory, Enva
                     mesaj.Insert(0, $"Tekil tarama listeye eklendi: {string.Join(", ", ipler!)} → {yeni} satır (bu IP'lerin eski satırları yenilendi).");
                 }
             }
+            var tumMesaj = (eskiMesaj ?? []).Concat(mesaj).Distinct().ToList();
+            ZfIs son;
             lock (_gate)
             {
-                _satir = satir; _mesaj = (eskiMesaj ?? []).Concat(mesaj).Distinct().ToList();
-                _is = _is! with { Durum = "bitti", Asama = ipSet != null ? $"Bitti: {yeni} satır ({ipler!.Count} IP)" : $"Bitti: {satir.Count} süreç", Bitis = DateTime.Now };
+                _satir = satir; _mesaj = tumMesaj;
+                son = _is! with { Durum = "bitti", Asama = ipSet != null ? $"Bitti: {yeni} satır ({ipler!.Count} IP)" : $"Bitti: {satir.Count} süreç", Bitis = DateTime.Now };
+                _is = _is with { Asama = "Sonuç kaydediliyor" };
             }
+            // Sonuç kaydı ("bitti"den ÖNCE, sayfa listeyi hemen görsün): tüm sunucu taraması ya da mevcut listeye eklenen tekil tarama
+            // (yalnız birkaç IP'lik liste kaydedilmez — "Kayıtlıdan getir" tam listeyi açsın)
+            if (ipSet == null || eski is { Count: > 0 })
+            {
+                var (kid, kt) = await TaramaKaydetAsync(son, satir, tumMesaj);
+                son = son with { KayitId = kid, KayitTarihi = kt };
+            }
+            lock (_gate) _is = son;
         }
         catch (OperationCanceledException) { lock (_gate) { _mesaj = mesaj; _is = _is! with { Durum = "durduruldu", Asama = "Durduruldu", Bitis = DateTime.Now }; } }
         catch (Exception ex)
@@ -751,6 +767,158 @@ sealed class ZafiyetService(IConfiguration cfg, IHttpClientFactory factory, Enva
         catch (Exception ex) when (ex is not OperationCanceledException) { log.LogWarning("Açıklık kuralı DB'den silinemedi: {H}", ex.Message); }
         log.LogInformation("Açıklık kuralı silindi: {Id} ({User})", id, user);
         lock (_gate) _kayitli = null;
+        return var;
+    }
+
+    // ---------------- Kayıtlı taramalar (DF_ZAFIYET_TARAMA; sql/zafiyet_tarama.sql) ----------------
+    // Kullanıcı: "son taramalar kayıtlı olsun, kayıtlıdan getir / yeni tara seçeneği olsun". Biten tarama gzip JSON olarak yazılır; kural başına son
+    // Zafiyet:KayitSayisi (5) tutulur. Tablo yoksa / yazılamazsa bellekte (uygulama yeniden başlayınca kaybolur) + uyarı.
+    string TaramaTablo => cfg["Zafiyet:TaramaTablosu"] is { } t && Regex.IsMatch(t, @"^[\w.\[\]]+$") ? t : "dbo.DF_ZAFIYET_TARAMA";
+    int KayitSayisi => Math.Clamp(cfg.GetValue("Zafiyet:KayitSayisi", 5), 1, 50);
+    string? _taramaUyari;
+    readonly List<(ZfKayit Ozet, byte[] Veri)> _taramaBellek = [];
+    int _bellekId;
+    static string KayitAnahtar(ZfKural k) => k.Id.Equals("anlik", StringComparison.OrdinalIgnoreCase) ? "anlik:" + Slug(k.Cve ?? k.Ad) : k.Id;
+    static byte[] Sikistir(ZfKayitVeri v)
+    {
+        using var ms = new MemoryStream();
+        using (var gz = new System.IO.Compression.GZipStream(ms, System.IO.Compression.CompressionLevel.Optimal)) System.Text.Json.JsonSerializer.Serialize(gz, v, Js);
+        return ms.ToArray();
+    }
+    static ZfKayitVeri? Ac(byte[] b)
+    {
+        using var gz = new System.IO.Compression.GZipStream(new MemoryStream(b), System.IO.Compression.CompressionMode.Decompress);
+        return System.Text.Json.JsonSerializer.Deserialize<ZfKayitVeri>(gz, Js);
+    }
+    static Dictionary<string, int> OncelikSay(List<ZfSatir> l) => l.GroupBy(r => r.Oncelik).ToDictionary(g => g.Key, g => g.Count());
+
+    async Task<(int Id, DateTime Tarih)> TaramaKaydetAsync(ZfIs i, List<ZfSatir> satir, List<string> mesaj)
+    {
+        string anahtar = KayitAnahtar(i.Kural);
+        var veri = Sikistir(new ZfKayitVeri(i with { KayitId = null, KayitTarihi = null, Kayittan = false }, satir, mesaj));
+        string ozet = System.Text.Json.JsonSerializer.Serialize(OncelikSay(satir), Js);
+        int id; DateTime tarih;
+        try
+        {
+            await using var conn = new Microsoft.Data.SqlClient.SqlConnection(cfg.GetConnectionString("Envanter"));
+            await conn.OpenAsync();
+            await using var cmd = new Microsoft.Data.SqlClient.SqlCommand($"""
+                INSERT INTO {TaramaTablo} (KURAL_ID, KURAL_AD, CVE, KAPSAM, SAAT, SATIR, OZET, SONUC, TARIH, KAYDEDEN)
+                OUTPUT INSERTED.ID, INSERTED.TARIH
+                VALUES (@k, @ad, @cve, @kap, @saat, @n, @oz, @s, SYSDATETIME(), @u);
+                """, conn);
+            cmd.Parameters.AddWithValue("@k", anahtar);
+            cmd.Parameters.AddWithValue("@ad", Kes(i.Kural.Ad, 400));
+            cmd.Parameters.AddWithValue("@cve", (object?)Kes(i.Kural.Cve, 400) ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@kap", (object?)Kes(i.Kapsam, 400) ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@saat", i.Saat);
+            cmd.Parameters.AddWithValue("@n", satir.Count);
+            cmd.Parameters.AddWithValue("@oz", ozet);
+            cmd.Parameters.Add("@s", System.Data.SqlDbType.VarBinary, -1).Value = veri;
+            cmd.Parameters.AddWithValue("@u", (object?)i.Kaydeden ?? DBNull.Value);
+            await using (var rd = await cmd.ExecuteReaderAsync())
+            {
+                await rd.ReadAsync();
+                id = rd.GetInt32(0); tarih = rd.GetDateTime(1);
+            }
+            // kural başına son N kayıt
+            await using var sil = new Microsoft.Data.SqlClient.SqlCommand($"""
+                DELETE FROM {TaramaTablo} WHERE KURAL_ID = @k AND ID NOT IN (SELECT TOP (@n) ID FROM {TaramaTablo} WHERE KURAL_ID = @k ORDER BY TARIH DESC, ID DESC);
+                """, conn);
+            sil.Parameters.AddWithValue("@k", anahtar);
+            sil.Parameters.AddWithValue("@n", KayitSayisi);
+            await sil.ExecuteNonQueryAsync();
+            _taramaUyari = null;
+        }
+        catch (Exception ex)
+        {
+            _taramaUyari = (ex is Microsoft.Data.SqlClient.SqlException { Number: 208 } ? $"Tarama kayıt tablosu ({TaramaTablo}) yok" : "Tarama sonucu DB'ye yazılamadı (" + ex.Message + ")")
+                + "; sonuç yalnız bellekte saklandı (uygulama yeniden başlayınca kaybolur; sql/zafiyet_tarama.sql).";
+            log.LogWarning("Açıklık taraması kaydedilemedi: {H}", ex.Message);
+            tarih = DateTime.Now;
+            lock (_gate)
+            {
+                id = --_bellekId;   // bellekteki kayıtlar eksi numaralı
+                _taramaBellek.Insert(0, (new ZfKayit(id, anahtar, i.Kural.Ad, i.Kural.Cve, i.Kapsam, i.Saat, satir.Count, OncelikSay(satir), tarih, i.Kaydeden), veri));
+                var fazla = _taramaBellek.Where(x => x.Ozet.KuralId == anahtar).Skip(KayitSayisi).ToList();
+                foreach (var f in fazla) _taramaBellek.Remove(f);
+            }
+        }
+        log.LogInformation("Açıklık taraması kaydedildi: {K} #{Id} ({N} satır)", anahtar, id, satir.Count);
+        return (id, tarih);
+    }
+    static string? Kes(string? s, int n) => s == null ? null : s.Length > n ? s[..n] : s;
+
+    // kural verilirse yalnız o kuralın kayıtları (anlık kuralda ZfOzel'den aynı anahtar); verilmezse tüm kuralların son kayıtları
+    public async Task<ZfKayitListe> KayitlarAsync(string? kural, CancellationToken ct)
+    {
+        var l = new List<ZfKayit>();
+        try
+        {
+            await using var conn = new Microsoft.Data.SqlClient.SqlConnection(cfg.GetConnectionString("Envanter"));
+            await conn.OpenAsync(ct);
+            await using var cmd = new Microsoft.Data.SqlClient.SqlCommand($"""
+                SELECT TOP 200 ID, KURAL_ID, KURAL_AD, CVE, KAPSAM, SAAT, SATIR, OZET, TARIH, KAYDEDEN FROM {TaramaTablo}
+                {(kural != null ? "WHERE KURAL_ID = @k" : "")} ORDER BY TARIH DESC, ID DESC
+                """, conn);
+            if (kural != null) cmd.Parameters.AddWithValue("@k", kural);
+            await using var rd = await cmd.ExecuteReaderAsync(ct);
+            while (await rd.ReadAsync(ct))
+            {
+                Dictionary<string, int> oz = [];
+                if (!rd.IsDBNull(7)) try { oz = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, int>>(rd.GetString(7), Js) ?? []; } catch (System.Text.Json.JsonException) { }
+                l.Add(new ZfKayit(rd.GetInt32(0), rd.GetString(1), rd.IsDBNull(2) ? null : rd.GetString(2), rd.IsDBNull(3) ? null : rd.GetString(3),
+                    rd.IsDBNull(4) ? null : rd.GetString(4), rd.IsDBNull(5) ? 0 : rd.GetInt32(5), rd.GetInt32(6), oz, rd.GetDateTime(8), rd.IsDBNull(9) ? null : rd.GetString(9)));
+            }
+            if (_taramaBellek.Count == 0) _taramaUyari = null;
+        }
+        catch (Microsoft.Data.SqlClient.SqlException ex) when (ex.Number == 208) { _taramaUyari = $"Tarama kayıt tablosu ({TaramaTablo}) yok; taramalar yalnız bellekte saklanıyor (sql/zafiyet_tarama.sql)."; }
+        catch (Exception ex) when (ex is not OperationCanceledException) { log.LogWarning(ex, "Kayıtlı açıklık taramaları okunamadı"); _taramaUyari = "Kayıtlı taramalar okunamadı: " + ex.Message; }
+        lock (_gate) l.AddRange(_taramaBellek.Select(x => x.Ozet).Where(o => kural == null || o.KuralId.Equals(kural, StringComparison.OrdinalIgnoreCase)));
+        return new ZfKayitListe(l.OrderByDescending(x => x.Tarih).ToList(), _taramaUyari);
+    }
+
+    // Kayıtlı taramayı sorgusuz açar: iş durumu "bitti" + Kayittan; süzgeçler, CSV ve "Bu IP'yi yeniden tara" (listeye ekle) bu liste üzerinde çalışır
+    public async Task<(ZfIs? Is, string? Hata)> KayitAcAsync(int id, CancellationToken ct)
+    {
+        lock (_gate) if (_is is { Durum: "calisiyor" }) return (null, "Şu an bir tarama çalışıyor; bitince ya da durdurunca açın.");
+        byte[]? b = null; DateTime tarih = DateTime.Now; string? kaydeden = null;
+        lock (_gate) if (_taramaBellek.FirstOrDefault(x => x.Ozet.Id == id) is { Veri: not null } m) { b = m.Veri; tarih = m.Ozet.Tarih; kaydeden = m.Ozet.Kaydeden; }
+        if (b == null && id > 0)
+        {
+            await using var conn = new Microsoft.Data.SqlClient.SqlConnection(cfg.GetConnectionString("Envanter"));
+            await conn.OpenAsync(ct);
+            await using var cmd = new Microsoft.Data.SqlClient.SqlCommand($"SELECT SONUC, TARIH, KAYDEDEN FROM {TaramaTablo} WHERE ID = @id", conn);
+            cmd.Parameters.AddWithValue("@id", id);
+            await using var rd = await cmd.ExecuteReaderAsync(ct);
+            if (await rd.ReadAsync(ct)) { b = (byte[])rd[0]; tarih = rd.GetDateTime(1); kaydeden = rd.IsDBNull(2) ? null : rd.GetString(2); }
+        }
+        if (b == null) return (null, "Kayıtlı tarama bulunamadı (silinmiş olabilir).");
+        var v = Ac(b);
+        if (v == null) return (null, "Kayıt okunamadı.");
+        lock (_gate)
+        {
+            if (_is is { Durum: "calisiyor" }) return (null, "Şu an bir tarama çalışıyor.");
+            _satir = v.Satirlar; _mesaj = v.Mesajlar;
+            _is = v.Is with { Durum = "bitti", KayitId = id, KayitTarihi = tarih, Kayittan = true, Kaydeden = v.Is.Kaydeden ?? kaydeden };
+            return (_is, null);
+        }
+    }
+
+    public async Task<bool> KayitSilAsync(int id, string? user, CancellationToken ct)
+    {
+        bool var;
+        lock (_gate) var = _taramaBellek.RemoveAll(x => x.Ozet.Id == id) > 0;
+        if (id > 0)
+        {
+            await using var conn = new Microsoft.Data.SqlClient.SqlConnection(cfg.GetConnectionString("Envanter"));
+            await conn.OpenAsync(ct);
+            await using var cmd = new Microsoft.Data.SqlClient.SqlCommand($"DELETE FROM {TaramaTablo} WHERE ID = @id", conn);
+            cmd.Parameters.AddWithValue("@id", id);
+            var |= await cmd.ExecuteNonQueryAsync(ct) > 0;
+        }
+        lock (_gate) if (_is?.KayitId == id) _is = _is with { KayitId = null, KayitTarihi = null };
+        log.LogInformation("Açıklık taraması kaydı silindi: #{Id} ({User})", id, user);
         return var;
     }
 
