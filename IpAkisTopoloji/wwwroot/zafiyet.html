@@ -427,16 +427,21 @@ function kaynakGrup(r) {
 }
 
 // ---- ERT boşsa tahminler: işleten birim (DF_BIRIM_ONERI), uygulama (ERT eksikleri önerisi), muhafız (önerilen uygulamanın ana kaydı) ----
+// ERT'deki "Sistem Portudur…" kayıtları uygulama değil (eski kayıtlı taramalarda da ayıklanır)
+const sistemUyg = a => /^\s*(sistem portu|altyap[ıi])/i.test(a || "");
+const ertUyg = r => (r.uygulamalar || []).filter(a => !sistemUyg(a));
+// Kullanılabilir uygulama önerileri: sistem / altyapı portu ya da "Altyapı / Sistem Portudur" cevabı değil
+const isOnerisi = l => (l || []).filter(x => !sistemUyg(x.uygulama) && !(st.tahminDisi?.has(x.port)));
 function uygOnerileri(r) {
   const b = r.ip && st.bm?.[r.ip];
-  if (!b || (r.uygulamalar || []).length) return [];
+  if (!b || ertUyg(r).length) return [];
   const portlar = new Set(r.portlar.map(p => p.port));
-  const l = b.uygOneri || [];
+  const l = isOnerisi(b.uygOneri);
   const bu = l.filter(x => portlar.has(x.port));
   return bu.length ? bu : l.slice(0, 3);
 }
 function uygHtml(r) {
-  const ert = esc((r.uygulamalar || []).slice(0, 3).join(" | "));
+  const ert = esc(ertUyg(r).slice(0, 3).join(" | "));
   const uo = uygOnerileri(r), bulunan = uo.filter(x => x.uygulama), bos = uo.filter(x => !x.uygulama);
   const b = r.ip && st.bm?.[r.ip];
   const ara = !ert && r.ip && st.yetki.yazma && b ? ` <button type="button" style="padding:0 5px;font-size:11px;margin-top:2px" data-bk="uyg" data-ip="${esc(r.ip)}" title="Bu sunucunun uygulamasını ERT eksikleri motoruyla AI'a sor (önerisi olsa da yeniden; onaylı / elle hariç)">🤖 AI ile ara</button>` : "";
@@ -464,14 +469,15 @@ function tekrarBtn(r) {
 }
 const bekle = ms => new Promise(r => setTimeout(r, ms));
 // Satırın uygulama tahmini için portları: CB'de dinlediği portlar + Nessus bulgu portları + ERT'de uygulaması boş portlar
+// Sıra: açıklığı taşıyan sürecin dinlediği portlar (CB) → ürünün Nessus bulgu portları → ERT'de uygulaması boş portlar; altyapı / sistem portları (st.tahminDisi) hariç
 function satirPortlari(ip) {
-  const rs = (st.veri?.satirlar || []).filter(r => r.ip === ip);
+  const rs = (st.veri?.satirlar || []).filter(r => r.ip === ip && !r._hayalet);
   return [...new Set([...rs.flatMap(r => r.portlar.map(p => p.port)), ...rs.flatMap(r => r.nessusPortlar || []), ...(st.bm?.[ip]?.bosPortlar || [])])]
-    .filter(p => /^\d+$/.test(p) && p !== "0").sort((a, b) => a - b);
+    .filter(p => /^\d+$/.test(p) && p !== "0" && +p < 49152 && !(st.tahminDisi?.has(p))).slice(0, 10);
 }
 // Uygulama tahmini gereken IP'ler: ERT'de uygulaması yok ve (yeniden değilse) önerisi yok; portu ya da ERT'de boş satırı olmalı
 function uygGerekenler(ips, yeniden) {
-  return ips.filter(ip => { const b = st.bm?.[ip]; return b && !(b.uygulamalar || []).length && (yeniden || !(b.uygOneri || []).length); });
+  return ips.filter(ip => { const b = st.bm?.[ip]; return b && !(b.uygulamalar || []).length && (yeniden || !isOnerisi(b.uygOneri).length); });
 }
 async function eksikBekle(not) {
   for (let i = 0; i < 1200; i++) {
@@ -575,6 +581,7 @@ async function birimYukle(zorla) {
     if (!r.ok) { st.bm = {}; $("#birimNot").textContent = r.status === 404 ? "Birim bilgisi: DLL güncel değil." : ""; return; }
     const j = await r.json();
     st.bm = Object.fromEntries(j.satirlar.map(x => [x.ip, x]));
+    st.tahminDisi = new Set(j.tahminDisi || []);
     st.bmUyari = j.uyari; birimDurumCiz(j.durum);
   } catch { st.bm = {}; }
   ciz();
@@ -833,8 +840,8 @@ function detay(r) {
       <dt>Geçici önlem</dt><dd>${r.onlem === "var" ? "✔ komut satırında var" : r.onlem === "yok" ? "komut satırında yok" : r.onlem === "bilinmiyor" ? "bilinmiyor (pencerede süreç başlangıcı görülmedi)" : "—"}</dd>
       <dt>Bilgisayar (CB)</dt><dd>${esc(r.bilgisayar || "—")}</dd>
       <dt>Kurum / segment</dt><dd>${esc(r.kurum || "")}${r.segment ? " · " + esc(r.segment) : ""}${r.test ? " · test" : ""}</dd>
-      <dt>ERT uygulamaları</dt><dd>${esc((r.uygulamalar || []).join(" | ")) || "—"}${r.muhafiz ? `<div class="small muted">Muhafız: ${esc(r.muhafiz)}</div>` : ""}
-        ${!(r.uygulamalar || []).length && uygOnerileri(r).length ? `<div class="small th">🤖 Uygulama önerisi (ERT eksikleri): ${uygOnerileri(r).map(x => `${esc(x.uygulama || "bulunamadı")} · port ${esc(x.port)} · %${x.guven} · ${esc(x.durum)}${x.gerekce ? `<div class="muted">${esc(x.gerekce)}</div>` : ""}`).join("<br>")}</div>` : ""}
+      <dt>ERT uygulamaları</dt><dd>${esc(ertUyg(r).join(" | ")) || "—"}${r.muhafiz ? `<div class="small muted">Muhafız: ${esc(r.muhafiz)}</div>` : ""}
+        ${!ertUyg(r).length && uygOnerileri(r).length ? `<div class="small th">🤖 Uygulama önerisi (ERT eksikleri): ${uygOnerileri(r).map(x => `${esc(x.uygulama || "bulunamadı")} · port ${esc(x.port)} · %${x.guven} · ${esc(x.durum)}${x.gerekce ? `<div class="muted">${esc(x.gerekce)}</div>` : ""}`).join("<br>")}</div>` : ""}
         ${st.bm?.[r.ip]?.muhafizTahmin && !r.muhafiz ? `<div class="small th">🤖 Muhafız tahmini: ${esc(st.bm[r.ip].muhafizTahmin)} <span class="g">(${esc(st.bm[r.ip].tahminKaynak || "")})</span></div>` : ""}</dd>
       <dt>İşleten birim</dt><dd>${birimHtml(r, true)}${r.ip ? ` <a class="small" href="api/birim/kanit?ip=${encodeURIComponent(r.ip)}" target="_blank" rel="noopener">kanıt ↗</a>` : ""}</dd>
       <dt>Dinlediği portlar</dt><dd>${portlar || "— (yalnız giden bağlantı)"}</dd>
@@ -906,7 +913,7 @@ function csv() {
   const q = v => `"${String(v ?? "").replace(/"/g, '""')}"`;
   const lines = [["ÖNCELİK", "IP", "SUNUCU", "BİLGİSAYAR (CB)", "KURUM", "SEGMENT", "VLAN", "DOMAIN", "CIDR", "TEST", "ERT UYGULAMALARI", "MUHAFIZ", "EXE", "EXE YOLU", "ÜRÜN", "-JAR", "DAĞITIM", "SÜRÜM", "SÜRÜM KAYNAĞI", "DURUM", "DURUM NOTU",
     "DİNLEDİĞİ PORTLAR", "VIP", "DIŞ İSTEMCİ", "GİDEN BAĞLANTI", "GEÇİCİ ÖNLEM", "SON GÖRÜLME", "SÜREÇ BAŞLANGICI", "ÖNCEKİ TARAMA", "ÖNCEKİ SÜRÜM", "ÖNCEKİ DURUM", "DEĞİŞİM", "İŞLETEN BİRİM", "BİRİM KAYNAĞI", "UYGULAMA ÖNERİSİ (ERT boşsa)", "MUHAFIZ TAHMİNİ", "KAYNAK", "NESSUS REPOSITORY", "NESSUS", "DMZ", "DIŞ HEDEF SAYISI", "DIŞ HEDEFLER", "KOMUT SATIRI"].join(";"),
-    ...suz().map(r => [ONC[r.oncelik], r.ip, r.sunucu, r.bilgisayar, r.kurum, r.segment, r.vlan, r.domain, r.cidr, r.test ? "evet" : "", (r.uygulamalar || []).join(" | "), r.muhafiz || st.bm?.[r.ip]?.muhafiz, r.exe, r.yol, r.urun, r.jar, r.dagitim,
+    ...suz().map(r => [ONC[r.oncelik], r.ip, r.sunucu, r.bilgisayar, r.kurum, r.segment, r.vlan, r.domain, r.cidr, r.test ? "evet" : "", ertUyg(r).join(" | "), r.muhafiz || st.bm?.[r.ip]?.muhafiz, r.exe, r.yol, r.urun, r.jar, r.dagitim,
       r.surum, r.surumKaynak, DUR[r.durum] || r.durum, r.durumNot, r.portlar.map(p => p.port).join(", "), [...new Set(r.portlar.flatMap(p => p.vip))].join(", "),
       [...new Set(r.portlar.flatMap(p => p.dis))].join(", "), r.giden, r.onlem, r.son, r.baslangic, st.kars ? trTarih(st.kars.tarih) : "", degisim(r)?.o && !r._hayalet ? degisim(r).o.surum : "", degisim(r)?.o && !r._hayalet ? (DUR[degisim(r).o.durum] || degisim(r).o.durum) : "", degisim(r) ? DEG[degisim(r).tur] : "",
       birimBilgi(r)?.ad, birimKaynak(r), uygOnerileri(r).map(x => `${x.uygulama || "bulunamadı"} (port ${x.port}, %${x.guven}, ${x.durum})`).join(" | "), st.bm?.[r.ip]?.muhafizTahmin, r.kaynak, r.repo, r.nessus, r.dmz ? "evet" : "", r.disGidenSay || "", (r.disGiden || []).join(", "), r.komut].map(q).join(";"))];

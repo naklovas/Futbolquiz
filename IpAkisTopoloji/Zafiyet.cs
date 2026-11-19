@@ -603,7 +603,7 @@ sealed class ZafiyetService(IConfiguration cfg, IHttpClientFactory factory, Enva
             string kurum = g.Ip == null ? "Diğer" : KurumBilgi.Of(cfg, env, g.Ip);
             string dom = (seg?.Domain ?? "").ToLowerInvariant();
             sonuc.Add(new ZfSatir(g.Ip, host ?? g.Pc, g.Pc, kurum, seg?.Label, test.Any(x => x.Length > 0 && dom.Contains(x)),
-                apps.Select(a => a.AppName).OfType<string>().Where(a => a.Length > 0).Distinct().Take(8).ToList(),
+                apps.Select(a => a.AppName).OfType<string>().Where(a => a.Length > 0 && !env.IsSystemApp(a)).Distinct().Take(8).ToList(),   // "Sistem Portudur…" uygulama değil
                 apps.Select(a => a.VarlikMuhafizi).FirstOrDefault(a => !string.IsNullOrWhiteSpace(a)),
                 ExeAd(g.Yol), g.Yol, Urun(g.Yol, komut, jar), surum, kaynakS, durum, not,
                 portlar, g.Giden, onlem, komut, jar, g.Son > 0 ? Zaman(g.Son.ToString(System.Globalization.CultureInfo.InvariantCulture)) : null,
@@ -720,7 +720,7 @@ sealed class ZafiyetService(IConfiguration cfg, IHttpClientFactory factory, Enva
         var portlar = vip.Count > 0 ? new List<ZfPort> { new("VIP", 0, 0, null, vip, []) } : [];
         var r = new ZfSatir(b.Ip, apps.Select(a => a.UnixName).FirstOrDefault(a => !string.IsNullOrWhiteSpace(a)) ?? b.Dns ?? b.Netbios, b.Netbios ?? b.Dns,
             KurumBilgi.Of(cfg, env, b.Ip), seg?.Label, test.Any(x => x.Length > 0 && dom.Contains(x)),
-            apps.Select(a => a.AppName).OfType<string>().Where(a => a.Length > 0).Distinct().Take(8).ToList(),
+            apps.Select(a => a.AppName).OfType<string>().Where(a => a.Length > 0 && !env.IsSystemApp(a)).Distinct().Take(8).ToList(),   // "Sistem Portudur…" uygulama değil
             apps.Select(a => a.VarlikMuhafizi).FirstOrDefault(a => !string.IsNullOrWhiteSpace(a)),
             exe, yol, null, surum, surum != null ? "Nessus" : null, durum, not, portlar, 0, "bilinmiyor", null, null, b.Son, null, "dusuk", kaynak,
             Vlan: seg?.Vlan, Domain: seg?.Domain, Cidr: seg?.Cidr, Dagitim: k.Java ? Dagitim(yol) : null, Nessus: nessusNot, Repo: RepoAdi(b));

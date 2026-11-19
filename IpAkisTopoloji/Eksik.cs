@@ -790,6 +790,10 @@ sealed class EksikService(IConfiguration cfg, IHttpClientFactory factory, Envant
         cfg.GetSection("Eksik:BilinenSistemPortlari").GetChildren().Where(c => c.Value is { Length: > 0 }).ToDictionary(c => c.Key, c => c.Value!) is { Count: > 0 } d
             ? d : DefaultSistemPortlari;
     static readonly HashSet<string> WebPortlari = ["80", "443", "8080", "8443", "8000", "8081", "8888", "9443"];
+    // Uygulama tahminine gönderilmeyecek portlar (açıklık taraması; kullanıcı: "sistem portudur basıp geçiyor hepsine"): altyapı portları (Uygulama:AltyapiPortlari),
+    // bilinen sistem portları (Eksik:BilinenSistemPortlari) ve birkaç Windows / Linux servis portu. Web portları (80, 443…) GÖNDERİLİR.
+    public HashSet<string> TahminDisiPortlar() =>
+        [.. AppTopology.InfraPorts(cfg), .. SistemPortlari().Keys, "23", "111", "1900", "3702", "5353", "5355", "593"];
     // Adı standarda göre veritabanı sunucusu olan sunucuda bu port DB portu sayılır mı: sistem / altyapı / web portu değil ve Carbon Black'te portu
     // DB dışı bir süreç kabul etmiyor (SQL Server adlandırılmış instance'ları 5101, 5378 gibi sabit olmayan portlarda dinler)
     bool AdDbPort(string? evidence, string port) =>

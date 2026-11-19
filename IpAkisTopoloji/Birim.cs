@@ -49,6 +49,8 @@ sealed class BirimService(IConfiguration cfg, EnvanterService envanter, IslevSer
             catch (ArgumentException ex) { log.LogWarning("Birim kuralı geçersiz ({D}): {H}", k.Desen, ex.Message); }
         return r;
     }
+    // "Altyapı: …" / "Sistem Portudur…" önerileri iş uygulaması değil (birim / muhafız bunlardan türetilmez)
+    public static bool UygulamaDegil(string u) => Regex.IsMatch(u.Trim(), @"^(altyap[ıi]|sistem portu)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
     static string Turk(string s) => s.Replace('İ', 'I').Replace('ı', 'i');
     static string Katla(string s) => Regex.Replace(Turk(s).ToLowerInvariant(), @"\s+", "");
     // Kural birimi ERT kataloğunda varsa onun yazımıyla
@@ -241,7 +243,7 @@ sealed class BirimService(IConfiguration cfg, EnvanterService envanter, IslevSer
                 .OrderByDescending(x => x.Uygulama != null).ThenByDescending(x => x.Durum is "Onaylandı" or "Elle").ThenByDescending(x => x.Guven).ToList();
             // Önerilen uygulamadan muhafız / birim (ERT'de boşsa): ana kayıt, yoksa uygulamanın diğer sunucularındaki en sık birim
             string? mT = null, bT = null, kay = null;
-            foreach (var u in uol.Where(x => x.Uygulama != null && !x.Uygulama.StartsWith("Altyapı", StringComparison.OrdinalIgnoreCase)))
+            foreach (var u in uol.Where(x => x.Uygulama != null && !UygulamaDegil(x.Uygulama)))
             {
                 string ad = Regex.Replace(u.Uygulama!, @"\s+Veritaban[ıi]$", "", RegexOptions.IgnoreCase);
                 env.Detay.TryGetValue(ad, out var det);
@@ -273,10 +275,12 @@ sealed class BirimService(IConfiguration cfg, EnvanterService envanter, IslevSer
             try { nes = await nessus.SunucularAsync(ips, null, ct); }
             catch (Exception ex) when (ex is not OperationCanceledException) { log.LogWarning("Birim: Nessus portları okunamadı: {H}", ex.Message); }
         int dyn = cfg.GetValue("Eksik:DinamikPortBaslangic", 49152);
+        var disi = eksik.TahminDisiPortlar();
+        bool Uygun(string? p) => int.TryParse(p, out int n) && n > 0 && n < dyn && !disi.Contains(p!);
         return ips.ToDictionary(ip => ip, ip =>
         {
-            var l = (nes.GetValueOrDefault(ip)?.Portlar ?? []).Select(p => p.Port).Where(p => int.TryParse(p, out int n) && n > 0 && n < dyn).Distinct().ToList();
-            if (l.Count == 0) l = env.AppsOnIp(ip).Select(r => r.Port?.Trim()).OfType<string>().Where(p => int.TryParse(p, out int n) && n > 0 && n < dyn).Distinct().ToList();
+            var l = (nes.GetValueOrDefault(ip)?.Portlar ?? []).Select(p => p.Port).Where(Uygun).Distinct().ToList();
+            if (l.Count == 0) l = env.AppsOnIp(ip).Select(r => r.Port?.Trim()).Where(Uygun).OfType<string>().Distinct().ToList();
             return l.OrderBy(p => int.Parse(p)).Take(20).ToList();
         });
     }
@@ -388,7 +392,7 @@ sealed class BirimService(IConfiguration cfg, EnvanterService envanter, IslevSer
         try
         {
             var uo = (await eksik.OnerilerAsync([ip], ct)).GetValueOrDefault(ip) ?? [];
-            foreach (var (port, o) in uo.Where(x => x.Value.Uygulama != null && x.Value.Durum != "Reddedildi" && !x.Value.Uygulama!.StartsWith("Altyapı", StringComparison.OrdinalIgnoreCase)))
+            foreach (var (port, o) in uo.Where(x => x.Value.Uygulama != null && x.Value.Durum != "Reddedildi" && !UygulamaDegil(x.Value.Uygulama!)))
             {
                 string uad = Regex.Replace(o.Uygulama!, @"\s+Veritaban[ıi]$", "", RegexOptions.IgnoreCase);
                 oneriAdlari.Add(o.Uygulama!);

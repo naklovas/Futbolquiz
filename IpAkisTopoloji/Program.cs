@@ -470,10 +470,10 @@ app.MapGet("/api/nessus/assetler", async (string? q, HttpContext ctx, IConfigura
     catch (Exception ex) when (ex is not OperationCanceledException) { return Results.Json(new { error = ex.Message }, statusCode: 502); }
 });
 // Sunucu işleten birim (Birim.cs): ERT SUNUCUISLETENBIRIM + boşsa kayıtlı öneri (AI / kural); öneriler DF_BIRIM_ONERI'ye, ERT'ye yazılmaz
-app.MapPost("/api/birim/satirlar", async (BirimIstek req, BirimService b, CancellationToken ct) =>
+app.MapPost("/api/birim/satirlar", async (BirimIstek req, BirimService b, EksikService eksik, CancellationToken ct) =>
 {
     var (l, uyari) = await b.SatirlarAsync(req.Ips ?? [], ct, req.Adlar);
-    return Results.Ok(new { satirlar = l, uyari, durum = b.Durum() });
+    return Results.Ok(new { satirlar = l, uyari, durum = b.Durum(), tahminDisi = eksik.TahminDisiPortlar() });
 });
 app.MapPost("/api/birim/portlar", async (BirimIstek req, BirimService b, CancellationToken ct) => Results.Ok(await b.PortlarAsync(req.Ips ?? [], ct)));
 app.MapGet("/api/birim/katalog", async (BirimService b, CancellationToken ct) => Results.Ok((await b.KatalogAsync(ct)).Select(x => new { birim = x.Birim, sunucu = x.Sunucu })));

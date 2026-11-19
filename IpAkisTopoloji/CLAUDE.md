@@ -1149,6 +1149,12 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
   `degisim`: giderildi (önce etkilenen / olası / bilinmiyor / bilgi → şimdi yamalı / etkilenmez), önlem alındı (önlem yok → var), değişti, aynı, yeni; önceki taramada olup şimdi
   olmayanlar soluk "hayalet" satır (artık görülmüyor — doğrulanmalı; tıklanmaz, seçilmez). Sürüm hücresinde "önce (tarih): sürüm durum" + rozet, hayalette "şimdi (tarih): görülmedi";
   "Değişim" süzgeci, özet (`#karsNot`: tarih → tarih: sayılar), CSV ÖNCEKİ TARAMA / ÖNCEKİ SÜRÜM / ÖNCEKİ DURUM / DEĞİŞİM (hayaletler dahil). Mock'la denendi.
+  "SİSTEM PORTUDUR" DÜZELTMESİ (kullanıcı: "hiç memnun değilim, sistem portudur basıp geçiyor hepsine"): (1) `ZfSatir.Uygulamalar` ERT'deki "Sistem Portudur…" kayıtlarını
+  uygulama sayıyordu (yalnız sistem portu kaydı olan sunucuda hücre "Sistem Portudur", AI düğmesi çıkmıyordu) → `env.IsSystemApp` ile ayıklanır; sayfada `ertUyg` eski kayıtlarda da
+  ayıklar. (2) Zafiyet'ten ERT eksiklerine giden port listesinde altyapı / sistem portları vardı (özellikle Nessus'un tüm portları) → `EksikService.TahminDisiPortlar()`
+  (Uygulama:AltyapiPortlari ∪ Eksik:BilinenSistemPortlari ∪ 23, 111, 593, 1900, 3702, 5353, 5355; web portları GÖNDERİLİR) `/api/birim/portlar`'da ve sayfada (`satirPortlari`, yanıttaki
+  `tahminDisi`) süzülür; sıra CB süreç portları → ürünün Nessus portları → ERT boş portları, en çok 10. (3) "Altyapı: / Sistem Portudur" cevapları ve sistem portundaki öneriler
+  uygulama önerisi sayılmaz (`isOnerisi`, `BirimService.UygulamaDegil`; birim / muhafız bunlardan türetilmez, "tümü" yeniden sorabilir). Mock'la denendi.
 - **VIP**: sorgulanan IP VIP ise üyeler + GW'ler aynı sorguya eklenir, üyeler "VIP ÜYESİ" (GW→üye trafiği varsa ✓).
   Gidilen IP VIP ise "VIP → n ÜYE"; gelen IP LB GW ise "LB GW"; sorgulanan sunucu havuz üyesiyse VIP kartı.
 - **Uygulama görünümü** (`/api/apps`, `/api/app`): `[kullanan uygulamalar] → [UYGULAMA: VIP'ler + segment grupları] → [bağımlı olunanlar]`,
