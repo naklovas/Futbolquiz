@@ -1139,6 +1139,8 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
   `KuralBul`: ERT sunucu adları + sayfadan gelen ad (`BirimIstek.Adlar` IP → CB bilgisayar / sunucu adı; ERT'de kaydı olmayan kutular için) + ERT uygulamaları + uygulama önerileri.
   `TahminAsync`'te AI'dan ÖNCE (Kaynak "Kural", güven 95); `BirimSatir.KuralBirim / KuralNeden` → sayfada ERT boşsa "📏 X (kural)" (onaylı / elle öneri öncelikli, AI önerisinden
   önce), ERT doluysa ve farklıysa "⚠ kurala göre X olmalı"; CSV BİRİM KAYNAĞI'nda. genelbilgiler.txt (Eksik:BilgiDosyasi) hem uygulama hem birim AI prompt'unun başında.
+  VARLIK MUHAFIZI KOLONU (kullanıcı: "VARLIKMUHAFIZI kolonu kayboldu?" — Uygulama hücresinin altında küçük yazıydı, yeni düğmelerle görünmez oldu): ayrı "Varlık muhafızı" kolonu
+  (`muhafizHtml` / `muhafizBilgi`: satırdaki ERT, yoksa `BirimSatir.Muhafiz` (eski kayıtlı taramalar), yoksa 🤖 önerilen uygulamadan tahmin), "Muhafız" süzgeci, aramada; CSV MUHAFIZ.
 - **VIP**: sorgulanan IP VIP ise üyeler + GW'ler aynı sorguya eklenir, üyeler "VIP ÜYESİ" (GW→üye trafiği varsa ✓).
   Gidilen IP VIP ise "VIP → n ÜYE"; gelen IP LB GW ise "LB GW"; sorgulanan sunucu havuz üyesiyse VIP kartı.
 - **Uygulama görünümü** (`/api/apps`, `/api/app`): `[kullanan uygulamalar] → [UYGULAMA: VIP'ler + segment grupları] → [bağımlı olunanlar]`,
