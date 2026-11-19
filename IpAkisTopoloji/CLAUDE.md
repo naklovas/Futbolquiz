@@ -1125,6 +1125,9 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
   `BirimSatir.BosPortlar` (ERT'de uygulaması boş portlar)), portsuz ama ERT'de kaydı olanlar (`BirimSatir.ErtKayit`) `{ips}`; 50 sunuculuk parçalar, 409'da bekleyip bir kez
   daha, her parça `/api/eksik/durum` bitene kadar izlenir; (2) satırlar yenilenir, birimi hâlâ boş (öneri yok, uygulama önerisinden de gelmeyen) IP'ler `/api/birim/calistir`.
   "↻ Bu IP için yeniden tahmin" aynı akış (`yeniden:true`). Durdur iki işi de durdurur (`st.tahminIptal`). Mock'la denendi.
+  SEÇİM (kullanıcı: "sadece seçilenleri de aratabileyim"): tabloda ilk kolon onay kutusu (`data-sec`, IP bazında `st.secili`; başlıktaki `#secHepsi` süzülen satırların IP'leri),
+  "🤖 Seçilenleri tahmin et (N sunucu)" (`secTahmin` → `tahminEt(seçili, yeniden)`) + "önerisi olanları da yeniden sor" (`#secYeniden`) + "✕ seçim"; toplu düğme "Tümünü tahmin et".
+  Yeni tarama / kayıt açılınca seçim temizlenir. Mock'la denendi.
 - **VIP**: sorgulanan IP VIP ise üyeler + GW'ler aynı sorguya eklenir, üyeler "VIP ÜYESİ" (GW→üye trafiği varsa ✓).
   Gidilen IP VIP ise "VIP → n ÜYE"; gelen IP LB GW ise "LB GW"; sorgulanan sunucu havuz üyesiyse VIP kartı.
 - **Uygulama görünümü** (`/api/apps`, `/api/app`): `[kullanan uygulamalar] → [UYGULAMA: VIP'ler + segment grupları] → [bağımlı olunanlar]`,

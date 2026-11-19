@@ -210,12 +210,15 @@
       <label><input type="checkbox" id="testG" checked> Test sunucuları</label>
       <span class="sp"></span>
       <button type="button" id="birimAi" hidden title="ERT eksikleri gibi: uygulaması boş sunucuların portları için uygulama önerisi (ERT eksikleri motoru), sonra işleten birimi boş olanlar için birim tahmini. Öneriler ERT'ye yazılmaz.">🤖 Eksikleri tahmin et</button>
+      <button type="button" id="secTahmin" hidden title="Yalnız seçili sunucular: uygulaması boşsa uygulama önerisi (ERT eksikleri), sonra işleten birim">🤖 Seçilenleri tahmin et</button>
+      <label class="small" id="secYenidenEt" hidden title="İşaretliyse seçili sunucularda önerisi olanlar da yeniden sorulur (onaylı / elle girilenler hariç)"><input type="checkbox" id="secYeniden"> önerisi olanları da yeniden sor</label>
+      <button type="button" id="secTemizle" hidden title="Seçimi kaldır">✕ seçim</button>
       <button type="button" id="birimDur" hidden>Durdur</button>
       <span class="small muted" id="birimNot"></span>
       <button type="button" id="csv" hidden>Excel'e aktar</button>
     </div>
     <div class="grid"><table>
-      <thead><tr><th>Öncelik</th><th>Sunucu</th><th>VLAN</th><th>Domain</th><th>Uygulama (ERT)</th><th title="ERT SUNUCUISLETENBIRIM; boşsa kayıtlı öneri (🤖 AI / kural) ya da önerilen uygulamanın birimi">İşleten birim</th><th>Süreç</th><th title="Exe / JVM yolundan; kesin değil">Dağıtım</th><th>Sürüm · durum</th><th>Dinlediği portlar</th><th>Giden</th><th>Önlem</th><th>Son görülme</th><th>Kaynak</th></tr></thead>
+      <thead><tr><th style="width:24px"><input type="checkbox" id="secHepsi" title="Süzülen satırların sunucularını seç / bırak"></th><th>Öncelik</th><th>Sunucu</th><th>VLAN</th><th>Domain</th><th>Uygulama (ERT)</th><th title="ERT SUNUCUISLETENBIRIM; boşsa kayıtlı öneri (🤖 AI / kural) ya da önerilen uygulamanın birimi">İşleten birim</th><th>Süreç</th><th title="Exe / JVM yolundan; kesin değil">Dağıtım</th><th>Sürüm · durum</th><th>Dinlediği portlar</th><th>Giden</th><th>Önlem</th><th>Son görülme</th><th>Kaynak</th></tr></thead>
       <tbody id="tb"></tbody>
     </table></div>
     <div class="foot"><span id="sayi"></span><button type="button" id="more" hidden>Daha fazla göster</button></div>
@@ -235,7 +238,7 @@ const ONC_IPUCU = {
   dusuk: "Etkilenmez / yamalı ya da sürüm bilinmiyor ve port dinlemiyor"
 };
 const DUR = { etkilenen: "etkilenen", olasi: "olası", yamali: "yamalı", etkilenmez: "etkilenmez", bilinmiyor: "sürüm bilinmiyor", bilgi: "değerlendirilmedi" };
-const st = { ar: [{ ana: "", min: "", son: "", duzeltilmis: "" }], ai: null, onlemF: false, mod: "kural", veri: null, yetki: {}, onc: "", limit: 500, sec: null, timer: null, kayitlar: [], kayitUyari: null, sonDurum: null };
+const st = { ar: [{ ana: "", min: "", son: "", duzeltilmis: "" }], ai: null, onlemF: false, mod: "kural", veri: null, yetki: {}, onc: "", limit: 500, sec: null, timer: null, secili: new Set(), kayitlar: [], kayitUyari: null, sonDurum: null };
 
 function kuralAciklama(k) {
   if (!k) return "";
@@ -394,7 +397,7 @@ async function kayitAc(id) {
   const j = await r.json();
   if (j.kural && !j.kural.id.startsWith("anlik") && [...$("#kural").options].some(o => o.value === j.kural.id)) { st.mod = "kural"; $("#kural").value = j.kural.id; }
   if (!$("#dmz").disabled) $("#dmz").checked = !!j.dmz;
-  st.onc = ""; st.onlemF = false; st.limit = 500; detay(null);
+  st.onc = ""; st.onlemF = false; st.limit = 500; st.secili.clear(); detay(null);
   await yukle();
 }
 async function kayitSil(id) {
@@ -532,7 +535,12 @@ function birimDurumCiz(d) {
   const cal = d?.durum === "calisiyor";
   const bos = birimBoslar(), ug = uygGerekenler(tumIpler(), false);
   $("#birimAi").hidden = !st.yetki.yazma || cal || st.tahminSuruyor || (!bos.length && !ug.length);
-  $("#birimAi").textContent = `🤖 Eksikleri tahmin et (uygulama ${ug.length} · birim ${bos.length} sunucu)`;
+  $("#birimAi").textContent = `🤖 Tümünü tahmin et (uygulama ${ug.length} · birim ${bos.length} sunucu)`;
+  st.bmDurum = d;
+  const sn = st.secili.size, mesgul = cal || st.tahminSuruyor;
+  $("#secTahmin").hidden = $("#secYenidenEt").hidden = $("#secTemizle").hidden = !st.yetki.yazma || !sn;
+  $("#secTahmin").disabled = mesgul;
+  $("#secTahmin").textContent = `🤖 Seçilenleri tahmin et (${sn} sunucu)`;
   $("#birimDur").hidden = !cal && !st.tahminSuruyor;
   $("#birimNot").textContent = (cal ? `Birim tahmini: ${d.biten} / ${d.toplam}${d.son ? " · " + d.son : ""}`
     : d && d.durum !== "calisiyor" && d.bitis ? `Son birim tahmini ${d.durum}: ${d.kural} kural, ${d.ai} AI, ${d.bos} bulunamadı` : "") + (st.bmUyari ? " · ⚠ " + (st.bmUyari.length > 110 ? st.bmUyari.slice(0, 110) + "…" : st.bmUyari) : "");
@@ -543,6 +551,15 @@ function birimDurumCiz(d) {
     if (j?.durum !== "calisiyor" || (j.biten % 10 === 0)) await birimYukle(true);
     birimDurumCiz(j);
   }, 3000);
+}
+async function secTahmin() {
+  const ips = [...st.secili], yeniden = $("#secYeniden").checked;
+  if (!ips.length) return;
+  const ug = uygGerekenler(ips, yeniden);
+  if (!confirm(`Seçili ${ips.length} sunucu tahmin edilecek:\n• Uygulama: ${ug.length} sunucu (ERT eksikleri motoru)\n• İşleten birim: ardından birimi boş olanlar${yeniden ? " (önerisi olanlar yeniden sorulur; onaylı / elle hariç)" : ""}\nÖneriler ERT'ye yazılmaz. Devam?`)) return;
+  st.tahminSuruyor = true; st.tahminIptal = false; $("#birimAi").hidden = true; $("#secTahmin").disabled = true; $("#birimDur").hidden = false;
+  try { await tahminEt(ips, yeniden, t => $("#birimNot").textContent = `Seçili ${ips.length} sunucu: ${t}`); }
+  finally { st.tahminSuruyor = false; await birimYukle(true); birimDurumCiz(st.bmDurum); }
 }
 async function birimAi() {
   const ips = tumIpler(), ug = uygGerekenler(ips, false), bos = birimBoslar();
@@ -640,6 +657,7 @@ function ciz() {
   secenek("#birimF", "Birim", "_birim", false);
   const l = suz();
   $("#tb").innerHTML = l.length ? l.slice(0, st.limit).map((r, i) => `<tr data-i="${(v.satirlar).indexOf(r)}">
+    <td>${r.ip ? `<input type="checkbox" data-sec="${esc(r.ip)}" ${st.secili.has(r.ip) ? "checked" : ""} title="Bu sunucuyu tahmin için seç">` : ""}</td>
     <td><span class="p ${r.oncelik}" title="${esc(ONC_IPUCU[r.oncelik])}">${ONC[r.oncelik]}</span></td>
     <td><div class="mono">${r.ip ? `<a href="./?ip=${encodeURIComponent(r.ip)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${esc(r.ip)}</a>` : '<span class="muted">IP yok</span>'}</div>
         <div class="small">${esc(r.sunucu || "")}${r.test ? ' <span class="d">test</span>' : ""}${r.dmz ? '<span class="dmz" title="Nessus DMZ asset\'inde">DMZ</span>' : ""}</div><div class="small muted">${esc(r.kurum || "")}${r.segment ? " · " + esc(r.segment) : ""}</div></td>
@@ -655,8 +673,10 @@ function ciz() {
     <td class="small o ${r.onlem}" title="Komut satırında geçici önlem parametresi">${r.onlem === "var" ? "✔ var" : r.onlem === "yok" ? "yok" : r.onlem === "bilinmiyor" ? '<span class="muted">bilinmiyor</span>' : '<span class="muted">—</span>'}</td>
     <td class="small">${esc(r.son || "")}${r.baslangic ? `<div class="muted">başlangıç ${esc(r.baslangic)}</div>` : ""}</td>
     <td class="small muted">${esc(r.kaynak)}${r.repo ? `<div title="Nessus repository">📁 ${esc(r.repo)}</div>` : ""}${r.nessus ? `<div style="color:${r.nessus.includes("CVE bulgusu") ? "var(--err)" : "var(--muted)"}" title="${esc(r.nessus)}">🛡 ${esc(r.nessus.length > 70 ? r.nessus.slice(0, 70) + "…" : r.nessus)}</div>` : ""}</td></tr>`).join("")
-    : `<tr><td colspan="14" class="empty">${v.satirlar?.length ? "Süzgece uyan süreç yok." : "Bu aralıkta Carbon Black'te kurala uyan süreç görülmedi."}</td></tr>`;
-  $("#sayi").textContent = `${Math.min(l.length, st.limit).toLocaleString("tr-TR")} / ${l.length.toLocaleString("tr-TR")} satır gösteriliyor`;
+    : `<tr><td colspan="15" class="empty">${v.satirlar?.length ? "Süzgece uyan süreç yok." : "Bu aralıkta Carbon Black'te kurala uyan süreç görülmedi."}</td></tr>`;
+  const gorunen = [...new Set(l.map(r => r.ip).filter(Boolean))];
+  $("#secHepsi").checked = gorunen.length > 0 && gorunen.every(ip => st.secili.has(ip));
+  $("#sayi").textContent = `${Math.min(l.length, st.limit).toLocaleString("tr-TR")} / ${l.length.toLocaleString("tr-TR")} satır gösteriliyor` + (st.secili.size ? ` · ${st.secili.size} sunucu seçili` : "");
   $("#more").hidden = l.length <= st.limit;
 }
 
@@ -733,7 +753,7 @@ async function tara() {
   }
   const r = await fetch("api/zafiyet/tara", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
   if (!r.ok) { const j = await r.json().catch(() => ({})); alert(j.error || ("HTTP " + r.status)); return; }
-  detay(null);
+  detay(null); st.secili.clear();
   yukle();
 }
 
@@ -771,6 +791,13 @@ document.addEventListener("click", e => {
   const dsf = e.target.closest("[data-disf]");
   if (dsf) { $("#disF").value = $("#disF").value === dsf.dataset.disf ? "" : dsf.dataset.disf; st.onc = ""; st.limit = 500; ciz(); return; }
   if (e.target.closest("[data-onlem]")) { st.onlemF = !st.onlemF; st.onc = ""; st.limit = 500; st.veri && ciz(); return; }
+  const sc = e.target.closest("[data-sec]");
+  if (sc) { e.stopPropagation(); sc.checked ? st.secili.add(sc.dataset.sec) : st.secili.delete(sc.dataset.sec); ciz(); birimDurumCiz(st.bmDurum); return; }
+  if (e.target.id === "secHepsi") {
+    const ips = [...new Set(suz().map(r => r.ip).filter(Boolean))];
+    ips.forEach(ip => e.target.checked ? st.secili.add(ip) : st.secili.delete(ip));
+    ciz(); birimDurumCiz(st.bmDurum); return;
+  }
   const tr = e.target.closest("tr[data-i]");
   if (tr) { document.querySelectorAll("tr.sel").forEach(x => x.classList.remove("sel")); tr.classList.add("sel"); detay(st.veri.satirlar[+tr.dataset.i]); }
 });
@@ -799,6 +826,8 @@ $("#durdur").addEventListener("click", () => fetch("api/zafiyet/durdur", { metho
 $("#more").addEventListener("click", () => { st.limit += 1000; ciz(); });
 $("#csv").addEventListener("click", csv);
 $("#birimAi").addEventListener("click", birimAi);
+$("#secTahmin").addEventListener("click", secTahmin);
+$("#secTemizle").addEventListener("click", () => { st.secili.clear(); ciz(); birimDurumCiz(st.bmDurum); });
 $("#birimDur").addEventListener("click", async () => {
   st.tahminIptal = true;
   await Promise.all([fetch("api/eksik/durdur", { method: "POST" }), fetch("api/birim/durdur", { method: "POST" })]).catch(() => {});
