@@ -21,7 +21,8 @@ record BirimSatir(string Ip, string? Ert, BirimOneri? Oneri, List<string> Uygula
 record BirimIstek(List<string>? Ips, bool Yeniden = false, Dictionary<string, string>? Adlar = null);
 // Tanımlı birim kuralı (kullanıcı: "ZP ile başlayan ya da Ziraat PAY ile ilgili tüm sunucular Ziraat PAY Uygulamaları ekibinin olmalı"): Desen (regex, büyük / küçük harf
 // duyarsız) sunucu adına, uygulama adına ya da uygulama önerisine uyarsa birim kesin — AI'a sorulmaz
-record BirimKurali(string Desen, string Birim);
+// Alan: "ad" (yalnız sunucu adı), "uygulama" (ERT uygulaması / öneri) ya da boş = ikisi
+record BirimKurali(string Desen, string Birim, string? Alan = null);
 record BirimKarar(string Ip, string Karar, string? Birim);
 record BirimIs(string Durum, int Toplam, int Biten, int Kural, int Ai, int Bos, string? Son, string? Hata, DateTime Baslangic, DateTime? Bitis, string? Kaydeden);
 
@@ -36,13 +37,15 @@ sealed class BirimService(IConfiguration cfg, EnvanterService envanter, IslevSer
     string Tablo => cfg["Birim:OneriTablosu"] is { } t && Regex.IsMatch(t, @"^[\w.\[\]]+$") ? t : "dbo.DF_BIRIM_ONERI";
 
     // ---------------- Tanımlı ad kuralları (Birim:Kurallar; boşsa varsayılan) ----------------
-    static readonly BirimKurali[] VarsayilanKurallar = [new(@"^zp|ziraat\s*-?\s*pay", "Ziraat PAY Uygulamaları")];
-    List<(Regex Rx, string Birim, string Desen)> Kurallar()
+    // Kullanıcı düzeltmesi: "ZP Ziraat Portföy; PY genelde Ziraat Pay" → sunucu adı PY ile başlayan ya da adında / uygulamasında Ziraat PAY geçen. ^py yalnız sunucu adında
+    // (Python… gibi uygulama adları eşleşmesin).
+    static readonly BirimKurali[] VarsayilanKurallar = [new(@"^py", "Ziraat PAY Uygulamaları", "ad"), new(@"ziraat\s*-?\s*pay", "Ziraat PAY Uygulamaları")];
+    List<(Regex Rx, string Birim, string Desen, string? Alan)> Kurallar()
     {
         var l = cfg.GetSection("Birim:Kurallar").Get<List<BirimKurali>>()?.Where(k => !string.IsNullOrWhiteSpace(k.Desen) && !string.IsNullOrWhiteSpace(k.Birim)).ToList();
-        var r = new List<(Regex, string, string)>();
+        var r = new List<(Regex, string, string, string?)>();
         foreach (var k in l is { Count: > 0 } ? l : [.. VarsayilanKurallar])
-            try { r.Add((new Regex(k.Desen, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant), k.Birim.Trim(), k.Desen)); }
+            try { r.Add((new Regex(k.Desen, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant), k.Birim.Trim(), k.Desen, k.Alan?.Trim().ToLowerInvariant())); }
             catch (ArgumentException ex) { log.LogWarning("Birim kuralı geçersiz ({D}): {H}", k.Desen, ex.Message); }
         return r;
     }
@@ -55,11 +58,15 @@ sealed class BirimService(IConfiguration cfg, EnvanterService envanter, IslevSer
         var adlar = env.AppsOnIp(ip).Select(r => r.UnixName).Append(ad).OfType<string>().Where(x => x.Trim().Length > 0).Select(x => ("sunucu adı", x.Trim()));
         var uyg = env.AppNamesOnIp(ip).Concat(ekUygulamalar).Where(x => !string.IsNullOrWhiteSpace(x)).Select(x => ("uygulama", x.Trim()));
         var metinler = adlar.Concat(uyg).Distinct().ToList();
-        foreach (var (rx, birim, desen) in Kurallar())
+        foreach (var (rx, birim, desen, alan) in Kurallar())
             foreach (var (tur, m) in metinler)
-                if (rx.IsMatch(Turk(m))) return (KatalogYazimi(d, birim), $"tanımlı kural ({desen}): {tur} '{m}'");
+                if ((alan is null or "" || (alan == "ad") == (tur == "sunucu adı")) && rx.IsMatch(Turk(m)))
+                    return (KatalogYazimi(d, birim), $"tanımlı kural ({desen}): {tur} '{m}'");
         return null;
     }
+    // Önceki bir ad kuralıyla yazılmış (Kural, "tanımlı kural …") ama şimdiki kurallara uymayan öneri geçersiz (kural değişti: ZP → PY)
+    static bool BayatKural(BirimOneri? o, (string Birim, string Neden)? simdi) =>
+        o is { Kaynak: "Kural", Durum: "AI" } && (o.Gerekce ?? "").StartsWith("tanımlı kural") && (simdi == null || Katla(simdi.Value.Birim) != Katla(o.Birim ?? ""));
 
     // ---------------- Envanter dizini (anlık görüntü başına) ----------------
     sealed class Dizin
@@ -246,7 +253,9 @@ sealed class BirimService(IConfiguration cfg, EnvanterService envanter, IslevSer
                 if (mT != null && bT != null) break;
             }
             var kural = KuralBul(env, d, ip, adlar?.GetValueOrDefault(ip), uol.Select(x => x.Uygulama).OfType<string>());
-            l.Add(new BirimSatir(ip, d.IpBirim.GetValueOrDefault(ip), on.GetValueOrDefault(ip), uyg, muh, uol,
+            var oneri = on.GetValueOrDefault(ip);
+            if (BayatKural(oneri, kural)) oneri = null;
+            l.Add(new BirimSatir(ip, d.IpBirim.GetValueOrDefault(ip), oneri, uyg, muh, uol,
                 muh == null ? mT : null, d.IpBirim.ContainsKey(ip) ? null : bT, kay, rows.Count > 0,
                 rows.Where(r => string.IsNullOrWhiteSpace(r.AppName) && !string.IsNullOrWhiteSpace(r.Port)).Select(r => r.Port!.Trim()).Distinct().ToList(),
                 kural?.Birim, kural?.Neden));
@@ -327,6 +336,9 @@ sealed class BirimService(IConfiguration cfg, EnvanterService envanter, IslevSer
             var env = await envanter.GetAsync(false, ct);
             var d = Dizi(env);
             var mevcut = await OkuAsync(ips, ct);
+            // kural değişmeden önce yazılmış kural önerileri yok sayılır (yeniden sorulur)
+            foreach (var ip in mevcut.Keys.ToList())
+                if (BayatKural(mevcut[ip], KuralBul(env, d, ip, adlar?.GetValueOrDefault(ip), []))) mevcut.Remove(ip);
             // ERT'de birimi olan, onaylı / elle girilmiş ya da (yeniden değilse) önerisi olan sunucular sorulmaz
             var todo = ips.Where(ip => !d.IpBirim.ContainsKey(ip)
                 && !(mevcut.TryGetValue(ip, out var m) && (m.Durum is "Onaylandı" or "Elle" || !yeniden))).ToList();

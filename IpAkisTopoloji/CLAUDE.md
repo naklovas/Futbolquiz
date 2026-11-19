@@ -1135,7 +1135,9 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
   gerekçe ipucu; motor hatası ("sorulacak port yok", AI hatası) → `eksikBekle` son durumu döner, `asama Hata / mesaj / hatalar` özette. Özet `st.sonMesaj`: "N soruldu → X bulundu,
   Y bulunamadı, Z cevapsız · HATA: …". `tahminEt` = `uygAra` + birim. Mock'la denendi.
   TANIMLI BİRİM KURALI (kullanıcı: "ZP ile başlayan ya da Ziraat PAY ile ilgili tüm sunucular Ziraat PAY Uygulamaları ekibinin olmalı"): `Birim:Kurallar` [{Desen (regex,
-  büyük / küçük harf duyarsız, İ/ı katlanır), Birim}]; boşsa varsayılan `^zp|ziraat\s*-?\s*pay` → "Ziraat PAY Uygulamaları" (ERT kataloğundaki yazımıyla, `KatalogYazimi`).
+  büyük / küçük harf duyarsız, İ/ı katlanır), Birim, Alan ("ad" yalnız sunucu adı | "uygulama" | boş = ikisi)}]; boşsa varsayılan `^py` (Alan ad) ve
+  `ziraat\s*-?\s*pay` → "Ziraat PAY Uygulamaları" (ERT kataloğundaki yazımıyla, `KatalogYazimi`). DÜZELTME (kullanıcı: "ZP Ziraat Portföy, PY genelde Ziraat Pay"): ilk sürümdeki
+  `^zp` kaldırıldı; o kuralla yazılmış öneriler (`BayatKural`: Kaynak Kural, durum AI, gerekçe "tanımlı kural …", şimdiki kural uymuyor) gösterilmez ve yeniden sorulur.
   `KuralBul`: ERT sunucu adları + sayfadan gelen ad (`BirimIstek.Adlar` IP → CB bilgisayar / sunucu adı; ERT'de kaydı olmayan kutular için) + ERT uygulamaları + uygulama önerileri.
   `TahminAsync`'te AI'dan ÖNCE (Kaynak "Kural", güven 95); `BirimSatir.KuralBirim / KuralNeden` → sayfada ERT boşsa "📏 X (kural)" (onaylı / elle öneri öncelikli, AI önerisinden
   önce), ERT doluysa ve farklıysa "⚠ kurala göre X olmalı"; CSV BİRİM KAYNAĞI'nda. genelbilgiler.txt (Eksik:BilgiDosyasi) hem uygulama hem birim AI prompt'unun başında.
