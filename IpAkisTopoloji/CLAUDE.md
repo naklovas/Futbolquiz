@@ -1090,6 +1090,12 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
   (tanımsız / okunamazsa pasif), "Dışa açıklık" süzgeci (DMZ / Derin dış / Dış istemci-VIP / herhangi), "DMZ asset'i" ve "derin dış" kartları, sunucuda kırmızı DMZ rozeti, Giden
   hücresinde "🌐 N dış hedef" (ipucunda liste), sağ panelde hedefler, aramada dış hedef, CSV'de DMZ / DIŞ HEDEF SAYISI / DIŞ HEDEFLER. Sahte envanter + sahte Splunk + asset'li sahte
   Tenable.sc ile uçtan uca ve Playwright'la denendi.
+  EKSİK IP (kullanıcının Excel'i: Nessus ekibinin 55 IP'si, DeltaFlow'da 41): HATA DÜZELTİLDİ — `NessusIsle` (a2) yalnız `Kurulumlar.Count == 0` bulgulara "sürüm bilinmiyor"
+  satırı açıyordu; kurulum satırı olup sürümü okunamayan ("unknown") bulgular hiç satır üretmiyordu → artık (a)'dan sonra satırı olmayan her ürün bulgusu IP'si satır olur (notta
+  Nessus'un yazdığı ham sürüm). `NessusSurum` başta değilse metindeki ilk sürümü de alır ("nginx/1.24.0"). TANI: `GET /api/zafiyet/tani?ip=a,b&kural=` (düz metin, Yetki:Topoloji) —
+  `NessusService.HamBulgularAsync` (yalnız ip süzgeci; repository / lastSeen YOK) ile IP başına: DMZ asset'inde mi, son taramada satır var mı, ilgili (kelime / CVE) bulgular +
+  kurulum / okunan sürüm + "TARAMADA ALINIR / ALINMAZ: repository X Nessus:Repolar'da yok / son görülme N günden eski (Nessus:MaxGun) …"; ilgili bulgu yoksa IP'deki ürün plugin
+  adları; sonda özet. Sahte Tenable.sc ile denendi.
 - **VIP**: sorgulanan IP VIP ise üyeler + GW'ler aynı sorguya eklenir, üyeler "VIP ÜYESİ" (GW→üye trafiği varsa ✓).
   Gidilen IP VIP ise "VIP → n ÜYE"; gelen IP LB GW ise "LB GW"; sorgulanan sunucu havuz üyesiyse VIP kartı.
 - **Uygulama görünümü** (`/api/apps`, `/api/app`): `[kullanan uygulamalar] → [UYGULAMA: VIP'ler + segment grupları] → [bağımlı olunanlar]`,
