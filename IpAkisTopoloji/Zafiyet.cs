@@ -608,6 +608,8 @@ sealed class ZafiyetService(IConfiguration cfg, IHttpClientFactory factory, Enva
     {
         if (string.IsNullOrWhiteSpace(v)) return null;
         var m = Regex.Match(v.Trim(), @"^(?:\d+u\d+|\d+(?:\.\d+)*(?:_\d+)?)");
+        // başta değilse ("nginx/1.24.0", "v17.0.10", "OpenJDK 17.0.10+7"): metindeki ilk a.b[.c] sürümü
+        if (!m.Success) m = Regex.Match(v, @"(?<![\d.])(?:\d+u\d+|\d+\.\d+(?:\.\d+)*(?:_\d+)?)");
         return m.Success ? NormSurum(m.Value) : null;
     }
 
@@ -646,12 +648,15 @@ sealed class ZafiyetService(IConfiguration cfg, IHttpClientFactory factory, Enva
             eklenen++;
         }
 
-        // (a2) Ürün bulgusu var ama sürüm yazmıyor (kimliksiz tarama, kutu / appliance): IP'de başka satır yoksa "sürüm bilinmiyor" satırı
-        foreach (var g in nUrun.Where(b => b.Kurulumlar.Count == 0).GroupBy(b => b.Ip))
+        // (a2) Ürün bulgusu var ama sürüm yazmıyor ya da yazdığı sürüm okunamıyor (kimliksiz tarama, kutu / appliance): IP'de başka satır yoksa
+        // "sürüm bilinmiyor" satırı. HATA DÜZELTİLDİ (kullanıcının Nessus listesiyle karşılaştırması): kurulum satırı olup sürümü okunamayan bulgular hiç satır üretmiyordu.
+        foreach (var g in nUrun.GroupBy(b => b.Ip))
         {
             if (sonuc.Any(r => r.Ip == g.Key)) continue;
             var b0 = g.OrderByDescending(x => x.Son).First();
-            string not = "ürün bulgusu (sürüm yok): " + string.Join(" | ", g.Select(x => x.PluginAd).Distinct().Take(3));
+            var ham = g.SelectMany(x => x.Kurulumlar).Select(x => $"{x.Yol} {x.Surum}".Trim()).Distinct().Take(2).ToList();
+            string not = "ürün bulgusu (sürüm yok): " + string.Join(" | ", g.Select(x => x.PluginAd).Distinct().Take(3))
+                + (ham.Count > 0 ? " · Nessus'un yazdığı (okunamadı): " + string.Join(" | ", ham) : "");
             sonuc.Add(NessusSatir(k, env, test, b0, "(Nessus: sürüm yok)", null, "bilinmiyor",
                 "Nessus bu sunucuda ürünü görüyor ama sürüm yazmıyor (kimliksiz tarama / kutu olabilir) — elle doğrulayın", not, "Nessus (ürün bulgusu)"));
             eklenen++;
@@ -700,6 +705,86 @@ sealed class ZafiyetService(IConfiguration cfg, IHttpClientFactory factory, Enva
             Vlan: seg?.Vlan, Domain: seg?.Domain, Cidr: seg?.Cidr, Dagitim: k.Java ? Dagitim(yol) : null, Nessus: nessusNot);
         return Oncelikle(r);
     }
+
+    // ---------------- Tanı: Nessus'ta görünüp taramada çıkmayan IP'ler (kullanıcı: "eksik var bizimkinde" — Nessus ekibinin listesiyle karşılaştırma) ----------------
+    // GET /api/zafiyet/tani?ip=a,b&kural= : her IP için DMZ asset'inde mi, son taramada satırı var mı, Nessus'taki TÜM ilgili bulgular (süzgeçsiz) ve
+    // her bulgunun taramada alınıp alınmayacağı (repository, son görülme, plugin adı kelimesi, CVE, sürüm okunuyor mu).
+    public async Task<string> TaniAsync(string ipMetin, string? kuralId, CancellationToken ct)
+    {
+        var ips = Regex.Matches(ipMetin ?? "", @"\b\d{1,3}(?:\.\d{1,3}){3}\b").Select(m => m.Value).Distinct().Take(100).ToList();
+        if (ips.Count == 0) return "IP verin: /api/zafiyet/tani?ip=10.1.1.1,10.1.1.2 (isteğe bağlı &kural=<kural id>; boşsa son taramanın kuralı)";
+        ZfKural? k = null; ZfIs? son; List<ZfSatir> satir;
+        lock (_gate) { son = _is; satir = _satir; }
+        if (!string.IsNullOrWhiteSpace(kuralId)) k = (await KurallarAsync(ct)).FirstOrDefault(x => x.Id.Equals(kuralId, StringComparison.OrdinalIgnoreCase));
+        k ??= son?.Kural ?? Yerlesik[0];
+        var kel = NessusKelimeleri(k);
+        var cveler = Regex.Matches(k.Cve ?? "", @"CVE-\d{4}-\d{4,}", RegexOptions.IgnoreCase).Select(m => m.Value.ToUpperInvariant()).Distinct().ToList();
+        var haric = k.Java ? new Regex("javascript|jquery|json", RegexOptions.IgnoreCase) : null;
+        bool Kelime(string ad, out string? w)
+        {
+            w = kel.FirstOrDefault(x => Regex.IsMatch(ad, $@"(?<![A-Za-z]){Regex.Escape(x)}", RegexOptions.IgnoreCase));
+            return w != null && !(haric?.IsMatch(ad) ?? false);
+        }
+        int gun = cfg.GetValue("Nessus:MaxGun", 30);
+        var repolar = nessus.RepoListesi;
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine($"Kural: {k.Id} · {k.Ad}");
+        sb.AppendLine($"Nessus kelimeleri: {string.Join(", ", kel)} · CVE: {string.Join(", ", cveler)}");
+        sb.AppendLine($"Taramadaki Nessus süzgeçleri: repository = {(repolar.Length > 0 ? string.Join(", ", repolar) : "(yok)")} (DMZ asset sorgusunda yok) · son görülme ≤ {gun} gün (Nessus:MaxGun)");
+        var (dmzA, dmzIp, dmzHata) = await DmzAsync(ct);
+        sb.AppendLine(dmzA != null ? $"DMZ asset'i: {dmzA.Asset.Ad} (id {dmzA.Asset.Id}) — {dmzIp.Count} IP" : "DMZ asset'i: " + (dmzHata ?? "tanımlı değil"));
+        sb.AppendLine(son != null ? $"Son tarama (bellekte): {son.Kural.Id} · {son.Kapsam} · {son.Durum} · {son.Baslangic:dd.MM.yyyy HH:mm}{(son.Kayittan ? " (kayıttan açıldı)" : "")}" : "Bellekte tarama yok.");
+        if (!nessus.Acik) { sb.AppendLine("Nessus tanımlı değil."); return sb.ToString(); }
+        List<NessusService.NessusHam> ham; bool kesik;
+        try { (ham, kesik) = await nessus.HamBulgularAsync(ips, ct); }
+        catch (Exception ex) when (ex is not OperationCanceledException) { sb.AppendLine("Nessus sorgusu hatası: " + ex.Message); return sb.ToString(); }
+        if (kesik) sb.AppendLine("UYARI: bazı IP'lerin bulguları sayfa sınırında kesildi.");
+        var simdi = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        var ozet = new List<string>();
+        foreach (var ip in ips)
+        {
+            sb.AppendLine().AppendLine($"===== {ip} =====");
+            bool dmz = dmzIp.Contains(ip);
+            var sat = satir.Where(r => r.Ip == ip).ToList();
+            sb.AppendLine($"DMZ asset'inde: {(dmz ? "evet" : "HAYIR")} · son taramada: {(sat.Count > 0 ? $"{sat.Count} satır ({string.Join(", ", sat.Select(r => r.Kaynak).Distinct())})" : "SATIR YOK")}");
+            var l = ham.Where(x => x.Ip == ip).ToList();
+            if (l.Count == 0) { sb.AppendLine("Nessus: bu IP için HİÇ bulgu yok (anahtarın görebildiği repository'lerde taranmamış ya da IP farklı)."); ozet.Add($"{ip}: Nessus'ta hiç bulgu yok"); continue; }
+            sb.AppendLine($"Nessus: {l.Count} bulgu · repository: {string.Join(", ", l.Select(x => $"{x.RepoAd} ({x.RepoId})").Distinct())} · DNS: {l.Select(x => x.Dns).FirstOrDefault(x => !string.IsNullOrEmpty(x))}");
+            var ilgili = l.Where(x => Kelime(x.PluginAd, out _) || cveler.Any(c => (x.Cve ?? "").Contains(c, StringComparison.OrdinalIgnoreCase))).ToList();
+            if (ilgili.Count == 0)
+            {
+                sb.AppendLine($"İLGİLİ BULGU YOK — plugin adında {string.Join(" / ", kel)} geçmiyor, CVE yok. Bu IP'deki ürün / yazılım bulgularından örnekler:");
+                foreach (var x in l.Where(x => Regex.IsMatch(x.PluginAd, "detect|installed|version|server|web|http|java|jdk|nginx|apache|tomcat|gateway", RegexOptions.IgnoreCase))
+                    .GroupBy(x => x.PluginId).Select(g => g.First()).Take(25))
+                    sb.AppendLine($"   [{x.PluginId}] {x.PluginAd} · port {x.Port} · {Tarih(x.Son)}");
+                ozet.Add($"{ip}: ilgili plugin yok (kelime eşleşmiyor)");
+                continue;
+            }
+            var nedenler = new List<string>();
+            foreach (var x in ilgili.GroupBy(x => (x.PluginId, x.Port)).Select(g => g.OrderByDescending(y => y.Son).First()))
+            {
+                var r = new List<string>();
+                bool repoOk = repolar.Length == 0 || repolar.Contains(x.RepoId) || dmz;
+                if (!repoOk) r.Add($"repository {x.RepoAd} ({x.RepoId}) Nessus:Repolar'da yok{(dmzA != null ? " ve IP DMZ asset'inde değil" : "")}");
+                if (gun > 0 && x.Son > 0 && simdi - x.Son > gun * 86400L) r.Add($"son görülme {Tarih(x.Son)} — {gun} günden eski (Nessus:MaxGun)");
+                bool cveOk = cveler.Any(c => (x.Cve ?? "").Contains(c, StringComparison.OrdinalIgnoreCase));
+                bool kelOk = Kelime(x.PluginAd, out var w);
+                string kur = x.Kurulumlar.Count == 0 ? "kurulum / sürüm satırı yok"
+                    : string.Join(" | ", x.Kurulumlar.Take(3).Select(z => $"{z.Yol} '{z.Surum}' → {(NessusSurum(z.Surum) is { } ns ? "okunan " + ns : "OKUNAMADI")}"));
+                string karar = r.Count == 0 ? "TARAMADA ALINIR" : "ALINMAZ: " + string.Join("; ", r);
+                sb.AppendLine($" - [{x.PluginId}] {x.PluginAd} · ciddiyet {x.Seviye} · port {x.Port} · son {Tarih(x.Son)} · {(cveOk ? "CVE eşleşmesi" : "kelime: " + w)}");
+                sb.AppendLine($"     {kur}");
+                sb.AppendLine($"     → {karar}");
+                nedenler.AddRange(r);
+            }
+            ozet.Add($"{ip}: " + (nedenler.Count == 0 ? (sat.Count > 0 ? "taramada var" : "Nessus bulgusu alınır ama son taramada satır yok (o tarama bu düzeltmeden önceyse yeniden tarayın)")
+                : string.Join("; ", nedenler.Distinct())));
+        }
+        sb.AppendLine().AppendLine("===== ÖZET =====");
+        foreach (var o in ozet) sb.AppendLine(o);
+        return sb.ToString();
+    }
+    static string Tarih(long u) => u > 0 ? DateTimeOffset.FromUnixTimeSeconds(u).ToLocalTime().ToString("dd.MM.yyyy") : "?";
 
     // Kurum içi mi: özel IP ya da kurumda kullanılan genel blok (uygulama / LB GW / ≥/8 segment kaydı var) — Yolculuk'taki "dış" tanımı
     static bool Ic(EnvanterSnapshot env, string ip)

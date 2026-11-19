@@ -293,6 +293,36 @@ sealed class NessusService(IConfiguration cfg, IHttpClientFactory factory, ILogg
         return true;
     }
 
+    // Tanı (açıklık taramasında eksik IP): verilen IP'lerin TÜM bulguları — repository / lastSeen süzgeci YOK; taramanın neden almadığı Zafiyet.cs'de yazılır
+    public record NessusHam(string Ip, string? Dns, string PluginId, string PluginAd, string? Seviye, string? Port, long Son, string? RepoId, string? RepoAd,
+        string? Cve, List<NessusKurulum> Kurulumlar);
+    public async Task<(List<NessusHam> L, bool Kesik)> HamBulgularAsync(IReadOnlyList<string> ips, CancellationToken ct)
+    {
+        var l = new List<NessusHam>();
+        bool kesik = false;
+        int sayfa = 2000;
+        foreach (var parca in ips.Chunk(20))
+            for (int i = 0, bas = 0; ; i++, bas += sayfa)
+            {
+                if (i >= 10) { kesik = true; break; }
+                var govde = new JsonObject
+                {
+                    ["type"] = "vuln", ["sourceType"] = "cumulative",
+                    ["query"] = new JsonObject { ["type"] = "vuln", ["tool"] = "vulndetails", ["startOffset"] = bas, ["endOffset"] = bas + sayfa, ["filters"] = new JsonArray { IpFiltre(parca) } }
+                };
+                var r = (await GonderAsync(Istek(HttpMethod.Post, "/rest/analysis", govde), ct))["response"];
+                var res = r?["results"]?.AsArray().OfType<JsonNode>().ToList() ?? [];
+                foreach (var x in res)
+                    if (S(x, "ip") is { Length: > 0 } ip)
+                        l.Add(new NessusHam(ip, S(x, "dnsName"), S(x, "pluginID") ?? "", S(x, "pluginName") ?? "", S(x, "severity"), S(x, "port"),
+                            long.TryParse(S(x, "lastSeen"), out long u) ? u : 0, x["repository"]?["id"]?.ToString(), x["repository"]?["name"]?.ToString(),
+                            S(x, "cve"), KurulumOku(Cikti(x))));
+                if (!long.TryParse(r?["totalRecords"]?.ToString(), out long top) || bas + sayfa >= top || res.Count == 0) break;
+            }
+        return (l, kesik);
+    }
+    public string[] RepoListesi => Repolar;
+
     // CVE numarasına göre bulgular (plugin yayımlanmamışsa boş)
     public async Task<(List<NessusBulgu> L, bool Kesik)> CveAsync(string cve, CancellationToken ct, IReadOnlyCollection<string>? ips = null, string? assetId = null)
     {

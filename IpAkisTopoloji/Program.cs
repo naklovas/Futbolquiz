@@ -456,6 +456,12 @@ app.MapDelete("/api/zafiyet/kural/{id}", async (string id, HttpContext ctx, ICon
 
 // DMZ asset'i (Zafiyet:DmzAsset) durumu: hangi asset, kaç IP; asset listesi (ayarı doğru yazmak için, ?q= ad süzgeci)
 app.MapGet("/api/zafiyet/dmz", async (ZafiyetService z, CancellationToken ct) => Results.Ok(await z.DmzBilgiAsync(ct)));
+// Tanı: Nessus'ta görünüp taramada çıkmayan IP'ler — düz metin (bulgu başına alınır / alınmaz nedeni)
+app.MapGet("/api/zafiyet/tani", async (string? ip, string? kural, HttpContext ctx, IConfiguration cfg, ZafiyetService z, CancellationToken ct) =>
+{
+    if (!Yetki.Var(cfg, ctx, Yetki.Topoloji)) return Yetki.Red(ctx, "Açıklık taraması tanısı");
+    return Results.Text(await z.TaniAsync(ip ?? "", kural, ct), "text/plain; charset=utf-8");
+});
 app.MapGet("/api/nessus/assetler", async (string? q, HttpContext ctx, IConfiguration cfg, NessusService n, CancellationToken ct) =>
 {
     if (!Yetki.Var(cfg, ctx, Yetki.Topoloji)) return Yetki.Red(ctx, "Nessus asset listesi");
