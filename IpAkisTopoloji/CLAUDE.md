@@ -1119,6 +1119,12 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
   UYGULAMA ÖNERİSİ / MUHAFIZ TAHMİNİ. "↻ Bu IP için yeniden tahmin" (`ipTahmin`): ERT'de uygulama boşsa önce `/api/eksik/calistir {portlar: {ip: satırın portları}, yeniden}` →
   `/api/eksik/durum` bitene kadar, sonra `/api/birim/calistir {ips:[ip], yeniden}`. Sahte envanter + sahte AI ile backend (benzer ad → birim, uydurma birim reddi, onaylıya dokunmama)
   ve Playwright'la arayüz denendi.
+  UYGULAMA TAHMİNİ DE (kullanıcı: "sadece birim değil uygulama tahmini de yapması lazım, aynı ERT eksikleri gibi"): toplu düğme "🤖 Eksikleri tahmin et (uygulama N · birim M)"
+  (`birimAi` → `tahminEt(ips, yeniden, not)`): (1) ERT'de uygulaması olmayan ve (yeniden değilse) önerisi olmayan IP'ler (`uygGerekenler`) ERT eksikleri motoruna — portlu olanlar
+  `/api/eksik/calistir {portlar: {ip: satirPortlari(ip)}}` (CB portları ∪ `ZfSatir.NessusPortlar` (NessusIsle sonunda IP'nin Nessus bulgu portları; port hücresinde "Nessus: …") ∪
+  `BirimSatir.BosPortlar` (ERT'de uygulaması boş portlar)), portsuz ama ERT'de kaydı olanlar (`BirimSatir.ErtKayit`) `{ips}`; 50 sunuculuk parçalar, 409'da bekleyip bir kez
+  daha, her parça `/api/eksik/durum` bitene kadar izlenir; (2) satırlar yenilenir, birimi hâlâ boş (öneri yok, uygulama önerisinden de gelmeyen) IP'ler `/api/birim/calistir`.
+  "↻ Bu IP için yeniden tahmin" aynı akış (`yeniden:true`). Durdur iki işi de durdurur (`st.tahminIptal`). Mock'la denendi.
 - **VIP**: sorgulanan IP VIP ise üyeler + GW'ler aynı sorguya eklenir, üyeler "VIP ÜYESİ" (GW→üye trafiği varsa ✓).
   Gidilen IP VIP ise "VIP → n ÜYE"; gelen IP LB GW ise "LB GW"; sorgulanan sunucu havuz üyesiyse VIP kartı.
 - **Uygulama görünümü** (`/api/apps`, `/api/app`): `[kullanan uygulamalar] → [UYGULAMA: VIP'ler + segment grupları] → [bağımlı olunanlar]`,

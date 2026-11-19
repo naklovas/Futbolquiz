@@ -209,7 +209,7 @@
       <label><input type="checkbox" id="dinleyen"> Yalnız port dinleyenler</label>
       <label><input type="checkbox" id="testG" checked> Test sunucuları</label>
       <span class="sp"></span>
-      <button type="button" id="birimAi" hidden title="ERT'de SUNUCUISLETENBIRIM'i boş ve önerisi olmayan sunucular için tahmin (envanter kanıtı açıksa AI'a sorulmaz). Öneriler ERT'ye yazılmaz.">🤖 Birim tahmini</button>
+      <button type="button" id="birimAi" hidden title="ERT eksikleri gibi: uygulaması boş sunucuların portları için uygulama önerisi (ERT eksikleri motoru), sonra işleten birimi boş olanlar için birim tahmini. Öneriler ERT'ye yazılmaz.">🤖 Eksikleri tahmin et</button>
       <button type="button" id="birimDur" hidden>Durdur</button>
       <span class="small muted" id="birimNot"></span>
       <button type="button" id="csv" hidden>Excel'e aktar</button>
@@ -437,30 +437,51 @@ function tekrarBtn(r) {
   return `<button type="button" data-bk="tekrar" data-ip="${esc(r.ip)}" title="Bu IP için yeniden tahmin: ${(b?.uygulamalar || []).length ? "" : "uygulama önerisi (ERT eksikleri) + "}işleten birim. Onaylı / elle girilenlere dokunulmaz.">↻</button>`;
 }
 const bekle = ms => new Promise(r => setTimeout(r, ms));
-async function ipTahmin(ip) {
+// Satırın uygulama tahmini için portları: CB'de dinlediği portlar + Nessus bulgu portları + ERT'de uygulaması boş portlar
+function satirPortlari(ip) {
   const rs = (st.veri?.satirlar || []).filter(r => r.ip === ip);
-  const b = st.bm?.[ip];
-  const not = t => $("#birimNot").textContent = `${ip}: ${t}`;
-  if (!(b?.uygulamalar || []).length) {
-    const portlar = [...new Set(rs.flatMap(r => r.portlar.map(p => p.port)).filter(p => /^\d+$/.test(p) && p !== "0"))];
-    if (portlar.length) {
-      not(`uygulama önerisi soruluyor (port ${portlar.join(", ")})…`);
-      const r = await fetch("api/eksik/calistir", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ portlar: { [ip]: portlar }, yeniden: true }) });
-      if (!r.ok) { const j = await r.json().catch(() => ({})); alert("Uygulama önerisi başlatılamadı (birim yine tahmin edilecek): " + (j.error || "HTTP " + r.status)); }
-      else for (let i = 0; i < 200; i++) {
-        await bekle(3000);
-        const d = await fetch("api/eksik/durum").then(x => x.ok ? x.json() : null).catch(() => null);
-        if (!d?.calisiyor) break;
-        not(`uygulama önerisi… ${d.asama || ""}`);
-      }
-    } else not("dinlediği port yok, uygulama önerisi atlandı");
+  return [...new Set([...rs.flatMap(r => r.portlar.map(p => p.port)), ...rs.flatMap(r => r.nessusPortlar || []), ...(st.bm?.[ip]?.bosPortlar || [])])]
+    .filter(p => /^\d+$/.test(p) && p !== "0").sort((a, b) => a - b);
+}
+// Uygulama tahmini gereken IP'ler: ERT'de uygulaması yok ve (yeniden değilse) önerisi yok; portu ya da ERT'de boş satırı olmalı
+function uygGerekenler(ips, yeniden) {
+  return ips.filter(ip => { const b = st.bm?.[ip]; return b && !(b.uygulamalar || []).length && (yeniden || !(b.uygOneri || []).length) && (satirPortlari(ip).length || b.ertKayit); });
+}
+async function eksikBekle(not) {
+  for (let i = 0; i < 1200; i++) {
+    await bekle(3000);
+    const d = await fetch("api/eksik/durum").then(x => x.ok ? x.json() : null).catch(() => null);
+    if (!d?.calisiyor) return;
+    not(`uygulama tahmini… ${d.asama || ""}${d.toplam ? ` (${d.biten || 0} / ${d.toplam})` : ""}`);
   }
-  not("işleten birim tahmin ediliyor…");
-  const r2 = await fetch("api/birim/calistir", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ips: [ip], yeniden: true }) });
+}
+// ERT eksikleri motoruyla uygulama tahmini (aynı kayıt: DF_ERT_UYGULAMA_ONERI), 50 sunuculuk parçalar; sonra işleten birim
+async function tahminEt(ips, yeniden, not) {
+  const ug = uygGerekenler(ips, yeniden);
+  const portlu = ug.filter(ip => satirPortlari(ip).length), ertli = ug.filter(ip => !satirPortlari(ip).length);
+  const parcalar = [];
+  for (let i = 0; i < portlu.length; i += 50) parcalar.push({ portlar: Object.fromEntries(portlu.slice(i, i + 50).map(ip => [ip, satirPortlari(ip)])), yeniden });
+  for (let i = 0; i < ertli.length; i += 50) parcalar.push({ ips: ertli.slice(i, i + 50), yeniden });
+  for (const [k, govde] of parcalar.entries()) {
+    if (st.tahminIptal) { not("durduruldu"); return; }
+    not(`uygulama tahmini ${k + 1} / ${parcalar.length}. parça başlıyor…`);
+    let r = await fetch("api/eksik/calistir", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(govde) });
+    if (r.status === 409) { not("ERT eksiklerinde başka bir iş çalışıyor, bitmesi bekleniyor…"); await eksikBekle(not);
+      r = await fetch("api/eksik/calistir", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(govde) }); }
+    if (!r.ok) { const j = await r.json().catch(() => ({})); alert("Uygulama tahmini başlatılamadı: " + (j.error || "HTTP " + r.status)); break; }
+    await eksikBekle(not);
+  }
+  if (ug.length) await birimYukle(true);
+  if (st.tahminIptal) { not("durduruldu"); return; }
+  // birim: ERT'de boş, önerisi yok (yeniden: onaylı / elle hariç hepsi) ve uygulama önerisinden de gelmeyenler
+  const bi = yeniden ? ips.filter(ip => !st.bm?.[ip]?.ert) : ips.filter(ip => { const x = birimBilgi({ ip }); return x?.tur === "bos" && !x.o; });
+  if (!bi.length) { not(ug.length ? `uygulama tahmini bitti (${ug.length} sunucu); birimi boş sunucu kalmadı` : "tahmin edilecek boş alan yok"); return; }
+  not(`işleten birim tahmini (${bi.length} sunucu)…`);
+  const r2 = await fetch("api/birim/calistir", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ips: bi, yeniden }) });
   if (!r2.ok) { const j = await r2.json().catch(() => ({})); alert(j.error || "HTTP " + r2.status); return; }
-  await birimYukle(true);
   birimDurumCiz(await r2.json());
 }
+async function ipTahmin(ip) { await tahminEt([ip], true, t => $("#birimNot").textContent = `${ip}: ${t}`); }
 
 function birimBilgi(r) {
   const b = r.ip && st.bm?.[r.ip];
@@ -506,12 +527,13 @@ async function birimYukle(zorla) {
   ciz();
 }
 function birimBoslar() { return [...new Set((st.veri?.satirlar || []).filter(r => r.ip && birimBilgi(r)?.tur === "bos" && !birimBilgi(r)?.o).map(r => r.ip))]; }
+function tumIpler() { return [...new Set((st.veri?.satirlar || []).map(r => r.ip).filter(Boolean))]; }
 function birimDurumCiz(d) {
   const cal = d?.durum === "calisiyor";
-  const bos = birimBoslar();
-  $("#birimAi").hidden = !st.yetki.yazma || cal || !bos.length;
-  $("#birimAi").textContent = `🤖 Birimi boş ${bos.length} sunucuyu tahmin et`;
-  $("#birimDur").hidden = !cal;
+  const bos = birimBoslar(), ug = uygGerekenler(tumIpler(), false);
+  $("#birimAi").hidden = !st.yetki.yazma || cal || st.tahminSuruyor || (!bos.length && !ug.length);
+  $("#birimAi").textContent = `🤖 Eksikleri tahmin et (uygulama ${ug.length} · birim ${bos.length} sunucu)`;
+  $("#birimDur").hidden = !cal && !st.tahminSuruyor;
   $("#birimNot").textContent = (cal ? `Birim tahmini: ${d.biten} / ${d.toplam}${d.son ? " · " + d.son : ""}`
     : d && d.durum !== "calisiyor" && d.bitis ? `Son birim tahmini ${d.durum}: ${d.kural} kural, ${d.ai} AI, ${d.bos} bulunamadı` : "") + (st.bmUyari ? " · ⚠ " + (st.bmUyari.length > 110 ? st.bmUyari.slice(0, 110) + "…" : st.bmUyari) : "");
   $("#birimNot").title = st.bmUyari || "";
@@ -523,11 +545,12 @@ function birimDurumCiz(d) {
   }, 3000);
 }
 async function birimAi() {
-  const ips = birimBoslar();
-  if (!ips.length || (ips.length > 50 && !confirm(`${ips.length} sunucunun işleten birimi tahmin edilecek (envanter kanıtı açıksa AI'a sorulmaz). Devam?`))) return;
-  const r = await fetch("api/birim/calistir", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ips }) });
-  if (!r.ok) { const j = await r.json().catch(() => ({})); alert(j.error || "HTTP " + r.status); return; }
-  birimDurumCiz(await r.json());
+  const ips = tumIpler(), ug = uygGerekenler(ips, false), bos = birimBoslar();
+  if (!ug.length && !bos.length) return;
+  if (!confirm(`ERT'de boş alanlar tahmin edilecek:\n• Uygulama: ${ug.length} sunucu (ERT eksikleri motoru, port başına; 50'lik parçalar)\n• İşleten birim: uygulama tahmininden sonra birimi hâlâ boş olanlar\nÖneriler ERT'ye yazılmaz. Devam?`)) return;
+  st.tahminSuruyor = true; st.tahminIptal = false; $("#birimAi").hidden = true; $("#birimDur").hidden = false;
+  try { await tahminEt(ips, false, t => $("#birimNot").textContent = t); }
+  finally { st.tahminSuruyor = false; await birimYukle(true); }
 }
 async function birimKarar(ip, karar) {
   let birim = null;
@@ -579,14 +602,16 @@ function statsCiz() {
 }
 
 function portHtml(r) {
-  if (!r.portlar.length) return '<span class="muted small">— yalnız giden</span>';
+  const np = (r.nessusPortlar || []).filter(p => !r.portlar.some(x => x.port === p));
+  const nn = np.length ? `<div class="small muted" title="Nessus bulgularının portları">Nessus: ${esc(np.slice(0, 6).join(", "))}${np.length > 6 ? " …" : ""}</div>` : "";
+  if (!r.portlar.length) return (np.length ? "" : '<span class="muted small">— yalnız giden</span>') + nn;
   const g = r.portlar.slice(0, 6).map(p => {
     const dis = p.dis.length, vip = p.vip.length;
     const ip = [`${p.baglanti.toLocaleString("tr-TR")} bağlantı, ${p.istemci} istemci`, p.ert ? "ERT: " + p.ert : "", vip ? "VIP: " + p.vip.join(", ") : "", dis ? "dış istemci: " + p.dis.join(", ") : ""].filter(Boolean).join("\n");
     if (p.port === "VIP") return `<span class="pt vip" title="${esc("Nessus satırı — dinlediği port bilinmiyor; sunucu VIP havuzunda: " + p.vip.join(", "))}">VIP üyesi</span>`;
     return `<span class="pt ${dis ? "dis" : vip ? "vip" : ""}" title="${esc(ip)}">${esc(p.port)}${vip ? " ⇄VIP" : ""}${dis ? " 🌐" : ""}</span>`;
   }).join("");
-  return g + (r.portlar.length > 6 ? `<span class="muted small">+${r.portlar.length - 6}</span>` : "");
+  return g + (r.portlar.length > 6 ? `<span class="muted small">+${r.portlar.length - 6}</span>` : "") + nn;
 }
 
 function ciz() {
@@ -774,7 +799,11 @@ $("#durdur").addEventListener("click", () => fetch("api/zafiyet/durdur", { metho
 $("#more").addEventListener("click", () => { st.limit += 1000; ciz(); });
 $("#csv").addEventListener("click", csv);
 $("#birimAi").addEventListener("click", birimAi);
-$("#birimDur").addEventListener("click", () => fetch("api/birim/durdur", { method: "POST" }).then(() => birimYukle(true)));
+$("#birimDur").addEventListener("click", async () => {
+  st.tahminIptal = true;
+  await Promise.all([fetch("api/eksik/durdur", { method: "POST" }), fetch("api/birim/durdur", { method: "POST" })]).catch(() => {});
+  birimYukle(true);
+});
 fetch("api/me").then(r => r.ok ? r.json() : null).then(me => {
   if (me?.name) $("#me").textContent = "👤 " + me.name;
   st.yetki = me?.yetki || {};

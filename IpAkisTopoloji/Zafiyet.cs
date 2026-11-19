@@ -25,7 +25,8 @@ record ZfSatir(string? Ip, string? Sunucu, string? Bilgisayar, string? Kurum, st
     string Exe, string Yol, string? Urun, string? Surum, string? SurumKaynak, string Durum, string DurumNot,
     List<ZfPort> Portlar, long Giden, string Onlem, string? Komut, string? Jar, string? Son, string? Baslangic, string Oncelik, string Kaynak,
     string? Vlan = null, string? Domain = null, string? Cidr = null, string? Dagitim = null, string? Nessus = null,
-    bool Dmz = false, List<string>? DisGiden = null, int DisGidenSay = 0, string? Repo = null);   // Repo: Nessus bulgusunun repository adı (id)   // Dmz: Nessus DMZ asset'inde; DisGiden: CB'de süreç dış IP'lere bağlanıyor ("derin dış")
+    bool Dmz = false, List<string>? DisGiden = null, int DisGidenSay = 0, string? Repo = null,
+    List<string>? NessusPortlar = null);   // Nessus bulgularının portları (CB portu olmayan kutularda uygulama tahmini bu portlarla)   // Repo: Nessus bulgusunun repository adı (id)   // Dmz: Nessus DMZ asset'inde; DisGiden: CB'de süreç dış IP'lere bağlanıyor ("derin dış")
 record ZfIs(string Durum, string Asama, DateTime Baslangic, DateTime? Bitis, string? Hata, string? Kaydeden, int Saat, int SurecSaat, ZfKural Kural, string? Kapsam = null,
     int? KayitId = null, DateTime? KayitTarihi = null, bool Kayittan = false, bool Dmz = false);
 // Kayıtlı tarama (DF_ZAFIYET_TARAMA): liste satırı (sonuç gövdesi yok) ve gzip JSON gövdesi
@@ -697,6 +698,11 @@ sealed class ZafiyetService(IConfiguration cfg, IHttpClientFactory factory, Enva
                 not, "Nessus (CVE bulgusu)"));
             eklenen++;
         }
+        // IP'nin Nessus bulgu portları (uygulama tahmini için; CB portu olmayan kutularda tek port bilgisi)
+        var nPort = nUrun.Concat(nCve).GroupBy(b => b.Ip).ToDictionary(g => g.Key,
+            g => g.Select(b => b.Port).OfType<string>().Where(p => p != "0" && int.TryParse(p, out _)).Distinct().OrderBy(p => int.Parse(p)).ToList());
+        for (int i = 0; i < sonuc.Count; i++)
+            if (sonuc[i].Ip is { } nip && nPort.TryGetValue(nip, out var np) && np.Count > 0) sonuc[i] = sonuc[i] with { NessusPortlar = np };
         mesaj.Add($"Nessus birleştirme: {doldurulan} satırın sürümü Nessus'tan, {eklenen} yeni satır (Carbon Black'te görülmeyen kurulum / bulgu).");
     }
 

@@ -15,7 +15,7 @@ record BirimOneri(string Ip, string? Birim, int Guven, string? Gerekce, string K
 // (DF_ERT_UYGULAMA_ONERI, port başına; reddedilenler hariç), muhafız / birim = önerilen uygulamanın ana kaydından (ERT_APPLICATIONDETAIL) ya da diğer sunucularından
 record BirimUygOneri(string Port, string Uygulama, int Guven, string Durum, bool Yeni, string? Gerekce);
 record BirimSatir(string Ip, string? Ert, BirimOneri? Oneri, List<string> Uygulamalar, string? Muhafiz, List<BirimUygOneri> UygOneri,
-    string? MuhafizTahmin, string? BirimTahmin, string? TahminKaynak);
+    string? MuhafizTahmin, string? BirimTahmin, string? TahminKaynak, bool ErtKayit = false, List<string>? BosPortlar = null);   // BosPortlar: ERT'de uygulaması boş portlar
 record BirimIstek(List<string>? Ips, bool Yeniden = false);
 record BirimKarar(string Ip, string Karar, string? Birim);
 record BirimIs(string Durum, int Toplam, int Biten, int Kural, int Ai, int Bos, string? Son, string? Hata, DateTime Baslangic, DateTime? Bitis, string? Kaydeden);
@@ -214,7 +214,8 @@ sealed class BirimService(IConfiguration cfg, EnvanterService envanter, IslevSer
                 if (mT != null && bT != null) break;
             }
             l.Add(new BirimSatir(ip, d.IpBirim.GetValueOrDefault(ip), on.GetValueOrDefault(ip), uyg, muh, uol,
-                muh == null ? mT : null, d.IpBirim.ContainsKey(ip) ? null : bT, kay));
+                muh == null ? mT : null, d.IpBirim.ContainsKey(ip) ? null : bT, kay, rows.Count > 0,
+                rows.Where(r => string.IsNullOrWhiteSpace(r.AppName) && !string.IsNullOrWhiteSpace(r.Port)).Select(r => r.Port!.Trim()).Distinct().ToList()));
         }
         return (l, uyari);
     }
