@@ -1117,7 +1117,7 @@ static async Task<IResult> FizA(HttpContext ctx, IConfiguration cfg, FizikselSer
     catch (Exception ex) { return Results.Json(new { error = ex.Message }, statusCode: 502); }
 }
 app.MapGet("/api/fiziksel/deger/kayitlar", (HttpContext ctx, IConfiguration cfg, FizikselService f, CancellationToken ct) =>
-    FizA(ctx, cfg, f, ct, Yetki.Fiziksel, "", s => f.KayitlarAsync(ct)));
+    FizA(ctx, cfg, f, ct, Yetki.Fiziksel, "", s => f.KayitlarAsync(ct, ctx.User?.Identity?.Name)));
 app.MapPost("/api/fiziksel/deger/kaydet", (FizKayitIstek q, HttpContext ctx, IConfiguration cfg, FizikselService f, CancellationToken ct) =>
     FizA(ctx, cfg, f, ct, Yetki.FizikselDeger, "Fiziksel değer kaydetme", s => f.KaydetAsync(s, q.Aciklama, ctx.User?.Identity?.Name, ct)));
 app.MapGet("/api/fiziksel/deger/elle", (HttpContext ctx, IConfiguration cfg, FizikselService f, CancellationToken ct) =>

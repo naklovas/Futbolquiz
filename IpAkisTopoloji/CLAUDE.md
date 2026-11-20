@@ -1190,6 +1190,9 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
   `ZfSonuc.Mesgul` ("X şu an tarama yapıyor…", sayfada ⏳ bandı, "Yeni tara" pasif, 15 sn'de bir yoklar) — aynı anda tek tarama kalır; kendi kayıtları bu sırada açılabilir.
   "Listeye ekle" ve SonKural kullanıcının görünümünden; durdurma yalnız başlatan (`Durdur(user)`, 403); tanı kullanıcının görünümüyle. Sayfada "Son taramalarım". Scratch test ucuyla
   (iki kullanıcı, bellek kaydı) denendi; SQL'de KAYDEDEN eşleşmesi `= @u OR = kısa ad OR LIKE '%\kısa' OR IS NULL`.
+  FİZİKSEL DE (kullanıcı: "fiziksele de yapalım"): `FizikselService.KayitlarAsync(ct, kullanici)` denetim kayıtlarını yalnız kaydedene listeler (aynı KAYDEDEN eşleşmesi, sahibi boş
+  eskiler herkese), `ExcelAsync(kayit=id)` başkasının kaydında 403; fiziksel.js "Denetim kayıtlarım". ELLE DEĞERLER ORTAK KALDI (cihazın değeri tek; kişiye özel olursa kabin değeri
+  kişiden kişiye değişir) — kullanıcıya soruldu. SQL olmadığı için yalnız derlendi.
 - **VIP**: sorgulanan IP VIP ise üyeler + GW'ler aynı sorguya eklenir, üyeler "VIP ÜYESİ" (GW→üye trafiği varsa ✓).
   Gidilen IP VIP ise "VIP → n ÜYE"; gelen IP LB GW ise "LB GW"; sorgulanan sunucu havuz üyesiyse VIP kartı.
 - **Uygulama görünümü** (`/api/apps`, `/api/app`): `[kullanan uygulamalar] → [UYGULAMA: VIP'ler + segment grupları] → [bağımlı olunanlar]`,

@@ -484,7 +484,7 @@ async function fzKayitlarYukle() {
   let b; try { b = await fzGet("api/fiziksel/deger/kayitlar"); } catch (e) { el.innerHTML = `<span style="color:var(--err)">${esc(e.message)}</span>`; return; }
   el.innerHTML = b.durum ? `<div style="color:var(--warn);margin:6px 0">⚠ ${esc(b.durum)}</div>`
     : !b.kayitlar.length ? `<div class="muted" style="margin:6px 0">Henüz denetim kaydı yok.</div>`
-    : `<div class="small" style="margin:10px 0 4px"><b>Denetim kayıtları</b> <span class="muted">— veritabanında (DF_FIZIKSEL_DEGER_KAYIT); Excel kayıttaki değerlerle birebir</span></div>
+    : `<div class="small" style="margin:10px 0 4px"><b>Denetim kayıtlarım</b> <span class="muted">— yalnız sizin aldığınız kayıtlar (DF_FIZIKSEL_DEGER_KAYIT); Excel kayıttaki değerlerle birebir</span></div>
       <div class="tbl-wrap" style="max-height:24vh"><table><thead><tr><th>#</th><th>Tarih</th><th>Kaydeden</th><th>Açıklama</th><th class="num">Cihaz</th><th class="num">Kabin</th><th>nlyte verisi</th><th></th></tr></thead>
       <tbody>${b.kayitlar.map(x => `<tr><td class="num">${x.kayitId}</td><td class="small">${new Date(x.tarih).toLocaleString("tr-TR")}</td><td class="small">${esc(x.kaydeden ?? "")}</td>
         <td class="small">${esc(x.aciklama ?? "")}</td><td class="num">${fmt(x.cihaz)}</td><td class="num">${fmt(x.kabin)}</td><td class="small muted">${x.veriTarihi ? new Date(x.veriTarihi).toLocaleString("tr-TR") : ""}</td>

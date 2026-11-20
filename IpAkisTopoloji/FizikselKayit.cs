@@ -188,13 +188,29 @@ sealed partial class FizikselService
         catch (SqlException ex) when (ex.Number == 208) { return Results.Json(new { error = TabloYok(TKayit) + " (" + ex.Message + ")" }, statusCode: 409); }
     }
 
-    public async Task<IResult> KayitlarAsync(CancellationToken ct)
+    // Kişiye özel (kullanıcı: "fiziksele de yapalım" — açıklık taramasındaki gibi): denetim kayıtlarını yalnız kaydeden görür / Excel'ini indirir. Kullanıcı yoksa
+    // (yetki kapalı) ya da kaydedeni boş eski kayıtta herkes. DOMAIN\ öneki fark etmez. Elle değerler cihaza ait olduğu için ORTAK kalır.
+    static string Kul(string? u) => (u ?? "").Split('\\').Last().Trim().ToLowerInvariant();
+    static bool KaydinSahibi(string? kaydeden, string? kullanici) =>
+        string.IsNullOrWhiteSpace(kullanici) || string.IsNullOrWhiteSpace(kaydeden) || Kul(kaydeden) == Kul(kullanici);
+
+    public async Task<IResult> KayitlarAsync(CancellationToken ct, string? kullanici = null)
     {
         try
         {
             await using var conn = new SqlConnection(ConnStr);
             await conn.OpenAsync(ct);
-            await using var cmd = new SqlCommand($"SELECT TOP 200 KAYIT_ID, TARIH, KAYDEDEN, ACIKLAMA, CIHAZ_SAYISI, KABIN_SAYISI, VERI_TARIHI FROM {TKayit} ORDER BY KAYIT_ID DESC", conn);
+            bool hepsi = string.IsNullOrWhiteSpace(kullanici);
+            await using var cmd = new SqlCommand($"""
+                SELECT TOP 200 KAYIT_ID, TARIH, KAYDEDEN, ACIKLAMA, CIHAZ_SAYISI, KABIN_SAYISI, VERI_TARIHI FROM {TKayit}
+                {(hepsi ? "" : "WHERE (KAYDEDEN = @u OR KAYDEDEN = @kisa OR KAYDEDEN LIKE @l OR KAYDEDEN IS NULL)")} ORDER BY KAYIT_ID DESC
+                """, conn);
+            if (!hepsi)
+            {
+                cmd.Parameters.AddWithValue("@u", kullanici!);
+                cmd.Parameters.AddWithValue("@kisa", Kul(kullanici));
+                cmd.Parameters.AddWithValue("@l", "%\\" + Kul(kullanici).Replace("[", "[[]").Replace("%", "[%]").Replace("_", "[_]"));
+            }
             await using var r = await cmd.ExecuteReaderAsync(ct);
             var l = new List<object>();
             while (await r.ReadAsync(ct))
@@ -223,6 +239,7 @@ sealed partial class FizikselService
                 tarih = r.GetDateTime(0); kim = r.IsDBNull(1) ? null : r.GetString(1); ac = r.IsDBNull(2) ? null : r.GetString(2); kj = r.IsDBNull(3) ? null : r.GetString(3);
                 vt = r.IsDBNull(4) ? null : r.GetDateTime(4);
             }
+            if (!KaydinSahibi(kim, kullanici)) return Results.Json(new { error = $"Kayıt #{id} başka bir kullanıcıya ait." }, statusCode: 403);
             static int?[] Dd(SqlDataReader r, int bas) => Enumerable.Range(bas, 5).Select(i => r.IsDBNull(i) ? (int?)null : Convert.ToInt32(r.GetValue(i))).ToArray();
             static string? S(SqlDataReader r, int i) => r.IsDBNull(i) ? null : Convert.ToString(r.GetValue(i));
             await using (var cmd = new SqlCommand($"SELECT KABIN, ODA, CIHAZ, ASSETID, TUR, MODEL, {string.Join(", ", BoyutKolon)}, YONTEM, KAYNAK, KURAL, ELLE FROM {TCihaz} WHERE KAYIT_ID = @id ORDER BY KABIN", conn))
