@@ -271,21 +271,26 @@ sealed class NessusService(IConfiguration cfg, IHttpClientFactory factory, ILogg
             if (ar.Count == 0 && S(r?["typeFields"], "definedIPs") is { Length: > 0 } d) ar.AddRange(Araliklar(d).Select(z => new NessusAralik(null, null, z.Bas, z.Bit)));
         }
         catch (Exception ex) when (ex is not OperationCanceledException) { log.LogWarning("Asset {Id} IP listesi okunamadı: {H}", a.Id, ex.Message); }
-        if (ar.Count == 0)
+        // HER ZAMAN: Tenable'ın asset süzgeciyle döndürdüğü sunucular (sumip; repository süzgeçsiz, son Zafiyet:NessusGun) — kullanıcı: "DMZ olan sunucu bizde DMZ etiketi
+        // almamış": dinamik asset'te viewableIPs eksik / farklı olabiliyor; asset'in üyesi olduğunu Tenable'ın kendisi söylesin. Aralık listesiyle birleşir.
+        int tanimAralik = ar.Count, sumipIp = 0;
+        try
         {
-            // Dinamik asset'te liste boş olabilir: asset süzgeçli analizde sonucu olan IP'ler (sumip), repository'leriyle
-            kaynak = "asset süzgeçli Nessus sonuçları (sumip)";
             int sayfa = 5000;
+            var gor = new HashSet<string>();
             for (int i = 0, bas = 0; i < 40; i++, bas += sayfa)
             {
                 var r = (await GonderAsync(Istek(HttpMethod.Post, "/rest/analysis", GenelSorgu(new JsonArray { AssetFiltre(a.Id) }, bas, bas + sayfa, "sumip")), ct))["response"];
                 var res = r?["results"]?.AsArray().OfType<JsonNode>().ToList() ?? [];
                 foreach (var x in res)
-                    if (S(x, "ip") is { Length: > 0 } ip && IpSayi(ip) is { } u)
+                    if (S(x, "ip") is { Length: > 0 } ip && IpSayi(ip) is { } u && gor.Add(ip + "|" + x["repository"]?["id"]))
                         ar.Add(new NessusAralik(x["repository"]?["id"]?.ToString(), x["repository"]?["name"]?.ToString(), u, u));
                 if (!long.TryParse(r?["totalRecords"]?.ToString(), out long top) || bas + sayfa >= top || res.Count == 0) break;
             }
+            sumipIp = gor.Select(g => g.Split('|')[0]).Distinct().Count();
         }
+        catch (Exception ex) when (ex is not OperationCanceledException) { log.LogWarning("Asset {Id} sumip okunamadı: {H}", a.Id, ex.Message); }
+        kaynak = $"asset tanımı: {tanimAralik} aralık + Tenable asset süzgeci: {sumipIp} sunucu (son {AcikGun} gün)";
         var sonuc = new NessusAssetIp(a, ar, kaynak);
         lock (_cache) _assetIp[a.Id] = (sonuc, DateTime.UtcNow);
         return sonuc;

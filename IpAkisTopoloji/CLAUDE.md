@@ -1175,6 +1175,10 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
   dinleyen program | kurulu yazılım | paket listesi)". Mesajda kayıtlı / kimlikli / kimliksiz sayıları ve kimliksiz IP'ler (Nessus kurulu yazılım / süreç GÖREMEZ). IP kipinde hâlâ
   görünmeyen IP → "Kör nokta (görülmedi)" satırı, öncelik İncele, notta CB (`CbOlayVarAsync`: pencerede olay var mı) + Nessus nedeni (kayıt yok / kimliksiz / kimlikli ama yok /
   19506 yok). `SunucularAsync(…, genis)` da repository süzgeçsiz + NessusGun (ayrı önbellek anahtarı "g:"). Sahte Tenable.sc + Splunk ile denendi.
+  DMZ ETİKETİ HATASI (kullanıcı: "Nessus'ta DMZ olan sunucu bizde DMZ etiketi almamış, dün verdiğim grubun içinde"): üyelik yalnız asset'in viewableIPs aralıklarına bakıyordu
+  (dinamik asset'te eksik / farklı) ve sumip yalnız aralık boşsa çalışıyordu → `AssetIpleriAsync` HER ZAMAN asset süzgeçli sumip'i (repository süzgeçsiz, NessusGun) de alıp tek IP
+  aralığı olarak ekler; kaynak "asset tanımı: N aralık + Tenable asset süzgeci: M sunucu". OpenSSL CVE-2026-121481 (EVP_EncodeBlock, PR #33652 açık, dal 4.0 / 4.1, sürüm yok)
+  kullanıcı isteğiyle PARK edildi (sürüm aralıksız "OpenSSL envanter" kuralı önerildi).
 - **VIP**: sorgulanan IP VIP ise üyeler + GW'ler aynı sorguya eklenir, üyeler "VIP ÜYESİ" (GW→üye trafiği varsa ✓).
   Gidilen IP VIP ise "VIP → n ÜYE"; gelen IP LB GW ise "LB GW"; sorgulanan sunucu havuz üyesiyse VIP kartı.
 - **Uygulama görünümü** (`/api/apps`, `/api/app`): `[kullanan uygulamalar] → [UYGULAMA: VIP'ler + segment grupları] → [bağımlı olunanlar]`,
