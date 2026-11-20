@@ -72,14 +72,15 @@ sealed class NessusService(IConfiguration cfg, IHttpClientFactory factory, ILogg
         return (await GonderAsync(Istek(HttpMethod.Get, "/rest/repository?fields=id,name,description,type"), ct))["response"];
     }
 
-    JsonObject Sorgu(IEnumerable<string> ips, int bas, int bit, bool tumPluginler, string tool = "vulndetails")
+    // genis: açıklık taramasının kör nokta kontrolü — repository süzgeci yok, son görülme Zafiyet:NessusGun (DMZ / seyrek taranan sunucular)
+    JsonObject Sorgu(IEnumerable<string> ips, int bas, int bit, bool tumPluginler, string tool = "vulndetails", bool genis = false)
     {
         var filtre = new JsonArray { new JsonObject { ["filterName"] = "ip", ["operator"] = "=", ["value"] = string.Join(",", ips) } };
         if (tool == "listvuln") filtre.Add(new JsonObject { ["filterName"] = "severity", ["operator"] = "=", ["value"] = "0" });   // yalnız bilgi bulguları
         else if (!tumPluginler) filtre.Add(new JsonObject { ["filterName"] = "pluginID", ["operator"] = "=", ["value"] = string.Join(",", Pluginler) });
-        if (Repolar.Length > 0)
+        if (Repolar.Length > 0 && !genis)
             filtre.Add(new JsonObject { ["filterName"] = "repository", ["operator"] = "=", ["value"] = new JsonArray(Repolar.Select(r => (JsonNode)new JsonObject { ["id"] = r }).ToArray()) });
-        int gun = cfg.GetValue("Nessus:MaxGun", 30);
+        int gun = genis ? AcikGun : cfg.GetValue("Nessus:MaxGun", 30);
         if (gun > 0) filtre.Add(new JsonObject { ["filterName"] = "lastSeen", ["operator"] = "=", ["value"] = $"0:{gun}" });
         return new JsonObject
         {
@@ -88,13 +89,13 @@ sealed class NessusService(IConfiguration cfg, IHttpClientFactory factory, ILogg
         };
     }
 
-    async Task<List<JsonNode>> KayitlarAsync(IReadOnlyCollection<string> ips, bool tumPluginler, CancellationToken ct, string tool = "vulndetails")
+    async Task<List<JsonNode>> KayitlarAsync(IReadOnlyCollection<string> ips, bool tumPluginler, CancellationToken ct, string tool = "vulndetails", bool genis = false)
     {
         int sayfa = Math.Clamp(cfg.GetValue("Nessus:SayfaBoyutu", 2000), 100, 10000), maxSayfa = cfg.GetValue("Nessus:MaxSayfa", 20);
         var list = new List<JsonNode>();
         for (int i = 0, bas = 0; i < maxSayfa; i++, bas += sayfa)
         {
-            var r = (await GonderAsync(Istek(HttpMethod.Post, "/rest/analysis", Sorgu(ips, bas, bas + sayfa, tumPluginler, tool)), ct))["response"];
+            var r = (await GonderAsync(Istek(HttpMethod.Post, "/rest/analysis", Sorgu(ips, bas, bas + sayfa, tumPluginler, tool, genis)), ct))["response"];
             var res = r?["results"]?.AsArray().OfType<JsonNode>().ToList() ?? [];
             list.AddRange(res);
             if (!long.TryParse(r?["totalRecords"]?.ToString(), out long top) || bas + sayfa >= top || res.Count == 0) break;
@@ -310,6 +311,41 @@ sealed class NessusService(IConfiguration cfg, IHttpClientFactory factory, ILogg
         return l;
     }
 
+    // ---------------- Envanter araması (açıklık taraması: kör nokta) ----------------
+    // Kullanıcı: "ajan yok, Nessus'tan da gelmedi; o sunucuya ait ilgili exe'leri her koşulda Nessus'tan getirelim, kısıt varsa belirt". Bulgu adına değil Nessus'un
+    // sunucu envanterine bakılır: 70329 çalışan süreçler, 44401 Windows servisleri (yol), 34252 / 25221 portu dinleyen program, 20811 kurulu yazılım (Windows),
+    // 22869 paketler (Linux), 19506 tarama bilgisi (kimlikli mi). Repository süzgeci yok, son görülme Zafiyet:NessusGun. Kapsam: IP listesi ya da asset (DMZ).
+    public record NessusEnvanter(string Ip, string? Dns, string? Netbios, string PluginId, string Metin, string? Son, string? RepoAd);
+    static readonly int[] EnvanterPluginleri = [70329, 44401, 34252, 25221, 20811, 22869, 19506];
+    public async Task<(List<NessusEnvanter> L, bool Kesik)> EnvanterAsync(IReadOnlyCollection<string>? ips, string? assetId, CancellationToken ct)
+    {
+        var l = new List<NessusEnvanter>();
+        if (!Acik || (ips is not { Count: > 0 } && assetId == null)) return (l, false);
+        int sayfa = 2000, max = cfg.GetValue("Zafiyet:NessusEnvanterSayfa", 30), gun = AcikGun;
+        bool kesik = false;
+        var kapsamlar = ips is { Count: > 0 } ? ips.Chunk(100).Select(c => (JsonNode)IpFiltre(c)).ToList() : [AssetFiltre(assetId!)];
+        foreach (var kapsam in kapsamlar)
+            for (int i = 0, bas = 0; ; i++, bas += sayfa)
+            {
+                if (i >= max) { kesik = true; break; }
+                var filtre = new JsonArray { kapsam.DeepClone(), new JsonObject { ["filterName"] = "pluginID", ["operator"] = "=", ["value"] = string.Join(",", EnvanterPluginleri) } };
+                if (gun > 0) filtre.Add(new JsonObject { ["filterName"] = "lastSeen", ["operator"] = "=", ["value"] = $"0:{gun}" });
+                var govde = new JsonObject
+                {
+                    ["type"] = "vuln", ["sourceType"] = "cumulative",
+                    ["query"] = new JsonObject { ["type"] = "vuln", ["tool"] = "vulndetails", ["startOffset"] = bas, ["endOffset"] = bas + sayfa, ["filters"] = filtre }
+                };
+                var r = (await GonderAsync(Istek(HttpMethod.Post, "/rest/analysis", govde), ct))["response"];
+                var res = r?["results"]?.AsArray().OfType<JsonNode>().ToList() ?? [];
+                foreach (var x in res)
+                    if (S(x, "ip") is { Length: > 0 } ip && (ips == null || ips.Contains(ip)))
+                        l.Add(new NessusEnvanter(ip, S(x, "dnsName") is { Length: > 0 } d ? d : null, S(x, "netbiosName") is { Length: > 0 } nb ? nb : null,
+                            S(x, "pluginID") ?? "", Cikti(x), Zaman(S(x, "lastSeen")), x["repository"]?["name"]?.ToString()));
+                if (!long.TryParse(r?["totalRecords"]?.ToString(), out long top) || bas + sayfa >= top || res.Count == 0) break;
+            }
+        return (l, kesik);
+    }
+
     // Tanı (açıklık taramasında eksik IP): verilen IP'lerin TÜM bulguları — repository / lastSeen süzgeci YOK; taramanın neden almadığı Zafiyet.cs'de yazılır
     public record NessusHam(string Ip, string? Dns, string PluginId, string PluginAd, string? Seviye, string? Port, long Son, string? RepoId, string? RepoAd,
         string? Cve, List<NessusKurulum> Kurulumlar);
@@ -396,26 +432,27 @@ sealed class NessusService(IConfiguration cfg, IHttpClientFactory factory, ILogg
     }
 
     // Sunucu başına özet (önbellekli; kaydı olmayan IP null). Hata fırlatır — çağıran uyarıya çevirir.
-    public async Task<Dictionary<string, NessusSunucu>> SunucularAsync(IEnumerable<string> ipler, Action<int, int>? ilerleme, CancellationToken ct)
+    public async Task<Dictionary<string, NessusSunucu>> SunucularAsync(IEnumerable<string> ipler, Action<int, int>? ilerleme, CancellationToken ct, bool genis = false)
     {
+        string On(string ip) => genis ? "g:" + ip : ip;   // geniş sorgu ayrı önbellekte
         var sonuc = new Dictionary<string, NessusSunucu>();
         if (!Acik) return sonuc;
         var ttl = TimeSpan.FromMinutes(cfg.GetValue("Nessus:CacheDakika", 60));
         var sor = new List<string>();
         foreach (var ip in ipler.Distinct())
-            if (_cache.TryGetValue(ip, out var c) && DateTime.Now - c.T < ttl) { if (c.S != null) sonuc[ip] = c.S; }
+            if (_cache.TryGetValue(On(ip), out var c) && DateTime.Now - c.T < ttl) { if (c.S != null) sonuc[ip] = c.S; }
             else sor.Add(ip);
         var parcalar = sor.Chunk(Math.Clamp(cfg.GetValue("Nessus:ParcaIp", 100), 1, 500)).ToList();
         for (int i = 0; i < parcalar.Count; i++)
         {
             ilerleme?.Invoke(i, parcalar.Count);
-            var raw = await KayitlarAsync(parcalar[i], false, ct);
+            var raw = await KayitlarAsync(parcalar[i], false, ct, genis: genis);
             var byIp = raw.GroupBy(x => S(x, "ip") ?? "").ToDictionary(g => g.Key, g => g.ToList());
-            var urun = (UrunTespiti ? await KayitlarAsync(parcalar[i], false, ct, "listvuln") : []).GroupBy(x => S(x, "ip") ?? "").ToDictionary(g => g.Key, g => g.ToList());
+            var urun = (UrunTespiti ? await KayitlarAsync(parcalar[i], false, ct, "listvuln", genis) : []).GroupBy(x => S(x, "ip") ?? "").ToDictionary(g => g.Key, g => g.ToList());
             foreach (var ip in parcalar[i])
             {
                 var s = byIp.TryGetValue(ip, out var rs) ? Coz(ip, rs, urun.GetValueOrDefault(ip) ?? []) : null;
-                _cache[ip] = (s, DateTime.Now);
+                _cache[On(ip)] = (s, DateTime.Now);
                 if (s != null) sonuc[ip] = s;
             }
         }

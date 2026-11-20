@@ -435,6 +435,10 @@ sealed class ZafiyetService(IConfiguration cfg, IHttpClientFactory factory, Enva
             try { imzaT = await imza.TaramaAsync(ct); } catch (Exception ex) when (ex is not OperationCanceledException) { mesaj.Add("Servis imzası kaydı okunamadı: " + ex.Message); }
             if (ipSet != null && imzaT != null) imzaT = imzaT with { Sunucular = imzaT.Sunucular.Where(x => ipSet.Contains(x.Ip)).ToList() };
             var satir = Birlestir(k, env, r1.Rows, r2Rows, imzaT, mesaj, nCve, nUrun);
+            // Kör nokta: CB'de ve Nessus bulgularında görünmeyen sunucular için Nessus envanteri (süreç / servis / yazılım listesi); IP kipinde hiç görünmeyen IP'ye nedenli satır
+            if (nessus.Acik && cfg.GetValue("Zafiyet:NessusEnvanter", true))
+                try { satir.AddRange(await KorNoktaAsync(k, env, satir, ipler, dmzA, saat, mesaj, ct)); }
+                catch (Exception ex) when (ex is not OperationCanceledException) { mesaj.Add("Nessus envanter araması yapılamadı: " + ex.Message); }
             // DMZ işareti (asset IP listesi ya da DMZ asset sorgusundan gelen Nessus bulgusu) + dışa açıklık önceliği
             satir = satir.Select(r => DisOncelik(r with { Dmz = r.Ip != null && (dmzNessus.Contains(r.Ip) || dmzA?.Icerir(r.Ip, null, dmzRepo) == true) })).ToList();
             if (dmzKip)
@@ -952,6 +956,128 @@ sealed class ZafiyetService(IConfiguration cfg, IHttpClientFactory factory, Enva
     }
 
     static string Tarih(long u) => u > 0 ? DateTimeOffset.FromUnixTimeSeconds(u).ToLocalTime().ToString("dd.MM.yyyy") : "?";
+
+    // ---------------- Kör nokta (Nessus envanteri) ----------------
+    async Task<List<ZfSatir>> KorNoktaAsync(ZfKural k, EnvanterSnapshot env, List<ZfSatir> satir, List<string>? ipler, NessusService.NessusAssetIp? dmzA, int saat,
+        List<string> mesaj, CancellationToken ct)
+    {
+        var ek = new List<ZfSatir>();
+        if (ipler == null && dmzA == null)
+        {
+            mesaj.Add("Nessus süreç / servis / yazılım listesi araması (ajan olmayan sunucular) yalnız IP ya da DMZ kapsamında yapılır (tüm sunucularda çok büyük): IP'leri girin ya da Zafiyet:DmzAsset tanımlayın.");
+            return ek;
+        }
+        Set(i => i with { Asama = "Nessus: süreç / servis / yazılım listelerinde kuralın ürünü (kör nokta)" });
+        var (kay, kesik) = await nessus.EnvanterAsync(ipler, ipler == null ? dmzA!.Asset.Id : null, ct);
+        var olan = satir.Select(r => r.Ip).OfType<string>().ToHashSet();
+        var test = (cfg.GetSection("Eksik:TestIfadeleri").Get<string[]>() ?? ["test"]).Select(x => x.ToLowerInvariant()).ToArray();
+        // eşleşme: kuralın exe adları (yol / süreç adı olarak) ya da yazılım satırında Nessus kelimeleri (Java'da JVM izleri)
+        var adlar = Temiz(k.Exeler).Select(e => Regex.Escape(e).Replace(@"\*", "[a-z0-9_.-]*")).ToList();
+        var exeRx = new Regex($@"(?<![a-z0-9_.-])({string.Join("|", adlar)})(\.exe)?(?![a-z0-9_-])", RegexOptions.IgnoreCase);
+        var yazRx = new Regex(@"(?<![a-z])(" + string.Join("|", NessusKelimeleri(k).Select(Regex.Escape)) + (k.Java ? "|openjdk|jre|jdk|temurin|corretto|zulu|graalvm|semeru" : "") + @")(?![a-z])", RegexOptions.IgnoreCase);
+        var haric = k.Java ? new Regex("javascript|jquery|json", RegexOptions.IgnoreCase) : null;
+        var ipGrup = kay.GroupBy(x => x.Ip).ToDictionary(g => g.Key, g => g.ToList());
+        int kimlikli = 0, kimliksiz = 0, bulunan = 0;
+        var kimliksizIp = new List<string>();
+        foreach (var (ip, l) in ipGrup)
+        {
+            bool? kim = null;
+            foreach (var x in l.Where(x => x.PluginId == "19506"))
+                if (Regex.Match(x.Metin, @"Credentialed checks\s*:\s*(\w+)", RegexOptions.IgnoreCase) is { Success: true } m)
+                    kim = (kim ?? false) || m.Groups[1].Value.StartsWith("yes", StringComparison.OrdinalIgnoreCase);
+            if (kim == true) kimlikli++; else if (kim == false) { kimliksiz++; kimliksizIp.Add(ip); }
+            if (olan.Contains(ip)) continue;
+            // satır satır eşleşme: (yol / ad, ham satır, plugin)
+            var es = new List<(string Yol, string Ham, string Plugin, string? Son, string? Repo, string? Dns, string? Nb)>();
+            foreach (var x in l.Where(x => x.PluginId != "19506"))
+                foreach (var satirMetin in x.Metin.Split('\n').Select(t => t.Trim()).Where(t => t.Length > 2))
+                {
+                    bool yaz = x.PluginId is "20811" or "22869";
+                    bool uy = exeRx.IsMatch(satirMetin) || (yaz && yazRx.IsMatch(satirMetin));
+                    if (!uy || (haric?.IsMatch(satirMetin) ?? false)) continue;
+                    // yol: satırdaki ilk dosya yolu (servis / dinleyen program), yoksa satırın kendisi
+                    string yol = Regex.Match(satirMetin, @"([A-Za-z]:\\[^""|<>\r\n]+?\.exe|/(?:[^\s""]+/)+[^\s""]+)", RegexOptions.IgnoreCase) is { Success: true } ym ? ym.Value.Trim()
+                        : exeRx.Match(satirMetin) is { Success: true } em && !yaz ? em.Value : satirMetin;
+                    if (yol.Length > 260) yol = yol[..260];
+                    es.Add((yol, satirMetin.Length > 300 ? satirMetin[..300] : satirMetin, x.PluginId, x.Son, x.RepoAd, x.Dns, x.Netbios));
+                }
+            // yalnız adı olan (süreç listesi "java.exe") kayıt, aynı exe'nin yolu bilinen kaydı varsa atılır
+            var yollu = es.Where(e => e.Yol.Contains('\\') || e.Yol.Contains('/')).Select(e => ExeAd(e.Yol).ToLowerInvariant()).ToHashSet();
+            es = es.Where(e => e.Yol.Contains('\\') || e.Yol.Contains('/') || e.Plugin is "20811" or "22869" || !yollu.Contains(e.Yol.ToLowerInvariant())).ToList();
+            foreach (var e in es.GroupBy(e => YolNorm(e.Yol)).Select(g => g.First()).Take(4))
+            {
+                // sürüm: yol / satır (Java kalıpları), "Java 8 Update 202", sonra ilk a.b.c
+                string? sur = Surum(k, e.Yol) ?? Surum(k, e.Ham)
+                    ?? (Regex.Match(e.Ham, @"java\D{0,20}?(\d+)\s*update\s*(\d+)", RegexOptions.IgnoreCase) is { Success: true } jm ? NormSurum($"{jm.Groups[1].Value}u{jm.Groups[2].Value}") : null)
+                    ?? (e.Plugin is "20811" or "22869" ? NessusSurum(e.Ham) : null);
+                var (du, no) = Degerlendir(k, sur);
+                string kaynakAd = e.Plugin switch { "70329" => "süreç listesi", "44401" => "Windows servisleri", "34252" or "25221" => "portu dinleyen program", "20811" => "kurulu yazılım", _ => "paket listesi" };
+                var b = new NessusBulgu(ip, e.Dns, e.Nb, e.Plugin, kaynakAd, "0", null, e.Son, []);
+                var r = NessusSatir(k, env, test, b, e.Yol, sur, du, no + $" · Nessus {kaynakAd}: {e.Ham}", $"envanter ({kaynakAd}, plugin {e.Plugin}, {e.Son})", $"Nessus ({kaynakAd})");
+                ek.Add(r with { Repo = e.Repo, Exe = e.Plugin is "20811" or "22869" ? (k.Java ? "java (Nessus yazılım)" : r.Exe) : ExeAd(e.Yol.TrimEnd('\\', '/')) is { Length: > 0 } ea ? ea : r.Exe });
+            }
+            if (es.Count > 0) { bulunan++; olan.Add(ip); }
+        }
+        mesaj.Add($"Nessus envanteri ({(ipler != null ? ipler.Count + " IP" : "DMZ asset'i")}; süreç / servis / dinleyen program / yazılım listeleri, son {nessus.AcikGun} gün, tüm repolar): {ipGrup.Count} sunucuda kayıt "
+            + $"({kimlikli} kimlikli, {kimliksiz} kimliksiz tarama) → {bulunan} sunucuda kuralın ürünü bulundu, {ek.Count} yeni satır."
+            + (kimliksiz > 0 ? $" Kimliksiz taranan {kimliksiz} sunucuda Nessus kurulu yazılım / süreç GÖREMEZ: {string.Join(", ", kimliksizIp.Take(15))}{(kimliksiz > 15 ? " …" : "")}." : "")
+            + (kesik ? " Sayfa sınırında kesildi (Zafiyet:NessusEnvanterSayfa)." : ""));
+
+        // IP kipi: verilen ama hiçbir yerde görünmeyen IP → nedenli satır (kullanıcı: "her koşulda getirelim, kısıt varsa belirt")
+        if (ipler != null)
+        {
+            var yok = ipler.Where(ip => !olan.Contains(ip)).ToList();
+            if (yok.Count > 0)
+            {
+                var cbVar = await CbOlayVarAsync(yok, saat, ct);
+                foreach (var ip in yok)
+                {
+                    var l = ipGrup.GetValueOrDefault(ip) ?? [];
+                    bool? kim = null;
+                    foreach (var x in l.Where(x => x.PluginId == "19506"))
+                        if (Regex.Match(x.Metin, @"Credentialed checks\s*:\s*(\w+)", RegexOptions.IgnoreCase) is { Success: true } m)
+                            kim = (kim ?? false) || m.Groups[1].Value.StartsWith("yes", StringComparison.OrdinalIgnoreCase);
+                    string cb = cbVar == null ? "Carbon Black kontrol edilemedi" : cbVar.Contains(ip) ? $"Carbon Black bu IP'den olay alıyor ama son {saat} saatte kuralın süreci görülmedi"
+                        : $"Carbon Black son {saat} saatte bu IP'den HİÇ olay almadı (ajan yok / çalışmıyor ya da IP farklı)";
+                    string ns = l.Count == 0 ? $"Nessus'ta son {nessus.AcikGun} günde envanter kaydı yok (taranmamış ya da anahtarın görmediği repo)"
+                        : kim == false ? "Nessus KİMLİKSİZ taramış — kurulu yazılım / çalışan süreç göremez (yalnız açık portlar)"
+                        : kim == true ? "Nessus kimlikli taramış, süreç / servis / yazılım listesinde kuralın ürünü yok"
+                        : "Nessus kaydı var ama tarama bilgisi (19506) yok — kimlikli mi bilinmiyor";
+                    var b = new NessusBulgu(ip, l.Select(x => x.Dns).FirstOrDefault(x => x != null), l.Select(x => x.Netbios).FirstOrDefault(x => x != null), "", "", null, null,
+                        l.Select(x => x.Son).Max(), []);
+                    var r = NessusSatir(k, env, test, b, "(görülmedi)", null, "bilinmiyor", cb + " · " + ns, ns, "Kör nokta (görülmedi)");
+                    ek.Add(r with { Exe = "(görülmedi)", Oncelik = "incele", Repo = l.Select(x => x.RepoAd).FirstOrDefault(x => x != null) });
+                }
+                mesaj.Add($"Hiçbir kaynakta görülmeyen {yok.Count} IP 'Kör nokta' satırı olarak eklendi (nedeni satırda).");
+            }
+        }
+        return ek;
+    }
+
+    // CB'de bu IP'lerden pencere içinde herhangi bir olay var mı (ajan çalışıyor mu); hata → null
+    async Task<HashSet<string>?> CbOlayVarAsync(List<string> ips, int saat, CancellationToken ct)
+    {
+        try
+        {
+            var s = cfg.GetSection("Splunk");
+            string index = s["Index"] ?? "carbonblack", st = s["Sourcetype"] ?? "bit9:carbonblack:json";
+            var set = new HashSet<string>();
+            foreach (var parca in ips.Chunk(50))
+            {
+                string spl = $"""
+                    search index={index} sourcetype="{st}" ({string.Join(" OR ", parca.Select(i => $"TERM({i})"))})
+                    | where in(local_ip, {string.Join(", ", parca.Select(i => $"\"{i}\""))})
+                    | stats count by local_ip
+                    """;
+                var bit = DateTimeOffset.Now;
+                var r = await SplunkService.ExportAsync(spl, new LookupQuery("0.0.0.0", bit.AddHours(-saat), bit), cfg, factory.CreateClient("splunk"), ct, "Carbon Black (olay var mı)",
+                    TimeSpan.FromSeconds(120));
+                foreach (var x in r.Rows) if (V(x, "local_ip") is { } ip) set.Add(ip);
+            }
+            return set;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException) { log.LogWarning("CB olay kontrolü: {H}", ex.Message); return null; }
+    }
 
     // Kurum içi mi: özel IP ya da kurumda kullanılan genel blok (uygulama / LB GW / ≥/8 segment kaydı var) — Yolculuk'taki "dış" tanımı
     static bool Ic(EnvanterSnapshot env, string ip)

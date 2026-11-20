@@ -1166,6 +1166,15 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
   komut satırında iz olan, ör. wrapper.exe … jvm.dll), diğerleri; (2) olay yoksa ERT / CB adıyla arama → CB'de başka IP ile mi görünüyor (çok kartlı / NAT); (3) bilgisayar adlarıyla
   süreç başlangıçlarında iz (komut satırı). IP başına sonuç: başka adlı exe içinde → exe adını kurala ekle; kurala uyan var ama son olay tarama penceresinden eski → pencereyi büyüt;
   yalnız süreç başlangıcı; ajan yok / olay yok; başka IP. Sahte Splunk ile denendi.
+  KÖR NOKTA / NESSUS ENVANTERİ (kullanıcı: "ajan yok, Nessus'tan da gelmedi; o sunucuya ait ilgili exe'leri her koşulda Nessus'tan getirelim, kısıt varsa belirt"; "ERT iş görmez,
+  manuel bilgi" → ERT'ye dayalı "aynı uygulamanın sunucuları" yapılmadı): `NessusService.EnvanterAsync(ips | assetId)` plugin 70329 süreçler, 44401 servisler (yol), 34252 / 25221
+  dinleyen program, 20811 yazılım, 22869 paketler, 19506 kimlikli mi — repository süzgeçsiz, son `Zafiyet:NessusGun`, `Zafiyet:NessusEnvanterSayfa`=30 × 2000. `KorNoktaAsync`
+  (Birlestir'den hemen sonra, `Zafiyet:NessusEnvanter`=true): kapsam IP kipi ya da DMZ asset'i (tam taramada da; tüm sunucularda yapılmaz, mesajla); sonuçta HİÇ satırı olmayan
+  IP'lerde satır satır eşleşme (kuralın exe adları; yazılım / paket satırında Nessus kelimeleri + Java'da JVM izleri, javascript / jquery / json hariç), yol satırdan, sürüm Java kalıpları
+  / "Java 8 Update 202" → 1.8.0.202 / ilk a.b.c; yalnız adı olan süreç kaydı yolu bilinen aynı exe varsa atılır; satır kaynağı "Nessus (süreç listesi | Windows servisleri | portu
+  dinleyen program | kurulu yazılım | paket listesi)". Mesajda kayıtlı / kimlikli / kimliksiz sayıları ve kimliksiz IP'ler (Nessus kurulu yazılım / süreç GÖREMEZ). IP kipinde hâlâ
+  görünmeyen IP → "Kör nokta (görülmedi)" satırı, öncelik İncele, notta CB (`CbOlayVarAsync`: pencerede olay var mı) + Nessus nedeni (kayıt yok / kimliksiz / kimlikli ama yok /
+  19506 yok). `SunucularAsync(…, genis)` da repository süzgeçsiz + NessusGun (ayrı önbellek anahtarı "g:"). Sahte Tenable.sc + Splunk ile denendi.
 - **VIP**: sorgulanan IP VIP ise üyeler + GW'ler aynı sorguya eklenir, üyeler "VIP ÜYESİ" (GW→üye trafiği varsa ✓).
   Gidilen IP VIP ise "VIP → n ÜYE"; gelen IP LB GW ise "LB GW"; sorgulanan sunucu havuz üyesiyse VIP kartı.
 - **Uygulama görünümü** (`/api/apps`, `/api/app`): `[kullanan uygulamalar] → [UYGULAMA: VIP'ler + segment grupları] → [bağımlı olunanlar]`,
