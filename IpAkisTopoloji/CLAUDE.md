@@ -1160,6 +1160,12 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
   Yeniden sorarken önceki iş önerilerinin portları da port listesine girer.
   CSV (kullanıcı: "değişim kolonuna = yazmışsın, Excel formül sanıyor"): DEĞİŞİM sembolsüz (`DEG_DUZ`); `q()` = + @ ya da - ve harfle başlayan hücrenin başına boşluk koyar
   (Excel formül sanmaz; komut satırı / Nessus metniyle formül enjeksiyonu da olmaz). imza.html / topoloji.html CSV'lerinde aynı koruma henüz yok.
+  TANIDA CARBON BLACK (kullanıcı: "bir IP gelmiyor, ekip Java var diyor; fazla mı Nessus bazlıyız, CB'den gelmiyor, nasıl test ederiz"): `/api/zafiyet/tani` artık Nessus'tan önce
+  `CbTaniAsync` (son `Zafiyet:TaniSaat`=168 saat, sorgu başına `TaniSureSaniye`=180; `Zafiyet:TaniCarbonBlack`=false kapatır): (1) IP'nin ağ olayları süreç başına (local_ip IN) —
+  ✔ kurala uyan, ☕ iz var ama kurala uymayan (yolunda kuralın exe adları / Java'da java|jre|jdk|jvm|openjdk|zulu|corretto|temurin|graalvm|semeru|-jar geçen YA DA süreç başlangıcının
+  komut satırında iz olan, ör. wrapper.exe … jvm.dll), diğerleri; (2) olay yoksa ERT / CB adıyla arama → CB'de başka IP ile mi görünüyor (çok kartlı / NAT); (3) bilgisayar adlarıyla
+  süreç başlangıçlarında iz (komut satırı). IP başına sonuç: başka adlı exe içinde → exe adını kurala ekle; kurala uyan var ama son olay tarama penceresinden eski → pencereyi büyüt;
+  yalnız süreç başlangıcı; ajan yok / olay yok; başka IP. Sahte Splunk ile denendi.
 - **VIP**: sorgulanan IP VIP ise üyeler + GW'ler aynı sorguya eklenir, üyeler "VIP ÜYESİ" (GW→üye trafiği varsa ✓).
   Gidilen IP VIP ise "VIP → n ÜYE"; gelen IP LB GW ise "LB GW"; sorgulanan sunucu havuz üyesiyse VIP kartı.
 - **Uygulama görünümü** (`/api/apps`, `/api/app`): `[kullanan uygulamalar] → [UYGULAMA: VIP'ler + segment grupları] → [bağımlı olunanlar]`,

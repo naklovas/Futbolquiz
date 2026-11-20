@@ -762,7 +762,12 @@ sealed class ZafiyetService(IConfiguration cfg, IHttpClientFactory factory, Enva
         }
         else sb.AppendLine("DMZ asset'i: " + (dmzHata ?? "tanımlı değil"));
         sb.AppendLine(son != null ? $"Son tarama (bellekte): {son.Kural.Id} · {son.Kapsam} · {son.Durum} · {son.Baslangic:dd.MM.yyyy HH:mm}{(son.Kayittan ? " (kayıttan açıldı)" : "")}" : "Bellekte tarama yok.");
-        if (!nessus.Acik) { sb.AppendLine("Nessus tanımlı değil."); return sb.ToString(); }
+        // Carbon Black (kullanıcı: "bir IP gelmiyor, ekip Java var diyor; fazla mı Nessus bazlıyız, CB'den gelmiyor"): neden CB'de görünmediği
+        var cbOzet = new Dictionary<string, string>();
+        if (cfg.GetValue("Zafiyet:TaniCarbonBlack", true))
+            try { await CbTaniAsync(ips, k, sb, cbOzet, ct); }
+            catch (Exception ex) when (ex is not OperationCanceledException) { sb.AppendLine().AppendLine("Carbon Black tanısı yapılamadı: " + ex.Message); }
+        if (!nessus.Acik) { sb.AppendLine().AppendLine("Nessus tanımlı değil."); foreach (var (ip, o) in cbOzet) sb.AppendLine($"{ip}: CB: {o}"); return sb.ToString(); }
         List<NessusService.NessusHam> ham; bool kesik;
         try { (ham, kesik) = await nessus.HamBulgularAsync(ips, ct); }
         catch (Exception ex) when (ex is not OperationCanceledException) { sb.AppendLine("Nessus sorgusu hatası: " + ex.Message); return sb.ToString(); }
@@ -812,8 +817,140 @@ sealed class ZafiyetService(IConfiguration cfg, IHttpClientFactory factory, Enva
         }
         sb.AppendLine().AppendLine("===== ÖZET =====");
         foreach (var o in ozet) sb.AppendLine(o);
+        if (cbOzet.Count > 0) { sb.AppendLine().AppendLine("Carbon Black:"); foreach (var (ip, o) in cbOzet) sb.AppendLine($"{ip}: {o}"); }
         return sb.ToString();
     }
+    // Carbon Black tanısı (son Zafiyet:TaniSaat=168 saat): IP'nin olayları (ajan çalışıyor mu), sunucudaki süreçler (kurala uyan / izi olup uymayan), olay yoksa ERT adıyla arama
+    // (başka IP ile mi görünüyor), komut satırında iz olan süreç başlangıçları.
+    async Task CbTaniAsync(List<string> ips, ZfKural k, System.Text.StringBuilder sb, Dictionary<string, string> ozet, CancellationToken ct)
+    {
+        var s = cfg.GetSection("Splunk");
+        string index = s["Index"] ?? "carbonblack", st = s["Sourcetype"] ?? "bit9:carbonblack:json";
+        int saat = Math.Clamp(cfg.GetValue("Zafiyet:TaniSaat", 168), 1, 720), taramaSaat = cfg.GetValue("Zafiyet:Saat", 24);
+        var sure = TimeSpan.FromSeconds(cfg.GetValue("Zafiyet:TaniSureSaniye", 180));
+        var http = factory.CreateClient("splunk");
+        var bit = DateTimeOffset.Now;
+        var aralik = new LookupQuery("0.0.0.0", bit.AddHours(-saat), bit);
+        var exeRx = new Regex(ExeDesen(k, false));
+        // "iz": kuralın exe adları (joker atılmış) + Java kuralında JVM izleri
+        string izDesen = string.Join("|", Temiz(k.Exeler).Select(e => Regex.Replace(e.Replace("*", ""), @"[^a-z0-9_-]", ".")).Where(e => e.Length >= 3))
+            + (k.Java ? "|java|jre|jdk|jvm|openjdk|zulu|corretto|temurin|graalvm|semeru|-jar" : "");
+        var izRx = new Regex(izDesen, RegexOptions.IgnoreCase);
+        var env = await envanter.GetAsync(false, ct);
+        sb.AppendLine().AppendLine($"===== CARBON BLACK (son {saat} saat; tarama penceresi: ağ olayları {taramaSaat} saat, süreç başlangıçları {cfg.GetValue("Zafiyet:SurecSaat", 168)} saat) =====");
+        sb.AppendLine($"Kuralın süreç adları: {string.Join(", ", Temiz(k.Exeler))} · iz araması: {izDesen}");
+
+        string ipList = string.Join(", ", ips.Select(i => $"\"{i}\""));
+        string spl1 = $"""
+            search index={index} sourcetype="{st}" ({string.Join(" OR ", ips.Select(i => $"TERM({i})"))})
+            | where in(local_ip, {ipList})
+            | eval yol=coalesce(process_path, process_name, "")
+            | stats count max(_time) as son values(computer_name) as pc values(local_port) as lp by local_ip yol
+            | eval pc=mvjoin(mvindex(pc, 0, 2), "|||"), lp=mvjoin(mvindex(lp, 0, 9), " ")
+            """;
+        var r1 = await SplunkService.ExportAsync(spl1, aralik, cfg, http, ct, "Carbon Black (tanı)", sure);
+        foreach (var m in r1.Messages) sb.AppendLine("  (Splunk) " + m);
+        var ipRows = r1.Rows.GroupBy(r => V(r, "local_ip") ?? "").ToDictionary(g => g.Key, g => g.ToList());
+
+        // bilgisayar adları: CB olaylarından + ERT
+        var pcler = new Dictionary<string, HashSet<string>>();
+        foreach (var ip in ips)
+        {
+            var set = new HashSet<string>(ipRows.GetValueOrDefault(ip, []).SelectMany(r => (V(r, "pc") ?? "").Split("|||")).Select(KisaPc).Where(x => x.Length > 0));
+            foreach (var a in env.AppsOnIp(ip).Select(a => a.UnixName).OfType<string>()) if (KisaPc(a) is { Length: >= 3 } kp) set.Add(kp);
+            pcler[ip] = set;
+        }
+        var tumPc = pcler.Values.SelectMany(x => x).Where(x => Regex.IsMatch(x, @"^[a-z0-9_\-]{3,}$")).Distinct().Take(60).ToList();
+
+        // olayı olmayan IP'ler: ERT / CB adıyla ara — başka IP ile mi görünüyor
+        var adIp = new Dictionary<string, List<(string Pc, string Ipler, string Son, string N)>>();
+        var olaysiz = ips.Where(ip => !ipRows.ContainsKey(ip)).ToList();
+        var olaysizPc = olaysiz.SelectMany(ip => pcler[ip]).Where(x => Regex.IsMatch(x, @"^[a-z0-9_\-]{3,}$")).Distinct().Take(40).ToList();
+        if (olaysizPc.Count > 0)
+        {
+            string spl2 = $"""
+                search index={index} sourcetype="{st}" ({string.Join(" OR ", olaysizPc.Select(x => $"TERM({x})"))})
+                | eval pc=lower(mvindex(split(computer_name, "."), 0))
+                | where in(pc, {string.Join(", ", olaysizPc.Select(x => $"\"{x}\""))})
+                | stats count max(_time) as son values(local_ip) as ipler by pc
+                | eval ipler=mvjoin(mvindex(ipler, 0, 9), " ")
+                """;
+            try
+            {
+                var r2 = await SplunkService.ExportAsync(spl2, aralik, cfg, http, ct, "Carbon Black (tanı, ad)", sure);
+                foreach (var r in r2.Rows) if (V(r, "pc") is { } pc)
+                        foreach (var ip in olaysiz.Where(i => pcler[i].Contains(pc)))
+                        { if (!adIp.TryGetValue(ip, out var l)) adIp[ip] = l = []; l.Add((pc, V(r, "ipler") ?? "", Zaman(V(r, "son")) ?? "", V(r, "count") ?? "")); }
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException) { sb.AppendLine("  ad araması yapılamadı: " + ex.Message); }
+        }
+
+        // süreç başlangıçlarında iz (komut satırı)
+        var basl = new Dictionary<string, List<Dictionary<string, string>>>();
+        if (tumPc.Count > 0)
+        {
+            string spl3 = $"""
+                search index={index} sourcetype="{st}" TERM(ingress.event.procstart) ({string.Join(" OR ", tumPc.Select(x => $"TERM({x})"))})
+                | eval yol=coalesce(process_path, process_name, ""), cmd=coalesce(cmdline, command_line, process_cmdline, ""), pc=lower(mvindex(split(computer_name, "."), 0))
+                | where match(lower(yol." ".cmd), "{izDesen.Replace("\\", "\\\\").Replace("\"", "")}")
+                | eval cmd=substr(cmd, 1, 300)
+                | stats count max(_time) as son latest(cmd) as cmd by pc yol
+                """;
+            try
+            {
+                var r3 = await SplunkService.ExportAsync(spl3, aralik, cfg, http, ct, "Carbon Black (tanı, süreç başlangıcı)", sure);
+                foreach (var r in r3.Rows) if (V(r, "pc") is { } pc) { if (!basl.TryGetValue(pc, out var l)) basl[pc] = l = []; l.Add(r); }
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException) { sb.AppendLine("  süreç başlangıcı araması yapılamadı: " + ex.Message); }
+        }
+
+        foreach (var ip in ips)
+        {
+            sb.AppendLine().AppendLine($"----- {ip} · Carbon Black -----");
+            var rows = ipRows.GetValueOrDefault(ip, []);
+            var bas = pcler[ip].SelectMany(pc => basl.GetValueOrDefault(pc, [])).ToList();
+            if (rows.Count == 0)
+            {
+                sb.AppendLine($"Bu IP'den son {saat} saatte HİÇ ağ olayı yok.");
+                if (adIp.TryGetValue(ip, out var al) && al.Count > 0)
+                {
+                    foreach (var a in al) sb.AppendLine($"  ad '{a.Pc}' ile olaylar VAR: {a.N} olay, son {a.Son}, CB'deki IP'ler: {a.Ipler}");
+                    ozet[ip] = $"bu IP ile olay yok ama sunucu adı ({string.Join(", ", al.Select(a => a.Pc))}) CB'de başka IP ile görünüyor: {string.Join(" ", al.Select(a => a.Ipler))} — çok kartlı / NAT; o IP'yi tarayın";
+                }
+                else
+                {
+                    sb.AppendLine(pcler[ip].Count > 0 ? $"  ERT adıyla ({string.Join(", ", pcler[ip])}) da olay yok." : "  ERT'de sunucu adı yok; adla aranamadı.");
+                    ozet[ip] = "CB bu sunucudan olay almıyor — ajan kurulu değil / çalışmıyor ya da ad farklı; Java yalnız Nessus'tan görülebilir";
+                }
+                if (bas.Count > 0) foreach (var b in bas.Take(10)) sb.AppendLine($"  süreç başlangıcı: {V(b, "yol")} · {V(b, "count")} kez · son {Zaman(V(b, "son"))} · {V(b, "cmd")}");
+                continue;
+            }
+            long toplam = rows.Sum(r => long.TryParse(V(r, "count"), out var n) ? n : 0);
+            double sonT = rows.Max(r => double.TryParse(V(r, "son"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var t) ? t : 0);
+            sb.AppendLine($"Ağ olayı: {toplam:N0} · {rows.Count} süreç · son {Zaman(sonT.ToString(System.Globalization.CultureInfo.InvariantCulture))} · bilgisayar: {string.Join(", ", pcler[ip])}");
+            var uyan = rows.Where(r => exeRx.IsMatch((V(r, "yol") ?? "").ToLowerInvariant())).ToList();
+            // iz: yolunda iz olan ya da süreç başlangıcının komut satırında iz olan (ör. wrapper.exe … jvm.dll) süreçler
+            var izYol = bas.Select(b => YolAnahtar(V(b, "yol") ?? "")).ToHashSet();
+            var iz = rows.Where(r => !uyan.Contains(r) && (izRx.IsMatch(V(r, "yol") ?? "") || izYol.Contains(YolAnahtar(V(r, "yol") ?? "")))).ToList();
+            string Satir(Dictionary<string, string> r) => $"{V(r, "yol")} · {V(r, "count")} olay · port {V(r, "lp") ?? "-"} · son {Zaman(V(r, "son"))}";
+            foreach (var r in uyan) sb.AppendLine("  ✔ KURALA UYUYOR   " + Satir(r));
+            foreach (var r in iz) sb.AppendLine("  ☕ İZ VAR, KURALA UYMUYOR   " + Satir(r) + (izRx.IsMatch(V(r, "yol") ?? "") ? "" : "  (iz komut satırında)") + "  ← exe adı kuralda yok");
+            foreach (var r in bas) sb.AppendLine($"  ▶ süreç başlangıcı: {V(r, "yol")} · {V(r, "count")} kez · son {Zaman(V(r, "son"))} · {V(r, "cmd")}");
+            var diger = rows.Except(uyan).Except(iz).OrderByDescending(r => long.TryParse(V(r, "count"), out var n) ? n : 0).ToList();
+            sb.AppendLine($"  Diğer süreçler ({diger.Count}, ilk 25):");
+            foreach (var r in diger.Take(25)) sb.AppendLine("     " + Satir(r));
+            // sonuç
+            double uyanSon = uyan.Select(r => double.TryParse(V(r, "son"), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var t) ? t : 0).DefaultIfEmpty(0).Max();
+            ozet[ip] = uyan.Count > 0
+                ? (DateTimeOffset.FromUnixTimeSeconds((long)uyanSon) < bit.AddHours(-taramaSaat)
+                    ? $"kurala uyan süreç VAR ama son ağ olayı {Zaman(uyanSon.ToString(System.Globalization.CultureInfo.InvariantCulture))} — tarama penceresi {taramaSaat} saat; 'Ağ olayı penceresi'ni 7 gün seçin"
+                    : "kurala uyan süreç VAR ve pencerede — taramada çıkması gerekir (son tarama bu IP'yi içeriyor mu, DMZ / IP süzgeci?)")
+                : iz.Count > 0 ? $"Java / ürün başka adlı exe içinde çalışıyor: {string.Join(", ", iz.Select(r => ExeAd(V(r, "yol") ?? "")).Distinct())} — bu exe adını kurala ekleyin (Kopyala / düzenle → exe adları)"
+                : bas.Count > 0 ? "süreç başlangıcında iz var ama ağ olayı yok — süreç ağ bağlantısı yapmıyor; taramada 'Carbon Black (yalnız süreç başlangıcı)' olarak çıkmalı, çıkmıyorsa bilgisayar adı ERT'deki adla eşleşmiyor"
+                : $"CB bu sunucuda olay alıyor ama son {saat} saatte Java / kuraldaki süreç görülmedi — kurulu ama çalışmıyor olabilir (yalnız Nessus görür) ya da 7 günden önce başlamış ve ağ olayı yok";
+        }
+    }
+
     static string Tarih(long u) => u > 0 ? DateTimeOffset.FromUnixTimeSeconds(u).ToLocalTime().ToString("dd.MM.yyyy") : "?";
 
     // Kurum içi mi: özel IP ya da kurumda kullanılan genel blok (uygulama / LB GW / ≥/8 segment kaydı var) — Yolculuk'taki "dış" tanımı
