@@ -50,7 +50,7 @@ topoloji çizer ve şirket içi AI'a etki analizi yaptırır. Canlıda IIS'te, W
 | `araclar/HttpSysTopla.ps1` | İSTEĞE BAĞLI: sunucularda elle `netsh http show servicestate` → DF_HTTPSYS_URL (DeltaFlow bağlanmaz) |
 | `Zafiyet.cs` | Açıklık taraması: kurala (CVE) ya da anlık exe listesine uyan süreçler tüm sunucularda, Carbon Black toplu (`wwwroot/zafiyet.html`) |
 | `Nessus.cs` | Nessus / Tenable.sc: repository'deki tarama sonuçlarından teknoloji, sertifika, OS, kurulu yazılım |
-| `Yetki.cs` | İşlem yetkileri (yazma, topoloji, dışa aktarma, toplu tahmin) — DokuPanel site kayıtları |
+| `Yetki.cs` | İşlem yetkileri (yazma, topoloji, dışa aktarma, toplu tahmin, TLS, fiziksel, açıklık taraması) — DokuPanel site kayıtları |
 | `AuthHelper.cs` | Kullanıcının verdiği DokuPanel yetki helper'ı (namespace `AppRel`), anahtar config'den |
 
 ## Veri kaynakları
@@ -1179,6 +1179,11 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
   (dinamik asset'te eksik / farklı) ve sumip yalnız aralık boşsa çalışıyordu → `AssetIpleriAsync` HER ZAMAN asset süzgeçli sumip'i (repository süzgeçsiz, NessusGun) de alıp tek IP
   aralığı olarak ekler; kaynak "asset tanımı: N aralık + Tenable asset süzgeci: M sunucu". OpenSSL CVE-2026-121481 (EVP_EncodeBlock, PR #33652 açık, dal 4.0 / 4.1, sürüm yok)
   kullanıcı isteğiyle PARK edildi (sürüm aralıksız "OpenSSL envanter" kuralı önerildi).
+  YETKİ (kullanıcı: "DeltaFlow'un bu bulgu kısmını da DokuPanel'e ekleyelim, yetkilendirme olsun"): yeni `Yetki:Zafiyet` (DokuPanel site kaydı; boşsa Topoloji) — Program.cs'te
+  `/api/zafiyet*` ve `/api/birim*` için ara katman (okuma dahil, 403 "Açıklık taraması yetkiniz yok"); tarama / kural / kayıt / tanı uçlarındaki Topoloji kontrolleri Zafiyet oldu;
+  uygulama / birim tahmini ve kararı ayrıca Yazma, Excel Disari. zafiyet.html önce /api/me: `zafiyet` yetkisi yoksa (`yetkiYok`) veri istenmez, tüm kontroller pasif, kilit mesajı
+  (eski DLL'de `zafiyet` alanı yoksa topoloji'ye bakar); GET /api/zafiyet 403 de kilitler. Yetkisiz / yetkili akış Playwright'la denendi. OpenSSL 17.11.2026 duyurusu (kullanıcı yapıştırdı:
+  CVE-2026-107493, CVE-2026-124709, ikisi Low; güncel sürümler 4.1.1 / 4.0.4 / 3.5.10 / 3.0.24) — 121481 henüz yok; "OpenSSL güncel mi" kuralı önerildi, onay bekliyor.
 - **VIP**: sorgulanan IP VIP ise üyeler + GW'ler aynı sorguya eklenir, üyeler "VIP ÜYESİ" (GW→üye trafiği varsa ✓).
   Gidilen IP VIP ise "VIP → n ÜYE"; gelen IP LB GW ise "LB GW"; sorgulanan sunucu havuz üyesiyse VIP kartı.
 - **Uygulama görünümü** (`/api/apps`, `/api/app`): `[kullanan uygulamalar] → [UYGULAMA: VIP'ler + segment grupları] → [bağımlı olunanlar]`,

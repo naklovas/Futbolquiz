@@ -108,6 +108,19 @@ if (authEnabled)
     });
 }
 
+// Açıklık taraması (Yetki:Zafiyet — DokuPanel site kaydı; boşsa Topoloji): sayfanın TÜM uçları, okuma dahil (kullanıcı: "bulgu kısmını da DokuPanel'e ekleyelim,
+// yetkilendirme olsun"). Uygulama / birim tahmini ve onayı uçlarda ayrıca Yazma ister.
+app.Use(async (context, next) =>
+{
+    if ((context.Request.Path.StartsWithSegments("/api/zafiyet") || context.Request.Path.StartsWithSegments("/api/birim"))
+        && !Yetki.Var(app.Configuration, context, Yetki.Zafiyet))
+    {
+        await Yetki.Red(context, "Açıklık taraması").ExecuteAsync(context);
+        return;
+    }
+    await next();
+});
+
 // API yanıtları önce bellekte yazılır: JSON yazılırken hata olursa (ör. veride beklenmeyen bir değer) yanıt yarım kalıp
 // "HTTP 200 ama JSON değil" görünmesin; bunun yerine 500 + hata mesajı döner ve log'a yazılır.
 app.Use(async (context, next) =>
@@ -423,7 +436,7 @@ app.MapGet("/api/erisim", async (string? src, string? dst, string? port, string?
 app.MapGet("/api/zafiyet", async (ZafiyetService z, CancellationToken ct) => Results.Ok(await z.SonucAsync(ct)));
 app.MapPost("/api/zafiyet/tara", async (ZafiyetIstek? req, HttpContext ctx, IConfiguration cfg, ZafiyetService z, CancellationToken ct) =>
 {
-    if (!Yetki.Var(cfg, ctx, Yetki.Topoloji)) return Yetki.Red(ctx, "Açıklık taraması");
+    if (!Yetki.Var(cfg, ctx, Yetki.Zafiyet)) return Yetki.Red(ctx, "Açıklık taraması");
     var (k, hata) = await z.KuralBulAsync(req ?? new ZafiyetIstek(null, null, null), ct);
     if (k == null) return Results.BadRequest(new { error = hata });
     var ipler = z.IpListesi(req?.Ipler, out var ipHata);
@@ -432,26 +445,26 @@ app.MapPost("/api/zafiyet/tara", async (ZafiyetIstek? req, HttpContext ctx, ICon
 });
 app.MapPost("/api/zafiyet/durdur", (HttpContext ctx, IConfiguration cfg, ZafiyetService z) =>
 {
-    if (!Yetki.Var(cfg, ctx, Yetki.Topoloji)) return Yetki.Red(ctx, "Açıklık taraması");
+    if (!Yetki.Var(cfg, ctx, Yetki.Zafiyet)) return Yetki.Red(ctx, "Açıklık taraması");
     z.Durdur(); return Results.Ok();
 });
 // CVE metninden AI ile kural önerisi (yalnız form doldurur; tarama başlatmaz)
 app.MapPost("/api/zafiyet/ai", async (ZafiyetAiIstek req, HttpContext ctx, IConfiguration cfg, ZafiyetService z, CancellationToken ct) =>
 {
-    if (!Yetki.Var(cfg, ctx, Yetki.Topoloji)) return Yetki.Red(ctx, "Açıklık taraması");
+    if (!Yetki.Var(cfg, ctx, Yetki.Zafiyet)) return Yetki.Red(ctx, "Açıklık taraması");
     try { return Results.Ok(await z.AiDoldurAsync(req.Metin ?? "", ct)); }
     catch (ArgumentException ex) { return Results.BadRequest(new { error = ex.Message }); }
     catch (Exception ex) when (ex is not OperationCanceledException) { return Results.Json(new { error = ex.Message }, statusCode: 502); }
 });
 app.MapPost("/api/zafiyet/kural", async (ZfOzel req, HttpContext ctx, IConfiguration cfg, ZafiyetService z, CancellationToken ct) =>
 {
-    if (!Yetki.Var(cfg, ctx, Yetki.Topoloji)) return Yetki.Red(ctx, "Açıklık kuralı kaydetme");
+    if (!Yetki.Var(cfg, ctx, Yetki.Zafiyet)) return Yetki.Red(ctx, "Açıklık kuralı kaydetme");
     var (k, hata) = await z.KaydetAsync(req, ctx.User?.Identity?.Name, ct);
     return k == null ? Results.BadRequest(new { error = hata }) : Results.Ok(k);
 });
 app.MapDelete("/api/zafiyet/kural/{id}", async (string id, HttpContext ctx, IConfiguration cfg, ZafiyetService z, CancellationToken ct) =>
 {
-    if (!Yetki.Var(cfg, ctx, Yetki.Topoloji)) return Yetki.Red(ctx, "Açıklık kuralı silme");
+    if (!Yetki.Var(cfg, ctx, Yetki.Zafiyet)) return Yetki.Red(ctx, "Açıklık kuralı silme");
     return await z.SilAsync(id, ctx.User?.Identity?.Name, ct) ? Results.Ok() : Results.NotFound(new { error = "Kayıtlı kural bulunamadı (yerleşik / ayardaki kurallar silinemez)." });
 });
 
@@ -460,7 +473,7 @@ app.MapGet("/api/zafiyet/dmz", async (ZafiyetService z, CancellationToken ct) =>
 // Tanı: Nessus'ta görünüp taramada çıkmayan IP'ler — düz metin (bulgu başına alınır / alınmaz nedeni)
 app.MapGet("/api/zafiyet/tani", async (string? ip, string? kural, HttpContext ctx, IConfiguration cfg, ZafiyetService z, CancellationToken ct) =>
 {
-    if (!Yetki.Var(cfg, ctx, Yetki.Topoloji)) return Yetki.Red(ctx, "Açıklık taraması tanısı");
+    if (!Yetki.Var(cfg, ctx, Yetki.Zafiyet)) return Yetki.Red(ctx, "Açıklık taraması tanısı");
     return Results.Text(await z.TaniAsync(ip ?? "", kural, ct), "text/plain; charset=utf-8");
 });
 app.MapGet("/api/nessus/assetler", async (string? q, HttpContext ctx, IConfiguration cfg, NessusService n, CancellationToken ct) =>
@@ -511,7 +524,7 @@ app.MapPost("/api/zafiyet/kayit/{id:int}/ac", async (int id, ZafiyetService z, C
 });
 app.MapDelete("/api/zafiyet/kayit/{id:int}", async (int id, HttpContext ctx, IConfiguration cfg, ZafiyetService z, CancellationToken ct) =>
 {
-    if (!Yetki.Var(cfg, ctx, Yetki.Topoloji)) return Yetki.Red(ctx, "Açıklık taraması kaydı silme");
+    if (!Yetki.Var(cfg, ctx, Yetki.Zafiyet)) return Yetki.Red(ctx, "Açıklık taraması kaydı silme");
     return await z.KayitSilAsync(id, ctx.User?.Identity?.Name, ct) ? Results.Ok() : Results.NotFound(new { error = "Kayıt bulunamadı." });
 });
 

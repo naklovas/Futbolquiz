@@ -310,7 +310,7 @@ async function aiDoldur() {
     $("#diger").value = j.digerEtkilenir ? "1" : "0";
     $("#aiDurum").textContent = "Doldurdu — alanları kontrol edin, gerekirse düzeltin, sonra taramayı başlatın.";
   } catch (e) { $("#aiDurum").innerHTML = `<span style="color:var(--err)">AI: ${esc(e.message)}</span>`; }
-  finally { $("#aiDoldur").disabled = !st.yetki.topoloji; }
+  finally { $("#aiDoldur").disabled = !st.yetki.zafiyet; }
   aiCiz();
 }
 
@@ -351,8 +351,8 @@ function formCiz() {
   $("#anlikRow").hidden = st.mod !== "anlik";
   document.querySelectorAll("[data-mod]").forEach(b => b.classList.toggle("on", b.dataset.mod === st.mod));
   const k = seciliKural();
-  $("#sil").hidden = !(k?.kaynak || "").startsWith("kayıtlı") || !st.yetki.topoloji;
-  $("#kaydet").disabled = $("#aiDoldur").disabled = !st.yetki.topoloji;
+  $("#sil").hidden = !(k?.kaynak || "").startsWith("kayıtlı") || !st.yetki.zafiyet;
+  $("#kaydet").disabled = $("#aiDoldur").disabled = !st.yetki.zafiyet;
   $("#desc").innerHTML = st.mod === "kural" ? kuralAciklama(k) + (k?.kaynak ? `<br><span class="small">Kaynak: ${esc(k.kaynak)}${k.kaydeden ? " · " + esc(k.kaydeden) : ""}${k.tarih ? " · " + esc(new Date(k.tarih).toLocaleString("tr-TR")) : ""}</span>` : "")
     : "Exe adını yazın (\".exe\" gerekmez, Linux süreçleri de bulunur) ya da CVE duyurusunu yapıştırıp AI'a doldurtun. Sürüm aralığı verirseniz yoldan / komut satırından okunan sürüm değerlendirilir; vermezseniz yalnız nerede çalıştığı, hangi portu dinlediği ve dışarıya açık olup olmadığı listelenir.";
 }
@@ -360,7 +360,7 @@ function formCiz() {
 function runCiz() {
   const is = st.veri?.is;
   const calisiyor = is?.durum === "calisiyor";
-  $("#tara").disabled = calisiyor || !st.yetki.topoloji;
+  $("#tara").disabled = calisiyor || !st.yetki.zafiyet;
   $("#durdur").hidden = !calisiyor;
   if (!is) { $("#run").innerHTML = ""; return; }
   const sure = is.bitis ? Math.round((new Date(is.bitis) - new Date(is.baslangic)) / 1000) : Math.round((Date.now() - new Date(is.baslangic)) / 1000);
@@ -398,7 +398,7 @@ function kayitCiz() {
     + (st.kayitlar.length ? `<table class="kt"><thead><tr><th>Tarih</th><th>Kural</th><th>Kapsam</th><th>Ağ olayı</th><th>Satır</th><th title="kritik / yüksek / orta">Öncelik</th><th>Kaydeden</th><th></th></tr></thead><tbody>`
       + st.kayitlar.map(x => `<tr class="${x.id === acik ? "acik" : ""}"><td>${esc(trTarih(x.tarih))}</td><td>${esc((x.cve ? x.cve + " · " : "") + (x.kuralAd || x.kuralId))}${x.kuralId.startsWith("anlik:") ? ' <span class="muted small">(süreç adıyla)</span>' : ""}${x.kuralId.endsWith(":dmz") ? '<span class="dmz">DMZ</span>' : ""}</td>
         <td>${esc(x.kapsam || "")}</td><td>${x.saat ? x.saat + " saat" : ""}</td><td>${x.satir.toLocaleString("tr-TR")}</td><td>${oz(x.oncelik)}</td><td>${esc(x.kaydeden || "")}${x.id < 0 ? ' <span class="muted small">(bellekte)</span>' : ""}</td>
-        <td style="white-space:nowrap"><button type="button" data-kac="${x.id}" ${calisiyor ? "disabled" : ""}>Aç</button> <button type="button" data-ksil="${x.id}" ${st.yetki.topoloji ? "" : "disabled"} title="Kaydı sil">🗑</button></td></tr>`).join("")
+        <td style="white-space:nowrap"><button type="button" data-kac="${x.id}" ${calisiyor ? "disabled" : ""}>Aç</button> <button type="button" data-ksil="${x.id}" ${st.yetki.zafiyet ? "" : "disabled"} title="Kaydı sil">🗑</button></td></tr>`).join("")
       + "</tbody></table>" : '<div class="sub">Henüz kaydedilmiş tarama yok — biten her tarama burada saklanır (kural başına son 5).</div>');
 }
 async function kayitAc(id) {
@@ -861,7 +861,7 @@ function detay(r) {
     </dl>
     <div style="margin-top:12px"><b>Komut satırı</b>${r.komut ? `<pre>${esc(r.komut)}</pre>` : '<div class="muted small">Pencerede süreç başlangıcı görülmedi (uzun süredir çalışan süreç). Ağ olayı penceresini genişletmek komut satırını getirmez; süreç yeniden başlayınca görünür.</div>'}</div>
     ${r.ip ? `<div style="margin-top:12px;display:flex;gap:12px;align-items:center;flex-wrap:wrap">
-      <button type="button" id="ipTara" ${st.yetki.topoloji && st.veri?.is?.durum !== "calisiyor" ? "" : "disabled"} title="Son taramanın kuralıyla yalnız bu IP'yi yeniden tarar; sonuç listeye eklenir (bu IP'nin satırları yenilenir)">↻ Bu IP'yi yeniden tara</button>
+      <button type="button" id="ipTara" ${st.yetki.zafiyet && st.veri?.is?.durum !== "calisiyor" ? "" : "disabled"} title="Son taramanın kuralıyla yalnız bu IP'yi yeniden tarar; sonuç listeye eklenir (bu IP'nin satırları yenilenir)">↻ Bu IP'yi yeniden tara</button>
       ${tekrarBtn(r) ? `<button type="button" data-bk="tekrar" data-ip="${esc(r.ip)}" title="Uygulama önerisi (ERT'de boşsa) + işleten birim yeniden tahmin">↻ Bu IP için yeniden tahmin</button>` : ""}
       <a href="./?ip=${encodeURIComponent(r.ip)}" target="_blank" rel="noopener">Bu IP'nin topolojisini aç ↗</a></div>` : ""}
     </div>`;
@@ -879,6 +879,7 @@ async function yukle() {
   try {
     const r = await fetch("api/zafiyet");
     if (r.status === 404) { $("#run").innerHTML = '<div class="run err">Sunucudaki DeltaFlow sürümünde bu sayfa yok (DLL güncel değil).</div>'; return; }
+    if (r.status === 403) { yetkiYok(); return; }
     st.veri = await r.json();
   } catch (e) { $("#run").innerHTML = `<div class="run err">${esc(e.message)}</div>`; return; }
   const ks = $("#kural"), sec = ks.value;
@@ -997,24 +998,37 @@ $("#birimDur").addEventListener("click", async () => {
   await Promise.all([fetch("api/eksik/durdur", { method: "POST" }), fetch("api/birim/durdur", { method: "POST" })]).catch(() => {});
   birimYukle(true);
 });
+// Yetki önce (Yetki:Zafiyet — DokuPanel; kullanıcı: "bulgu kısmını da DokuPanel'e ekleyelim, yetkilendirme olsun"): yetkisizse veri hiç istenmez, sayfa kilitli
+function yetkiYok(ad) {
+  document.querySelectorAll("main input, main select, main textarea, main button, main summary").forEach(x => { x.disabled = true; x.style.pointerEvents = "none"; });
+  $("#sonuc").hidden = true;
+  $("#kayitBox").open = false;
+  $("#run").innerHTML = `<div class="run err">🔒 Açıklık taraması yetkiniz yok${ad ? " (" + esc(ad) + ")" : ""}. Yetki DokuPanel'den verilir (Yetki:Zafiyet site kaydı).</div>`;
+}
+function baslat() {
+  yukle();
+  kayitYukle();
+  $("#dmz").addEventListener("change", kayitCiz);
+  fetch("api/zafiyet/dmz").then(r => r.ok ? r.json() : null).then(j => {
+    const tanimsiz = !j || !j.tanimli;
+    $("#dmz").disabled = tanimsiz || !!j?.hata;
+    $("#dmzNot").innerHTML = !j ? "" : tanimsiz ? "DMZ asset'i tanımlı değil (Zafiyet:DmzAsset)"
+      : j.hata ? `<span style="color:var(--err)">DMZ asset'i okunamadı: ${esc(j.hata)}</span>`
+      : `DMZ: ${esc(j.asset?.ad || "")} · ${j.ipSayisi.toLocaleString("tr-TR")} IP`;
+    if ($("#dmz").disabled) $("#dmz").checked = false;
+  }).catch(() => {});
+}
 fetch("api/me").then(r => r.ok ? r.json() : null).then(me => {
   if (me?.name) $("#me").textContent = "👤 " + me.name;
   st.yetki = me?.yetki || {};
+  // eski DLL (zafiyet yetkisi yok): eskisi gibi topoloji yetkisine bak
+  if (!("zafiyet" in st.yetki)) st.yetki.zafiyet = !!st.yetki.topoloji;
+  if (!st.yetki.zafiyet) { yetkiYok(me?.name); return; }
   $("#csv").hidden = !st.yetki.disari;
-  $("#yetkiNot").textContent = st.yetki.topoloji ? "" : "Tarama başlatma yetkiniz yok (DokuPanel: Yetki:Topoloji); son taramanın sonucunu görebilirsiniz.";
+  $("#yetkiNot").textContent = "";
   runCiz(); formCiz(); kayitCiz();
-}).catch(() => {});
-yukle();
-kayitYukle();
-$("#dmz").addEventListener("change", kayitCiz);
-fetch("api/zafiyet/dmz").then(r => r.ok ? r.json() : null).then(j => {
-  const tanimsiz = !j || !j.tanimli;
-  $("#dmz").disabled = tanimsiz || !!j?.hata;
-  $("#dmzNot").innerHTML = !j ? "" : tanimsiz ? "DMZ asset'i tanımlı değil (Zafiyet:DmzAsset)"
-    : j.hata ? `<span style="color:var(--err)">DMZ asset'i okunamadı: ${esc(j.hata)}</span>`
-    : `DMZ: ${esc(j.asset?.ad || "")} · ${j.ipSayisi.toLocaleString("tr-TR")} IP`;
-  if ($("#dmz").disabled) $("#dmz").checked = false;
-}).catch(() => {});
+  baslat();
+}).catch(() => baslat());
 </script>
 </body>
 </html>
