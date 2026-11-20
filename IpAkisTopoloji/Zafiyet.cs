@@ -43,7 +43,8 @@ record ZafiyetAiIstek(string? Metin);
 record ZfAiExe(string Ad, string? Neden, string Kaynak, int Sunucu, List<string> Ornek);
 record ZfAiSonuc(string? Urun, string? Cve, string? Ozet, bool Kutuphane, string? KutuphaneNot, List<ZfAiExe> Exeler, List<ZfAralik> Araliklar,
     List<string> Onlem, bool DigerEtkilenir, List<string> Uyarilar, string? EnvanterTarihi);
-record ZfSonuc(ZfIs? Is, List<ZfSatir> Satirlar, List<string> Mesajlar, List<ZfKural> Kurallar);
+// Mesgul: başka bir kullanıcının taraması çalışıyor (aynı anda tek tarama; bu kullanıcı kendi görünümünü ve kayıtlarını kullanabilir)
+record ZfSonuc(ZfIs? Is, List<ZfSatir> Satirlar, List<string> Mesajlar, List<ZfKural> Kurallar, string? Mesgul = null);
 
 sealed class ZafiyetService(IConfiguration cfg, IHttpClientFactory factory, EnvanterService envanter, ServisImzaService imza, IslevService islev, NessusService nessus,
     ILogger<ZafiyetService> log)
@@ -54,12 +55,43 @@ sealed class ZafiyetService(IConfiguration cfg, IHttpClientFactory factory, Enva
     List<string> _mesaj = [];
     CancellationTokenSource? _cts;
 
-    public async Task<ZfSonuc> SonucAsync(CancellationToken ct)
+    // Kullanıcı başına görünüm (kullanıcı: "herkes kendi kayıtlı taramalarını görmeli"): _is / _satir / _mesaj çalışan (son) işin canlı durumu, sahibi _isSahip;
+    // iş bitince ya da kullanıcı kayıttan açınca o kullanıcının görünümüne (_gor) yazılır. Aynı anda tek tarama (Carbon Black sorguları ağır).
+    string? _isSahip;
+    readonly Dictionary<string, (ZfIs? Is, List<ZfSatir> Satir, List<string> Mesaj)> _gor = new(StringComparer.OrdinalIgnoreCase);
+    static string Kul(string? u) => (u ?? "").Split('\\').Last().Trim().ToLowerInvariant();
+    static bool Ayni(string? a, string? b) => Kul(a) == Kul(b);
+    // kayıt bu kullanıcının mı: yetki kapalıyken (kullanıcı yok) ya da sahibi bilinmeyen eski kayıtta herkes
+    static bool Sahibi(string? kaydeden, string? user) => string.IsNullOrWhiteSpace(user) || string.IsNullOrWhiteSpace(kaydeden) || Ayni(kaydeden, user);
+    (ZfIs? Is, List<ZfSatir> Satir, List<string> Mesaj) Gorunum(string? user)
+    {
+        // lock (_gate) içinde çağrılır
+        if (_is != null && Ayni(_isSahip, user) && (_is.Durum == "calisiyor" || !_gor.ContainsKey(Kul(user)))) return (_is, _satir, _mesaj);
+        return _gor.TryGetValue(Kul(user), out var g) ? g : (null, [], []);
+    }
+    void IsBitti() { if (_is != null) _gor[Kul(_isSahip)] = (_is, _satir, _mesaj); }   // lock (_gate) içinde
+
+    public async Task<ZfSonuc> SonucAsync(CancellationToken ct, string? user = null)
     {
         var k = await KurallarAsync(ct);
-        lock (_gate) return new ZfSonuc(_is, _satir, [.. _mesaj, .. new[] { _kayitUyari, _taramaUyari }.OfType<string>()], k);
+        lock (_gate)
+        {
+            var g = Gorunum(user);
+            string? mesgul = _is is { Durum: "calisiyor" } && !Ayni(_isSahip, user)
+                ? $"{_is.Kaydeden ?? "başka bir kullanıcı"} şu an tarama yapıyor ({(_is.Kural.Cve != null ? _is.Kural.Cve + " · " : "")}{_is.Kural.Ad}, {_is.Baslangic:HH:mm} başladı); aynı anda tek tarama çalışır — bitince yeni tarama başlatabilirsiniz. Bu sırada kendi kayıtlı taramalarınızı açabilirsiniz."
+                : null;
+            return new ZfSonuc(g.Is, g.Satir, [.. g.Mesaj, .. new[] { _kayitUyari, _taramaUyari }.OfType<string>()], k, mesgul);
+        }
     }
-    public void Durdur() { lock (_gate) _cts?.Cancel(); }
+    // Yalnız taramayı başlatan durdurabilir (yetki kapalıyken herkes)
+    public bool Durdur(string? user = null)
+    {
+        lock (_gate)
+        {
+            if (!string.IsNullOrWhiteSpace(user) && _is is { Durum: "calisiyor" } && !Ayni(_isSahip, user)) return false;
+            _cts?.Cancel(); return true;
+        }
+    }
 
     // ---------------- Kurallar ----------------
     static readonly ZfKural Java4Shell = new("java4shell", "Java4Shell — OpenJDK Base64 çözücüsünde heap taşması", "CVE-2026-114938",
@@ -236,9 +268,9 @@ sealed class ZafiyetService(IConfiguration cfg, IHttpClientFactory factory, Enva
 
     // ---------------- Tarama ----------------
     // İstekte kural id'si ya da sayfada doldurulmuş kural
-    public async Task<(ZfKural? Kural, string? Hata)> KuralBulAsync(ZafiyetIstek r, CancellationToken ct)
+    public async Task<(ZfKural? Kural, string? Hata)> KuralBulAsync(ZafiyetIstek r, CancellationToken ct, string? user = null)
     {
-        if (r.SonKural) { lock (_gate) if (_is?.Kural is { } son) return (son, null); return (null, "Önce bir tarama yapılmalı (son taramanın kuralı yok)."); }
+        if (r.SonKural) { lock (_gate) if (Gorunum(user).Is?.Kural is { } son) return (son, null); return (null, "Önce bir tarama yapılmalı (son taramanın kuralı yok)."); }
         if (r.Ozel != null) return OzelKural(r.Ozel, "anlik");
         var l = await KurallarAsync(ct);
         return (l.FirstOrDefault(x => string.Equals(x.Id, r.Kural ?? "", StringComparison.OrdinalIgnoreCase)) ?? l.First(), null);
@@ -283,17 +315,20 @@ sealed class ZafiyetService(IConfiguration cfg, IHttpClientFactory factory, Enva
         lock (_gate)
         {
             if (_is is { Durum: "calisiyor" }) return _is;
+            // "listeye ekle": bu kullanıcının görünümündeki liste
+            var gor = Gorunum(user);
             // Listeye eklenen tekil IP taraması listenin kapsamını (DMZ) korur; IP kipinde DMZ süzgeci uygulanmaz
-            if (ipler != null) dmz = ekle && _satir.Count > 0 && _is?.Dmz == true;
+            if (ipler != null) dmz = ekle && gor.Satir.Count > 0 && gor.Is?.Dmz == true;
             int maxSaat = cfg.GetValue("Zafiyet:MaxSaat", 168);
             saat = Math.Clamp(saat <= 0 ? cfg.GetValue("Zafiyet:Saat", 24) : saat, 1, maxSaat);
             int surecSaat = Math.Max(saat, cfg.GetValue("Zafiyet:SurecSaat", 168));
             _cts = new CancellationTokenSource();
             string kapsam = ipler == null ? (dmz ? "DMZ asset'leri" : "tüm sunucular") : $"{ipler.Count} IP: {string.Join(", ", ipler.Take(5))}{(ipler.Count > 5 ? " …" : "")}" + (ekle ? " (listeye ekleniyor)" : "");
             _is = new ZfIs("calisiyor", "Başlıyor", DateTime.Now, null, null, user, saat, surecSaat, kural, kapsam, Dmz: dmz);
-            var eski = ekle && ipler != null ? _satir : [];
-            var eskiMesaj = ekle && ipler != null ? _mesaj : [];
-            if (!(ekle && ipler != null)) { _satir = []; _mesaj = []; }
+            _isSahip = user;
+            var eski = ekle && ipler != null ? gor.Satir : [];
+            var eskiMesaj = ekle && ipler != null ? gor.Mesaj : [];
+            _satir = eski; _mesaj = eskiMesaj;
             var ct = _cts.Token;
             bool dmzKip = dmz && ipler == null;
             _ = Task.Run(() => CalisAsync(kural, saat, surecSaat, ct, ipler, eski, eskiMesaj, dmzKip));
@@ -477,13 +512,13 @@ sealed class ZafiyetService(IConfiguration cfg, IHttpClientFactory factory, Enva
                 var (kid, kt) = await TaramaKaydetAsync(son, satir, tumMesaj);
                 son = son with { KayitId = kid, KayitTarihi = kt };
             }
-            lock (_gate) _is = son;
+            lock (_gate) { _is = son; IsBitti(); }
         }
-        catch (OperationCanceledException) { lock (_gate) { _mesaj = mesaj; _is = _is! with { Durum = "durduruldu", Asama = "Durduruldu", Bitis = DateTime.Now }; } }
+        catch (OperationCanceledException) { lock (_gate) { _mesaj = mesaj; _is = _is! with { Durum = "durduruldu", Asama = "Durduruldu", Bitis = DateTime.Now }; IsBitti(); } }
         catch (Exception ex)
         {
             log.LogWarning(ex, "Açıklık taraması hatası");
-            lock (_gate) { _mesaj = mesaj; _is = _is! with { Durum = "hata", Asama = "Hata", Hata = ex.Message, Bitis = DateTime.Now }; }
+            lock (_gate) { _mesaj = mesaj; _is = _is! with { Durum = "hata", Asama = "Hata", Hata = ex.Message, Bitis = DateTime.Now }; IsBitti(); }
         }
     }
 
@@ -734,12 +769,12 @@ sealed class ZafiyetService(IConfiguration cfg, IHttpClientFactory factory, Enva
     // ---------------- Tanı: Nessus'ta görünüp taramada çıkmayan IP'ler (kullanıcı: "eksik var bizimkinde" — Nessus ekibinin listesiyle karşılaştırma) ----------------
     // GET /api/zafiyet/tani?ip=a,b&kural= : her IP için DMZ asset'inde mi, son taramada satırı var mı, Nessus'taki TÜM ilgili bulgular (süzgeçsiz) ve
     // her bulgunun taramada alınıp alınmayacağı (repository, son görülme, plugin adı kelimesi, CVE, sürüm okunuyor mu).
-    public async Task<string> TaniAsync(string ipMetin, string? kuralId, CancellationToken ct)
+    public async Task<string> TaniAsync(string ipMetin, string? kuralId, CancellationToken ct, string? user = null)
     {
         var ips = Regex.Matches(ipMetin ?? "", @"\b\d{1,3}(?:\.\d{1,3}){3}\b").Select(m => m.Value).Distinct().Take(100).ToList();
         if (ips.Count == 0) return "IP verin: /api/zafiyet/tani?ip=10.1.1.1,10.1.1.2 (isteğe bağlı &kural=<kural id>; boşsa son taramanın kuralı)";
         ZfKural? k = null; ZfIs? son; List<ZfSatir> satir;
-        lock (_gate) { son = _is; satir = _satir; }
+        lock (_gate) { var g = Gorunum(user); son = g.Is; satir = g.Satir; }
         if (!string.IsNullOrWhiteSpace(kuralId)) k = (await KurallarAsync(ct)).FirstOrDefault(x => x.Id.Equals(kuralId, StringComparison.OrdinalIgnoreCase));
         k ??= son?.Kural ?? Yerlesik[0];
         var kel = NessusKelimeleri(k);
@@ -1281,11 +1316,13 @@ sealed class ZafiyetService(IConfiguration cfg, IHttpClientFactory factory, Enva
                 await rd.ReadAsync();
                 id = rd.GetInt32(0); tarih = rd.GetDateTime(1);
             }
-            // kural başına son N kayıt
+            // kural + kişi başına son N kayıt
             await using var sil = new Microsoft.Data.SqlClient.SqlCommand($"""
-                DELETE FROM {TaramaTablo} WHERE KURAL_ID = @k AND ID NOT IN (SELECT TOP (@n) ID FROM {TaramaTablo} WHERE KURAL_ID = @k ORDER BY TARIH DESC, ID DESC);
+                DELETE FROM {TaramaTablo} WHERE KURAL_ID = @k AND ISNULL(KAYDEDEN, '') = @u
+                  AND ID NOT IN (SELECT TOP (@n) ID FROM {TaramaTablo} WHERE KURAL_ID = @k AND ISNULL(KAYDEDEN, '') = @u ORDER BY TARIH DESC, ID DESC);
                 """, conn);
             sil.Parameters.AddWithValue("@k", anahtar);
+            sil.Parameters.AddWithValue("@u", i.Kaydeden ?? "");
             sil.Parameters.AddWithValue("@n", KayitSayisi);
             await sil.ExecuteNonQueryAsync();
             _taramaUyari = null;
@@ -1300,7 +1337,7 @@ sealed class ZafiyetService(IConfiguration cfg, IHttpClientFactory factory, Enva
             {
                 id = --_bellekId;   // bellekteki kayıtlar eksi numaralı
                 _taramaBellek.Insert(0, (new ZfKayit(id, anahtar, i.Kural.Ad, i.Kural.Cve, i.Kapsam, i.Saat, satir.Count, OncelikSay(satir), tarih, i.Kaydeden), veri));
-                var fazla = _taramaBellek.Where(x => x.Ozet.KuralId == anahtar).Skip(KayitSayisi).ToList();
+                var fazla = _taramaBellek.Where(x => x.Ozet.KuralId == anahtar && Ayni(x.Ozet.Kaydeden, i.Kaydeden)).Skip(KayitSayisi).ToList();
                 foreach (var f in fazla) _taramaBellek.Remove(f);
             }
         }
@@ -1310,8 +1347,10 @@ sealed class ZafiyetService(IConfiguration cfg, IHttpClientFactory factory, Enva
     static string? Kes(string? s, int n) => s == null ? null : s.Length > n ? s[..n] : s;
 
     // kural verilirse yalnız o kuralın kayıtları (anlık kuralda ZfOzel'den aynı anahtar); verilmezse tüm kuralların son kayıtları
-    public async Task<ZfKayitListe> KayitlarAsync(string? kural, CancellationToken ct)
+    // Yalnız bu kullanıcının kayıtları (yetki kapalıyken / kullanıcı yokken hepsi)
+    public async Task<ZfKayitListe> KayitlarAsync(string? kural, CancellationToken ct, string? user = null)
     {
+        bool hepsi = string.IsNullOrWhiteSpace(user);
         var l = new List<ZfKayit>();
         try
         {
@@ -1319,9 +1358,16 @@ sealed class ZafiyetService(IConfiguration cfg, IHttpClientFactory factory, Enva
             await conn.OpenAsync(ct);
             await using var cmd = new Microsoft.Data.SqlClient.SqlCommand($"""
                 SELECT TOP 200 ID, KURAL_ID, KURAL_AD, CVE, KAPSAM, SAAT, SATIR, OZET, TARIH, KAYDEDEN FROM {TaramaTablo}
-                {(kural != null ? "WHERE KURAL_ID = @k" : "")} ORDER BY TARIH DESC, ID DESC
+                WHERE 1 = 1 {(kural != null ? "AND KURAL_ID = @k" : "")} {(hepsi ? "" : "AND (KAYDEDEN = @u OR KAYDEDEN = @kisa OR KAYDEDEN LIKE @l OR KAYDEDEN IS NULL)")}
+                ORDER BY TARIH DESC, ID DESC
                 """, conn);
             if (kural != null) cmd.Parameters.AddWithValue("@k", kural);
+            if (!hepsi)
+            {
+                cmd.Parameters.AddWithValue("@u", user!);
+                cmd.Parameters.AddWithValue("@kisa", Kul(user));
+                cmd.Parameters.AddWithValue("@l", "%\\" + Kul(user).Replace("[", "[[]").Replace("%", "[%]").Replace("_", "[_]"));
+            }
             await using var rd = await cmd.ExecuteReaderAsync(ct);
             while (await rd.ReadAsync(ct))
             {
@@ -1334,7 +1380,7 @@ sealed class ZafiyetService(IConfiguration cfg, IHttpClientFactory factory, Enva
         }
         catch (Microsoft.Data.SqlClient.SqlException ex) when (ex.Number == 208) { _taramaUyari = $"Tarama kayıt tablosu ({TaramaTablo}) yok; taramalar yalnız bellekte saklanıyor (sql/zafiyet_tarama.sql)."; }
         catch (Exception ex) when (ex is not OperationCanceledException) { log.LogWarning(ex, "Kayıtlı açıklık taramaları okunamadı"); _taramaUyari = "Kayıtlı taramalar okunamadı: " + ex.Message; }
-        lock (_gate) l.AddRange(_taramaBellek.Select(x => x.Ozet).Where(o => kural == null || o.KuralId.Equals(kural, StringComparison.OrdinalIgnoreCase)));
+        lock (_gate) l.AddRange(_taramaBellek.Select(x => x.Ozet).Where(o => (kural == null || o.KuralId.Equals(kural, StringComparison.OrdinalIgnoreCase)) && (hepsi || Sahibi(o.Kaydeden, user))));
         return new ZfKayitListe(l.OrderByDescending(x => x.Tarih).ToList(), _taramaUyari);
     }
 
@@ -1359,28 +1405,32 @@ sealed class ZafiyetService(IConfiguration cfg, IHttpClientFactory factory, Enva
     }
 
     // Karşılaştırma (kullanıcı: "satırda eski ve yeni halini göreyim, eski versiyon yeni versiyon; tarih olarak da"): kayıtlı taramanın satırları, açmadan
-    public async Task<(object? Veri, string? Hata)> KayitVeriAsync(int id, CancellationToken ct)
+    public async Task<(object? Veri, string? Hata)> KayitVeriAsync(int id, CancellationToken ct, string? user = null)
     {
         var (v, tarih, kaydeden, hata) = await KayitOkuAsync(id, ct);
+        if (v != null && !Sahibi(kaydeden ?? v.Is.Kaydeden, user)) return (null, "Bu kayıt başka bir kullanıcıya ait.");
         return v == null ? (null, hata) : (new { id, tarih, kaydeden = v.Is.Kaydeden ?? kaydeden, kural = v.Is.Kural.Id, kapsam = v.Is.Kapsam, satirlar = v.Satirlar }, null);
     }
 
-    public async Task<(ZfIs? Is, string? Hata)> KayitAcAsync(int id, CancellationToken ct)
+    // Kaydı bu kullanıcının görünümüne açar (başkasının çalışan taramasını etkilemez); kendi taraması çalışırken açılamaz
+    public async Task<(ZfIs? Is, string? Hata)> KayitAcAsync(int id, CancellationToken ct, string? user = null)
     {
-        lock (_gate) if (_is is { Durum: "calisiyor" }) return (null, "Şu an bir tarama çalışıyor; bitince ya da durdurunca açın.");
+        lock (_gate) if (_is is { Durum: "calisiyor" } && Ayni(_isSahip, user)) return (null, "Taramanız çalışıyor; bitince ya da durdurunca açın.");
         var (v, tarih, kaydeden, hata) = await KayitOkuAsync(id, ct);
         if (v == null) return (null, hata);
+        if (!Sahibi(kaydeden ?? v.Is.Kaydeden, user)) return (null, "Bu kayıt başka bir kullanıcıya ait.");
         lock (_gate)
         {
-            if (_is is { Durum: "calisiyor" }) return (null, "Şu an bir tarama çalışıyor.");
-            _satir = v.Satirlar; _mesaj = v.Mesajlar;
-            _is = v.Is with { Durum = "bitti", KayitId = id, KayitTarihi = tarih, Kayittan = true, Kaydeden = v.Is.Kaydeden ?? kaydeden };
-            return (_is, null);
+            var i = v.Is with { Durum = "bitti", KayitId = id, KayitTarihi = tarih, Kayittan = true, Kaydeden = v.Is.Kaydeden ?? kaydeden };
+            _gor[Kul(user)] = (i, v.Satirlar, v.Mesajlar);
+            return (i, null);
         }
     }
 
     public async Task<bool> KayitSilAsync(int id, string? user, CancellationToken ct)
     {
+        var (_, _, kaydeden, _) = await KayitOkuAsync(id, ct);
+        if (!Sahibi(kaydeden, user)) return false;
         bool var;
         lock (_gate) var = _taramaBellek.RemoveAll(x => x.Ozet.Id == id) > 0;
         if (id > 0)
@@ -1391,7 +1441,8 @@ sealed class ZafiyetService(IConfiguration cfg, IHttpClientFactory factory, Enva
             cmd.Parameters.AddWithValue("@id", id);
             var |= await cmd.ExecuteNonQueryAsync(ct) > 0;
         }
-        lock (_gate) if (_is?.KayitId == id) _is = _is with { KayitId = null, KayitTarihi = null };
+        lock (_gate)
+            if (_gor.TryGetValue(Kul(user), out var g) && g.Is?.KayitId == id) _gor[Kul(user)] = (g.Is with { KayitId = null, KayitTarihi = null }, g.Satir, g.Mesaj);
         log.LogInformation("Açıklık taraması kaydı silindi: #{Id} ({User})", id, user);
         return var;
     }

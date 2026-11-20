@@ -1184,6 +1184,12 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
   uygulama / birim tahmini ve kararı ayrıca Yazma, Excel Disari. zafiyet.html önce /api/me: `zafiyet` yetkisi yoksa (`yetkiYok`) veri istenmez, tüm kontroller pasif, kilit mesajı
   (eski DLL'de `zafiyet` alanı yoksa topoloji'ye bakar); GET /api/zafiyet 403 de kilitler. Yetkisiz / yetkili akış Playwright'la denendi. OpenSSL 17.11.2026 duyurusu (kullanıcı yapıştırdı:
   CVE-2026-107493, CVE-2026-124709, ikisi Low; güncel sürümler 4.1.1 / 4.0.4 / 3.5.10 / 3.0.24) — 121481 henüz yok; "OpenSSL güncel mi" kuralı önerildi, onay bekliyor.
+  KİŞİYE ÖZEL (kullanıcı: "herkes kendi kayıtlı taramalarını görmeli"): kayıtlar — liste (`KayitlarAsync(…, user)`: KAYDEDEN = kullanıcı, DOMAIN\ öneki fark etmez, sahibi
+  boş eski kayıtlar herkese), açma / karşılaştırma / silme (`Sahibi`) yalnız kaydı yapanın; saklama kural + KİŞİ başına son KayitSayisi. Ekrandaki sonuç da kişiye özel: `_is / _satir
+  / _mesaj` çalışan işin canlı durumu (`_isSahip`), iş bitince ya da kayıt açılınca `_gor[kullanıcı]`; `SonucAsync(ct, user)` → `Gorunum(user)`; başkasının işi çalışırken
+  `ZfSonuc.Mesgul` ("X şu an tarama yapıyor…", sayfada ⏳ bandı, "Yeni tara" pasif, 15 sn'de bir yoklar) — aynı anda tek tarama kalır; kendi kayıtları bu sırada açılabilir.
+  "Listeye ekle" ve SonKural kullanıcının görünümünden; durdurma yalnız başlatan (`Durdur(user)`, 403); tanı kullanıcının görünümüyle. Sayfada "Son taramalarım". Scratch test ucuyla
+  (iki kullanıcı, bellek kaydı) denendi; SQL'de KAYDEDEN eşleşmesi `= @u OR = kısa ad OR LIKE '%\kısa' OR IS NULL`.
 - **VIP**: sorgulanan IP VIP ise üyeler + GW'ler aynı sorguya eklenir, üyeler "VIP ÜYESİ" (GW→üye trafiği varsa ✓).
   Gidilen IP VIP ise "VIP → n ÜYE"; gelen IP LB GW ise "LB GW"; sorgulanan sunucu havuz üyesiyse VIP kartı.
 - **Uygulama görünümü** (`/api/apps`, `/api/app`): `[kullanan uygulamalar] → [UYGULAMA: VIP'ler + segment grupları] → [bağımlı olunanlar]`,

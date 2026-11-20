@@ -190,7 +190,7 @@
       <span class="sub" id="dmzNot"></span>
     </div>
     <div class="desc" id="desc"></div>
-    <details class="kayit" id="kayitBox"><summary>Son taramalar <span class="sub" id="kayitSay"></span></summary><div id="kayitlar"></div></details>
+    <details class="kayit" id="kayitBox"><summary>Son taramalarım <span class="sub" id="kayitSay"></span></summary><div id="kayitlar"></div></details>
   </section>
 
   <div id="run"></div>
@@ -360,12 +360,14 @@ function formCiz() {
 function runCiz() {
   const is = st.veri?.is;
   const calisiyor = is?.durum === "calisiyor";
-  $("#tara").disabled = calisiyor || !st.yetki.zafiyet;
+  $("#tara").disabled = calisiyor || !st.yetki.zafiyet || !!st.veri?.mesgul;
+  $("#tara").title = st.veri?.mesgul ? "Başka bir kullanıcının taraması çalışıyor; bitince başlatabilirsiniz" : "Carbon Black ve Nessus'u yeniden sorgular; bitince sonuç kaydedilir";
   $("#durdur").hidden = !calisiyor;
-  if (!is) { $("#run").innerHTML = ""; return; }
+  const mg = st.veri?.mesgul ? `<div class="run" style="margin-bottom:6px">⏳ ${esc(st.veri.mesgul)}</div>` : "";
+  if (!is) { $("#run").innerHTML = mg; return; }
   const sure = is.bitis ? Math.round((new Date(is.bitis) - new Date(is.baslangic)) / 1000) : Math.round((Date.now() - new Date(is.baslangic)) / 1000);
   const ss = sure >= 60 ? `${Math.floor(sure / 60)} dk ${sure % 60} sn` : `${sure} sn`;
-  $("#run").innerHTML = `<div class="run ${is.durum === "hata" ? "err" : ""}">${calisiyor ? '<span class="spinner"></span>' : is.durum === "bitti" ? "✔" : is.durum === "hata" ? "✖" : "■"}
+  $("#run").innerHTML = mg + `<div class="run ${is.durum === "hata" ? "err" : ""}">${calisiyor ? '<span class="spinner"></span>' : is.durum === "bitti" ? "✔" : is.durum === "hata" ? "✖" : "■"}
     <b>${esc(is.kural?.cve ? is.kural.cve + " · " : "")}${esc(is.kural?.ad)}</b>
     <span>${esc(is.asama)}</span><span class="muted">· ${ss}${is.kapsam ? " · " + esc(is.kapsam) : ""} · ağ olayları son ${is.saat} saat, süreç başlangıçları son ${is.surecSaat} saat${is.kaydeden ? " · " + esc(is.kaydeden) : ""}</span>
     ${is.kayittan ? `<span class="kb" title="Sorgu yapılmadı; kayıtlı sonuç gösteriliyor. Güncel durum için 'Yeni tara'.">📁 Kayıttan açıldı: ${esc(trTarih(is.kayitTarihi))}</span>`
@@ -893,6 +895,7 @@ async function yukle() {
   st.sonDurum = d; kayitCiz();
   clearTimeout(st.timer);
   if (st.veri.is?.durum === "calisiyor") st.timer = setTimeout(yukle, 3000);
+  else if (st.veri.mesgul) st.timer = setTimeout(yukle, 15000);   // başkasının taraması bitince "Yeni tara" açılsın
 }
 
 async function tara() {
