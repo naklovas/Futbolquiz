@@ -35,9 +35,10 @@ function runTlsToplu() {
   if (yetki && yetki.tls === false) { ttYetkiYok(); return; }
   if (!$("#ttShell")) ttShell();
 }
-// Yetki:Tls (DokuPanel) yoksa sekme gizli; adresle (?tls=1) gelinirse açıklama gösterilir
+// Yetki:Tls (DokuPanel) yoksa sekme görünür ama içerik çizilmez, sorgu gönderilmez (sunucu da 403 verir)
 function ttYetkiYok() {
-  $("#main").innerHTML = `<div class="panel empty" style="color:var(--err)">TLS toplu sorgu yetkiniz yok. Yetki DokuPanel'den verilir.</div>`;
+  if (uiMode !== "tls") return;
+  $("#main").innerHTML = `<div class="panel empty" style="color:var(--err)">🔒 TLS toplu sorgu yetkiniz yok — sayfa görüntülenemez. Yetki DokuPanel'den verilir.</div>`;
 }
 
 function ttShell() {

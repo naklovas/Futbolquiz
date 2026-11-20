@@ -316,11 +316,20 @@ $("#body").addEventListener("click", e => {
   if (k) { e.preventDefault(); kanit(k.dataset.kanit); }
 });
 document.addEventListener("keydown", e => { if (e.key === "Escape") $("#drawerHost").innerHTML = ""; });
+// Sayfa yetkisi (DokuPanel, Yetki:Eksik; boşsa Topoloji): yoksa veri yüklenmez, tüm denetimler pasif (sunucu da 403 verir)
+function sayfaKilit(kul) {
+  document.querySelectorAll("main input, main select, main textarea, main button, main summary, main a").forEach(x => { x.disabled = true; x.style.pointerEvents = "none"; });
+  const k = document.createElement("div");
+  k.style.cssText = "color:var(--err);padding:12px 0;font-weight:600";
+  k.textContent = `🔒 ERT eksikleri yetkiniz yok${kul ? " (" + kul + ")" : ""} — sayfa görüntülenemez. Yetki DokuPanel'den verilir.`;
+  document.querySelector("main .panel").prepend(k);
+}
 fetch("api/me").then(r => r.ok ? r.json() : null).then(me => {
   if (me?.name) $("#me").textContent = "👤 " + me.name;
   $("#csv").hidden = !me?.yetki?.disari;   // Excel'e aktarma yetkisi (DokuPanel, Yetki:Disari)
-}).catch(() => {});
-load();
+  if (me?.yetki && me.yetki.eksik === false) { sayfaKilit(me.name); return; }
+  load();
+}).catch(() => load());
 </script>
 </body>
 </html>

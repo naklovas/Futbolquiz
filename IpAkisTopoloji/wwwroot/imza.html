@@ -181,8 +181,8 @@ async function load() {
 
 function runHtml() {
   const v = st.veri, k = v?.kayit || {}, is = v?.is;
-  const yetki = st.yetki.topoloji;
-  const btn = (id, t, title, prim) => `<button id="${id}" type="button"${prim ? ` class="primary"` : ""}${yetki ? "" : " disabled"} title="${esc(yetki ? title : "Yetkiniz yok (DokuPanel: Yetki:Topoloji)")}">${t}</button>`;
+  const yetki = "imza" in st.yetki ? st.yetki.imza : st.yetki.topoloji;
+  const btn = (id, t, title, prim) => `<button id="${id}" type="button"${prim ? ` class="primary"` : ""}${yetki ? "" : " disabled"} title="${esc(yetki ? title : "Yetkiniz yok (DokuPanel: Yetki:Imza)")}">${t}</button>`;
   if (is?.durum === "calisiyor") {
     const yuz = is.yuzde ?? (is.toplam ? Math.round(is.biten * 100 / is.toplam) : 0);
     const adim = is.adim === "iis" ? "IIS logu sorgulanıyor" : is.adim === "cb" ? "Carbon Black sorgulanıyor" : "başlıyor";
@@ -297,7 +297,7 @@ async function aiSor() {
   const n = Object.keys(portlar).length;
   // Taranmamış sunucuda AI'a "SERVİS İMZASI" kanıtı gitmez → önce yalnız onlar taranır, tarama bitince AI kendiliğinden sorulur
   const taranmamis = [...new Set(l.filter(r => r.veri === "taranmadi").map(r => r.ip))];
-  if (taranmamis.length && st.veri?.is?.durum !== "calisiyor" && st.yetki.topoloji) {
+  if (taranmamis.length && st.veri?.is?.durum !== "calisiyor" && ("imza" in st.yetki ? st.yetki.imza : st.yetki.topoloji)) {
     if (confirm(`${taranmamis.length} / ${n} sunucu servis imzasında henüz taranmamış; AI bu sunucularda exe / IIS / VIP / sözlük kanıtını göremez.\n\nTamam: önce bu sunucular taransın, tarama bitince ${l.length} port kendiliğinden AI'a sorulsun.\nİptal: taramadan şimdi AI'a sor.`)) {
       st.aiBekle = portlar;
       await tara("ip", taranmamis);
@@ -464,13 +464,21 @@ document.addEventListener("click", e => {
   const f = e.target.closest("[data-f]");
   if (f) { st.durumFiltre = f.dataset.f; $("#durum").value = ""; st.tab = "satir"; document.querySelectorAll("[data-tab]").forEach(b => b.classList.toggle("on", b.dataset.tab === "satir")); st.limit = 500; ciz(); }
 });
+// Sayfa yetkisi (DokuPanel, Yetki:Imza; boşsa Topoloji): yoksa veri yüklenmez, tüm denetimler pasif (sunucu da 403 verir)
+function sayfaKilit(kul) {
+  document.querySelectorAll("main input, main select, main textarea, main button, main summary, main a").forEach(x => { x.disabled = true; x.style.pointerEvents = "none"; });
+  const k = document.createElement("div");
+  k.style.cssText = "color:var(--err);padding:12px 0;font-weight:600";
+  k.textContent = `🔒 Servis imzası yetkiniz yok${kul ? " (" + kul + ")" : ""} — sayfa görüntülenemez. Yetki DokuPanel'den verilir.`;
+  document.querySelector("main .panel").prepend(k);
+}
 fetch("api/me").then(r => r.ok ? r.json() : null).then(me => {
   if (me?.name) $("#me").textContent = "👤 " + me.name;
   st.yetki = me?.yetki || {};
   $("#csv").hidden = !st.yetki.disari;
-  if (st.veri) ciz();
-}).catch(() => {});
-load();
+  if (st.yetki.imza === false) { sayfaKilit(me.name); return; }
+  load();
+}).catch(() => load());
 </script>
 </body>
 </html>

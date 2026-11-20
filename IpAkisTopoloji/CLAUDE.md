@@ -50,7 +50,7 @@ topoloji çizer ve şirket içi AI'a etki analizi yaptırır. Canlıda IIS'te, W
 | `araclar/HttpSysTopla.ps1` | İSTEĞE BAĞLI: sunucularda elle `netsh http show servicestate` → DF_HTTPSYS_URL (DeltaFlow bağlanmaz) |
 | `Zafiyet.cs` | Açıklık taraması: kurala (CVE) ya da anlık exe listesine uyan süreçler tüm sunucularda, Carbon Black toplu (`wwwroot/zafiyet.html`) |
 | `Nessus.cs` | Nessus / Tenable.sc: repository'deki tarama sonuçlarından teknoloji, sertifika, OS, kurulu yazılım |
-| `Yetki.cs` | İşlem yetkileri (yazma, topoloji, dışa aktarma, toplu tahmin, TLS, fiziksel, açıklık taraması) — DokuPanel site kayıtları |
+| `Yetki.cs` | İşlem + sayfa yetkileri (yazma, topoloji, dışa aktarma, toplu tahmin, TLS, fiziksel, açıklık taraması, erişim, işlev, etiket, eksik, imza, segment) — DokuPanel site kayıtları |
 | `AuthHelper.cs` | Kullanıcının verdiği DokuPanel yetki helper'ı (namespace `AppRel`), anahtar config'den |
 
 ## Veri kaynakları
@@ -1229,8 +1229,22 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
   konum satırı `/api/fiziksel/ip` serbest, yetkisizde kabin adı bağlantısız; boşsa Topoloji ile aynı). Auth ara katmanı /api isteklerinde yapılandırılmış siteleri
   `AuthHelper.YetkiKontrol(ctx, cfg, siteAdi)` ile sorar (kullanıcı + site başına `Auth:CacheMinutes`; aynı ad tek sorgu) →
   `context.Items["Yetki"]` → `Yetki.Var(cfg, ctx, tür)`. `/api/me` → `yetki {yazma, topoloji, disari, toplu, tls, fiziksel, fizikseldeger}`; topoloji.html body
-  `no-disari` / `no-topoloji` / `no-tls` sınıfları (yüklenene kadar gizli). DokuPanel'e ulaşılamazsa o işlem kapalı. Görüntüleme (IP / uygulama
-  sorgusu, işlev haritası, kayıtlı versiyonlar) yalnız sayfa yetkisiyle açık.
+  `no-disari` / `no-topoloji` sınıfları (yüklenene kadar gizli).
+  SAYFA YETKİLERİ (kullanıcı: "IP sorgulama ve Uygulama sorgulama dışındaki tüm DeltaFlow alt sayfalarında yetkilendirme olmalı, TLS eksik"): yeni
+  `Yetki:Erisim` (Erişim sorgula), `Yetki:Islev` (Topoloji sekmesi: işlev haritası, küme topolojisi, versiyon, kurum), `Yetki:Etiket` (Sunucu etiketleme),
+  `Yetki:Eksik` (ERT eksikleri), `Yetki:Imza` (Servis imzası), `Yetki:Segment` (Segment / etiket tarama) — hepsi boşsa Topoloji ile aynı (`TopolojiyeDuser`).
+  Tek ara katman (Program.cs, eski Zafiyet ara katmanının yerine) `Yetki.SayfaYetkisi(yol, metot)` → gereken türlerden BİRİ: /api/zafiyet, /api/birim,
+  /api/nessus/assetler → Zafiyet; /api/erisim, /api/opinnate → Erisim; /api/islev, /api/tenantlar → Islev; /api/etiket/aciklama → Etiket|Islev; /api/etiket/*
+  → Etiket (POST /api/etiket SERBEST: IP kartındaki "+ Etiket", uçta Yazma); /api/eksik ve /csv → Eksik; /api/eksik/ip|durum|calistir SERBEST (IP kartı AI önerisi;
+  calistir uçta Yazma); diğer /api/eksik/* → Eksik|Imza|Segment|Zafiyet (oneriler, kanit, karar, durdur başka sayfalardan da); /api/imza → Imza;
+  /api/segment/exeag → Segment|Etiket|Islev; /api/segment → Segment|Etiket (etiketlemedeki "Segment getir"); /api/tls/toplu → Tls; /api/fiziksel (ip hariç)
+  → Fiziksel; POST /api/envanter/yenile → Yazma. Serbest kalanlar: IP / uygulama görünümünün uçları (flow, hop2, surec*, tls, nessus/ip, f5uri, oturum,
+  yolculuk, ai/etki, app, apps, etiketler, filtreler, appliances, me). Uçlarda: imza tara / durdur → Imza (eskiden Topoloji), segment tarama → Segment|Etiket,
+  segment AI → Segment, nessus/assetler → Zafiyet. Arayüz: TÜM sekmeler görünür (TLS'in `body.no-tls` gizlemesi kaldırıldı); topoloji.html `SEKME_YETKI`
+  (topo → islev, erisim, etiket) + `sekmeKapali` / `sekmeKilit` (#main'de 🔒 mesaj, setUiMode / submit / runTopo / runAccess / runEtiket / ktExeRun sorgu
+  göndermez), TLS `ttYetkiYok`, fiziksel `fzYetkiYok`; ilk derin bağlantı `/api/me` gelmeden çalışmaz (`meHazir`). eksik.html / imza.html / segment.html:
+  `sayfaKilit` (veri yüklenmez, main'deki tüm denetimler pasif, 🔒 mesaj); segment tarama / yeniden çek düğmeleri `tarayabilir()` (segment, eski DLL'de topoloji),
+  imza tarama düğmeleri imza yetkisine bakar. Auth kapalı + `Etiket__Yazanlar__0=baskasi` ile uçlar, Playwright + mock'la kilitler denendi. DokuPanel'e ulaşılamazsa o işlem kapalı. Görüntüleme: IP / uygulama sorgusu yalnız site yetkisiyle (AppSettings:CurrentSiteName) açık; diğer alt sayfalar yukarıdaki SAYFA YETKİLERİ ile.
 - Marka: **DeltaFlow** adı ve logosu.
 
 ## Kullanıcının tercihleri / kurallar

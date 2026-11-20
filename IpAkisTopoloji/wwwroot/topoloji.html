@@ -285,13 +285,12 @@
   .grid2 { display: grid; gap: 16px; }
 /* İşlem yetkileri (/api/me → yetki; DokuPanel, Yetki.cs): yüklenene kadar ve yetki yoksa dışa aktarma / topoloji çizme düğmeleri gizli */
 body.no-disari #dlSvg, body.no-disari #dlPng, body.no-disari [data-csv] { display:none !important; }
-body.no-tls [data-ui="tls"] { display:none !important; }
 /* Fiziksel envanter: sekme görünür, yetki yoksa sayfa açılır ama tüm denetimler pasif (fiziksel.js fzYetkiYok) */
 #fzShell.fz-kapali .toolbar, #fzShell.fz-kapali details { opacity: .5; pointer-events: none; }
 body.no-topoloji .need-topo, body.no-topoloji #ivDep, body.no-topoloji #ktAgain { display:none !important; }
 </style>
 </head>
-<body class="no-disari no-topoloji no-tls no-fiziksel">
+<body class="no-disari no-topoloji">
 <header>
   <div class="brand">
     <img src="deltaflow.svg" alt="DeltaFlow logosu">
@@ -462,7 +461,7 @@ function initForm() {
   return p.get("app") ? "app" : p.get("ip") ? "ip" : null;
 }
 
-$("#f").addEventListener("submit", ev => { ev.preventDefault(); uiMode === "app" ? runApp() : uiMode === "topo" ? runTopo() : uiMode === "erisim" ? runAccess() : uiMode === "etiket" ? runEtiket() : uiMode === "tls" ? runTlsToplu() : uiMode === "fiziksel" ? runFiziksel() : run(); });
+$("#f").addEventListener("submit", ev => { ev.preventDefault(); if (sekmeKapali(uiMode)) { sekmeKilit(uiMode); return; } uiMode === "app" ? runApp() : uiMode === "topo" ? runTopo() : uiMode === "erisim" ? runAccess() : uiMode === "etiket" ? runEtiket() : uiMode === "tls" ? runTlsToplu() : uiMode === "fiziksel" ? runFiziksel() : run(); });
 $("#cancel").addEventListener("click", () => abort?.abort());
 
 async function run() {
@@ -2628,18 +2627,25 @@ function wireEnvToggles(onChange) {
 
 // İşlem yetkileri: yazma, topoloji, disari (Excel / SVG / PNG), toplu — sunucu da ayrıca kontrol eder
 let yetki = {};
-fetch("api/me").then(r => r.ok ? r.json() : null).then(me => {
+const meHazir = fetch("api/me").then(r => r.ok ? r.json() : null).then(me => {
   if (me?.name) $("#me").textContent = "👤 " + me.name;
   yetki = me?.yetki || {};
   document.body.classList.toggle("no-disari", !yetki.disari);
   document.body.classList.toggle("no-topoloji", !yetki.topoloji);
-  document.body.classList.toggle("no-tls", !yetki.tls);
   if (uiMode === "tls" && !yetki.tls) globalThis.ttYetkiYok?.();
-  document.body.classList.toggle("no-fiziksel", !yetki.fiziksel);
   if (uiMode === "fiziksel" && !yetki.fiziksel) globalThis.fzYetkiYok?.();
+  if (sekmeKapali(uiMode)) sekmeKilit(uiMode);
 }).catch(() => {});
 function yetkiYok(ne) { alert(`${ne} yetkiniz yok. Yetki DokuPanel'den verilir.`); }
-loadAppliances().then(() => { const m = initForm(); if (m) uiMode = m; /* adres çubuğundaki aralık o sekmenin aralığıdır */ if (m === "app") runApp(); else if (m === "topo") runTopo(); else if (m === "erisim") runAccess(); else if (m === "etiket") runEtiket(); else if (m === "tls") { uiMode = "ip"; runTlsToplu(); } else if (m === "fiziksel") { uiMode = "ip"; runFiziksel(); } else if (m === "ip") run();
+// Sekme (sayfa) yetkileri — IP sorgula ve Uygulama sorgula dışındaki her sekme DokuPanel'den (Yetki.cs SayfaYetkisi; sunucu da 403 verir).
+// Sekme görünür, yetki yoksa içerik çizilmez, sorgu gönderilmez. TLS toplu (tlstoplu.js ttYetkiYok) ve fiziksel (fiziksel.js fzYetkiYok) kendi kilidini çizer.
+const SEKME_YETKI = { topo: ["islev", "Topoloji (işlev haritası / küme topolojisi)"], erisim: ["erisim", "Erişim sorgula"], etiket: ["etiket", "Sunucu etiketleme"] };
+function sekmeKapali(m) { const y = SEKME_YETKI[m]; return !!y && yetki[y[0]] === false; }
+function sekmeKilit(m) {
+  const y = SEKME_YETKI[m];
+  if (y) $("#main").innerHTML = `<div class="panel empty" style="color:var(--err)">🔒 ${esc(y[1])} yetkiniz yok — sayfa görüntülenemez. Yetki DokuPanel'den verilir.</div>`;
+}
+Promise.all([loadAppliances(), meHazir]).then(() => { const m = initForm(); if (m) uiMode = m; /* adres çubuğundaki aralık o sekmenin aralığıdır */ if (m === "app") runApp(); else if (m === "topo") runTopo(); else if (m === "erisim") runAccess(); else if (m === "etiket") runEtiket(); else if (m === "tls") { uiMode = "ip"; runTlsToplu(); } else if (m === "fiziksel") { uiMode = "ip"; runFiziksel(); } else if (m === "ip") run();
   else if (m === "exeag") { const q = new URLSearchParams(location.search); uiMode = "topo"; ktExeRun({ tur: q.get("tur"), ad: q.get("ad"), id: q.get("id"), genel: q.get("genel") === "1" }); } });
 </script>
 <script src="uygulama.js"></script>

@@ -36,6 +36,7 @@ function setUiMode(m) {
   if (uiMode === "fiziksel" && m !== "fiziksel") $("#main").innerHTML = "";
   // İşlev haritası da başka sekmede kalmasın; ilerleme yoklaması durur
   if (uiMode === "topo" && m !== "topo") { $("#main").innerHTML = ""; ivStopPoll(); iv.sel = null; kt.abort?.abort(); ktClose(); }
+  if (m !== uiMode && sekmeKapali(uiMode)) $("#main").innerHTML = "";   // kilit mesajı başka sekmede kalmasın
   uiMode = m;
   document.querySelectorAll("#modeTabs button").forEach(b => b.classList.toggle("on", b.dataset.ui === m));
   $("#ipLabel").hidden = m !== "ip";
@@ -51,6 +52,7 @@ function setUiMode(m) {
   $("#srcArLabel").hidden = m === "erisim";
   $("#srcF5Label").hidden = m !== "erisim";
   $("#srcOpLabel").hidden = m !== "erisim";
+  if (sekmeKapali(m)) { sekmeKilit(m); return; }   // sekme yetkisi yok (topoloji.html SEKME_YETKI)
   if (m === "app") loadAppCatalog();
   if (m === "topo") { loadTopoTags(); globalThis.tnRender?.(); }
 }
@@ -81,6 +83,7 @@ async function loadTopoTags(force) {
   } catch { /* liste gelmezse boş */ }
 }
 async function runTopo() {
+  if (sekmeKapali("topo")) { setUiMode("topo"); return; }
   await loadTopoTags();
   const tag = topoWanted ?? $("#topoTag").value;
   topoWanted = null;

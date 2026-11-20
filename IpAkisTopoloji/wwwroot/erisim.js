@@ -13,6 +13,7 @@ function accDefaultRange() {
 
 async function runAccess() {
   setUiMode("erisim");
+  if (sekmeKapali("erisim")) return;
   const src = $("#accSrc").value.trim(), dst = $("#accDst").value.trim(), port = $("#accPort").value.trim();
   if (!src || !dst) { alert("Kaynak ve hedef IP girin."); return; }
   const srcs = [$("#srcSplunk").checked && "splunk", $("#srcFw").checked && "firewall", $("#srcF5").checked && "f5", $("#srcOp").checked && "opinnate"].filter(Boolean);

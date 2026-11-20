@@ -108,14 +108,15 @@ if (authEnabled)
     });
 }
 
-// Açıklık taraması (Yetki:Zafiyet — DokuPanel site kaydı; boşsa Topoloji): sayfanın TÜM uçları, okuma dahil (kullanıcı: "bulgu kısmını da DokuPanel'e ekleyelim,
-// yetkilendirme olsun"). Uygulama / birim tahmini ve onayı uçlarda ayrıca Yazma ister.
+// Sayfa yetkileri (Yetki.SayfaYetkisi): IP sorgula ve Uygulama sorgula dışındaki her alt sayfanın TÜM uçları, okuma dahil (kullanıcı: "IP sorgulama ve
+// Uygulama sorgulama dışındaki tüm alt sayfalarda yetkilendirme olmalı"). Açıklık taraması, erişim, topoloji (işlev haritası), etiketleme, ERT eksikleri,
+// servis imzası, segment tarama, TLS toplu, fiziksel. Yazma işleri uçlarda ayrıca Yazma ister.
 app.Use(async (context, next) =>
 {
-    if ((context.Request.Path.StartsWithSegments("/api/zafiyet") || context.Request.Path.StartsWithSegments("/api/birim"))
-        && !Yetki.Var(app.Configuration, context, Yetki.Zafiyet))
+    if (context.Request.Path.StartsWithSegments("/api") && Yetki.SayfaYetkisi(context.Request.Path, context.Request.Method) is { } sy
+        && !sy.Turler.Any(t => Yetki.Var(app.Configuration, context, t)))
     {
-        await Yetki.Red(context, "Açıklık taraması").ExecuteAsync(context);
+        await Yetki.Red(context, sy.Ad).ExecuteAsync(context);
         return;
     }
     await next();
@@ -478,7 +479,7 @@ app.MapGet("/api/zafiyet/tani", async (string? ip, string? kural, HttpContext ct
 });
 app.MapGet("/api/nessus/assetler", async (string? q, HttpContext ctx, IConfiguration cfg, NessusService n, CancellationToken ct) =>
 {
-    if (!Yetki.Var(cfg, ctx, Yetki.Topoloji)) return Yetki.Red(ctx, "Nessus asset listesi");
+    if (!Yetki.Var(cfg, ctx, Yetki.Zafiyet)) return Yetki.Red(ctx, "Nessus asset listesi");
     try { var l = await n.AssetlerAsync(ct); return Results.Ok(string.IsNullOrWhiteSpace(q) ? l : l.Where(x => x.Ad.Contains(q, StringComparison.OrdinalIgnoreCase)).ToList()); }
     catch (Exception ex) when (ex is not OperationCanceledException) { return Results.Json(new { error = ex.Message }, statusCode: 502); }
 });
@@ -1033,7 +1034,7 @@ app.MapGet("/api/segment/liste", async (SegmentTaramaService seg, CancellationTo
 });
 app.MapPost("/api/segment/tarama", async (SegmentIstek req, HttpContext ctx, IConfiguration cfg, SegmentTaramaService seg, CancellationToken ct) =>
 {
-    if (!Yetki.Var(cfg, ctx, Yetki.Topoloji)) return Yetki.Red(ctx, "Segment tarama (topoloji)");
+    if (!Yetki.Var(cfg, ctx, Yetki.Segment) && !Yetki.Var(cfg, ctx, Yetki.Etiket)) return Yetki.Red(ctx, "Segment tarama");
     try { return Results.Ok(await seg.BaslatAsync(req, ctx.User?.Identity?.Name ?? "?", ct)); }
     catch (InvalidOperationException ex) { return Results.BadRequest(new { error = ex.Message }); }
 });
@@ -1042,13 +1043,13 @@ app.MapGet("/api/imza", async (ServisImzaService imza, CancellationToken ct) => 
 app.MapGet("/api/imza/durum", (ServisImzaService imza) => Results.Ok(new { @is = imza.Durum, uyari = imza.Uyari }));
 app.MapPost("/api/imza/tara", async (ImzaIstek? req, HttpContext ctx, IConfiguration cfg, ServisImzaService imza, CancellationToken ct) =>
 {
-    if (!Yetki.Var(cfg, ctx, Yetki.Topoloji)) return Yetki.Red(ctx, "Servis imzası taraması (topoloji)");
+    if (!Yetki.Var(cfg, ctx, Yetki.Imza)) return Yetki.Red(ctx, "Servis imzası taraması");
     try { return Results.Ok(await imza.BaslatAsync(req?.Mod ?? "yeni", req?.Ipler, ctx.User?.Identity?.Name ?? "?", ct, req?.Kurum)); }
     catch (InvalidOperationException ex) { return Results.Conflict(new { error = ex.Message }); }
 });
 app.MapPost("/api/imza/durdur", (HttpContext ctx, IConfiguration cfg, ServisImzaService imza) =>
 {
-    if (!Yetki.Var(cfg, ctx, Yetki.Topoloji)) return Yetki.Red(ctx, "Servis imzası taraması (topoloji)");
+    if (!Yetki.Var(cfg, ctx, Yetki.Imza)) return Yetki.Red(ctx, "Servis imzası taraması");
     imza.Durdur(); return Results.Ok(new { ok = true });
 });
 // Kayıtlı taramalar (tür + ad başına son tarama; sayfada "kayıtlı" bilgisi için)
@@ -1059,7 +1060,7 @@ app.MapGet("/api/segment/tarama/{id}", (string id, SegmentTaramaService seg) =>
 app.MapPost("/api/segment/tarama/{id}/durdur", (string id, SegmentTaramaService seg) => { seg.Durdur(id); return Results.Ok(new { ok = true }); });
 app.MapPost("/api/segment/tarama/{id}/ai", async (string id, SegmentAiIstek? req, HttpContext ctx, IConfiguration cfg, SegmentTaramaService seg, CancellationToken ct) =>
 {
-    if (!Yetki.Var(cfg, ctx, Yetki.Topoloji)) return Yetki.Red(ctx, "Segment tarama (topoloji)");
+    if (!Yetki.Var(cfg, ctx, Yetki.Segment)) return Yetki.Red(ctx, "Segment tarama");
     try { return Results.Ok(await seg.AiBaslatAsync(id, req?.Ips, req?.Yeniden ?? false, ctx.User?.Identity?.Name ?? "?", ct)); }
     catch (InvalidOperationException ex) { return Results.BadRequest(new { error = ex.Message }); }
 });

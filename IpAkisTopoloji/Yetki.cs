@@ -11,14 +11,25 @@
 //   FizikselDeger — fiziksel cihaz değerlerini kaydetme (denetim kaydı) ve elle değer girme; Fiziksel de gerekir   (boşsa Yazma ile aynı)
 //   Zafiyet  — Açıklık taraması sayfası: görme, tarama, kural / kayıt, tanı (/api/zafiyet*, /api/birim*); uygulama / birim tahmini ve onayı
 //              ayrıca Yazma, Excel ayrıca Disari ister                                              (boşsa Topoloji ile aynı)
+// SAYFA (görme) yetkileri — IP sorgula ve Uygulama sorgula dışındaki her alt sayfa (kullanıcı: "IP sorgulama ve Uygulama sorgulama dışındaki tüm
+// alt sayfalarda yetkilendirme olmalı"). Sayfanın okuma uçları dahil (Program.cs SayfaYetkisi ara katmanı); yazma işleri ayrıca Yazma ister:
+//   Erisim   — Erişim sorgula sekmesi (/api/erisim, /api/opinnate)                                 (boşsa Topoloji ile aynı)
+//   Islev    — Topoloji sekmesi: işlev haritası, küme topolojisi, versiyonlar (/api/islev, /api/tenantlar) (boşsa Topoloji ile aynı)
+//   Etiket   — Sunucu etiketleme sekmesi (/api/etiket/*; IP kartındaki "+ Etiket" yalnız Yazma ister)   (boşsa Topoloji ile aynı)
+//   Eksik    — ERT eksikleri sayfası (/api/eksik; IP kartındaki AI önerisi kolonu serbest)          (boşsa Topoloji ile aynı)
+//   Imza     — Servis imzası sayfası (/api/imza)                                                   (boşsa Topoloji ile aynı)
+//   Segment  — Segment / etiket tarama sayfası (/api/segment)                                      (boşsa Topoloji ile aynı)
 // Auth ara katmanı /api isteklerinde gereken siteleri sorar (kullanıcı + site başına Auth:CacheMinutes önbellek; aynı ad tek sorgu),
 // sonuç context.Items["Yetki"]. DokuPanel'e ulaşılamazsa o işlem kapalı. Auth kapalıysa (yerel) yalnız listeler geçerli.
 // ---------------------------------------------------------------------------
 static class Yetki
 {
     public const string Yazma = "Yazma", Topoloji = "Topoloji", Disari = "Disari", Toplu = "Toplu", Tls = "Tls", Fiziksel = "Fiziksel", FizikselDeger = "FizikselDeger",
-        Zafiyet = "Zafiyet";
-    public static readonly string[] Turler = [Yazma, Topoloji, Disari, Toplu, Tls, Fiziksel, FizikselDeger, Zafiyet];
+        Zafiyet = "Zafiyet", Erisim = "Erisim", Islev = "Islev", Etiket = "Etiket", Eksik = "Eksik", Imza = "Imza", Segment = "Segment";
+    public static readonly string[] Turler = [Yazma, Topoloji, Disari, Toplu, Tls, Fiziksel, FizikselDeger, Zafiyet, Erisim, Islev, Etiket, Eksik, Imza, Segment];
+
+    // Topoloji'ye düşen (boşsa Topoloji sitesi kullanılan) yetkiler
+    static bool TopolojiyeDuser(string tur) => tur is Tls or Fiziksel or Zafiyet or Erisim or Islev or Etiket or Eksik or Imza or Segment;
 
     // Yetkinin DokuPanel site adı (yoksa null: liste / başka yetkiye bağlı)
     public static string? Site(IConfiguration cfg, string tur)
@@ -26,7 +37,7 @@ static class Yetki
         string? s = cfg[$"Yetki:{tur}"];
         if (string.IsNullOrWhiteSpace(s) && tur == Yazma) s = cfg["Etiket:YazmaSiteAdi"];
         if (string.IsNullOrWhiteSpace(s) && tur is Topoloji or Disari or FizikselDeger) return Site(cfg, Yazma);
-        if (string.IsNullOrWhiteSpace(s) && tur is Tls or Fiziksel or Zafiyet) return Site(cfg, Topoloji);
+        if (string.IsNullOrWhiteSpace(s) && TopolojiyeDuser(tur)) return Site(cfg, Topoloji);
         return string.IsNullOrWhiteSpace(s) ? null : s.Trim();
     }
 
@@ -37,7 +48,31 @@ static class Yetki
             return Var(cfg, ctx, Yazma) && (Site(cfg, Toplu) is { } ts ? Doku(cfg, ctx, ts) : InList(cfg, "Eksik:TopluYetkililer", user, ["visikhan"]));
         if (tur == FizikselDeger && !Var(cfg, ctx, Fiziksel)) return false;
         if (Site(cfg, tur) is { } site) return Doku(cfg, ctx, site);
-        return tur == Yazma ? InList(cfg, "Etiket:Yazanlar", user, []) : tur is Tls or Fiziksel or Zafiyet ? Var(cfg, ctx, Topoloji) : Var(cfg, ctx, Yazma);
+        return tur == Yazma ? InList(cfg, "Etiket:Yazanlar", user, []) : TopolojiyeDuser(tur) ? Var(cfg, ctx, Topoloji) : Var(cfg, ctx, Yazma);
+    }
+
+    // Sayfa yetkisi: istenen /api yolu hangi alt sayfaya ait (gerekenlerden BİRİ yeterli; birden çok sayfanın kullandığı uçlar). null = sayfa
+    // yetkisi gerekmez (IP / Uygulama sorgula ve IP kartının kullandığı uçlar: /api/eksik/ip|durum|calistir, POST /api/etiket, /api/etiketler,
+    // /api/fiziksel/ip, /api/tls …). Uçların kendi işlem yetkisi (Yazma, Topoloji, Toplu, Disari) ayrıca geçerli.
+    public static (string[] Turler, string Ad)? SayfaYetkisi(PathString yol, string metot)
+    {
+        bool B(string p) => yol.StartsWithSegments(p);
+        if (B("/api/zafiyet") || B("/api/birim") || B("/api/nessus/assetler")) return ([Zafiyet], "Açıklık taraması");
+        if (B("/api/erisim") || B("/api/opinnate")) return ([Erisim], "Erişim sorgula");
+        if (B("/api/islev") || B("/api/tenantlar")) return ([Islev], "Topoloji (işlev haritası)");
+        if (B("/api/etiket/aciklama")) return ([Etiket, Islev], "Sunucu etiketleme");
+        if (B("/api/etiket")) return yol.Value!.TrimEnd('/').Equals("/api/etiket", StringComparison.OrdinalIgnoreCase) && metot == "POST"
+            ? null : ([Etiket], "Sunucu etiketleme");
+        if (B("/api/eksik/ip") || B("/api/eksik/durum") || B("/api/eksik/calistir")) return null;
+        if (B("/api/eksik/csv") || yol.Value!.TrimEnd('/').Equals("/api/eksik", StringComparison.OrdinalIgnoreCase)) return ([Eksik], "ERT eksikleri");
+        if (B("/api/eksik")) return ([Eksik, Imza, Segment, Zafiyet], "ERT eksikleri");
+        if (B("/api/imza")) return ([Imza], "Servis imzası");
+        if (B("/api/segment/exeag")) return ([Segment, Etiket, Islev], "Segment / etiket tarama");
+        if (B("/api/segment")) return ([Segment, Etiket], "Segment / etiket tarama");
+        if (B("/api/tls/toplu")) return ([Tls], "TLS toplu sorgu");
+        if (B("/api/fiziksel") && !B("/api/fiziksel/ip")) return ([Fiziksel], "Fiziksel envanter");
+        if (B("/api/envanter/yenile")) return ([Yazma], "Envanteri yeniden yükleme");
+        return null;
     }
 
     // Arayüz için tüm yetkiler (/api/me)

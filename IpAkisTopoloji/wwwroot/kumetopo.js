@@ -151,6 +151,7 @@ function ktFitScale() {
 // karo = exe'nin bir sunucudaki örneği, ok = exe → exe trafik (Carbon Black, kayıtlı tarama; yeniden sorgu yok)
 async function ktExeRun(q) {
   setUiMode("topo");
+  if (sekmeKapali("topo")) return;
   kt.exe = q; kt.stack = []; kt.saved = null; kt.tag = q.ad || q.id;
   $("#main").innerHTML = `<div class="panel empty"><span class="spinner"></span> Exe ilişki ağı hazırlanıyor (kayıtlı tarama)…</div>`;
   try {

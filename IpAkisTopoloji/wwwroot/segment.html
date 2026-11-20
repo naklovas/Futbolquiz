@@ -455,7 +455,7 @@ function kayitBand() {
   return `<div class="run" style="margin-top:10px;grid-template-columns:1fr auto;align-items:center">
     <div>${acildi ? "📁 <b>Kayıtlı tarama</b> açıldı" : "💾 Tarama <b>kaydedildi</b>"} · ${tarihTr(k.tarih)}${k.kaydeden ? " · " + esc(k.kaydeden) : ""} · Carbon Black ${k.saat} saat · ${fmt(k.sunucu)} sunucu, ${fmt(k.satir)} satır
       ${j.not ? `<div class="small" style="margin-top:3px">${esc(j.not)}</div>` : ""}${acildi ? `<div class="small muted">Carbon Black yeniden sorgulanmadı. Güncel veri için yeniden çekin ya da yalnız yeni sunucuları ekleyin.</div>` : ""}</div>
-    <div style="display:flex;gap:6px">${st.yetki.topoloji ? `<button type="button" id="kEkle" title="Kayıtta olmayan ya da geçen sefer Carbon Black verisi gelmeyen sunucuları tarar, kayda ekler">➕ Yeni sunucuları ekle</button>
+    <div style="display:flex;gap:6px">${tarayabilir() ? `<button type="button" id="kEkle" title="Kayıtta olmayan ya da geçen sefer Carbon Black verisi gelmeyen sunucuları tarar, kayda ekler">➕ Yeni sunucuları ekle</button>
       <button type="button" id="kYeni" title="Tüm segmenti / etiketi Carbon Black'ten baştan sorgular ve kaydın üzerine yazar">🔄 Yeniden çek</button>` : ""}</div></div>`;
 }
 const viewTabs = () => kayitBand() + `<div class="tools" style="margin-top:10px"><div class="vt">
@@ -545,7 +545,7 @@ function renderAg() {
   const g = st.ag;
   let body;
   if (!g || g.loading) body = `<div class="run"><div><span class="spinner"></span> Exe ilişki ağı hazırlanıyor…</div></div>`;
-  else if (g.eski) body = `<div class="warn">Bu tarama exe ilişki ağı verisi içermiyor (bu özellikten önce kaydedilmiş). ${st.yetki.topoloji ? `<button type="button" id="agYeni">🔄 Yeniden çek</button>` : ""}</div>`;
+  else if (g.eski) body = `<div class="warn">Bu tarama exe ilişki ağı verisi içermiyor (bu özellikten önce kaydedilmiş). ${tarayabilir() ? `<button type="button" id="agYeni">🔄 Yeniden çek</button>` : ""}</div>`;
   else if (g.error) body = `<div class="warn">Exe ağı hazırlanamadı: ${esc(g.error)}</div>`;
   else {
     const L = agYerlesim(g, st.agInfra), maxH = Math.max(1, ...L.E.map(e => e.hits));
@@ -808,17 +808,28 @@ $("#tur").addEventListener("change", e => { st.tur = e.target.value; $("#seg").v
 $("#seg").addEventListener("keydown", e => { if (e.key === "Enter") start(); });
 $("#seg").addEventListener("input", segInfo);
 $("#dur").addEventListener("click", async () => { if (st.job) { await fetch(`api/segment/tarama/${st.job}/durdur`, { method: "POST" }); } });
-fetch("api/me").then(r => r.ok ? r.json() : null).then(me => {
-  if (me?.name) $("#me").textContent = "👤 " + me.name;
-  st.yetki = me?.yetki || {};
-  if (!st.yetki.topoloji) { $("#tara").disabled = true; $("#tara").title = "Segment tarama için topoloji yetkisi gerekir (DokuPanel)."; }
-  if (st.data) render();
-}).catch(() => {});
+// Sayfa yetkisi (DokuPanel, Yetki:Segment; boşsa Topoloji): yoksa veri yüklenmez, tüm denetimler pasif (sunucu da 403 verir)
+function sayfaKilit(kul) {
+  document.querySelectorAll("main input, main select, main textarea, main button, main summary, main a").forEach(x => { x.disabled = true; x.style.pointerEvents = "none"; });
+  const k = document.createElement("div");
+  k.style.cssText = "color:var(--err);padding:12px 0;font-weight:600";
+  k.textContent = `🔒 Segment / etiket tarama yetkiniz yok${kul ? " (" + kul + ")" : ""} — sayfa görüntülenemez. Yetki DokuPanel'den verilir.`;
+  document.querySelector("main .panel").prepend(k);
+}
+// Tarama / yeniden çekme: Yetki:Segment (eski DLL'de segment anahtarı yok → topoloji)
+const tarayabilir = () => !!("segment" in st.yetki ? st.yetki.segment : st.yetki.topoloji);
 const p = new URLSearchParams(location.search);
 if (p.get("etiket")) { st.tur = "etiket"; $("#tur").value = "etiket"; $("#seg").value = p.get("etiket"); }
 else if (p.get("segment")) $("#seg").value = p.get("segment");
 if (p.get("saat")) $("#saat").value = p.get("saat");
-loadSegs();
+fetch("api/me").then(r => r.ok ? r.json() : null).then(me => {
+  if (me?.name) $("#me").textContent = "👤 " + me.name;
+  st.yetki = me?.yetki || {};
+  if (st.yetki.segment === false) { sayfaKilit(me.name); return; }
+  if (!tarayabilir()) { $("#tara").disabled = true; $("#tara").title = "Segment tarama yetkisi gerekir (DokuPanel)."; }
+  loadSegs();
+  if (st.data) render();
+}).catch(() => loadSegs());
 st.surumP = fetch("api/surum").then(r => r.ok ? r.json() : null).then(v => { st.surum = v; $("#surum").textContent = v ? "sunucu sürümü " + v.surum : "eski sunucu sürümü (DLL güncel değil)"; }).catch(() => {});
 </script>
 </body>

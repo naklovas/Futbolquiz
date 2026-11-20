@@ -131,6 +131,7 @@ const tagParent = t => String(t).split("/")[0];
 
 function runEtiket() {
   setUiMode("etiket");
+  if (sekmeKapali("etiket")) return;
   history.replaceState(null, "", "?etiket=");
   etq.shell = false;
   etqLoad();
