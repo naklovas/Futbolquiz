@@ -1,4 +1,4 @@
-using ClosedXML.Excel;
+﻿using ClosedXML.Excel;
 using ITInventory.Data;
 using ITInventory.Data.Common;
 using ITInventory.Data.Entities;
@@ -117,8 +117,17 @@ public class ServersController : Controller
     // already a "Server" device category for that), so keeping a Physical option here only
     // duplicated that. Existing rows created before this change may still be Physical; Edit
     // leaves those alone and fully editable, this only affects new records.
+    /// <summary>Disaridan gelen metni form alanina koymadan once kirpar.</summary>
+    private static string Kirp(string d, int enFazla)
+    {
+        d = d.Trim();
+        return d.Length <= enFazla ? d : d[..enFazla];
+    }
+
     [HttpGet]
-    public async Task<IActionResult> Create(bool fromPool = false, int? sourceId = null, int? countryId = null)
+    public async Task<IActionResult> Create(bool fromPool = false, int? sourceId = null, int? countryId = null,
+        string? hostName = null, string? ipAddress = null, string? operatingSystem = null,
+        string? esxiHostName = null)
     {
         var isAdmin = User.IsAdministrator();
         var scopedCountryId = User.ScopedCountryId();
@@ -131,6 +140,33 @@ public class ServersController : Controller
             CountryId = isAdmin ? countryId ?? 0 : scopedCountryId ?? 0,
             ApplianceType = ApplianceType.Virtual
         };
+
+        // Aria Pool'dan on-doldurma -- yalnizca formu dolduruyor, kaydi
+        // kullanici onayliyor. vROps her alani vermiyor (VMware Tools yoksa
+        // konuk alanlari bos), eksigi kisi tamamlasin diye formu gosteriyoruz.
+        if (!string.IsNullOrWhiteSpace(hostName)) vm.HostName = Kirp(hostName, 200);
+        if (!string.IsNullOrWhiteSpace(ipAddress)) vm.IpAddress = Kirp(ipAddress, 100);
+        if (!string.IsNullOrWhiteSpace(operatingSystem)) vm.OperatingSystem = Kirp(operatingSystem, 200);
+
+        // VM'in uzerinde calistigi ESXi host'u envanterde ariyoruz. Bu alan
+        // bugune kadar elle dolduruluyordu. Kapsam sorgunun icinde: baska
+        // ulkenin cihazina baglanamaz.
+        if (!string.IsNullOrWhiteSpace(esxiHostName))
+        {
+            var ad = Kirp(esxiHostName, 200);
+            var kisaAd = ad.Split('.')[0];
+
+            // vROps tam nitelikli ad veriyor (zb0010a.zbaz.local), envantere
+            // kisa adla girilmis olabilir; ikisini de deniyoruz.
+            var cihaz = await _db.PhysicalDevices
+                .Where(d => (isAdmin || d.CountryId == scopedCountryId)
+                         && (d.DeviceName == ad || d.DeviceName == kisaAd))
+                .Select(d => new { d.Id })
+                .FirstOrDefaultAsync();
+
+            if (cihaz is not null)
+                vm.HostPhysicalDeviceId = cihaz.Id;
+        }
 
         if (fromPool && sourceId.HasValue)
         {

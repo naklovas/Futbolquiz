@@ -1,4 +1,4 @@
-using ClosedXML.Excel;
+﻿using ClosedXML.Excel;
 using ITInventory.Data;
 using ITInventory.Data.Common;
 using ITInventory.Data.Entities;
@@ -129,8 +129,21 @@ public class PhysicalDevicesController : Controller
         return File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", $"PhysicalDevices_Export_{DateTime.UtcNow:yyyyMMdd_HHmmss}.xlsx");
     }
 
+    /// <summary>
+    /// Disaridan gelen metni form alanina koymadan once kirpar. Deger
+    /// istekten geliyor; uzunlugu sinirlamak hem formu hem de arkasindaki
+    /// sutunu korur.
+    /// </summary>
+    private static string Kirp(string d, int enFazla)
+    {
+        d = d.Trim();
+        return d.Length <= enFazla ? d : d[..enFazla];
+    }
+
     [HttpGet]
-    public async Task<IActionResult> Create(bool fromPool = false, int? sourceId = null, int? countryId = null, int? categoryId = null)
+    public async Task<IActionResult> Create(bool fromPool = false, int? sourceId = null, int? countryId = null, int? categoryId = null,
+        string? deviceName = null, string? ipAddress = null, string? brand = null,
+        string? model = null, string? softwareVersion = null, string? serialNo = null)
     {
         var isAdmin = User.IsAdministrator();
         var scopedCountryId = User.ScopedCountryId();
@@ -143,6 +156,19 @@ public class PhysicalDevicesController : Controller
             CountryId = isAdmin ? countryId ?? 0 : scopedCountryId ?? 0,
             CategoryId = categoryId ?? 0
         };
+
+        // Aria Pool'dan on-doldurma. Bu degerler YALNIZCA formu dolduruyor;
+        // kaydi kullanici onayliyor ve dogrulama normal sekilde calisiyor.
+        // Dogrudan kaydetmiyoruz: vROps her alani her makine icin vermiyor
+        // (VMware Tools yoksa konuk alanlari hic gelmiyor), zorunlu bir alan
+        // bos kalirsa kisi gorup tamamlamali.
+        if (!string.IsNullOrWhiteSpace(deviceName)) vm.DeviceName = Kirp(deviceName, 200);
+        if (!string.IsNullOrWhiteSpace(ipAddress)) vm.IpAddress = Kirp(ipAddress, 100);
+        if (!string.IsNullOrWhiteSpace(ipAddress)) vm.MgmtIp = Kirp(ipAddress, 100);
+        if (!string.IsNullOrWhiteSpace(brand)) vm.Brand = Kirp(brand, 200);
+        if (!string.IsNullOrWhiteSpace(model)) vm.Model = Kirp(model, 200);
+        if (!string.IsNullOrWhiteSpace(softwareVersion)) vm.SoftwareVersion = Kirp(softwareVersion, 200);
+        if (!string.IsNullOrWhiteSpace(serialNo)) vm.SerialNo = Kirp(serialNo, 200);
 
         if (fromPool && sourceId.HasValue)
         {

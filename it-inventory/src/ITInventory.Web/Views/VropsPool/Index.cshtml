@@ -1,4 +1,4 @@
-@model List<ITInventory.Web.Models.VropsPool.VropsDatacenterContent>
+﻿@model List<ITInventory.Web.Models.VropsPool.VropsDatacenterContent>
 @{
     ViewData["Title"] = "Aria Pool";
     var countries = (List<ITInventory.Data.Entities.Country>)ViewBag.Countries;
@@ -97,6 +97,15 @@ else
                     @dc.Error
                 </div>
             }
+            else if (dc.DetailsSkipped)
+            {
+                <div class="bg-amber-50 border border-amber-200 text-amber-800 rounded-md px-4 py-3 text-sm mb-3">
+                    IP, operating system and hardware columns are empty here because this list is
+                    larger than the per-request limit. Each of those values needs its own call to
+                    Aria, so they are not fetched for very large lists. Raise
+                    <code class="bg-amber-100 px-1 rounded">Vrops:DetailLimit</code> to fetch them anyway.
+                </div>
+            }
             else
             {
                 @* ---------------- ESXi hosts ---------------- *@
@@ -109,6 +118,9 @@ else
                             <thead>
                                 <tr class="border-b border-slate-200">
                                     <th class="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wider">Host Name</th>
+                                    <th class="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wider">IP</th>
+                                    <th class="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wider">Model</th>
+                                    <th class="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wider">Version</th>
                                     <th class="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wider">VMs</th>
                                     <th class="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wider">Status</th>
                                     <th class="px-4 py-2"></th>
@@ -119,6 +131,9 @@ else
                             {
                                 <tr class="border-b border-slate-100 hover:bg-slate-50">
                                     <td class="px-4 py-2 font-medium text-slate-800">@h.Name</td>
+                                    <td class="px-4 py-2 text-slate-600 tabular-nums">@(h.IpAddress ?? "—")</td>
+                                    <td class="px-4 py-2 text-slate-600">@(h.Model ?? "—")</td>
+                                    <td class="px-4 py-2 text-slate-600">@(h.Version ?? "—")</td>
                                     <td class="px-4 py-2 text-slate-600">@h.VmCount</td>
                                     <td class="px-4 py-2">
                                         @if (h.AlreadyInInventory)
@@ -137,6 +152,12 @@ else
                                         {
                                             <a asp-controller="PhysicalDevices" asp-action="Create"
                                                asp-route-countryId="@selectedCountryId"
+                                               asp-route-deviceName="@h.Name"
+                                               asp-route-ipAddress="@h.IpAddress"
+                                               asp-route-brand="@h.Vendor"
+                                               asp-route-model="@h.Model"
+                                               asp-route-softwareVersion="@h.Version"
+                                               asp-route-serialNo="@h.SerialNo"
                                                onclick="showLoadingOverlay()"
                                                class="text-xs font-medium text-brand-700 hover:text-brand-800">
                                                 Add as Device
@@ -155,7 +176,7 @@ else
                             }
                             @if (dc.Hosts.Count == 0)
                             {
-                                <tr><td colspan="4" class="px-4 py-6 text-center text-slate-400 text-sm">No ESXi host found in this datacenter.</td></tr>
+                                <tr><td colspan="7" class="px-4 py-6 text-center text-slate-400 text-sm">No ESXi host found in this datacenter.</td></tr>
                             }
                             </tbody>
                         </table>
@@ -181,6 +202,8 @@ else
                             <thead>
                                 <tr class="border-b border-slate-200">
                                     <th class="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wider">Virtual Machine</th>
+                                    <th class="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wider">IP</th>
+                                    <th class="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wider">Operating System</th>
                                     <th class="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wider">Runs on (ESXi Host)</th>
                                     <th class="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wider">Status</th>
                                     <th class="px-4 py-2"></th>
@@ -197,6 +220,8 @@ else
                                             <span class="ml-1 text-xs text-slate-400">(system)</span>
                                         }
                                     </td>
+                                    <td class="px-4 py-2 text-slate-600 tabular-nums">@(v.IpAddress ?? "—")</td>
+                                    <td class="px-4 py-2 text-slate-600">@(v.OperatingSystem ?? "—")</td>
                                     <td class="px-4 py-2 text-slate-600">
                                         <i class="fa-solid fa-server text-slate-300 mr-1"></i>@v.HostName
                                     </td>
@@ -217,6 +242,10 @@ else
                                         {
                                             <a asp-controller="Servers" asp-action="Create"
                                                asp-route-countryId="@selectedCountryId"
+                                               asp-route-hostName="@(v.GuestHostName ?? v.Name)"
+                                               asp-route-ipAddress="@v.IpAddress"
+                                               asp-route-operatingSystem="@v.OperatingSystem"
+                                               asp-route-esxiHostName="@v.HostName"
                                                onclick="showLoadingOverlay()"
                                                class="text-xs font-medium text-brand-700 hover:text-brand-800">
                                                 Add as Server
@@ -235,7 +264,7 @@ else
                             }
                             @if (vms.Count == 0)
                             {
-                                <tr><td colspan="4" class="px-4 py-6 text-center text-slate-400 text-sm">No virtual machine to show.</td></tr>
+                                <tr><td colspan="6" class="px-4 py-6 text-center text-slate-400 text-sm">No virtual machine to show.</td></tr>
                             }
                             </tbody>
                         </table>
