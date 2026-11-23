@@ -1,4 +1,4 @@
-using ITInventory.Data;
+﻿using ITInventory.Data;
 using ITInventory.Web.Configuration;
 using Microsoft.Extensions.Options;
 using ITInventory.Web.Services;
@@ -28,6 +28,7 @@ builder.Services.AddScoped<ICurrentUserService, CurrentUserService>();
 builder.Services.AddScoped<IDevicePoolService, DevicePoolService>();
 
 builder.Services.Configure<VropsSettings>(builder.Configuration.GetSection(VropsSettings.SectionName));
+builder.Services.Configure<DevLoginSettings>(builder.Configuration.GetSection(DevLoginSettings.SectionName));
 builder.Services.AddMemoryCache();
 
 // vROps kendi ic sertifikasini kullaniyor olabilir. DOGRU cozum o sertifikayi
@@ -77,6 +78,28 @@ if (!app.Environment.IsDevelopment())
     app.UseExceptionHandler("/Home/Error");
     // The default HSTS value is 30 days. You may want to change this for production scenarios, see https://aka.ms/aspnetcore-hsts.
     app.UseHsts();
+}
+
+// Gelistirme giris anahtari uretimde acik kalmasin. Bunu bir hatirlama
+// isi olarak birakmiyoruz: ortam Development degilken bayrak aciksa
+// uygulama hic baslamaz. Sessizce yok saymak daha tehlikeli olurdu --
+// bayragin acik oldugunu saniriz, aslinda kapali olur ya da tersi.
+{
+    var devLogin = app.Services.GetRequiredService<IOptions<DevLoginSettings>>().Value;
+    if (devLogin.Enabled)
+    {
+        if (!app.Environment.IsDevelopment())
+        {
+            throw new InvalidOperationException(
+                "DevLogin:Enabled = true, ancak ortam Development degil (" + app.Environment.EnvironmentName + "). " +
+                "Bu ayar AD/LDAP dogrulamasini tamamen devre disi birakir ve uretimde acik kalamaz. " +
+                "appsettings.Development.json disindaki yapilandirmalardan kaldirin.");
+        }
+
+        app.Logger.LogWarning(
+            "DEVLOGIN ACIK -- AD/LDAP dogrulamasi ATLANIYOR. dbo.YDUsers icindeki herhangi bir " +
+            "kullanici adi, parola kontrolu olmadan giris yapabilir. Yalnizca gelistirme icindir.");
+    }
 }
 
 app.UseHttpsRedirection();

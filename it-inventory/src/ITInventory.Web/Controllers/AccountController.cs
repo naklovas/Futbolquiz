@@ -1,4 +1,4 @@
-using System.Security.Claims;
+﻿using System.Security.Claims;
 using ITInventory.Data;
 using ITInventory.Web.Configuration;
 using ITInventory.Web.Models.Account;
@@ -16,6 +16,7 @@ namespace ITInventory.Web.Controllers;
 public class AccountController : Controller
 {
     private readonly ILdapAuthenticationService _ldapAuth;
+    private readonly DevLoginSettings _devLogin;
     private readonly ITInventoryDbContext _db;
     private readonly ILogger<AccountController> _logger;
     private readonly IActivityLogger _activityLogger;
@@ -24,9 +25,11 @@ public class AccountController : Controller
         ILdapAuthenticationService ldapAuth,
         ITInventoryDbContext db,
         ILogger<AccountController> logger,
-        IActivityLogger activityLogger)
+        IActivityLogger activityLogger,
+        IOptions<DevLoginSettings> devLogin)
     {
         _ldapAuth = ldapAuth;
+        _devLogin = devLogin.Value;
         _db = db;
         _logger = logger;
         _activityLogger = activityLogger;
@@ -47,10 +50,19 @@ public class AccountController : Controller
         if (!ModelState.IsValid)
             return View(model);
 
-        // AD/LDAP is the only way in. The old "test user" mode is gone entirely: it carried a
-        // second credential store and a PBKDF2 verifier whose salt was read back out of the
-        // stored string, and none of it earned its keep once LDAP was working.
-        if (!_ldapAuth.ValidateCredentials(model.Username, model.Password, out var ldapError))
+        // AD/LDAP is the only way in, except behind the development switch below. The old
+        // "test user" mode is gone entirely: it carried a second credential store and a PBKDF2
+        // verifier whose salt was read back out of the stored string.
+        //
+        // DevLogin stores no secret at all -- it skips validation outright -- so it does not
+        // bring that finding back. Program.cs refuses to start when it is enabled outside
+        // Development, so it cannot reach production by being forgotten.
+        if (_devLogin.Enabled)
+        {
+            _logger.LogWarning(
+                "DEVLOGIN: parola dogrulanmadan giris denemesi -- {Username}", model.Username);
+        }
+        else if (!_ldapAuth.ValidateCredentials(model.Username, model.Password, out var ldapError))
         {
             ModelState.AddModelError(string.Empty, ldapError ?? "Invalid username or password.");
             return View(model);
