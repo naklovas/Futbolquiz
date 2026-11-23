@@ -76,36 +76,55 @@ BEGIN
 END
 
 -- ------------------------------------------------------- 4) test kullanicisi
--- BURAYI DEGISTIRIN: fintek.local'de var olan bir kullanici adi yazin.
-DECLARE @TestUsername nvarchar(100) = N'DEGISTIRIN_AD_KULLANICI_ADI';
-DECLARE @TestFullName nvarchar(100) = N'Algeria Test User';
-
-IF @TestUsername <> N'DEGISTIRIN_AD_KULLANICI_ADI'
+-- algeria_test, germany_test / bulgaria_test ile ayni desende olusturulur.
+-- DIKKAT: Bu satir TEK BASINA GIRIS SAGLAMAZ. "Log In as Test User" ozelligi
+-- kaldirildi (Weak Cryptographic Hash bulgusu); giris artik yalnizca AD/LDAP ile.
+-- algeria_test fintek.local'de yoksa bu kayit sadece veritabaninda durur.
+IF NOT EXISTS (SELECT 1 FROM dbo.YDUsers WHERE Username = N'algeria_test')
 BEGIN
-    IF NOT EXISTS (SELECT 1 FROM dbo.YDUsers WHERE Username = @TestUsername)
-    BEGIN
-        INSERT INTO dbo.YDUsers (Username, FullName, Email, IsActive, CreatedAt, RepositoryName)
-        VALUES (@TestUsername, @TestFullName, NULL, 1, SYSUTCDATETIME(), @CezayirName);
-        PRINT 'Test kullanicisi eklendi: ' + @TestUsername;
-    END
-    ELSE
-    BEGIN
-        UPDATE dbo.YDUsers SET RepositoryName = @CezayirName, IsActive = 1
-        WHERE Username = @TestUsername;
-        PRINT 'Mevcut kullanici Cezayir''a baglandi: ' + @TestUsername;
-    END
-
-    -- country_manager: kendi ulkesinde goruntuler, ekler, duzenler.
-    INSERT INTO dbo.YDUserRoles (UserId, RoleId)
-    SELECT u.Id, r.Id
-    FROM dbo.YDUsers u
-    CROSS JOIN dbo.YDRoles r
-    WHERE u.Username = @TestUsername
-      AND r.RoleName = N'country_manager'
-      AND NOT EXISTS (SELECT 1 FROM dbo.YDUserRoles ur WHERE ur.UserId = u.Id AND ur.RoleId = r.Id);
+    INSERT INTO dbo.YDUsers (Username, FullName, Email, IsActive, CreatedAt, RepositoryName)
+    VALUES (N'algeria_test', N'Algeria Test User', NULL, 1, SYSUTCDATETIME(), @CezayirName);
+    PRINT 'algeria_test eklendi.';
 END
 ELSE
-    PRINT 'Test kullanicisi ATLANDI -- @TestUsername degerini duzenleyin.';
+BEGIN
+    UPDATE dbo.YDUsers SET RepositoryName = @CezayirName, IsActive = 1
+    WHERE Username = N'algeria_test' AND (RepositoryName <> @CezayirName OR IsActive = 0);
+    PRINT 'algeria_test zaten var, Cezayir''a baglandi.';
+END
+
+-- country_manager: kendi ulkesinde goruntuler, ekler, duzenler.
+INSERT INTO dbo.YDUserRoles (UserId, RoleId)
+SELECT u.Id, r.Id
+FROM dbo.YDUsers u CROSS JOIN dbo.YDRoles r
+WHERE u.Username = N'algeria_test'
+  AND r.RoleName = N'country_manager'
+  AND NOT EXISTS (SELECT 1 FROM dbo.YDUserRoles ur WHERE ur.UserId = u.Id AND ur.RoleId = r.Id);
+
+-- ------------------------------------------- 5) GERCEKTEN giris yapacak hesap
+-- Cezayir'i ekranda test etmek icin AD'de VAR OLAN bir hesap gerekiyor.
+-- En pratigi kendi kullanici adiniz. Bos birakirsaniz bu bolum atlanir ve
+-- sonuc izgarasinda bunu acikca gorursunuz.
+DECLARE @AdUsername nvarchar(100) = N'';   -- <<< kendi AD kullanici adiniz
+
+IF @AdUsername <> N''
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM dbo.YDUsers WHERE Username = @AdUsername)
+        INSERT INTO dbo.YDUsers (Username, FullName, Email, IsActive, CreatedAt, RepositoryName)
+        VALUES (@AdUsername, @AdUsername, NULL, 1, SYSUTCDATETIME(), @CezayirName);
+    ELSE
+        UPDATE dbo.YDUsers SET RepositoryName = @CezayirName, IsActive = 1
+        WHERE Username = @AdUsername;
+
+    INSERT INTO dbo.YDUserRoles (UserId, RoleId)
+    SELECT u.Id, r.Id
+    FROM dbo.YDUsers u CROSS JOIN dbo.YDRoles r
+    WHERE u.Username = @AdUsername
+      AND r.RoleName = N'country_manager'
+      AND NOT EXISTS (SELECT 1 FROM dbo.YDUserRoles ur WHERE ur.UserId = u.Id AND ur.RoleId = r.Id);
+
+    PRINT 'AD hesabi Cezayir''a baglandi: ' + @AdUsername;
+END
 
 COMMIT TRANSACTION;
 
@@ -120,11 +139,21 @@ JOIN dbo.Countries c ON c.Id = d.CountryId;
 SELECT u.Username, u.FullName, u.RepositoryName, u.IsActive,
        STUFF((SELECT ', ' + r.RoleName FROM dbo.YDUserRoles ur
               JOIN dbo.YDRoles r ON r.Id = ur.RoleId
-              WHERE ur.UserId = u.Id FOR XML PATH('')), 1, 2, '') AS Roller
+              WHERE ur.UserId = u.Id FOR XML PATH('')), 1, 2, '') AS Roller,
+       CASE WHEN u.Username = N'algeria_test'
+            THEN N'AD hesabi degil -- GIRIS YAPAMAZ, sadece kayit'
+            ELSE N'AD hesabi ise giris yapabilir' END AS GirisDurumu
 FROM dbo.YDUsers u WHERE u.RepositoryName = N'Cezayir';
 
 -- ------------------------------------------------------------- GERI ALMA
--- Kendi hesabinizi Cezayir'a bagladiysaniz, test bitince eski ulkenize dondurun:
+-- 1) algeria_test'i silmek icin (AD'de karsiligi yok, test sonrasi temizlik):
+--
+--   DELETE ur FROM dbo.YDUserRoles ur
+--   JOIN dbo.YDUsers u ON u.Id = ur.UserId
+--   WHERE u.Username = N'algeria_test';
+--   DELETE FROM dbo.YDUsers WHERE Username = N'algeria_test';
+--
+-- 2) Kendi hesabinizi Cezayir'a bagladiysaniz, test bitince eski ulkenize dondurun:
 --
 --   UPDATE dbo.YDUsers SET RepositoryName = N'ESKI_ULKENIZ'
 --   WHERE Username = N'SIZIN_KULLANICI_ADINIZ';
