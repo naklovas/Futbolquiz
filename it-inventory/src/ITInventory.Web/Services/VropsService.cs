@@ -86,7 +86,7 @@ public class VropsService : IVropsService
             }
 
             // 2) datacenter'in altindaki ESXi host'lari
-            var hostlar = await AltNesneleriGetirAsync(token, dcId, "HostSystem", ct);
+            var hostlar = await HostlariBulAsync(token, dcId, ct);
 
             // 3) her host'un altindaki VM'ler -- VM -> host eslemesi buradan cikiyor
             foreach (var h in hostlar)
@@ -195,30 +195,86 @@ public class VropsService : IVropsService
     }
 
     // ------------------------------------------------- iliski uzerinden cekme
-    private Task<List<VropsHostDto>> AltNesneleriGetirAsync(string token, string kaynakId, string tur, CancellationToken ct)
-        => IliskiliGetirAsync(token, kaynakId, "DESCENDANT", tur, ct);
+    //
+    // NEDEN DESCENDANT KULLANMIYORUZ:
+    // Bu vROps surumu relationshipType icin yalnizca PARENT, CHILD ve ALL
+    // kabul ediyor; DESCENDANT'a "Value DESCENDANT is invalid" diye HTTP 400
+    // donuyor. O yuzden datacenter'dan host'a CHILD ile kademe kademe
+    // iniyoruz.
+    //
+    // Hiyerarsi tek adim degil: Datacenter -> Cluster -> HostSystem -> VM,
+    // ve araya klasor (Folder) girebiliyor, tek basina duran host'lar da
+    // ComputeResource altinda asili olabiliyor. Sabit iki kademe yazmak
+    // yerine sinirli derinlikte bir arama yapiyoruz: HostSystem bulunca
+    // duruyoruz, VM'lerin icine hic inmiyoruz.
+    private const int EnFazlaDerinlik = 4;
+
+    private async Task<List<VropsHostDto>> HostlariBulAsync(string token, string dcId, CancellationToken ct)
+    {
+        var hostlar = new Dictionary<string, VropsHostDto>(StringComparer.OrdinalIgnoreCase);
+        var gorulen = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { dcId };
+        var sira = new List<string> { dcId };
+
+        for (var derinlik = 0; derinlik < EnFazlaDerinlik && sira.Count > 0; derinlik++)
+        {
+            var sonraki = new List<string>();
+
+            foreach (var id in sira)
+            {
+                foreach (var cocuk in await IliskililerAsync(token, id, "CHILD", ct))
+                {
+                    if (string.IsNullOrEmpty(cocuk.Id) || !gorulen.Add(cocuk.Id))
+                        continue;
+
+                    if (string.Equals(cocuk.Kind, "HostSystem", StringComparison.OrdinalIgnoreCase))
+                    {
+                        hostlar[cocuk.Id] = new VropsHostDto { VropsId = cocuk.Id, Name = cocuk.Name };
+                        continue;   // host bulundu, altina inmiyoruz -- altinda VM'ler var
+                    }
+
+                    // VM'lerin altinda host olmaz; bosa istek atmayalim.
+                    if (string.Equals(cocuk.Kind, "VirtualMachine", StringComparison.OrdinalIgnoreCase))
+                        continue;
+
+                    sonraki.Add(cocuk.Id);
+                }
+            }
+
+            sira = sonraki;
+        }
+
+        return hostlar.Values
+            .OrderBy(x => x.Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
 
     private async Task<List<VropsVmDto>> CocuklariGetirAsync(string token, string kaynakId, string tur, CancellationToken ct)
     {
-        var host = await IliskiliGetirAsync(token, kaynakId, "CHILD", tur, ct);
-        return host.Select(h => new VropsVmDto { VropsId = h.VropsId, Name = h.Name }).ToList();
+        var cocuklar = await IliskililerAsync(token, kaynakId, "CHILD", ct);
+        return cocuklar
+            .Where(c => string.Equals(c.Kind, tur, StringComparison.OrdinalIgnoreCase))
+            .Select(c => new VropsVmDto { VropsId = c.Id, Name = c.Name })
+            .OrderBy(x => x.Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
     }
 
-    private async Task<List<VropsHostDto>> IliskiliGetirAsync(
-        string token, string kaynakId, string iliskiTuru, string kaynakTuru, CancellationToken ct)
+    /// <summary>
+    /// Bir kaynagin iliskililerini TURUYLE BIRLIKTE dondurur. Tur bilgisi
+    /// lazim, cunku datacenter'in altinda cluster, klasor ve host birlikte
+    /// gelebiliyor ve hangisinin icine inecegimize ona gore karar veriyoruz.
+    /// </summary>
+    private async Task<List<(string Id, string Name, string Kind)>> IliskililerAsync(
+        string token, string kaynakId, string iliskiTuru, CancellationToken ct)
     {
         var yol = $"resources/{kaynakId}/relationships?relationshipType={iliskiTuru}";
         var liste = await GetAsync<KaynakListesi>(token, yol, ct);
 
         return (liste?.ResourceList ?? new List<Kaynak>())
-            .Where(r => string.Equals(r.ResourceKey?.ResourceKindKey, kaynakTuru, StringComparison.OrdinalIgnoreCase))
-            .Select(r => new VropsHostDto
-            {
-                VropsId = r.Identifier ?? string.Empty,
-                Name = r.ResourceKey?.Name ?? "(adsiz)"
-            })
-            .Where(x => !string.IsNullOrEmpty(x.VropsId))
-            .OrderBy(x => x.Name, StringComparer.OrdinalIgnoreCase)
+            .Where(r => !string.IsNullOrEmpty(r.Identifier))
+            .Select(r => (
+                Id:   r.Identifier!,
+                Name: r.ResourceKey?.Name ?? "(adsiz)",
+                Kind: r.ResourceKey?.ResourceKindKey ?? string.Empty))
             .ToList();
     }
 
