@@ -1,4 +1,4 @@
-namespace ITInventory.Web.Models.VropsPool;
+﻿namespace ITInventory.Web.Models.VropsPool;
 
 /// <summary>vROps'tan gelen bir ESXi host. Envanterde PhysicalDevice karsiligi var.</summary>
 public class VropsHostDto
@@ -77,9 +77,23 @@ public class VropsIliskiliKaynak
     public string Name { get; set; } = string.Empty;
 }
 
-/// <summary>Alan kesfi ekraninin tamami: ornek VM'ler ve ornek host'lar.</summary>
+/// <summary>
+/// vROps'ta tanimli bir adaptor ornegi -- pratikte BIR vCENTER.
+/// Ulke ayrimi datacenter adi yerine vCenter'a baglanacaksa esleme
+/// bunlardan birine yapilacak, o yuzden gercek adlarini goruyoruz.
+/// </summary>
+public class VropsVcenter
+{
+    public string VropsId { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    public string AdapterKind { get; set; } = string.Empty;
+    public string ResourceKind { get; set; } = string.Empty;
+}
+
+/// <summary>Alan kesfi ekraninin tamami: vCenter'lar, ornek VM'ler, ornek host'lar.</summary>
 public class VropsAlanOrnekleri
 {
+    public List<VropsVcenter> Vcenters { get; set; } = new();
     public List<VropsKaynakAlanlari> Vms { get; set; } = new();
     public List<VropsKaynakAlanlari> Hosts { get; set; } = new();
     public string? Error { get; set; }

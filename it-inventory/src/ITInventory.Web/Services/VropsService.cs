@@ -135,6 +135,19 @@ public class VropsService : IVropsService
             var token = await TokenAlAsync(ct);
             var adet = Math.Clamp(ornekSayisi, 1, 10);
 
+            // vCenter'lar: ulke ayrimi datacenter yerine vCenter'a
+            // baglanacaksa esleme bunlardan birine yapilacak.
+            // Patlasa da ornekleri kaybetmiyoruz.
+            try
+            {
+                sonuc.Vcenters = await VcenterlariGetirAsync(token, ct);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "vROps adaptor listesi alinamadi");
+                sonuc.Vcenters = new List<VropsVcenter>();
+            }
+
             sonuc.Vms = await OrneklerAsync(token, "VirtualMachine", adet, atlaVcls: true, ct);
             sonuc.Hosts = await OrneklerAsync(token, "HostSystem", adet, atlaVcls: false, ct);
             sonuc.FetchedAt = DateTime.UtcNow;
@@ -146,6 +159,28 @@ public class VropsService : IVropsService
             sonuc.Error = $"vROps'a ulasilamadi: {ex.Message}";
             return sonuc;
         }
+    }
+
+    /// <summary>
+    /// vROps'ta tanimli adaptor orneklerini getirir -- pratikte vCenter'lar.
+    /// Her vCenter bir "VMwareAdapter Instance" kaydi olarak goruluyor, ama
+    /// kaynak tipinin adi surume gore degisebiliyor; o yuzden filtrelemiyoruz,
+    /// ne donerse ekrana yaziyoruz ve gercek adlari oradan okuyoruz.
+    /// </summary>
+    private async Task<List<VropsVcenter>> VcenterlariGetirAsync(string token, CancellationToken ct)
+    {
+        var liste = await GetAsync<AdaptorListesi>(token, "adapters", ct);
+
+        return (liste?.AdapterInstancesInfoDto ?? new List<Adaptor>())
+            .Select(a => new VropsVcenter
+            {
+                VropsId = a.Id ?? string.Empty,
+                Name = a.ResourceKey?.Name ?? "(adsiz)",
+                AdapterKind = a.ResourceKey?.AdapterKindKey ?? string.Empty,
+                ResourceKind = a.ResourceKey?.ResourceKindKey ?? string.Empty
+            })
+            .OrderBy(x => x.Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
     }
 
     private async Task<List<VropsKaynakAlanlari>> OrneklerAsync(
@@ -420,5 +455,23 @@ public class VropsService : IVropsService
     {
         public string? Name { get; set; }
         public string? Value { get; set; }
+    }
+
+    private sealed class AdaptorListesi
+    {
+        public List<Adaptor>? AdapterInstancesInfoDto { get; set; }
+    }
+
+    private sealed class Adaptor
+    {
+        public string? Id { get; set; }
+        public AdaptorAnahtari? ResourceKey { get; set; }
+    }
+
+    private sealed class AdaptorAnahtari
+    {
+        public string? Name { get; set; }
+        public string? AdapterKindKey { get; set; }
+        public string? ResourceKindKey { get; set; }
     }
 }
