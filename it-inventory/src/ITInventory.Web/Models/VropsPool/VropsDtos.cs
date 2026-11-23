@@ -9,6 +9,14 @@ public class VropsHostDto
     /// <summary>Bu host'un uzerinde kac VM calisiyor.</summary>
     public int VmCount { get; set; }
 
+    // --- vROps'tan okunan alanlar. Hepsi BOS OLABILIR: her kurulum her
+    //     alani doldurmuyor. Form on-doldurmada ve listede kullaniliyor.
+    public string? IpAddress { get; set; }
+    public string? Vendor { get; set; }
+    public string? Model { get; set; }
+    public string? Version { get; set; }
+    public string? SerialNo { get; set; }
+
     /// <summary>Ayni adla bir PhysicalDevice zaten varsa onun Id'si.</summary>
     public int? ExistingPhysicalDeviceId { get; set; }
 
@@ -32,6 +40,17 @@ public class VropsVmDto
     /// </summary>
     public bool IsSystemVm { get; set; }
 
+    // --- vROps'tan okunan alanlar. Hepsi BOS OLABILIR.
+    //     Konuk alanlari (guest|*) VMware Tools kurulu degilse hic gelmiyor;
+    //     ornek dokumunde "none" degeri goruldu, onu da bos sayiyoruz.
+    public string? IpAddress { get; set; }
+    public string? OperatingSystem { get; set; }
+
+    /// <summary>Konuk isletim sistemindeki makine adi. VM adindan farkli olabilir.</summary>
+    public string? GuestHostName { get; set; }
+
+    public string? PowerState { get; set; }
+
     /// <summary>Ayni adla bir Server zaten varsa onun Id'si.</summary>
     public int? ExistingServerId { get; set; }
 
@@ -47,6 +66,13 @@ public class VropsDatacenterContent
 
     /// <summary>vROps'a ulasilamadiysa sebebi. Doluysa ekran bunu gosterir.</summary>
     public string? Error { get; set; }
+
+    /// <summary>
+    /// Liste Vrops:DetailLimit degerinden buyuk oldugu icin IP / isletim
+    /// sistemi / model alanlari cekilmedi. Ekran bunu kullaniciya yaziyor,
+    /// yoksa alanlar "vROps'ta yok" sanilir.
+    /// </summary>
+    public bool DetailsSkipped { get; set; }
 
     public DateTime FetchedAt { get; set; } = DateTime.UtcNow;
 }

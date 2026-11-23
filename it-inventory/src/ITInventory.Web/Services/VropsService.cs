@@ -1,6 +1,7 @@
 ﻿using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using ITInventory.Web.Configuration;
 using ITInventory.Web.Models.VropsPool;
 using Microsoft.Extensions.Caching.Memory;
@@ -123,6 +124,11 @@ public class VropsService : IVropsService
             }
 
             sonuc.Hosts = hostlar;
+
+            // 4) IP / isletim sistemi / model gibi alanlar -- kaynak basina
+            //    bir istek. Sinirin uzerindeki listelerde atlaniyor.
+            await AlanlariYukleAsync(token, sonuc, ct);
+
             sonuc.FetchedAt = DateTime.UtcNow;
 
             _cache.Set(cacheKey, sonuc, TimeSpan.FromMinutes(Math.Max(1, _settings.CacheMinutes)));
@@ -135,6 +141,146 @@ public class VropsService : IVropsService
             sonuc.Error = $"vROps'a ulasilamadi: {ex.Message}";
             return sonuc;
         }
+    }
+
+    /// <summary>
+    /// Host ve VM'lerin IP / isletim sistemi / model alanlarini yukler.
+    ///
+    /// Bu alanlar liste cagrisinda GELMIYOR, kaynak basina ayri bir
+    /// properties istegi gerekiyor. 1678 VM'lik bir vCenter'da bu 1678
+    /// istek demek, o yuzden DetailLimit'in uzerinde hic denemiyoruz ve
+    /// ekranda alanlarin neden bos oldugunu yaziyoruz -- sessizce bos
+    /// birakmak "vROps'ta bu bilgi yok" izlenimi verirdi.
+    ///
+    /// Es zamanli istek sayisini sinirliyoruz: vROps'u tek bir liste
+    /// ekrani yuzunden yormak istemiyoruz.
+    /// </summary>
+    private async Task AlanlariYukleAsync(string token, VropsDatacenterContent sonuc, CancellationToken ct)
+    {
+        var toplam = sonuc.Hosts.Count + sonuc.Vms.Count;
+        if (toplam == 0) return;
+
+        if (toplam > Math.Max(1, _settings.DetailLimit))
+        {
+            sonuc.DetailsSkipped = true;
+            _logger.LogInformation(
+                "{Datacenter}: {Toplam} kaynak DetailLimit ({Limit}) ustunde, alanlar cekilmedi",
+                sonuc.DatacenterName, toplam, _settings.DetailLimit);
+            return;
+        }
+
+        using var kapi = new SemaphoreSlim(6);
+
+        async Task Yukle(string kaynakId, Action<Dictionary<string, string>> uygula)
+        {
+            await kapi.WaitAsync(ct);
+            try
+            {
+                var props = await GetAsync<OzellikListesi>(token, $"resources/{kaynakId}/properties", ct);
+
+                var alanlar = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var p in props?.Property ?? new List<Ozellik>())
+                    if (!string.IsNullOrWhiteSpace(p.Name) && p.Value is not null)
+                        alanlar[p.Name] = p.Value;
+
+                uygula(alanlar);
+            }
+            catch (Exception ex)
+            {
+                // Tek bir kaynagin alanlari gelmezse liste yine gosterilmeli.
+                _logger.LogWarning(ex, "vROps alanlari alinamadi: {Kaynak}", kaynakId);
+            }
+            finally
+            {
+                kapi.Release();
+            }
+        }
+
+        var isler = new List<Task>(toplam);
+        foreach (var h in sonuc.Hosts) isler.Add(Yukle(h.VropsId, p => HostAlanlariniDoldur(h, p)));
+        foreach (var v in sonuc.Vms) isler.Add(Yukle(v.VropsId, p => VmAlanlariniDoldur(v, p)));
+
+        await Task.WhenAll(isler);
+    }
+
+    // ------------------------------------------------------- alan okuma
+    //
+    // vROps'un property adlari surume ve kuruluma gore degisiyor, ve bir
+    // alanin DEGERI de her kaynakta gelmiyor: VMware Tools kurulu degilse
+    // konuk alanlari ya hic yok ya da "none" yaziyor (ornek dokumunde
+    // zb0010v boyleydi). O yuzden tek bir ada baglanmiyoruz: her alan icin
+    // ADAY LISTESI var, sirayla denenir, ilk DOLU olan alinir.
+    //
+    // Yanlis okunmus bir ad hicbir seyi kirmaz, o alan bos kalir.
+
+    private static readonly string[] BosSayilanlar = { "none", "unknown", "n/a", "unset", "-" };
+
+    private static bool Dolu(string? d)
+        => !string.IsNullOrWhiteSpace(d)
+           && !BosSayilanlar.Contains(d.Trim(), StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Aday adlari sirayla dener, ilk dolu degeri dondurur.</summary>
+    private static string? IlkDolu(IDictionary<string, string> alanlar, params string[] adaylar)
+    {
+        foreach (var ad in adaylar)
+            if (alanlar.TryGetValue(ad, out var d) && Dolu(d))
+                return d.Trim();
+        return null;
+    }
+
+    /// <summary>
+    /// Adi bir kalibi tutan alanlarin ilk dolu degeri. IP icin lazim:
+    /// arayuzler net:4000|ip_address, net:vmk0|ip_address gibi degisken
+    /// adlarla geliyor, sabit bir ad yazilamiyor.
+    /// </summary>
+    private static string? KalipIle(IDictionary<string, string> alanlar, Regex kalip, Func<string, bool>? kabul = null)
+        => alanlar
+            .Where(x => kalip.IsMatch(x.Key) && Dolu(x.Value) && (kabul is null || kabul(x.Value.Trim())))
+            .OrderBy(x => x.Key, StringComparer.OrdinalIgnoreCase)
+            .Select(x => x.Value.Trim())
+            .FirstOrDefault();
+
+    private static readonly Regex IpAlaniKalibi =
+        new(@"^net:.*\|ip_address$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    /// <summary>
+    /// Envantere yazmaya deger bir IPv4 mu? Link-local (169.254.*) ve geri
+    /// dongu adreslerini eliyoruz; bunlar makinenin gercek adresi degil.
+    /// </summary>
+    private static bool KullanilabilirIp(string d)
+        => System.Net.IPAddress.TryParse(d, out var ip)
+           && ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork
+           && !d.StartsWith("169.254.", StringComparison.Ordinal)
+           && !d.StartsWith("127.", StringComparison.Ordinal);
+
+    private static void VmAlanlariniDoldur(VropsVmDto vm, IDictionary<string, string> p)
+    {
+        vm.GuestHostName = IlkDolu(p, "summary|guest|hostName");
+
+        // Tools varsa guest|fullName daha dogru; yoksa config|guestFullName
+        // Tools olmadan da geliyor (zb0010v ornegi).
+        vm.OperatingSystem = IlkDolu(p, "summary|guest|fullName", "config|guestFullName");
+
+        vm.IpAddress = IlkDolu(p, "summary|guest|ipAddress")
+                       ?? KalipIle(p, IpAlaniKalibi, KullanilabilirIp);
+
+        vm.PowerState = IlkDolu(p, "summary|runtime|powerState");
+
+        // Host adi iliskiden geliyor ama property'de de var; iliski
+        // yoksa buraya dusuyoruz.
+        if (string.IsNullOrWhiteSpace(vm.HostName))
+            vm.HostName = IlkDolu(p, "summary|parentHost") ?? string.Empty;
+    }
+
+    private static void HostAlanlariniDoldur(VropsHostDto h, IDictionary<string, string> p)
+    {
+        h.Vendor = IlkDolu(p, "hardware|vendor", "hardware|manufacturer");
+        h.Model = IlkDolu(p, "hardware|vendorModel", "hardware|hostModel", "hardware|model");
+        h.Version = IlkDolu(p, "summary|version", "config|product|version", "sys|build", "runtime|build");
+        h.SerialNo = IlkDolu(p, "hardware|serialNumber", "hardware|serviceTag", "hardware|biosUuid");
+
+        h.IpAddress = IlkDolu(p, "summary|managementAddress", "net|mgmt_address")
+                      ?? KalipIle(p, IpAlaniKalibi, KullanilabilirIp);
     }
 
     // -------------------------------------------------------- alan kesfi

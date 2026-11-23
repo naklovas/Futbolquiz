@@ -1,4 +1,4 @@
-namespace ITInventory.Web.Configuration;
+﻿namespace ITInventory.Web.Configuration;
 
 /// <summary>
 /// vROps / Aria Operations baglanti ayarlari.
@@ -56,6 +56,15 @@ public class VropsSettings
 
     /// <summary>Liste ekraninin vROps'u kac dakika onbellekten okuyacagi.</summary>
     public int CacheMinutes { get; set; } = 5;
+
+    /// <summary>
+    /// IP / isletim sistemi / model gibi alanlar icin kaynak basina bir
+    /// istek gerekiyor. Bu sinirin uzerindeki listelerde o alanlar
+    /// CEKILMEZ: 1678 VM icin 1678 istek, ekrani kullanilamaz hale getirir.
+    /// Ekran bu durumda alanlarin neden bos oldugunu yaziyor.
+    /// Sonuc onbellege alindigi icin bedel CacheMinutes'ta bir odeniyor.
+    /// </summary>
+    public int DetailLimit { get; set; } = 400;
 
     public bool IsConfigured =>
         !string.IsNullOrWhiteSpace(Host) &&
