@@ -13,4 +13,17 @@ public interface IVropsService
     /// Liste ekraninin dis bir servis yuzunden 500 vermesini istemiyoruz.
     /// </summary>
     Task<VropsDatacenterContent> GetDatacenterContentAsync(string datacenterName, CancellationToken ct = default);
+
+    /// <summary>
+    /// Ornek VM ve host'larin HAM vROps alanlarini getirir.
+    ///
+    /// Amac teshis: "envantere ekle" formunu hangi property'den dolduracagimiza
+    /// karar vermek icin vROps'un gercek alan adlarini gormek gerekiyor, ve bu
+    /// adlar surume gore degisiyor. Iliski sorgusu KULLANMAZ, o yuzden datacenter
+    /// listesi calismasa bile sonuc verir.
+    ///
+    /// Yalnizca admin ekranindan cagriliyor; liste ekranlarinda kullanilmaz.
+    /// vROps'a ulasilamazsa istisna firlatmaz, Error alani dolar.
+    /// </summary>
+    Task<VropsAlanOrnekleri> OrnekAlanlariGetirAsync(int ornekSayisi = 3, CancellationToken ct = default);
 }

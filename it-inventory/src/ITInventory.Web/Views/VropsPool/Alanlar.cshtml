@@ -1,0 +1,181 @@
+@model ITInventory.Web.Models.VropsPool.VropsAlanOrnekleri
+@{
+    ViewData["Title"] = "Aria Fields";
+    bool isConfigured = ViewBag.IsConfigured;
+    int ornekSayisi = ViewBag.OrnekSayisi;
+
+    // Form alanlarina karsilik gelmesi muhtemel property adlari. Bu liste
+    // sadece ONE CIKARMAK icin; tablo her zaman tum alanlari gosteriyor.
+    var ilgiKaliplari = new[]
+    {
+        "ip", "address", "guest", "os", "operating", "dns", "hostname", "host_name",
+        "serial", "vendor", "manufacturer", "brand", "model", "hardware",
+        "version", "build", "cpu", "mem", "parent", "cluster", "datacenter",
+        "power", "state"
+    };
+
+    bool Ilgili(string ad)
+    {
+        var k = ad.ToLowerInvariant();
+        return ilgiKaliplari.Any(x => k.Contains(x));
+    }
+}
+
+<div class="flex items-baseline justify-between flex-wrap gap-3 mb-1">
+    <h2 class="text-xl font-semibold text-slate-900">Aria Fields</h2>
+    <a asp-action="Index" onclick="showLoadingOverlay()"
+       class="text-sm font-medium text-brand-700 hover:text-brand-800">&larr; Back to Aria Pool</a>
+</div>
+<p class="text-sm text-slate-500 mb-6 max-w-3xl">
+    The raw fields Aria Operations returns for a few sample virtual machines and ESXi hosts.
+    These are the property names the create forms will be prefilled from. Property names differ
+    between Aria versions, so they are read here rather than assumed.
+    This page makes no relationship calls, so it works even when the Aria Pool list does not.
+</p>
+
+@if (!isConfigured)
+{
+    <div class="bg-amber-50 border border-amber-200 text-amber-800 rounded-md px-4 py-3 text-sm mb-4">
+        <span class="font-medium">Aria Operations is not configured.</span>
+        Set <code class="bg-amber-100 px-1 rounded">Vrops:Host</code>,
+        <code class="bg-amber-100 px-1 rounded">Vrops:Username</code> and
+        <code class="bg-amber-100 px-1 rounded">Vrops:Password</code>.
+    </div>
+}
+
+@if (!string.IsNullOrEmpty(Model.Error))
+{
+    <div class="bg-red-50 border border-red-200 text-red-700 rounded-md px-4 py-3 text-sm mb-4">
+        @Model.Error
+    </div>
+}
+
+<div class="flex flex-wrap items-center gap-3 mb-5">
+    <form method="get" class="flex items-center gap-2">
+        <label for="ornekSayisi" class="text-sm text-slate-600">Samples per kind</label>
+        <select id="ornekSayisi" name="ornekSayisi" onchange="showLoadingOverlay(); this.form.submit();"
+                class="rounded-md border border-slate-300 px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500">
+            @foreach (var n in new[] { 1, 3, 5, 10 })
+            {
+                <option value="@n" selected="@(n == ornekSayisi)">@n</option>
+            }
+        </select>
+    </form>
+
+    <div class="flex items-center gap-2 flex-1 min-w-0">
+        <input id="alanFiltre" type="search" placeholder="Filter field names and values…"
+               class="w-full max-w-sm rounded-md border border-slate-300 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500" />
+        <label class="inline-flex items-center gap-2 text-sm text-slate-600 whitespace-nowrap">
+            <input id="sadeceIlgili" type="checkbox"
+                   class="rounded border-slate-300 text-brand-600 focus:ring-brand-500" />
+            Likely fields only
+        </label>
+    </div>
+
+    <span class="text-xs text-slate-400 whitespace-nowrap">
+        read @Model.FetchedAt.ToLocalTime().ToString("HH:mm")
+    </span>
+</div>
+
+@if (Model.Vms.Count == 0 && Model.Hosts.Count == 0 && string.IsNullOrEmpty(Model.Error))
+{
+    <div class="bg-white border border-slate-200 rounded-lg px-4 py-10 text-center text-slate-400 text-sm">
+        Aria returned no virtual machines or hosts.
+    </div>
+}
+
+@foreach (var grup in new[]
+          {
+              ("Virtual Machines", "These feed the Server form", Model.Vms),
+              ("ESXi Hosts", "These feed the Physical Device form", Model.Hosts)
+          })
+{
+    if (grup.Item3.Count == 0) { continue; }
+
+    <h3 class="text-base font-semibold text-slate-800 mb-1">@grup.Item1</h3>
+    <p class="text-xs text-slate-500 mb-3">@grup.Item2</p>
+
+    foreach (var kaynak in grup.Item3)
+    {
+        <div class="bg-white border border-slate-200 rounded-lg overflow-hidden mb-5">
+            <div class="px-4 py-2.5 bg-slate-50 border-b border-slate-200 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                <span class="font-medium text-slate-800 text-sm">@kaynak.Name</span>
+                <span class="text-xs text-slate-500">@kaynak.Kind</span>
+                <code class="text-xs text-slate-400 break-all">@kaynak.VropsId</code>
+                <span class="text-xs text-slate-400 ml-auto">@kaynak.Properties.Count fields</span>
+            </div>
+
+            @if (!string.IsNullOrEmpty(kaynak.Error))
+            {
+                <div class="px-4 py-2 bg-red-50 border-b border-red-200 text-red-700 text-xs">
+                    @kaynak.Error
+                </div>
+            }
+
+            @if (kaynak.Parents.Count > 0)
+            {
+                <div class="px-4 py-2 border-b border-slate-100 text-xs text-slate-600">
+                    <span class="font-medium text-slate-500 uppercase tracking-wider">Parents</span>
+                    @foreach (var p in kaynak.Parents)
+                    {
+                        <span class="inline-flex items-center gap-1 ml-2">
+                            <span class="text-slate-400">@p.Kind</span>
+                            <span class="font-medium text-slate-700">@p.Name</span>
+                        </span>
+                    }
+                </div>
+            }
+
+            @if (kaynak.Properties.Count == 0)
+            {
+                <div class="px-4 py-6 text-center text-slate-400 text-sm">Aria returned no fields for this resource.</div>
+            }
+            else
+            {
+                <div class="overflow-x-auto">
+                    <table class="min-w-full text-sm alan-tablosu">
+                        <tbody>
+                        @foreach (var p in kaynak.Properties.OrderBy(x => x.Key, StringComparer.OrdinalIgnoreCase))
+                        {
+                            var ilgili = Ilgili(p.Key);
+                            <tr class="border-b border-slate-100 alan-satiri @(ilgili ? "ilgili" : "")"
+                                data-arama="@($"{p.Key} {p.Value}".ToLowerInvariant())">
+                                <td class="px-4 py-1.5 align-top w-1/2 min-w-0">
+                                    <code class="text-xs break-all @(ilgili ? "text-brand-800 font-medium" : "text-slate-500")">@p.Key</code>
+                                </td>
+                                <td class="px-4 py-1.5 align-top text-slate-800 break-all">@p.Value</td>
+                            </tr>
+                        }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </div>
+    }
+}
+
+@section Scripts {
+<script>
+    (function () {
+        var filtre  = document.getElementById('alanFiltre');
+        var sadece  = document.getElementById('sadeceIlgili');
+        if (!filtre || !sadece) { return; }
+
+        var satirlar = Array.prototype.slice.call(document.querySelectorAll('.alan-satiri'));
+
+        function uygula() {
+            var q = filtre.value.trim().toLowerCase();
+            var yalnizIlgili = sadece.checked;
+
+            satirlar.forEach(function (tr) {
+                var metinUygun = q === '' || (tr.dataset.arama || '').indexOf(q) !== -1;
+                var ilgiUygun  = !yalnizIlgili || tr.classList.contains('ilgili');
+                tr.hidden = !(metinUygun && ilgiUygun);
+            });
+        }
+
+        filtre.addEventListener('input', uygula);
+        sadece.addEventListener('change', uygula);
+    })();
+</script>
+}

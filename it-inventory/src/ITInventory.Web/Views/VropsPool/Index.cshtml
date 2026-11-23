@@ -12,7 +12,14 @@
     bool noDatacenterMapped = ViewBag.NoDatacenterMapped ?? false;
 }
 
-<h2 class="text-xl font-semibold text-slate-900 mb-1">Aria Pool</h2>
+<div class="flex items-baseline justify-between flex-wrap gap-3 mb-1">
+    <h2 class="text-xl font-semibold text-slate-900">Aria Pool</h2>
+    @if (isAdmin)
+    {
+        <a asp-action="Alanlar" onclick="showLoadingOverlay()"
+           class="text-sm font-medium text-brand-700 hover:text-brand-800">Aria Fields &rarr;</a>
+    }
+</div>
 <p class="text-sm text-slate-500 mb-6">
     ESXi hosts and the virtual machines running on them, read live from Aria Operations.
     Add a host to Physical Devices, or a virtual machine to Servers.

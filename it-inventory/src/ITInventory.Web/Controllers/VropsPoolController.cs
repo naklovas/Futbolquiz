@@ -120,4 +120,27 @@ public class VropsPoolController : Controller
 
         return View(icerikler);
     }
+
+    /// <summary>
+    /// Teshis ekrani: ornek VM ve host'larin HAM vROps alanlari.
+    ///
+    /// "Envantere ekle" formunu hangi property'den dolduracagimiza karar
+    /// vermek icin vROps'un gercek alan adlari gerekiyor; bu adlar surume
+    /// gore degisiyor, tahminle kodlanamiyor.
+    ///
+    /// Ham altyapi bilgisi oldugu icin YALNIZCA ADMIN. Ulke kapsami
+    /// uygulanamiyor: alanlar ulkeye gore ayrilmiyor, ornekler vROps'un
+    /// tamamindan geliyor.
+    /// </summary>
+    [HttpGet]
+    public async Task<IActionResult> Alanlar(int ornekSayisi = 3)
+    {
+        if (!User.IsAdministrator()) return Forbid();
+
+        ViewBag.IsConfigured = _vrops.IsConfigured;
+        ViewBag.OrnekSayisi = Math.Clamp(ornekSayisi, 1, 10);
+
+        var model = await _vrops.OrnekAlanlariGetirAsync(ornekSayisi, HttpContext.RequestAborted);
+        return View(model);
+    }
 }

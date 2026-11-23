@@ -118,6 +118,96 @@ public class VropsService : IVropsService
         }
     }
 
+    // -------------------------------------------------------- alan kesfi
+    public async Task<VropsAlanOrnekleri> OrnekAlanlariGetirAsync(int ornekSayisi = 3, CancellationToken ct = default)
+    {
+        var sonuc = new VropsAlanOrnekleri();
+
+        if (!IsConfigured)
+        {
+            sonuc.Error = "vROps baglantisi yapilandirilmamis.";
+            return sonuc;
+        }
+
+        // Onbellege almiyoruz: bu bir teshis ekrani, guncel hali gorulmeli.
+        try
+        {
+            var token = await TokenAlAsync(ct);
+            var adet = Math.Clamp(ornekSayisi, 1, 10);
+
+            sonuc.Vms = await OrneklerAsync(token, "VirtualMachine", adet, atlaVcls: true, ct);
+            sonuc.Hosts = await OrneklerAsync(token, "HostSystem", adet, atlaVcls: false, ct);
+            sonuc.FetchedAt = DateTime.UtcNow;
+            return sonuc;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "vROps alan kesfi basarisiz");
+            sonuc.Error = $"vROps'a ulasilamadi: {ex.Message}";
+            return sonuc;
+        }
+    }
+
+    private async Task<List<VropsKaynakAlanlari>> OrneklerAsync(
+        string token, string tur, int adet, bool atlaVcls, CancellationToken ct)
+    {
+        var liste = await GetAsync<KaynakListesi>(token, $"resources?resourceKind={tur}&page=0&pageSize=50", ct);
+        var kaynaklar = (liste?.ResourceList ?? new List<Kaynak>())
+            .Where(r => !string.IsNullOrEmpty(r.Identifier));
+
+        // vCLS-* makineleri vSphere'in kendi yardimcilari: konuk IP'si ve
+        // isletim sistemi hic gelmiyor, yani alanlarin dolu olup olmadigini
+        // onlardan anlayamayiz.
+        if (atlaVcls)
+            kaynaklar = kaynaklar.Where(r =>
+                !(r.ResourceKey?.Name ?? string.Empty).StartsWith("vCLS-", StringComparison.OrdinalIgnoreCase));
+
+        var secilenler = kaynaklar.Take(adet).ToList();
+        var cikti = new List<VropsKaynakAlanlari>(secilenler.Count);
+
+        foreach (var r in secilenler)
+        {
+            var kayit = new VropsKaynakAlanlari
+            {
+                VropsId = r.Identifier!,
+                Name = r.ResourceKey?.Name ?? "(adsiz)",
+                Kind = r.ResourceKey?.ResourceKindKey ?? tur
+            };
+
+            // Bir ornek patlarsa digerlerini kaybetmiyoruz.
+            try
+            {
+                var props = await GetAsync<OzellikListesi>(token, $"resources/{r.Identifier}/properties", ct);
+                foreach (var p in props?.Property ?? new List<Ozellik>())
+                {
+                    if (!string.IsNullOrWhiteSpace(p.Name) && !string.IsNullOrWhiteSpace(p.Value))
+                        kayit.Properties[p.Name!] = p.Value!;
+                }
+            }
+            catch (Exception ex)
+            {
+                kayit.Error = $"properties: {ex.Message}";
+            }
+
+            if (string.Equals(tur, "VirtualMachine", StringComparison.OrdinalIgnoreCase))
+            {
+                try
+                {
+                    foreach (var e in await IliskililerAsync(token, r.Identifier!, "PARENT", ct))
+                        kayit.Parents.Add(new VropsIliskiliKaynak { Kind = e.Kind, Name = e.Name });
+                }
+                catch (Exception ex)
+                {
+                    kayit.Error = (kayit.Error is null ? "" : kayit.Error + " | ") + $"parents: {ex.Message}";
+                }
+            }
+
+            cikti.Add(kayit);
+        }
+
+        return cikti;
+    }
+
     // ------------------------------------------------------------------ token
     private async Task<string> TokenAlAsync(CancellationToken ct)
     {
@@ -319,5 +409,16 @@ public class VropsService : IVropsService
     {
         public string? Name { get; set; }
         public string? ResourceKindKey { get; set; }
+    }
+
+    private sealed class OzellikListesi
+    {
+        public List<Ozellik>? Property { get; set; }
+    }
+
+    private sealed class Ozellik
+    {
+        public string? Name { get; set; }
+        public string? Value { get; set; }
     }
 }

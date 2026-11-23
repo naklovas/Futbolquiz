@@ -50,3 +50,38 @@ public class VropsDatacenterContent
 
     public DateTime FetchedAt { get; set; } = DateTime.UtcNow;
 }
+
+/// <summary>
+/// Bir vROps kaynaginin HAM alanlari. "Envantere ekle" formunu hangi
+/// property'den dolduracagimiza karar vermek icin kullaniliyor: property
+/// adlari vROps surumune gore degisiyor, tahmin edilemiyor.
+/// </summary>
+public class VropsKaynakAlanlari
+{
+    public string VropsId { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    public string Kind { get; set; } = string.Empty;
+
+    /// <summary>property adi -> deger. vROps ne dondurduyse, kirpilmadan.</summary>
+    public Dictionary<string, string> Properties { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>PARENT iliskileri: (tur, ad). VM icin host/cluster buradan cikiyor.</summary>
+    public List<VropsIliskiliKaynak> Parents { get; set; } = new();
+
+    public string? Error { get; set; }
+}
+
+public class VropsIliskiliKaynak
+{
+    public string Kind { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+}
+
+/// <summary>Alan kesfi ekraninin tamami: ornek VM'ler ve ornek host'lar.</summary>
+public class VropsAlanOrnekleri
+{
+    public List<VropsKaynakAlanlari> Vms { get; set; } = new();
+    public List<VropsKaynakAlanlari> Hosts { get; set; } = new();
+    public string? Error { get; set; }
+    public DateTime FetchedAt { get; set; } = DateTime.UtcNow;
+}
