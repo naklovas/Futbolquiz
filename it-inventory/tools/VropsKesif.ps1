@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     vROps / Aria Operations KESIF scripti. Uretim kodu DEGILDIR.
     Amaci tek sey: veriye bakip tasarim sorularini cevaplamak.
@@ -43,7 +43,7 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$VropsHost,
 
-    [string]$AuthSource = 'Local',
+    [string]$AuthSource = '',
 
     [switch]$SkipCertCheck,
 
@@ -90,18 +90,20 @@ function Dump {
 
 Say "vROps kesif - $(Get-Date -Format 'yyyy-MM-dd HH:mm')"
 Say "Sunucu     : $VropsHost"
-Say "AuthSource : $AuthSource"
+Say "AuthSource : $(if ([string]::IsNullOrWhiteSpace($AuthSource)) { '(gonderilmiyor)' } else { $AuthSource })"
 Say "PowerShell : $($PSVersionTable.PSVersion)"
 
 # --- kimlik dogrulama -----------------------------------------------------
 $cred = Get-Credential -Message "vROps / Aria Operations kullanici adi ve parolasi"
 $plain = [System.Net.NetworkCredential]::new('', $cred.Password).Password
 
-$body = @{
-    username   = $cred.UserName
-    password   = $plain
-    authSource = $AuthSource
-} | ConvertTo-Json
+# authSource BOSSA alani HIC koymuyoruz. Bu kurulumda yerel hesaplar
+# alan yokken kabul ediliyor; 'Local' yazildiginda vROps 401 donuyor.
+if ([string]::IsNullOrWhiteSpace($AuthSource)) {
+    $body = @{ username = $cred.UserName; password = $plain } | ConvertTo-Json
+} else {
+    $body = @{ username = $cred.UserName; password = $plain; authSource = $AuthSource } | ConvertTo-Json
+}
 
 try {
     $tokenResp = Invoke-RestMethod -Method Post -Uri "$base/auth/token/acquire" `

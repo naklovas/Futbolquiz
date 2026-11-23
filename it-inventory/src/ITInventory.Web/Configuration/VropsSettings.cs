@@ -24,8 +24,18 @@ public class VropsSettings
     /// <summary>Sunucu adi veya IP. https:// ve sondaki / olmadan.</summary>
     public string Host { get; set; } = string.Empty;
 
-    /// <summary>Kimlik kaynagi: yerel hesap icin "Local", AD icin domain adi.</summary>
-    public string AuthSource { get; set; } = "Local";
+    /// <summary>
+    /// vROps kimlik kaynagi.
+    ///
+    /// BOS BIRAKIN. Bu kurulumda yerel hesaplar, authSource alani istege HIC
+    /// KONULMADIGINDA kabul ediliyor; "Local" yazmak HTTP 401 donduruyor.
+    /// Bos string de yetmez -- alanin tamamen yok olmasi gerekiyor, bunu
+    /// VropsService.TokenAlAsync hallediyor.
+    ///
+    /// Yalnizca vROps'ta tanimli bir AD kaynagi kullanacaksaniz o kaynagin
+    /// adini yazin: giris ekranindaki kaynak listesinde gordugunuz metin.
+    /// </summary>
+    public string AuthSource { get; set; } = string.Empty;
 
     /// <summary>Ortam degiskeninden gelir (Vrops__Username).</summary>
     public string Username { get; set; } = string.Empty;

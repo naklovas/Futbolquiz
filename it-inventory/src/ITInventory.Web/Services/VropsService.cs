@@ -32,6 +32,10 @@ public class VropsService : IVropsService
 
     private static readonly JsonSerializerOptions JsonOpts = new() { PropertyNameCaseInsensitive = true };
 
+    // Reddedilen kimligi bir sure hatirliyoruz -- bkz. TokenAlAsync.
+    private const string KimlikHatasiKey = "vrops:token:kimlik-hatasi";
+    private const int KimlikHatasiDakika = 5;
+
     public VropsService(
         HttpClient http,
         IOptions<VropsSettings> settings,
@@ -121,12 +125,27 @@ public class VropsService : IVropsService
         if (_cache.TryGetValue<string>(cacheKey, out var mevcut) && !string.IsNullOrEmpty(mevcut))
             return mevcut;
 
-        var govde = JsonSerializer.Serialize(new
-        {
-            username = _settings.Username,
-            password = _settings.Password,
-            authSource = _settings.AuthSource
-        });
+        // Son deneme kimlik yuzunden reddedildiyse YENIDEN DENEMIYORUZ.
+        // Her deneme vROps tarafinda bir basarisiz giris sayiliyor; kullanici
+        // ekrani yeniledikce hesap kilitleniyordu. Ayar duzeltilince uygulama
+        // yeniden baslatilir, ya da bu kayit kendiliginden dusuyor.
+        if (_cache.TryGetValue<string>(KimlikHatasiKey, out var sonHata) && !string.IsNullOrEmpty(sonHata))
+            throw new InvalidOperationException(sonHata);
+
+        // authSource BOSSA alani istege HIC KOYMUYORUZ. Bos string gondermekle
+        // ayni sey degil: bu kurulumda yerel hesaplar alan yokken kabul ediliyor,
+        // "Local" yazildiginda 401 donuyor. Alan yalnizca vROps'ta tanimli bir AD
+        // kaynagi adi verildiginde gidiyor.
+        object govdeNesnesi = string.IsNullOrWhiteSpace(_settings.AuthSource)
+            ? new { username = _settings.Username, password = _settings.Password }
+            : new
+            {
+                username = _settings.Username,
+                password = _settings.Password,
+                authSource = _settings.AuthSource
+            };
+
+        var govde = JsonSerializer.Serialize(govdeNesnesi);
 
         using var istek = new HttpRequestMessage(HttpMethod.Post, "auth/token/acquire")
         {
@@ -138,14 +157,26 @@ public class VropsService : IVropsService
         {
             var metin = await cevap.Content.ReadAsStringAsync(ct);
             // Parola bu metne girmez; vROps sadece hata aciklamasi doner.
-            throw new InvalidOperationException(
-                $"Token alinamadi (HTTP {(int)cevap.StatusCode}). {Kisalt(metin)}");
+            var mesaj = $"Token alinamadi (HTTP {(int)cevap.StatusCode}). {Kisalt(metin)}";
+
+            if ((int)cevap.StatusCode is 401 or 403)
+            {
+                mesaj += $" -- Bu hata {KimlikHatasiDakika} dakika onbellekte tutuluyor: "
+                       + "her deneme vROps'ta bir basarisiz giris sayiliyor ve hesabi "
+                       + "kilitleyebilir. Ayarlari duzelttikten sonra uygulamayi yeniden baslatin.";
+                _cache.Set(KimlikHatasiKey, mesaj, TimeSpan.FromMinutes(KimlikHatasiDakika));
+            }
+
+            throw new InvalidOperationException(mesaj);
         }
 
         using var akis = await cevap.Content.ReadAsStreamAsync(ct);
         var cozum = await JsonSerializer.DeserializeAsync<TokenCevap>(akis, JsonOpts, ct);
         if (string.IsNullOrEmpty(cozum?.Token))
             throw new InvalidOperationException("vROps token dondurmedi.");
+
+        // Basarili giris, varsa eski kimlik hatasini siler.
+        _cache.Remove(KimlikHatasiKey);
 
         // Token'in kendi gecerliligi daha uzun; biz kisa tutup yenilenmesine birakiyoruz.
         _cache.Set(cacheKey, cozum.Token, TimeSpan.FromMinutes(20));
