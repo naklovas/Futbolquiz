@@ -229,16 +229,31 @@ public class VropsService : IVropsService
     }
 
     /// <summary>
-    /// Adi bir kalibi tutan alanlarin ilk dolu degeri. IP icin lazim:
-    /// arayuzler net:4000|ip_address, net:vmk0|ip_address gibi degisken
-    /// adlarla geliyor, sabit bir ad yazilamiyor.
+    /// Bir alanin degerinden ILK KULLANILABILIR IPv4'u cikarir.
+    ///
+    /// vROps bazi alanlarda TEK METIN ICINDE BIRDEN FAZLA adres donduruyor
+    /// ("192.168.63.76 192.168.63.77" gibi). Degeri oldugu gibi forma
+    /// koymak dogrulamaya takiliyordu: IpAddressAttribute tek bir adres
+    /// bekliyor. CIDR yazimi da (10.0.0.5/24) burada ayrisiyor.
     /// </summary>
-    private static string? KalipIle(IDictionary<string, string> alanlar, Regex kalip, Func<string, bool>? kabul = null)
+    private static readonly char[] IpAyiraclari = { ',', ';', ' ', '\t', '|', '/', '\r', '\n' };
+
+    private static string? IpSec(string? ham)
+    {
+        if (string.IsNullOrWhiteSpace(ham) || !Dolu(ham)) return null;
+
+        return ham
+            .Split(IpAyiraclari, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .FirstOrDefault(KullanilabilirIp);
+    }
+
+    /// <summary>Adi kalibi tutan alanlarda ilk kullanilabilir IPv4.</summary>
+    private static string? KalipIleIp(IDictionary<string, string> alanlar, Regex kalip)
         => alanlar
-            .Where(x => kalip.IsMatch(x.Key) && Dolu(x.Value) && (kabul is null || kabul(x.Value.Trim())))
+            .Where(x => kalip.IsMatch(x.Key))
             .OrderBy(x => x.Key, StringComparer.OrdinalIgnoreCase)
-            .Select(x => x.Value.Trim())
-            .FirstOrDefault();
+            .Select(x => IpSec(x.Value))
+            .FirstOrDefault(ip => ip is not null);
 
     private static readonly Regex IpAlaniKalibi =
         new(@"^net:.*\|ip_address$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
@@ -261,8 +276,8 @@ public class VropsService : IVropsService
         // Tools olmadan da geliyor (zb0010v ornegi).
         vm.OperatingSystem = IlkDolu(p, "summary|guest|fullName", "config|guestFullName");
 
-        vm.IpAddress = IlkDolu(p, "summary|guest|ipAddress")
-                       ?? KalipIle(p, IpAlaniKalibi, KullanilabilirIp);
+        vm.IpAddress = IpSec(IlkDolu(p, "summary|guest|ipAddress"))
+                       ?? KalipIleIp(p, IpAlaniKalibi);
 
         vm.PowerState = IlkDolu(p, "summary|runtime|powerState");
 
@@ -279,8 +294,8 @@ public class VropsService : IVropsService
         h.Version = IlkDolu(p, "summary|version", "config|product|version", "sys|build", "runtime|build");
         h.SerialNo = IlkDolu(p, "hardware|serialNumber", "hardware|serviceTag", "hardware|biosUuid");
 
-        h.IpAddress = IlkDolu(p, "summary|managementAddress", "net|mgmt_address")
-                      ?? KalipIle(p, IpAlaniKalibi, KullanilabilirIp);
+        h.IpAddress = IpSec(IlkDolu(p, "summary|managementAddress", "net|mgmt_address"))
+                      ?? KalipIleIp(p, IpAlaniKalibi);
     }
 
     // -------------------------------------------------------- alan kesfi
