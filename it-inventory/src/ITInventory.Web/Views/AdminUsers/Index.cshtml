@@ -1,4 +1,4 @@
-@model List<ITInventory.Data.Entities.YdUser>
+﻿@model List<ITInventory.Data.Entities.YdUser>
 @{
     ViewData["Title"] = "Users";
     var countryDisplayNames = (Dictionary<string, string>)ViewBag.CountryDisplayNames;
@@ -22,6 +22,7 @@
         <thead class="bg-slate-50">
             <tr>
                 <th class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Username</th>
+                <th class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Domain</th>
                 <th class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Full Name</th>
                 <th class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Email</th>
                 <th class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Country/Branch</th>
@@ -36,6 +37,16 @@
             {
                 <tr class="hover:bg-slate-50">
                     <td class="px-4 py-3 text-slate-700 font-medium">@user.Username</td>
+                    <td class="px-4 py-3 text-slate-500">
+                        @if (string.IsNullOrWhiteSpace(user.Domain))
+                        {
+                            <span class="text-slate-400" title="Signs in from the first domain configured in Ldap:Domains">default</span>
+                        }
+                        else
+                        {
+                            @user.Domain
+                        }
+                    </td>
                     <td class="px-4 py-3 text-slate-700">@user.FullName</td>
                     <td class="px-4 py-3 text-slate-700">@user.Email</td>
                     <td class="px-4 py-3 text-slate-700">

@@ -1,13 +1,15 @@
-using ITInventory.Data;
+﻿using ITInventory.Data;
 using ITInventory.Data.Common;
 using ITInventory.Data.Entities;
 using ITInventory.Web.Common;
+using ITInventory.Web.Configuration;
 using ITInventory.Web.Models.Admin;
 using ITInventory.Web.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Rendering;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 
 namespace ITInventory.Web.Controllers;
 
@@ -17,13 +19,24 @@ public class AdminUsersController : Controller
     private readonly ITInventoryDbContext _db;
     private readonly IActivityLogger _activityLogger;
     private readonly ICurrentUserService _currentUser;
+    private readonly LdapSettings _ldap;
 
-    public AdminUsersController(ITInventoryDbContext db, IActivityLogger activityLogger, ICurrentUserService currentUser)
+    public AdminUsersController(ITInventoryDbContext db, IActivityLogger activityLogger,
+        ICurrentUserService currentUser, IOptions<LdapSettings> ldap)
     {
         _db = db;
         _activityLogger = activityLogger;
         _currentUser = currentUser;
+        _ldap = ldap.Value;
     }
+
+    /// <summary>
+    /// Bos/bosluk domaini NULL'a cevirir. Bos string ile NULL'u ayri degerler
+    /// olarak tutmak, benzersizlik kontrolunu ve giris aramasini sessizce
+    /// bozardi: '' ile NULL esit degildir.
+    /// </summary>
+    private static string? Normalize(string? d)
+        => string.IsNullOrWhiteSpace(d) ? null : d.Trim();
 
     [HttpGet]
     public async Task<IActionResult> Index()
@@ -56,8 +69,13 @@ public class AdminUsersController : Controller
 
         var requestedRoleIds = selectedRoleIds ?? new List<int>();
 
-        if (await _db.YdUsers.AnyAsync(u => u.Username == vm.Username))
-            ModelState.AddModelError(nameof(vm.Username), "This username already exists.");
+        // Benzersizlik (Username, Domain) ciftinde: ayni kullanici adi iki
+        // farkli domainde bulunabilir ve bunlar farkli kisilerdir.
+        var yeniDomain = Normalize(vm.Domain);
+
+        if (await _db.YdUsers.AnyAsync(u => u.Username == vm.Username && u.Domain == yeniDomain))
+            ModelState.AddModelError(nameof(vm.Username),
+                "This username already exists in that domain.");
 
         var validRoleIds = await _db.YdRoles.Select(r => r.Id).ToListAsync();
         if (requestedRoleIds.Except(validRoleIds).Any())
@@ -74,6 +92,7 @@ public class AdminUsersController : Controller
         var user = new YdUser
         {
             Username = vm.Username,
+            Domain = yeniDomain,
             FullName = vm.FullName,
             Email = vm.Email,
             RepositoryName = country?.Name,
@@ -109,6 +128,7 @@ public class AdminUsersController : Controller
         {
             Id = user.Id,
             Username = user.Username,
+            Domain = user.Domain,
             FullName = user.FullName,
             Email = user.Email,
             CountryId = country?.Id,
@@ -130,8 +150,11 @@ public class AdminUsersController : Controller
 
         var requestedRoleIds = selectedRoleIds ?? new List<int>();
 
-        if (await _db.YdUsers.AnyAsync(u => u.Username == vm.Username && u.Id != id))
-            ModelState.AddModelError(nameof(vm.Username), "This username already exists.");
+        var yeniDomain = Normalize(vm.Domain);
+
+        if (await _db.YdUsers.AnyAsync(u => u.Username == vm.Username && u.Domain == yeniDomain && u.Id != id))
+            ModelState.AddModelError(nameof(vm.Username),
+                "This username already exists in that domain.");
 
         var validRoleIds = await _db.YdRoles.Select(r => r.Id).ToListAsync();
         if (requestedRoleIds.Except(validRoleIds).Any())
@@ -151,6 +174,7 @@ public class AdminUsersController : Controller
         var country = vm.CountryId.HasValue ? await _db.Countries.FirstOrDefaultAsync(c => c.Id == vm.CountryId.Value && isAdmin) : null;
 
         user.Username = vm.Username;
+        user.Domain = yeniDomain;
         user.FullName = vm.FullName;
         user.Email = vm.Email;
         user.RepositoryName = country?.Name;
@@ -188,5 +212,14 @@ public class AdminUsersController : Controller
         var countries = await _db.Countries.OrderBy(c => c.Name).Select(c => new { c.Id, Label = c.DisplayName ?? c.Name }).ToListAsync();
         ViewBag.CountryOptions = new SelectList(countries, "Id", "Label");
         ViewBag.Roles = await _db.YdRoles.OrderBy(r => r.RoleName).ToListAsync();
+
+        // Domain SERBEST METIN DEGIL: yanlis yazilan bir domain adi kaydi
+        // olusturur ama kullanici giris yapamaz, sebebi de hicbir yerde
+        // gorunmez. Yapilandirmada tanimli domainlerden seciliyor.
+        ViewBag.DomainOptions = _ldap.EtkinDomainler
+            .Where(d => !string.IsNullOrWhiteSpace(d.Name))
+            .Select(d => d.Name)
+            .ToList();
+        ViewBag.DefaultDomain = _ldap.VarsayilanDomain;
     }
 }

@@ -1,5 +1,7 @@
-@model ITInventory.Web.Models.Admin.UserFormViewModel
+﻿@model ITInventory.Web.Models.Admin.UserFormViewModel
 @{
+    var domainSecenekleri = (List<string>)(ViewBag.DomainOptions ?? new List<string>());
+    var varsayilanDomain = (string?)ViewBag.DefaultDomain ?? string.Empty;
     var countryOptions = (Microsoft.AspNetCore.Mvc.Rendering.SelectList)ViewBag.CountryOptions;
     var roles = (List<ITInventory.Data.Entities.YdRole>)ViewBag.Roles;
     // Role membership isn't part of the bound model on purpose (see UserFormViewModel) -- the
@@ -16,7 +18,19 @@
         <label asp-for="Username" class="block text-sm font-medium text-slate-700 mb-1"></label>
         <input asp-for="Username" class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500" />
         <span asp-validation-for="Username" class="text-sm text-red-600"></span>
-        <p class="text-xs text-slate-400 mt-1">AD username (without the fintek.local\ prefix).</p>
+        <p class="text-xs text-slate-400 mt-1">AD username only, without the domain.</p>
+    </div>
+    <div>
+        <label asp-for="Domain" class="block text-sm font-medium text-slate-700 mb-1"></label>
+        <select asp-for="Domain" class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
+            <option value="">@($"Default ({(string.IsNullOrWhiteSpace(varsayilanDomain) ? "not configured" : varsayilanDomain)})")</option>
+            @foreach (var d in domainSecenekleri)
+            {
+                <option value="@d" selected="@(string.Equals(Model.Domain, d, StringComparison.OrdinalIgnoreCase))">@d</option>
+            }
+        </select>
+        <span asp-validation-for="Domain" class="text-sm text-red-600"></span>
+        <p class="text-xs text-slate-400 mt-1">Which AD domain this account signs in from.</p>
     </div>
     <div>
         <label asp-for="FullName" class="block text-sm font-medium text-slate-700 mb-1"></label>

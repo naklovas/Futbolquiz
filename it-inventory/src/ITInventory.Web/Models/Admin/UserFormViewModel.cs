@@ -1,4 +1,4 @@
-using System.ComponentModel.DataAnnotations;
+﻿using System.ComponentModel.DataAnnotations;
 
 namespace ITInventory.Web.Models.Admin;
 
@@ -10,6 +10,18 @@ public class UserFormViewModel
     [StringLength(100)]
     [Display(Name = "Username (AD sAMAccountName)")]
     public string Username { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Kullanicinin AD domaini. Bos birakilirsa varsayilan domain
+    /// (Ldap:Domains listesinin ilki) kabul edilir.
+    ///
+    /// Ayni kullanici adi birden fazla domainde bulunabildigi icin kimligi
+    /// belirleyen sey (Username, Domain) ciftidir; yalnizca kullanici adi
+    /// iki ayri kisiyi ayni kayda baglardi.
+    /// </summary>
+    [StringLength(100)]
+    [Display(Name = "Domain")]
+    public string? Domain { get; set; }
 
     [Required(ErrorMessage = "Full name is required.")]
     [StringLength(100)]
