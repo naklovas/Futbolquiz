@@ -1,5 +1,6 @@
 using ITInventory.Data;
 using ITInventory.Web.Configuration;
+using Microsoft.Extensions.Options;
 using ITInventory.Web.Services;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authorization;
@@ -25,6 +26,22 @@ builder.Services.AddSingleton<ILdapAuthenticationService, LdapAuthenticationServ
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ICurrentUserService, CurrentUserService>();
 builder.Services.AddScoped<IDevicePoolService, DevicePoolService>();
+
+builder.Services.Configure<VropsSettings>(builder.Configuration.GetSection(VropsSettings.SectionName));
+builder.Services.AddMemoryCache();
+
+// vROps kendi ic sertifikasini kullaniyor olabilir. DOGRU cozum o sertifikayi
+// sunucunun guvenilen koklerine eklemek; asagidaki bayrak sadece bunun mumkun
+// olmadigi kurulumlar icin ve VARSAYILAN OLARAK KAPALI.
+builder.Services.AddHttpClient<IVropsService, VropsService>()
+    .ConfigurePrimaryHttpMessageHandler(sp =>
+    {
+        var ayar = sp.GetRequiredService<IOptions<VropsSettings>>().Value;
+        var handler = new HttpClientHandler();
+        if (ayar.SkipCertificateValidation)
+            handler.ServerCertificateCustomValidationCallback = HttpClientHandler.DangerousAcceptAnyServerCertificateValidator;
+        return handler;
+    });
 builder.Services.AddScoped<IActivityLogger, ActivityLogger>();
 
 builder.Services
