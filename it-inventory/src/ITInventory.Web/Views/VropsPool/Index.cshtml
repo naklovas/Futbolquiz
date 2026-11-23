@@ -156,10 +156,11 @@ else
                 </div>
 
                 @* ---------------- virtual machines ---------------- *@
-                @{
-                    var vms = showSystemVms ? dc.Vms : dc.Vms.Where(v => !v.IsSystemVm).ToList();
-                    var hiddenCount = dc.Vms.Count - vms.Count;
-                }
+                @* Zaten bir kod blogunun icindeyiz (else { ... }), burada C# dogrudan
+                   yazilir; "@{" kullanmak Razor'da hata verir. *@
+                var vms = showSystemVms ? dc.Vms : dc.Vms.Where(v => !v.IsSystemVm).ToList();
+                var hiddenCount = dc.Vms.Count - vms.Count;
+
                 <div class="bg-white border border-slate-200 rounded-lg overflow-hidden">
                     <div class="px-4 py-2 bg-slate-50 border-b border-slate-200 text-xs font-medium text-slate-500 uppercase tracking-wider flex items-center justify-between">
                         <span>Virtual Machines &rarr; Servers</span>
