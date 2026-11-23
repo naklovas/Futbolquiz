@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Bir VM ve bir ESXi host icin vROps'ta HANGI ALANLAR VAR, onlari doker.
 
@@ -25,14 +25,24 @@
     gonderilmediginde kabul ediliyor.
 
 .PARAMETER VmAdi
-    Ornek alinacak bir sanal makinenin adi. Aria Pool ekranindaki
-    listeden bir ad kopyalayin.
+    Ornek alinacak bir sanal makinenin adi. VERMEYE GEREK YOK: bos
+    birakirsaniz script ilk uygun VM'leri kendisi secer.
 
 .PARAMETER HostAdi
-    Ornek alinacak bir ESXi host'un adi.
+    Ornek alinacak bir ESXi host'un adi. Bos birakilabilir.
+
+.PARAMETER OrnekSayisi
+    Ad verilmediginde kac ornek alinacagi (varsayilan 3). Birden fazla
+    ornek lazim, cunku property ADLARI her kaynakta ayni ama DEGERLERI
+    degisiyor: VMware Tools kurulu olmayan bir VM'de konuk IP'si bos
+    gelir. Hangi alanlarin gercekten dolu oldugunu ancak birkac orneğe
+    bakarak anlariz.
 
 .PARAMETER SkipCertCheck
     Self-signed sertifikayi kabul et.
+
+.EXAMPLE
+    .\VropsAlanKesif.ps1 -VropsIp 10.6.18.155 -Username KDYAPI -SkipCertCheck
 
 .EXAMPLE
     .\VropsAlanKesif.ps1 -VropsIp 10.6.18.155 -Username KDYAPI `
@@ -45,6 +55,7 @@ param(
     [string]$AuthSource = '',
     [string]$VmAdi,
     [string]$HostAdi,
+    [int]$OrnekSayisi = 3,
     [switch]$SkipCertCheck,
     [string]$OutFile = "vrops-alanlar-$(Get-Date -Format yyyyMMdd-HHmmss).txt"
 )
@@ -154,31 +165,39 @@ try {
         return $cevap.resourceList | Select-Object -First 1
     }
 
-    function AlanlariDok {
-        param([string]$Ad, [string]$Tur, [string]$Etiket)
+    # Ad verilmediyse ORNEGI KENDIMIZ SECIYORUZ. Aria Pool henuz veri
+    # getirmiyorsa kullanicinin elinde ad olmuyor; ad istemek onu cikmaz
+    # sokaga sokuyordu.
+    #
+    # vCLS-* makinelerini atliyoruz: onlar vSphere'in kendi yarattigi
+    # yardimci makineler, konuk IP'si ve isletim sistemi hic gelmiyor,
+    # yani alanlarin dolu olup olmadigini onlardan anlayamayiz.
+    function OrnekSec {
+        param([string]$Tur, [int]$Adet)
 
+        $cevap = Cagir "/resources?resourceKind=$Tur&page=0&pageSize=50"
+        $hepsi = @($cevap.resourceList)
+
+        if ($Tur -eq 'VirtualMachine') {
+            $hepsi = @($hepsi | Where-Object { "$($_.resourceKey.name)" -notlike 'vCLS-*' })
+        }
+
+        return @($hepsi | Select-Object -First $Adet)
+    }
+
+    function AlanlariDok {
+        param($Kaynak, [string]$Tur, [string]$Etiket)
+
+        $Ad = $Kaynak.resourceKey.name
         Baslik "$Etiket : $Ad   (resourceKind=$Tur)"
 
-        if ([string]::IsNullOrWhiteSpace($Ad)) {
-            Say "  Ad verilmedi, atlandi. Parametre: -$(if ($Tur -eq 'VirtualMachine') { 'VmAdi' } else { 'HostAdi' })" 'Yellow'
-            return
-        }
-
-        $kaynak = KaynakBul -Ad $Ad -Tur $Tur
-        if (-not $kaynak) {
-            Say "  '$Ad' adinda bir $Tur bulunamadi." 'Red'
-            Say "  Aria Pool ekranindaki listeden adi birebir kopyalayin." 'Yellow'
-            return
-        }
-
-        Say "  Bulunan ad : $($kaynak.resourceKey.name)"
-        Say "  Identifier : $($kaynak.identifier)"
+        Say "  Identifier : $($Kaynak.identifier)"
         Say ""
 
         # --- property'ler
         $props = $null
         try {
-            $props = Cagir "/resources/$($kaynak.identifier)/properties"
+            $props = Cagir "/resources/$($Kaynak.identifier)/properties"
         } catch {
             Say "  properties cagrisi basarisiz: $($_.Exception.Message)" 'Red'
         }
@@ -225,7 +244,7 @@ try {
             Say ""
             Say "  --- PARENT ILISKILERI (hangi host / cluster) ---" 'Yellow'
             try {
-                $ebeveynler = Cagir "/resources/$($kaynak.identifier)/relationships?relationshipType=PARENT"
+                $ebeveynler = Cagir "/resources/$($Kaynak.identifier)/relationships?relationshipType=PARENT"
                 foreach ($e in $ebeveynler.resourceList) {
                     Say ("    {0,-28} {1}" -f $e.resourceKey.resourceKindKey, $e.resourceKey.name)
                 }
@@ -235,8 +254,28 @@ try {
         }
     }
 
-    AlanlariDok -Ad $VmAdi   -Tur 'VirtualMachine' -Etiket 'SANAL MAKINE'
-    AlanlariDok -Ad $HostAdi -Tur 'HostSystem'     -Etiket 'ESXi HOST'
+    # ------------------------------------------------------- ornekleri topla
+    $vmler = @()
+    if (-not [string]::IsNullOrWhiteSpace($VmAdi)) {
+        $bulunan = KaynakBul -Ad $VmAdi -Tur 'VirtualMachine'
+        if ($bulunan) { $vmler = @($bulunan) }
+        else { Say ""; Say "'$VmAdi' adinda bir VM bulunamadi, ornegi kendim seciyorum." 'Yellow' }
+    }
+    if ($vmler.Count -eq 0) { $vmler = OrnekSec -Tur 'VirtualMachine' -Adet $OrnekSayisi }
+
+    $hostlar = @()
+    if (-not [string]::IsNullOrWhiteSpace($HostAdi)) {
+        $bulunan = KaynakBul -Ad $HostAdi -Tur 'HostSystem'
+        if ($bulunan) { $hostlar = @($bulunan) }
+        else { Say ""; Say "'$HostAdi' adinda bir host bulunamadi, ornegi kendim seciyorum." 'Yellow' }
+    }
+    if ($hostlar.Count -eq 0) { $hostlar = OrnekSec -Tur 'HostSystem' -Adet $OrnekSayisi }
+
+    Say ""
+    Say "Ornek sayisi: $($vmler.Count) VM, $($hostlar.Count) host" 'Green'
+
+    foreach ($vm in $vmler)   { AlanlariDok -Kaynak $vm   -Tur 'VirtualMachine' -Etiket 'SANAL MAKINE' }
+    foreach ($h  in $hostlar) { AlanlariDok -Kaynak $h    -Tur 'HostSystem'     -Etiket 'ESXi HOST' }
 
     Baslik "BITTI"
     Say "Tam ciktiyi bana gonderin: $OutFile" 'Green'
