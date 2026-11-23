@@ -1,4 +1,4 @@
-using ITInventory.Data.Common;
+﻿using ITInventory.Data.Common;
 
 namespace ITInventory.Data.Entities;
 
@@ -18,6 +18,20 @@ public class VropsDatacenter
 
     /// <summary>vROps'taki datacenter adi, birebir. Degistirilmemelidir.</summary>
     public string DatacenterName { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Bu satirin vROps'ta NEYI isaret ettigi.
+    ///
+    /// "VMwareAdapter Instance"  -> bir vCenter  (bugun kullandigimiz)
+    /// "Datacenter"              -> bir datacenter (eski yaklasim)
+    ///
+    /// Ulke ayrimi datacenter adindan vCenter adina tasindi: datacenter
+    /// adlari tutarsiz ve ayni ad birden fazla ulkede gecebiliyor
+    /// (VxRail-Datacenter), vCenter adlari ise ulke basina tek
+    /// (ZBALGERIA, ZBBULGARIA...). Kolon duruyor cunku ayrim bir kez
+    /// degisti ve tekrar degisebilir.
+    /// </summary>
+    public string ResourceKind { get; set; } = "VMwareAdapter Instance";
 
     public int CountryId { get; set; }
     public Country? Country { get; set; }

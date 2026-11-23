@@ -1,4 +1,4 @@
-using System.Net.Http.Headers;
+﻿using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using ITInventory.Web.Configuration;
@@ -57,7 +57,8 @@ public class VropsService : IVropsService
 
     public bool IsConfigured => _settings.IsConfigured;
 
-    public async Task<VropsDatacenterContent> GetDatacenterContentAsync(string datacenterName, CancellationToken ct = default)
+    public async Task<VropsDatacenterContent> GetDatacenterContentAsync(
+        string datacenterName, string kaynakTuru = "VMwareAdapter Instance", CancellationToken ct = default)
     {
         var sonuc = new VropsDatacenterContent { DatacenterName = datacenterName };
 
@@ -68,7 +69,7 @@ public class VropsService : IVropsService
             return sonuc;
         }
 
-        var cacheKey = $"vrops:dc:{datacenterName}";
+        var cacheKey = $"vrops:dc:{kaynakTuru}:{datacenterName}";
         if (_cache.TryGetValue<VropsDatacenterContent>(cacheKey, out var onbellekten) && onbellekten is not null)
             return onbellekten;
 
@@ -76,17 +77,35 @@ public class VropsService : IVropsService
         {
             var token = await TokenAlAsync(ct);
 
-            // 1) datacenter'i adiyla bul
-            var dcId = await DatacenterIdBulAsync(token, datacenterName, ct);
-            if (dcId is null)
-            {
-                sonuc.Error = $"vROps'ta '{datacenterName}' adinda bir datacenter bulunamadi. "
-                            + "Admin > Countries altindaki eslemeyi kontrol edin.";
-                return sonuc;
-            }
+            // 1) kaynagi adiyla bul -- bir vCenter ya da bir datacenter olabilir
+            List<VropsHostDto> hostlar;
 
-            // 2) datacenter'in altindaki ESXi host'lari
-            var hostlar = await HostlariBulAsync(token, dcId, ct);
+            if (VcenterMi(kaynakTuru))
+            {
+                var vcenter = (await VcenterlariGetirAsync(token, ct))
+                    .FirstOrDefault(v => string.Equals(v.Name, datacenterName, StringComparison.OrdinalIgnoreCase));
+
+                if (vcenter is null)
+                {
+                    sonuc.Error = $"vROps'ta '{datacenterName}' adinda bir vCenter bulunamadi. "
+                                + "Aria Fields ekranindaki vCenters tablosuyla karsilastirin.";
+                    return sonuc;
+                }
+
+                hostlar = await VcenterHostlariAsync(token, vcenter.VropsId, ct);
+            }
+            else
+            {
+                var dcId = await DatacenterIdBulAsync(token, datacenterName, ct);
+                if (dcId is null)
+                {
+                    sonuc.Error = $"vROps'ta '{datacenterName}' adinda bir datacenter bulunamadi. "
+                                + "dbo.VropsDatacenters tablosundaki eslemeyi kontrol edin.";
+                    return sonuc;
+                }
+
+                hostlar = await HostlariBulAsync(token, dcId, ct);
+            }
 
             // 3) her host'un altindaki VM'ler -- VM -> host eslemesi buradan cikiyor
             foreach (var h in hostlar)
@@ -308,6 +327,55 @@ public class VropsService : IVropsService
         return cozum.Token;
     }
 
+    /// <summary>
+    /// Esleme satiri bir vCenter'i mi isaret ediyor? Adaptor ornegi olan her
+    /// kaynak tipini vCenter sayiyoruz; tam ad surume gore degisebiliyor
+    /// ("VMwareAdapter Instance"), o yuzden tam esleme aramiyoruz.
+    /// </summary>
+    private static bool VcenterMi(string? kaynakTuru)
+        => (kaynakTuru ?? string.Empty).Contains("Adapter Instance", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Bir vCenter'in altindaki ESXi host'lari.
+    ///
+    /// Once adaptor filtresini deniyoruz: tek cagri, en ucuzu. Bu parametrenin
+    /// bu surumde desteklendiginden EMIN DEGILIZ -- desteklenmiyorsa HTTP 400
+    /// doner, tipki relationshipType=DESCENDANT'ta oldugu gibi. O yuzden
+    /// basarisizligi yutup bildigimiz CHILD yuruyusune donuyoruz.
+    /// </summary>
+    private async Task<List<VropsHostDto>> VcenterHostlariAsync(string token, string vcenterId, CancellationToken ct)
+    {
+        try
+        {
+            var yol = $"resources?adapterInstanceId={Uri.EscapeDataString(vcenterId)}"
+                    + "&resourceKind=HostSystem&page=0&pageSize=1000";
+            var liste = await GetAsync<KaynakListesi>(token, yol, ct);
+
+            var hostlar = (liste?.ResourceList ?? new List<Kaynak>())
+                .Where(r => !string.IsNullOrEmpty(r.Identifier))
+                .Select(r => new VropsHostDto
+                {
+                    VropsId = r.Identifier!,
+                    Name = r.ResourceKey?.Name ?? "(adsiz)"
+                })
+                .OrderBy(x => x.Name, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            if (hostlar.Count > 0)
+                return hostlar;
+
+            _logger.LogInformation(
+                "adapterInstanceId filtresi host dondurmedi, CHILD yuruyusune geciliyor ({Vcenter})", vcenterId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "adapterInstanceId filtresi calismadi, CHILD yuruyusune geciliyor ({Vcenter})", vcenterId);
+        }
+
+        return await HostlariBulAsync(token, vcenterId, ct);
+    }
+
     // ------------------------------------------------------- datacenter bulma
     private async Task<string?> DatacenterIdBulAsync(string token, string ad, CancellationToken ct)
     {
@@ -332,7 +400,10 @@ public class VropsService : IVropsService
     // ComputeResource altinda asili olabiliyor. Sabit iki kademe yazmak
     // yerine sinirli derinlikte bir arama yapiyoruz: HostSystem bulunca
     // duruyoruz, VM'lerin icine hic inmiyoruz.
-    private const int EnFazlaDerinlik = 4;
+    //
+    // Sinir 6: vCenter'dan baslarsak zincir vCenter -> Datacenter -> Cluster
+    // -> Host, yani dort kademe, araya klasor girerse bes. Dort yetmiyordu.
+    private const int EnFazlaDerinlik = 6;
 
     private async Task<List<VropsHostDto>> HostlariBulAsync(string token, string dcId, CancellationToken ct)
     {

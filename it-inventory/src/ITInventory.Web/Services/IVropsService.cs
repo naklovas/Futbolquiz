@@ -1,4 +1,4 @@
-using ITInventory.Web.Models.VropsPool;
+﻿using ITInventory.Web.Models.VropsPool;
 
 namespace ITInventory.Web.Services;
 
@@ -12,7 +12,10 @@ public interface IVropsService
     /// vROps'a ulasilamazsa istisna FIRLATMAZ -- donen nesnenin Error alani dolar.
     /// Liste ekraninin dis bir servis yuzunden 500 vermesini istemiyoruz.
     /// </summary>
-    Task<VropsDatacenterContent> GetDatacenterContentAsync(string datacenterName, CancellationToken ct = default);
+    Task<VropsDatacenterContent> GetDatacenterContentAsync(
+        string datacenterName,
+        string kaynakTuru = "VMwareAdapter Instance",
+        CancellationToken ct = default);
 
     /// <summary>
     /// Ornek VM ve host'larin HAM vROps alanlarini getirir.

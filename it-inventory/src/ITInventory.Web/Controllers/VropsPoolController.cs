@@ -1,4 +1,4 @@
-using ITInventory.Data;
+﻿using ITInventory.Data;
 using ITInventory.Data.Entities;
 using ITInventory.Web.Common;
 using ITInventory.Web.Models.VropsPool;
@@ -76,7 +76,7 @@ public class VropsPoolController : Controller
         var icerikler = new List<VropsDatacenterContent>();
         foreach (var dc in datacenterlar)
         {
-            var icerik = await _vrops.GetDatacenterContentAsync(dc.DatacenterName, HttpContext.RequestAborted);
+            var icerik = await _vrops.GetDatacenterContentAsync(dc.DatacenterName, dc.ResourceKind, HttpContext.RequestAborted);
             icerikler.Add(icerik);
         }
 

@@ -12,8 +12,10 @@ public class VropsDatacenterConfiguration : IEntityTypeConfiguration<VropsDatace
 
         builder.HasKey(x => x.Id);
         builder.Property(x => x.DatacenterName).HasMaxLength(255).IsRequired();
+        builder.Property(x => x.ResourceKind).HasMaxLength(100).IsRequired()
+               .HasDefaultValue("VMwareAdapter Instance");
 
-        // Ayni datacenter iki ulkeye baglanamaz.
+        // Ayni kaynak iki ulkeye baglanamaz.
         builder.HasIndex(x => x.DatacenterName).IsUnique();
 
         builder.HasOne(x => x.Country)
