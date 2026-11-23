@@ -162,7 +162,23 @@ public class PhysicalDevicesController : Controller
         // Dogrudan kaydetmiyoruz: vROps her alani her makine icin vermiyor
         // (VMware Tools yoksa konuk alanlari hic gelmiyor), zorunlu bir alan
         // bos kalirsa kisi gorup tamamlamali.
-        if (!string.IsNullOrWhiteSpace(deviceName)) vm.DeviceName = Kirp(deviceName, 200);
+        if (!string.IsNullOrWhiteSpace(deviceName))
+        {
+            vm.DeviceName = Kirp(deviceName, 200);
+
+            // Aria'dan gelen her kayit bir ESXi host. Kategoriyi ADIYLA
+            // ariyoruz, Id'yi sabit yazmiyoruz: bu kategorinin adi zaten bir
+            // kez degisti (Sunucu -> Server -> ESXi / Physical Server, bkz.
+            // sql/005 ve sql/020) ve tekrar degisebilir. Bulamazsak alan bos
+            // kalir, kullanici secer -- yanlis kategoriyle kaydetmektense iyi.
+            if (vm.CategoryId is null or 0)
+            {
+                vm.CategoryId = await _db.DeviceCategories
+                    .Where(k => k.Name.Contains("ESXi"))
+                    .Select(k => (int?)k.Id)
+                    .FirstOrDefaultAsync();
+            }
+        }
         if (!string.IsNullOrWhiteSpace(ipAddress)) vm.IpAddress = Kirp(ipAddress, 100);
         if (!string.IsNullOrWhiteSpace(ipAddress)) vm.MgmtIp = Kirp(ipAddress, 100);
         if (!string.IsNullOrWhiteSpace(brand)) vm.Brand = Kirp(brand, 200);
