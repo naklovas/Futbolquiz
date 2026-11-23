@@ -3,9 +3,21 @@ namespace ITInventory.Web.Services;
 public interface ILdapAuthenticationService
 {
     /// <summary>
-    /// fintek.local domaininde kullanıcı adı/şifreyi LDAP bind ile doğrular.
-    /// Sadece kimlik doğrulama yapar; kullanıcının IT Envanter sistemine
-    /// erişim izni olup olmadığını kontrol etmez (bkz. IUserContextService).
+    /// Kullanici adi/parolayi LDAP bind ile dogrular.
+    ///
+    /// Birden fazla domain tanimliysa: kullanici adresini tam yazdiysa
+    /// (ali@zfgistirak.local) yalnizca o domain denenir; domainsiz yazdiysa
+    /// (ali) domainler yapilandirmadaki SIRAYLA denenir ve ilk kabul eden
+    /// kazanir.
+    ///
+    /// Sadece kimlik dogrulama yapar; kullanicinin IT Envanter sistemine
+    /// erisim izni olup olmadigini kontrol etmez.
     /// </summary>
-    bool ValidateCredentials(string username, string password, out string? errorMessage);
+    /// <param name="eslesenDomain">
+    /// Dogrulama basarili olduysa kimligin DOGRULANDIGI domain. Cagiran bunu
+    /// bilmek zorunda: iki domainde ayni kullanici adi olabilir ve envanter
+    /// kaydi buna gore secilir.
+    /// </param>
+    bool ValidateCredentials(string username, string password,
+        out string? errorMessage, out string? eslesenDomain);
 }

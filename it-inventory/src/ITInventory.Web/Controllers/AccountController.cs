@@ -17,6 +17,7 @@ public class AccountController : Controller
 {
     private readonly ILdapAuthenticationService _ldapAuth;
     private readonly DevLoginSettings _devLogin;
+    private readonly LdapSettings _ldapSettings;
     private readonly ITInventoryDbContext _db;
     private readonly ILogger<AccountController> _logger;
     private readonly IActivityLogger _activityLogger;
@@ -26,10 +27,12 @@ public class AccountController : Controller
         ITInventoryDbContext db,
         ILogger<AccountController> logger,
         IActivityLogger activityLogger,
-        IOptions<DevLoginSettings> devLogin)
+        IOptions<DevLoginSettings> devLogin,
+        IOptions<LdapSettings> ldapSettings)
     {
         _ldapAuth = ldapAuth;
         _devLogin = devLogin.Value;
+        _ldapSettings = ldapSettings.Value;
         _db = db;
         _logger = logger;
         _activityLogger = activityLogger;
@@ -62,7 +65,18 @@ public class AccountController : Controller
             _logger.LogWarning(
                 "DEVLOGIN: parola dogrulanmadan giris denemesi -- {Username}", model.Username);
         }
-        else if (!_ldapAuth.ValidateCredentials(model.Username, model.Password, out var ldapError))
+        string? dogrulananDomain = null;
+
+        if (_devLogin.Enabled)
+        {
+            // Gelistirme anahtari: domaini kullanici adindan okuyoruz ki
+            // kapsam testleri gercek akisla ayni kaydi bulsun.
+            dogrulananDomain = model.Username.Contains('@')
+                ? model.Username[(model.Username.IndexOf('@') + 1)..]
+                : _ldapSettings.VarsayilanDomain;
+        }
+        else if (!_ldapAuth.ValidateCredentials(model.Username, model.Password,
+                     out var ldapError, out dogrulananDomain))
         {
             ModelState.AddModelError(string.Empty, ldapError ?? "Invalid username or password.");
             return View(model);
@@ -70,16 +84,28 @@ public class AccountController : Controller
 
         var bareUsername = model.Username.Contains('@') ? model.Username.Split('@')[0] : model.Username;
 
+        // Kullaniciyi DOGRULANDIGI DOMAIN ile birlikte ariyoruz. Yalnizca
+        // Username ile aramak, ayni adin iki domainde bulunabildigi bir
+        // kurulumda iki farkli kisiyi ayni kayda -- ayni ulke yetkisine --
+        // baglardi.
+        //
+        // Domain'i NULL olan ESKI kayitlar varsayilan domaine ait sayilir,
+        // boylece bugun giris yapabilen kimse etkilenmiyor.
+        var varsayilanMi = string.Equals(dogrulananDomain, _ldapSettings.VarsayilanDomain,
+                                         StringComparison.OrdinalIgnoreCase);
+
         var user = await _db.YdUsers
             .Include(u => u.UserRoles)
             .ThenInclude(ur => ur.Role)
-            .FirstOrDefaultAsync(u => u.Username == bareUsername);
+            .FirstOrDefaultAsync(u => u.Username == bareUsername
+                && (u.Domain == dogrulananDomain
+                    || (varsayilanMi && u.Domain == null)));
 
         if (user is null || !user.IsActive)
         {
             _logger.LogWarning(
-                "Authentication succeeded but the user is not registered/active in the IT Inventory system: {Username}",
-                bareUsername);
+                "Authentication succeeded but the user is not registered/active in the IT Inventory system: {Username} ({Domain})",
+                bareUsername, dogrulananDomain);
             ModelState.AddModelError(string.Empty,
                 "This user is not registered in the IT Inventory system. Please contact your system administrator.");
             return View(model);

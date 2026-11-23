@@ -16,15 +16,79 @@ public class LdapAuthenticationService : ILdapAuthenticationService
         _logger = logger;
     }
 
-    public bool ValidateCredentials(string username, string password, out string? errorMessage)
+    public bool ValidateCredentials(string username, string password,
+        out string? errorMessage, out string? eslesenDomain)
     {
         errorMessage = null;
+        eslesenDomain = null;
 
-        var server = _settings.Servers.Length > 0 ? _settings.Servers[0] : _settings.Domain;
-        var userPrincipal = username.Contains('@') ? username : $"{username}@{_settings.Domain}";
+        var domainler = _settings.EtkinDomainler;
+        if (domainler.Count == 0 || domainler.All(d => string.IsNullOrWhiteSpace(d.Name)))
+        {
+            // Ldap bolumu hic yoksa boyle oluyordu: bos sunucu adina bind
+            // denenip "parola yanlis" deniyordu. Sebebi artik aciktan yaziyoruz.
+            _logger.LogError("Ldap yapilandirmasi eksik: tanimli domain yok.");
+            errorMessage = "Authentication is not configured. Please contact your system administrator.";
+            return false;
+        }
 
-        var identifier = new LdapDirectoryIdentifier(server, _settings.Port);
-        var credential = new NetworkCredential(userPrincipal, password);
+        // Kullanici adresini tam yazdiysa domaini o belirler; yazmadiysa
+        // hepsini sirayla deniyoruz.
+        var denenecekler = domainler;
+        if (username.Contains('@'))
+        {
+            var sonek = username[(username.IndexOf('@') + 1)..];
+            var secilen = domainler.FirstOrDefault(d =>
+                string.Equals(d.Name, sonek, StringComparison.OrdinalIgnoreCase));
+
+            if (secilen is null)
+            {
+                _logger.LogWarning("Taninmayan domain sonegi ile giris denemesi: {Username}", username);
+                errorMessage = "Invalid username or password.";
+                return false;
+            }
+
+            denenecekler = new List<LdapDomainSettings> { secilen };
+        }
+
+        var ulasilamadi = false;
+
+        foreach (var domain in denenecekler)
+        {
+            if (string.IsNullOrWhiteSpace(domain.Name)) continue;
+
+            var kullaniciAdresi = username.Contains('@') ? username : $"{username}@{domain.Name}";
+
+            switch (Dene(domain, kullaniciAdresi, password))
+            {
+                case Sonuc.Kabul:
+                    eslesenDomain = domain.Name;
+                    return true;
+
+                case Sonuc.Ulasilamadi:
+                    // Sunucuya ulasilamadiysa bunu "parola yanlis" diye
+                    // gostermiyoruz; digerlerini deneyip sonunda soyluyoruz.
+                    ulasilamadi = true;
+                    break;
+
+                case Sonuc.Red:
+                    break;
+            }
+        }
+
+        errorMessage = ulasilamadi
+            ? "Unable to reach the authentication server right now. Please try again later."
+            : "Invalid username or password.";
+        return false;
+    }
+
+    private enum Sonuc { Kabul, Red, Ulasilamadi }
+
+    private Sonuc Dene(LdapDomainSettings domain, string kullaniciAdresi, string password)
+    {
+        var sunucu = domain.SunucuAdresi;
+        var identifier = new LdapDirectoryIdentifier(sunucu, domain.Port);
+        var credential = new NetworkCredential(kullaniciAdresi, password);
 
         using var connection = new LdapConnection(identifier, credential)
         {
@@ -32,7 +96,7 @@ public class LdapAuthenticationService : ILdapAuthenticationService
             Timeout = TimeSpan.FromSeconds(10)
         };
 
-        if (_settings.UseSsl)
+        if (domain.UseSsl)
         {
             connection.SessionOptions.SecureSocketLayer = true;
             connection.SessionOptions.ProtocolVersion = 3;
@@ -41,19 +105,25 @@ public class LdapAuthenticationService : ILdapAuthenticationService
         try
         {
             connection.Bind();
-            return true;
+            return Sonuc.Kabul;
         }
         catch (LdapException ex)
         {
-            _logger.LogWarning("LDAP bind failed. User: {Username}, Error: {Message}", username, ex.Message);
-            errorMessage = "Invalid username or password.";
-            return false;
+            // Parola yanlis OLABILIR, ama sunucu ayakta degilse de buraya
+            // dusuyoruz. Ayirt etmek icin hata koduna bakiyoruz: 81
+            // (ServerDown) ve 85 (TimeLimitExceeded) ulasilamama demek.
+            var ulasilamadi = ex.ErrorCode is 81 or 85;
+
+            _logger.LogWarning(
+                "LDAP bind basarisiz. Domain: {Domain}, Kullanici: {Kullanici}, Kod: {Kod}, Hata: {Mesaj}",
+                domain.Name, kullaniciAdresi, ex.ErrorCode, ex.Message);
+
+            return ulasilamadi ? Sonuc.Ulasilamadi : Sonuc.Red;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Could not connect to the LDAP server ({Server}).", server);
-            errorMessage = "Unable to reach the authentication server right now. Please try again later.";
-            return false;
+            _logger.LogError(ex, "LDAP sunucusuna baglanilamadi ({Sunucu}).", sunucu);
+            return Sonuc.Ulasilamadi;
         }
     }
 }
