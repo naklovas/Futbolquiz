@@ -1,4 +1,7 @@
-@model ITInventory.Web.Models.Account.LoginViewModel
+﻿@model ITInventory.Web.Models.Account.LoginViewModel
+@{
+    var domainSecenekleri = (List<string>)(ViewBag.DomainOptions ?? new List<string>());
+}
 @{
     ViewData["Title"] = "Log In";
     Layout = "_LoginLayout";
@@ -21,6 +24,26 @@
                    class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500" />
             <span asp-validation-for="Username" class="text-sm text-red-600"></span>
         </div>
+
+        @* Tek domain varsa liste hic gosterilmiyor -- secenegi olmayan bir
+           acilir liste kullaniciyi bosuna mesgul eder. *@
+        @if (domainSecenekleri.Count > 0)
+        {
+            <div>
+                <label asp-for="Domain" class="block text-sm font-medium text-slate-700 mb-1"></label>
+                <select asp-for="Domain"
+                        class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
+                    @foreach (var d in domainSecenekleri)
+                    {
+                        <option value="@d" selected="@(string.Equals(Model.Domain, d, StringComparison.OrdinalIgnoreCase))">@d</option>
+                    }
+                </select>
+                <p class="text-xs text-slate-400 mt-1">
+                    Which domain your account belongs to. Typing a full address such as
+                    <span class="font-mono">name@domain</span> above overrides this.
+                </p>
+            </div>
+        }
 
         <div>
             <label asp-for="Password" class="block text-sm font-medium text-slate-700 mb-1"></label>

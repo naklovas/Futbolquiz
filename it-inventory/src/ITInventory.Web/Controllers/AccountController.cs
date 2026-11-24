@@ -38,10 +38,25 @@ public class AccountController : Controller
         _activityLogger = activityLogger;
     }
 
+    /// <summary>
+    /// Giris ekranindaki domain listesi. TEK domain varsa bos birakiyoruz;
+    /// secenegi olmayan bir acilir liste gostermenin anlami yok.
+    /// </summary>
+    private void DomainSeceneklerini_Doldur()
+    {
+        var domainler = _ldapSettings.EtkinDomainler
+            .Where(d => !string.IsNullOrWhiteSpace(d.Name))
+            .Select(d => d.Name)
+            .ToList();
+
+        ViewBag.DomainOptions = domainler.Count > 1 ? domainler : new List<string>();
+    }
+
     [HttpGet]
     [AllowAnonymous]
     public IActionResult Login(string? returnUrl = null)
     {
+        DomainSeceneklerini_Doldur();
         return View(new LoginViewModel { ReturnUrl = returnUrl });
     }
 
@@ -51,7 +66,17 @@ public class AccountController : Controller
     public async Task<IActionResult> Login(LoginViewModel model)
     {
         if (!ModelState.IsValid)
+        {
+            DomainSeceneklerini_Doldur();
             return View(model);
+        }
+
+        // Secilen domaini kullanici adina ekliyoruz. Kisi adi zaten tam
+        // yazdiysa (ali@zfgistirak.local) ona dokunmuyoruz: acikca yazilan
+        // sey, listede kalmis bir secimi ezer.
+        var girisAdi = model.Username.Trim();
+        if (!girisAdi.Contains('@') && !string.IsNullOrWhiteSpace(model.Domain))
+            girisAdi = $"{girisAdi}@{model.Domain.Trim()}";
 
         // AD/LDAP is the only way in, except behind the development switch below. The old
         // "test user" mode is gone entirely: it carried a second credential store and a PBKDF2
@@ -63,7 +88,7 @@ public class AccountController : Controller
         if (_devLogin.Enabled)
         {
             _logger.LogWarning(
-                "DEVLOGIN: parola dogrulanmadan giris denemesi -- {Username}", model.Username);
+                "DEVLOGIN: parola dogrulanmadan giris denemesi -- {Username}", girisAdi);
         }
         string? dogrulananDomain = null;
 
@@ -71,18 +96,19 @@ public class AccountController : Controller
         {
             // Gelistirme anahtari: domaini kullanici adindan okuyoruz ki
             // kapsam testleri gercek akisla ayni kaydi bulsun.
-            dogrulananDomain = model.Username.Contains('@')
-                ? model.Username[(model.Username.IndexOf('@') + 1)..]
+            dogrulananDomain = girisAdi.Contains('@')
+                ? girisAdi[(girisAdi.IndexOf('@') + 1)..]
                 : _ldapSettings.VarsayilanDomain;
         }
-        else if (!_ldapAuth.ValidateCredentials(model.Username, model.Password,
+        else if (!_ldapAuth.ValidateCredentials(girisAdi, model.Password,
                      out var ldapError, out dogrulananDomain))
         {
             ModelState.AddModelError(string.Empty, ldapError ?? "Invalid username or password.");
+            DomainSeceneklerini_Doldur();
             return View(model);
         }
 
-        var bareUsername = model.Username.Contains('@') ? model.Username.Split('@')[0] : model.Username;
+        var bareUsername = girisAdi.Contains('@') ? girisAdi.Split('@')[0] : girisAdi;
 
         // Kullaniciyi DOGRULANDIGI DOMAIN ile birlikte ariyoruz. Yalnizca
         // Username ile aramak, ayni adin iki domainde bulunabildigi bir
@@ -108,6 +134,7 @@ public class AccountController : Controller
                 bareUsername, dogrulananDomain);
             ModelState.AddModelError(string.Empty,
                 "This user is not registered in the IT Inventory system. Please contact your system administrator.");
+            DomainSeceneklerini_Doldur();
             return View(model);
         }
 
@@ -121,6 +148,7 @@ public class AccountController : Controller
         {
             ModelState.AddModelError(string.Empty,
                 "No role is assigned to this user. Please contact your system administrator.");
+            DomainSeceneklerini_Doldur();
             return View(model);
         }
 
