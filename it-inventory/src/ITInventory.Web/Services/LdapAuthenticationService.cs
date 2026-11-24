@@ -1,4 +1,4 @@
-using System.DirectoryServices.Protocols;
+﻿using System.DirectoryServices.Protocols;
 using System.Net;
 using ITInventory.Web.Configuration;
 using Microsoft.Extensions.Options;
@@ -51,7 +51,7 @@ public class LdapAuthenticationService : ILdapAuthenticationService
             denenecekler = new List<LdapDomainSettings> { secilen };
         }
 
-        var ulasilamadi = false;
+        var ulasilamayanlar = new List<string>();
 
         foreach (var domain in denenecekler)
         {
@@ -68,7 +68,7 @@ public class LdapAuthenticationService : ILdapAuthenticationService
                 case Sonuc.Ulasilamadi:
                     // Sunucuya ulasilamadiysa bunu "parola yanlis" diye
                     // gostermiyoruz; digerlerini deneyip sonunda soyluyoruz.
-                    ulasilamadi = true;
+                    ulasilamayanlar.Add(domain.Name);
                     break;
 
                 case Sonuc.Red:
@@ -76,9 +76,17 @@ public class LdapAuthenticationService : ILdapAuthenticationService
             }
         }
 
-        errorMessage = ulasilamadi
-            ? "Unable to reach the authentication server right now. Please try again later."
+        // Hangi domaine ulasilamadigini YAZIYORUZ. Bunu yazmadan mesaj
+        // "bir yere ulasilamadi" demekten ibaretti ve iki domainli bir
+        // kurulumda hangisinin dustugunu kimse anlayamiyordu.
+        errorMessage = ulasilamayanlar.Count > 0
+            ? $"Unable to reach the authentication server for {string.Join(", ", ulasilamayanlar)}. Please try again later."
             : "Invalid username or password.";
+
+        if (ulasilamayanlar.Count > 0)
+            _logger.LogError("Ulasilamayan domain controller(lar): {Domainler}",
+                string.Join(", ", ulasilamayanlar));
+
         return false;
     }
 
