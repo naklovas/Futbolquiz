@@ -92,6 +92,23 @@ public class LdapAuthenticationService : ILdapAuthenticationService
 
     private enum Sonuc { Kabul, Red, Ulasilamadi }
 
+    /// <summary>
+    /// Yapilandirmadaki metni AuthType'a cevirir. Taninmayan deger
+    /// Negotiate'e duser ve loglanir: yazim hatasi yuzunden sessizce
+    /// baska bir kimlik dogrulama turune gecmek, sonradan bulunmasi zor
+    /// bir davranis farki yaratirdi.
+    /// </summary>
+    private AuthType TuruCozumle(string? ayar)
+    {
+        if (string.IsNullOrWhiteSpace(ayar)) return System.DirectoryServices.Protocols.AuthType.Negotiate;
+
+        if (Enum.TryParse<AuthType>(ayar.Trim(), ignoreCase: true, out var tur))
+            return tur;
+
+        _logger.LogWarning("Taninmayan Ldap AuthType degeri: {Deger}. Negotiate kullaniliyor.", ayar);
+        return System.DirectoryServices.Protocols.AuthType.Negotiate;
+    }
+
     private Sonuc Dene(LdapDomainSettings domain, string kullaniciAdresi, string password)
     {
         var sunucu = domain.SunucuAdresi;
@@ -100,7 +117,7 @@ public class LdapAuthenticationService : ILdapAuthenticationService
 
         using var connection = new LdapConnection(identifier, credential)
         {
-            AuthType = AuthType.Negotiate,
+            AuthType = TuruCozumle(domain.AuthType),
             Timeout = TimeSpan.FromSeconds(10)
         };
 

@@ -1,4 +1,4 @@
-namespace ITInventory.Web.Configuration;
+﻿namespace ITInventory.Web.Configuration;
 
 /// <summary>
 /// Tek bir AD domaininin baglanti bilgisi.
@@ -13,6 +13,22 @@ public class LdapDomainSettings
 
     public int Port { get; set; } = 636;
     public bool UseSsl { get; set; } = true;
+
+    /// <summary>
+    /// LDAP bind kimlik dogrulama turu: Negotiate (varsayilan), Ntlm veya Basic.
+    ///
+    /// NE ZAMAN DEGISTIRILIR:
+    /// Ormanlar arasi bir guven iliskisi varken Negotiate once Kerberos'u
+    /// dener; Kerberos'ta ISTEMCI karsi ormanin KDC'sine kendi ulasmak
+    /// zorundadir (port 88). O yol kapaliysa trust'a ragmen dogrulama
+    /// basarisiz olur.
+    ///
+    /// Ntlm'de dogrulamayi kendi domain controller'imiz guven kanali
+    /// uzerinden karsi tarafa iletir -- bu DC'ler arasi bir trafiktir,
+    /// uygulama sunucusunun karsi ormana erisimi gerekmez. Erisilemeyen
+    /// ama guven iliskisi olan bir domain icin dogru secim budur.
+    /// </summary>
+    public string AuthType { get; set; } = "Negotiate";
 
     public string SunucuAdresi => Servers.Length > 0 ? Servers[0] : Name;
 }
