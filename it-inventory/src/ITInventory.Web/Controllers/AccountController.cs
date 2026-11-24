@@ -131,6 +131,13 @@ public class AccountController : Controller
             new(AppClaimTypes.FullName, user.FullName),
         };
 
+        // Hangi domainle girildigi ekranda gorunsun. Kayitta Domain bos ise
+        // (eski kayitlar) dogrulamanin yapildigi domaini yaziyoruz -- kisi
+        // icin dogru olan bilgi bu.
+        var gosterilecekDomain = user.Domain ?? dogrulananDomain;
+        if (!string.IsNullOrWhiteSpace(gosterilecekDomain))
+            claims.Add(new Claim(AppClaimTypes.Domain, gosterilecekDomain));
+
         if (!string.IsNullOrWhiteSpace(user.RepositoryName))
         {
             claims.Add(new Claim(AppClaimTypes.Country, user.RepositoryName));
