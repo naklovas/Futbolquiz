@@ -1165,7 +1165,7 @@ app.MapPost("/api/tls/toplu", (TlsTopluIstek req, HttpContext ctx, IConfiguratio
             foreach (var pt in ps ?? []) if (int.TryParse(pt?.Trim(), out int pn) && pn is > 0 and < 65536)
                 ((istenen ??= [])[kip] = istenen.GetValueOrDefault(kip) ?? []).Add(pn.ToString());
     var j = TlsToplu.Start(ips, saat, req.Sifresiz ?? false, ctx.User.Identity?.Name ?? "", cfg, factory.CreateClient("appresponse"), envanter,
-        req.Fqdn ?? false, istenen, factory.CreateClient("splunk"), nessus);
+        req.Fqdn ?? false, istenen, factory.CreateClient("splunk"), nessus, req.Giden ?? false);
     return Results.Ok(new { id = j.Id, ipSayisi = ips.Count, toplamParca = j.ToplamParca });
 });
 app.MapGet("/api/tls/toplu/{id}", (string id, HttpContext ctx, IConfiguration cfg) =>
@@ -1174,7 +1174,7 @@ app.MapGet("/api/tls/toplu/{id}", (string id, HttpContext ctx, IConfiguration cf
     var j = TlsToplu.Get(id);
     if (j == null) return Results.NotFound(new { error = "İş bulunamadı (süresi dolmuş olabilir)." });
     lock (j) return Results.Ok(new { j.Id, j.Saat, j.Bas, j.Bit, ipSayisi = j.Ips.Count, j.Parca, j.ToplamParca, j.Bitti, j.Hata,
-        yontem = string.Join(", ", j.Yontemler), sifresiz = j.Sifresiz, fqdn = j.Fqdn, istenenPort = j.IstenenPort, mesajlar = j.Mesajlar.ToList(), satirlar = j.Satirlar.ToList() });
+        yontem = string.Join(", ", j.Yontemler), sifresiz = j.Sifresiz, fqdn = j.Fqdn, giden = j.Giden, istenenPort = j.IstenenPort, mesajlar = j.Mesajlar.ToList(), satirlar = j.Satirlar.ToList() });
 });
 app.MapPost("/api/tls/toplu/{id}/durdur", (string id, HttpContext ctx, IConfiguration cfg) =>
 {
@@ -2063,4 +2063,4 @@ record L4Row(string Vifg, string ClientIp, string ServerIp, string Port, int Hit
 record L7Row(string Vifg, string ClientIp, string ServerIp, string Url, int Hit);
 
 // Portlar: girişte IP + port verilen satırlar (ip → portlar; yalnız bu portlar listelenir); Fqdn: FQDN / endpoint araması
-record TlsTopluIstek(List<string>? Ips, int? Saat, bool? Sifresiz, bool? Fqdn = null, Dictionary<string, List<string>>? Portlar = null);
+record TlsTopluIstek(List<string>? Ips, int? Saat, bool? Sifresiz, bool? Fqdn = null, Dictionary<string, List<string>>? Portlar = null, bool? Giden = null);

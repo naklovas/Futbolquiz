@@ -260,7 +260,10 @@ record TlsTopluSurum(string Surum, long Sayi, double Yuzde);
 record TlsTopluSatir(string Ip, string? Sunucu, string Port, string? Uygulama, bool ErtPortu, List<TlsTopluSurum> Surumler,
     long Sayi, int Istemci, List<string> Kutular, string? Not, string Sifreleme = "bilinmiyor", long Trafik = 0, string? Ipucu = null,
     // FQDN / endpoint (kullanıcı: mailde "ilgili servislerin FQDN / endpoint URL bilgileri" istendi, ~1000 sunucu toplu)
-    List<TlsFqdn>? Fqdn = null, List<TlsUc>? Uclar = null, string? Url = null, string? Website = null, string? Vip = null, bool Istenen = false);
+    List<TlsFqdn>? Fqdn = null, List<TlsUc>? Uclar = null, string? Url = null, string? Website = null, string? Vip = null, bool Istenen = false,
+    // Yön (kullanıcı: "tek IP yazarsam giden gelen ne varsa baksın"): "gelen" = IP sunucu (Port onun portu); "giden" = IP istemci, Hedef:Port çağrılan servis,
+    // Uygulama hedefin ERT uygulaması
+    string Yon = "gelen", string? Hedef = null, string? HedefSunucu = null);
 // Servise erişilen ad: Kaynaklar = "DNS (Carbon Black)" (istemcilerin çözdüğü ad), "DNS · VIP ip:port", "IIS Host", "Sertifika (Nessus)", "Sunucu DNS (Nessus)"
 record TlsFqdn(string Ad, List<string> Kaynaklar, long Sayi, int Istemci);
 // IIS logunda görülen yol (sayı / GUID parçaları {n} / {guid}), istek ve istemci sayısı, örnek metot, site
@@ -276,6 +279,7 @@ class TlsTopluIs
     public bool Bitti;
     public bool Sifresiz;   // ek flow_tcp sorgusu yapıldı mı (trafik var / TLS yok ayrımı)
     public bool Fqdn;       // FQDN / endpoint araması yapıldı mı (Carbon Black DNS, IIS logu, Nessus sertifika)
+    public bool Giden;      // giden el sıkışmaları da alındı mı (IP istemci)
     public int IstenenPort; // girişte IP + port verilen satır sayısı (yalnız o portlar)
     public string? Hata;
     public DateTime Bas, Bit, Basladi = DateTime.UtcNow;
@@ -292,14 +296,14 @@ static class TlsToplu
     public static TlsTopluIs? Get(string id) => _isler.TryGetValue(id, out var j) ? j : null;
 
     public static TlsTopluIs Start(List<string> ips, int saat, bool sifresiz, string kullanici, IConfiguration cfg, HttpClient http, EnvanterService envanter,
-        bool fqdn = false, Dictionary<string, HashSet<string>>? istenen = null, HttpClient? splunk = null, NessusService? nessus = null)
+        bool fqdn = false, Dictionary<string, HashSet<string>>? istenen = null, HttpClient? splunk = null, NessusService? nessus = null, bool giden = false)
     {
         // eski işler (1 saat) temizlenir
         foreach (var kv in _isler.Where(kv => (DateTime.UtcNow - kv.Value.Basladi).TotalHours > 1).ToList()) _isler.TryRemove(kv.Key, out _);
         int parca = Math.Max(1, cfg.GetValue("Tls:TopluParca", 20));
         var (bas, bit) = TlsAkis.Aralik(saat);
         var j = new TlsTopluIs { Kullanici = kullanici, Saat = saat, Ips = ips, Bas = bas, Bit = bit, ToplamParca = (ips.Count + parca - 1) / parca, Sifresiz = sifresiz,
-            Fqdn = fqdn && splunk != null, IstenenPort = istenen?.Sum(x => x.Value.Count) ?? 0 };
+            Fqdn = fqdn && splunk != null, IstenenPort = istenen?.Sum(x => x.Value.Count) ?? 0, Giden = giden };
         _isler[j.Id] = j;
         _ = Task.Run(async () =>
         {
@@ -314,10 +318,10 @@ static class TlsToplu
                     // TCP trafiği (şifresiz kontrolü) TLS sorgusuyla AYNI ANDA başlar (sırayla beklemek süreyi ikiye katlıyordu)
                     var akisTask = sifresiz ? TlsAkis.AkisAsync(grup, bas, bit, cfg, http, j.Cts.Token) : null;
                     // FQDN / endpoint: Carbon Black DNS adları + IIS logu + Nessus, TLS sorgusuyla aynı anda
-                    var ucTask = j.Fqdn ? UcNoktaAsync(grup, env, cfg, splunk!, nessus, j.Cts.Token) : null;
+                    var ucTask = j.Fqdn ? UcNoktaAsync(grup, env, cfg, splunk!, nessus, j.Cts.Token, giden) : null;
                     try
                     {
-                        var (s, cihazlar, mesajlar, _) = await TlsAkis.CekAsync(grup, bas, bit, [], true, cfg, http, j.Cts.Token);
+                        var (s, cihazlar, mesajlar, _) = await TlsAkis.CekAsync(grup, bas, bit, [], !giden, cfg, http, j.Cts.Token);
                         ham = s;
                         foreach (var c in cihazlar.Where(c => c.Yontem != null)) lock (j) j.Yontemler.Add(c.Yontem!);
                         lock (j) foreach (var m in mesajlar) if (!j.Mesajlar.Contains(m) && j.Mesajlar.Count < 30) j.Mesajlar.Add(m);
@@ -362,6 +366,7 @@ static class TlsToplu
                         var ek = uc == null ? [] : uc.Portlar(ip, env);
                         var satirlar = Satirlar(ip, ham.Where(h => TlsAkis.AyniIpDis(h.Srv, ip)).ToList(), ipAkis, sifresiz, env, cfg, ek, sadece);
                         yeni.AddRange(satirlar.Select(r => Zenginlestir(tlsHata ? r with { Not = "TLS verisi alınamadı (hata)", Sifreleme = "bilinmiyor" } : r, uc, env, sadece != null)));
+                        if (giden) yeni.AddRange(GidenSatirlar(ip, ham.Where(h => TlsAkis.AyniIpDis(h.Cli, ip) && !TlsAkis.AyniIpDis(h.Srv, ip)).ToList(), uc, env, tlsHata));
                     }
                     lock (j) { j.Satirlar.AddRange(yeni); j.Parca++; }
                 }
@@ -442,6 +447,8 @@ static class TlsToplu
         public Dictionary<(string Ip, string Port), List<(string Ad, long N, int Ist)>> Dns = new();
         public Dictionary<(string Ip, string Port), List<(string Yol, long N, int Ist, string? M, string? Site, List<string> Host)>> Iis = new();
         public Dictionary<string, NessusSunucu> Nessus = new();
+        // giden: bu sunucunun (istemci) bağlandığı hedef ip:port → çözdüğü DNS adları (Carbon Black, local_ip = sunucu)
+        public Dictionary<(string Ip, string Hedef, string Port), List<(string Ad, long N)>> GidenDns = new();
         public List<string> Mesajlar = [];
         // satır olacak portlar: CB'de DNS adıyla bağlanılan ve IIS logunda görülen portlar (VIP üzerinden gelenler üye portuna çevrilir)
         public IEnumerable<string> Portlar(string ip, EnvanterSnapshot env) =>
@@ -451,7 +458,13 @@ static class TlsToplu
     }
 
     static readonly Regex _ipRx = new(@"^\d{1,3}(\.\d{1,3}){3}$");
-    static async Task<UcVeri> UcNoktaAsync(string[] grup, EnvanterSnapshot env, IConfiguration cfg, HttpClient http, NessusService? nessus, CancellationToken ct)
+    // HTTP olmayan bilinen portlar: FQDN gösterilir ama "önerilen URL" üretilmez (veritabanı, SSH, RDP, LDAP, MQ…)
+    static readonly HashSet<string> _httpDegil = ["21", "22", "23", "25", "53", "88", "110", "111", "123", "135", "139", "143", "161", "389", "445", "514", "587", "636",
+        "1433", "1434", "1521", "1522", "1523", "1524", "1525", "1526", "1527", "1528", "1529", "1530", "2049", "2483", "2484", "3268", "3269", "3306", "3389",
+        "5432", "5672", "5985", "5986", "6379", "9092", "11211", "27017", "47001", "50000", "61616"];
+    static string? UrlYap(string? ad, bool https, string port) =>
+        ad == null || _httpDegil.Contains(port) ? null : $"{(https ? "https" : "http")}://{ad}" + ((https && port == "443") || (!https && port == "80") ? "" : ":" + port);
+    static async Task<UcVeri> UcNoktaAsync(string[] grup, EnvanterSnapshot env, IConfiguration cfg, HttpClient http, NessusService? nessus, CancellationToken ct, bool giden = false)
     {
         var v = new UcVeri();
         var end = DateTimeOffset.Now;
@@ -489,6 +502,12 @@ static class TlsToplu
                 """, new LookupQuery(grup[0], end.AddHours(-iisSaat), end), cfg, http, ct, "IIS logu (endpoint)", sure);
         }
         else v.Mesajlar.Add("HttpSys:IisIndexleri geçersiz: IIS endpoint araması yapılmadı.");
+        // giden: sunucunun kendi giden olaylarındaki hedef ad (domain) — hangi servislere hangi adla bağlanıyor
+        string gin0 = string.Join(",", grup.Select(x => $"\"{x}\""));
+        var gidenTask = giden ? SplunkService.ExportAsync($"""
+            search index={index} sourcetype="{st}" ({string.Join(" OR ", grup.Select(x => $"TERM({x})"))}) local_ip IN ({gin0}) direction=outbound domain=*
+            | stats count by local_ip remote_ip remote_port domain
+            """, new LookupQuery(grup[0], end.AddHours(-cbSaat), end), cfg, http, ct, "Carbon Black (giden DNS adları)", sure) : null;
         var nesTask = nessus is { Acik: true } && cfg.GetValue("Tls:UcNessus", true) ? nessus.SunucularAsync(grup, null, ct) : null;
 
         static string? V(Dictionary<string, string> r, string k) => r.TryGetValue(k, out var x) && !string.IsNullOrWhiteSpace(x) ? x.Trim() : null;
@@ -524,6 +543,21 @@ static class TlsToplu
             }
         }
         catch (Exception ex) when (ex is not OperationCanceledException) { v.Mesajlar.Add("IIS endpoint bilgisi alınamadı: " + ex.Message); }
+        if (gidenTask != null) try
+        {
+            var r = await gidenTask;
+            foreach (var m in r.Messages) v.Mesajlar.Add(m);
+            foreach (var row in r.Rows)
+            {
+                if (V(row, "local_ip") is not { } ip || V(row, "remote_ip") is not { } h || V(row, "remote_port") is not { } port || V(row, "domain") is not { } d) continue;
+                d = d.TrimEnd('.').ToLowerInvariant();
+                if (_ipRx.IsMatch(d) || d.Length < 3 || h == ip || h.StartsWith("127.")) continue;
+                var key = (ip, h, port);
+                if (!v.GidenDns.TryGetValue(key, out var l)) v.GidenDns[key] = l = [];
+                l.Add((d, L(V(row, "count"))));
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException) { v.Mesajlar.Add("Carbon Black giden DNS adları alınamadı: " + ex.Message); }
         if (nesTask != null) try { v.Nessus = await nesTask; }
         catch (Exception ex) when (ex is not OperationCanceledException) { v.Mesajlar.Add("Nessus (sertifika adları) alınamadı: " + ex.Message); }
         return v;
@@ -573,8 +607,38 @@ static class TlsToplu
         var fq = ad.Select(kv => new TlsFqdn(kv.Key, kv.Value.K, kv.Value.N, kv.Value.I))
             .OrderBy(x => Oncelik(x.Kaynaklar)).ThenByDescending(x => x.Sayi).ThenBy(x => x.Ad).Take(12).ToList();
         string? host = fq.FirstOrDefault(x => !x.Ad.StartsWith("*") && Oncelik(x.Kaynaklar) < 3)?.Ad ?? fq.FirstOrDefault(x => !x.Ad.StartsWith("*"))?.Ad;
-        string sema = https ? "https" : "http";
-        string? url = host == null ? null : $"{sema}://{host}" + ((https && port == "443") || (!https && port == "80") ? "" : ":" + port);
+        string? url = UrlYap(host, https, port);
         return r with { Fqdn = fq.Count > 0 ? fq : null, Uclar = uclar, Url = url, Website = web, Vip = vip, Istenen = istenen };
+    }
+
+    // GİDEN satırlar: IP'nin istemci olduğu el sıkışmaları hedef ip:port başına (sürüm yüzdeleri); FQDN açıksa CB'de bu sunucunun DNS adıyla bağlandığı
+    // ama TLS el sıkışması görülmeyen hedefler de satır olur ("TLS el sıkışması görülmedi"). Uygulama = hedefin ERT uygulaması.
+    static IEnumerable<TlsTopluSatir> GidenSatirlar(string ip, List<TlsAkis.Ham> ham, UcVeri? uc, EnvanterSnapshot env, bool tlsHata)
+    {
+        string? host = Host(env, ip);
+        var anahtar = ham.Select(h => (H: h.Srv, P: h.Port))
+            .Concat(uc?.GidenDns.Keys.Where(k => k.Ip == ip).Select(k => (H: k.Hedef, P: k.Port)) ?? [])
+            .Where(k => k.P != "" && k.P != "0").Distinct().ToList();
+        foreach (var (h, p) in anahtar.OrderBy(k => k.H).ThenBy(k => int.TryParse(k.P, out int n) ? n : 99999))
+        {
+            var hs = ham.Where(x => x.Srv == h && x.Port == p).ToList();
+            long top = hs.Sum(x => x.Sayi);
+            var surumler = hs.GroupBy(x => x.Surum).Select(g => (S: g.Key, N: g.Sum(x => x.Sayi))).OrderByDescending(x => x.N)
+                .Select(x => new TlsTopluSurum(x.S, x.N, top > 0 ? Math.Round(x.N * 100.0 / top, 1) : 0)).ToList();
+            var happ = env.AppsOnIp(h);
+            string? uyg = happ.Where(a => a.Port == p).Select(a => a.AppName).FirstOrDefault(a => !string.IsNullOrWhiteSpace(a));
+            bool ertte = uyg != null;
+            uyg ??= env.AppNamesOnIp(h).FirstOrDefault(a => !env.IsSystemApp(a));
+            string? web = happ.Where(a => a.Port == p).Select(a => a.Website).FirstOrDefault(w => !string.IsNullOrWhiteSpace(w));
+            List<TlsFqdn>? fq = null;
+            if (uc != null && uc.GidenDns.TryGetValue((ip, h, p), out var dl))
+                fq = dl.GroupBy(x => x.Ad).Select(g => new TlsFqdn(g.Key, ["DNS (Carbon Black)"], g.Sum(x => x.N), 0)).OrderByDescending(x => x.Sayi).Take(8).ToList();
+            bool https = hs.Count > 0 || p is "443" or "8443" or "9443";
+            string? ad = fq?.FirstOrDefault()?.Ad;
+            string? url = UrlYap(ad, https, p);
+            string? not = hs.Count > 0 ? null : tlsHata ? "TLS verisi alınamadı (hata)" : "TLS el sıkışması görülmedi (Carbon Black'te bağlantı var)";
+            yield return new TlsTopluSatir(ip, host, p, uyg, ertte, surumler, top, 0, hs.Select(x => x.Cihaz).Distinct().ToList(), not,
+                hs.Count > 0 ? "tls" : "bilinmiyor", Fqdn: fq, Url: url, Website: web, Yon: "giden", Hedef: h, HedefSunucu: Host(env, h));
+        }
     }
 }

@@ -878,6 +878,13 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
   Arayüz kolonları: FQDN (kaynak rozetleri DNS / VIP DNS / IIS / sertifika / sunucu DNS, ilk 3 + açılır), Önerilen URL, Endpoint (IIS) (ilk 3 + açılır), VIP, IIS website (ERT);
   özet "N / M portta FQDN bulundu"; CSV IIS WEBSITE, VIP, ÖNERİLEN URL, FQDN, FQDN KAYNAKLARI, ENDPOINT URL'LERİ (URL + yol (istek)). Sahte envanter + sahte Splunk ile uçtan
   uca, Playwright'la Excel'den IP + port okuma denendi. IIS dışı (Java / nginx…) servislerde yol ağ verisinde yok (yalnız FQDN + port).
+  GİDEN YÖN (kullanıcı: "TLS'e gelen / giden diye bakıyor muyuz" → toplu yalnız gelendi; "tek IP yazarsam full giden gelen ne varsa baksın", "portları belirt, gelen mi
+  giden mi"): "Giden bağlantıları da al" kutucuğu (listede TEK IP varsa kendiliğinden işaretlenir, elle değiştirilirse dokunulmaz; istek `giden`) → `CekAsync(..., gelenYalniz: false)`
+  (filtre srv OR cli), `GidenSatirlar`: IP'nin istemci olduğu el sıkışmaları hedef ip:port başına; `TlsTopluSatir.Yon` "gelen" | "giden", `Hedef`, `HedefSunucu`, Uygulama =
+  hedefin ERT uygulaması; FQDN açıksa CB `local_ip IN (grup) direction=outbound domain=*` → hedef ip:port'a bağlanırken çözülen ad (`UcVeri.GidenDns`) ve TLS görülmeyen
+  ama CB'de adıyla bağlanılan hedefler de satır ("TLS el sıkışması görülmedi"). Önerilen URL HTTP olmayan bilinen portlarda (DB, SSH, RDP, LDAP, MQ… `_httpDegil`) üretilmez.
+  Arayüz: "Yön" (▼ Gelen / ▲ Giden) ve "Hedef (giden)" kolonları, Port altında "kendi portu" / "hedef portu", "Yön" süzgeci, özette gelen / giden sayıları; CSV YÖN, HEDEF IP,
+  HEDEF SUNUCU. Şifresiz kontrolü (flow_tcp) yalnız gelen.
 - **Fiziksel envanter** (`FizikselEnvanter.cs`, `wwwroot/fiziksel.js`, sekme "Fiziksel envanter" `data-ui="fiziksel"`, `?fiziksel=1&kabin=&host=`;
   claude.ai sohbetindeki görev tanımı: "Bu kabin kapanırsa hangi uygulamalar etkilenir?"): veri doku DB'de HAZIR — NlyteCollector (nlyte OData →
   dbo.NlyteRaw) + `EXEC dbo.sp_KabinZincirYenile` doldurur; DeltaFlow YALNIZ OKUR (yazmaz, prosedürü çağırmaz). Betik kullanıcıda
