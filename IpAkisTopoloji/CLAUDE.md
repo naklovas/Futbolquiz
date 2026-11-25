@@ -233,6 +233,9 @@ topoloji çizer ve şirket içi AI'a etki analizi yaptırır. Canlıda IIS'te, W
     (versiyonda düzenleme kapalı) → Topoloji sekmesi CANLI haritayla açılır (`iv.ver`, URL `&ver=ID`); araç çubuğunda "Son kayıtlı
     topoloji" düğmesi ve "Görünüm" seçicisi kayıtlı versiyonu sorgusuz açar (`ktShowSaved`); versiyon bandında "Canlıya dön (düzenle)".
     Düzenleme / AI / yeniden çizim yalnız canlıda. Kurum seçimi değişince canlıya geçer.
+    HATA DÜZELTİLDİ (kullanıcı: "IRAK'ı kümelememe rağmen Sorgula deyince KOS topolojisi geliyor"): runTopo adres çubuğundaki `ciz` / `ver`'i etiket
+    bakmadan kullanıyordu → KOS'un kayıtlı versiyonu (?topo=KOS&ciz=1&ver=7) IRAK seçilince de açılıyordu. Artık yalnız `topo` = seçilen etiketse geçerli;
+    `ivVerData` başka etiketin versiyonunu reddeder (ozet.etiket kontrolü).
   - **Kurum seçimi** (`wwwroot/kurum.js`, Topoloji sekmesinde Etiket'in yanında): KonsolideSegmentler4.**Domain** (kullanıcı düzeltti:
     Tenant DEĞİL; kodda adlar hâlâ tenant/TenantOf) — sunucunun segmentinin Domain'i; yoksa "(kurum yok)". `/api/tenantlar?etiket=` (kurum + sunucu sayısı). Çoklu seçimli açılır kutu: arama,
     "Tümü" (boş seçim = tümü; hepsi tek tek seçilirse yine tümü), Uygula; seçim localStorage `df.tenant`. `/api/islev` ve

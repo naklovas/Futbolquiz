@@ -88,9 +88,11 @@ async function runTopo() {
   const tag = topoWanted ?? $("#topoTag").value;
   topoWanted = null;
   if (!tag) { alert("Henüz etiketli sunucu yok. Sunucu etiketleme sekmesinden sunuculara etiket ekleyin."); return; }
-  // ?topo=X&ciz=1: doğrudan küme topolojisi; &ver=ID: kayıtlı versiyon (canli=1: güncel veri)
-  const qs = new URLSearchParams(location.search), ver = +qs.get("ver") || (qs.get("canli") === "1" ? null : undefined);
-  if (qs.get("ciz") === "1") {
+  // ?topo=X&ciz=1: doğrudan küme topolojisi; &ver=ID: kayıtlı versiyon (canli=1: güncel veri). Adres çubuğundaki ciz / ver
+  // YALNIZ aynı etiketinse geçerli: başka etiket seçilip Sorgula'ya basılınca önceki etiketin (ör. KOS) kayıtlı versiyonu açılmasın
+  const qs = new URLSearchParams(location.search), ayni = qs.get("topo") === tag;
+  const ver = !ayni ? undefined : +qs.get("ver") || (qs.get("canli") === "1" ? null : undefined);
+  if (ayni && qs.get("ciz") === "1") {
     ivSetVer(tag, ver ?? null);
     if (ver) ktShowSaved(tag); else ktRun(tag);
   } else runIslev(tag, ver);

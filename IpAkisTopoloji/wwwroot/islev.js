@@ -484,6 +484,10 @@ async function ivVerData(id) {
   const r = await fetch("api/islev/versiyon/" + id);
   const b = await r.json().catch(() => ({ error: `HTTP ${r.status}` }));
   if (!r.ok) throw new Error(b.error || `HTTP ${r.status}`);
+  // Versiyon başka etiketin olamaz (eski adres çubuğundan gelen ver): yanlış etiketin haritası / topolojisi gösterilmez
+  const et = b.ozet?.etiket;
+  if (et && iv.ver.tag && et.toLocaleUpperCase("tr") !== String(iv.ver.tag).toLocaleUpperCase("tr"))
+    throw new Error(`Seçilen versiyon "${et}" etiketine ait, "${iv.ver.tag}" değil.`);
   return iv.ver.data = b;
 }
 
