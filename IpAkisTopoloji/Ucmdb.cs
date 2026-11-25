@@ -108,23 +108,28 @@ sealed class UcmdbService(IConfiguration cfg, ILogger<UcmdbService> log)
     }
     Dizin? _dizin;
     Task? _hazirlik;
-    string? _dizinHata;
+    string? _dizinHata, _asama;
+    DateTime _asamaBas, _hataZaman;
     readonly ConcurrentDictionary<string, (DateTime Z, string? Metin, string Bicim, int Boyut, int Maske)> _icerik = new();
 
     // Dizin arka planda hazırlanır (ilk seferde tüm web.config'lerin kapsayıcı zinciri yürünür; IIS istek zaman aşımına takılmasın)
-    public (bool Hazir, string? Hata) DizinDurumu()
+    public (bool Hazir, string? Hata, string? Asama, int Gecen) DizinDurumu()
     {
         var d = _dizin;
         bool eski = d == null || (DateTime.UtcNow - d.Zaman).TotalHours >= C.GetValue("OnbellekSaat", 12.0);
-        if (eski && Acik)
+        if (eski && Acik && (_dizinHata == null || (DateTime.UtcNow - _hataZaman).TotalMinutes >= 5))
             lock (this)
                 if (_hazirlik == null || _hazirlik.IsCompleted)
+                {
+                    _asamaBas = DateTime.UtcNow; _asama = "başlıyor";
                     _hazirlik = Task.Run(async () =>
                     {
-                        try { await DizinAsync(true, CancellationToken.None); _dizinHata = null; }
-                        catch (Exception ex) { _dizinHata = ex.Message; log.LogWarning(ex, "UCMDB dizini hazırlanamadı"); }
+                        try { await DizinAsync(true, CancellationToken.None); _dizinHata = null; _asama = null; }
+                        catch (Exception ex) { _dizinHata = ex.Message; _hataZaman = DateTime.UtcNow; _asama = null; log.LogWarning(ex, "UCMDB dizini hazırlanamadı"); }
                     });
-        return (d != null, d == null ? _dizinHata : null);
+                }
+        bool suruyor = _hazirlik is { IsCompleted: false };
+        return (d != null, d == null ? _dizinHata : null, suruyor ? _asama : null, suruyor ? (int)(DateTime.UtcNow - _asamaBas).TotalSeconds : 0);
     }
 
     public async Task<(List<UcmdbBelge> Belgeler, List<string> Notlar)> DizinAsync(bool yenile, CancellationToken ct)
@@ -134,9 +139,12 @@ sealed class UcmdbService(IConfiguration cfg, ILogger<UcmdbService> log)
         await _kilit.WaitAsync(ct);
         try
         {
+            _asama = "Oracle'a bağlanılıyor";
             using var c = await AcAsync(ct);
+            _asama = "şema okunuyor (ALL_TAB_COLUMNS)";
             var s = await SemaAsync(c, ct);
-            _dizin = d = await DizinOlusturAsync(c, s, null, ct);
+            _asama = "Oracle'a bağlanıldı, şema okundu";
+            _dizin = d = await DizinOlusturAsync(c, s, null, ct, 0, x => _asama = x);
             return (d.Belgeler, d.Notlar);
         }
         finally { _kilit.Release(); }
@@ -205,17 +213,23 @@ sealed class UcmdbService(IConfiguration cfg, ILogger<UcmdbService> log)
     List<string> Desenler => (C.GetSection("DosyaDesenleri").Get<string[]>() is { Length: > 0 } a ? a : ["web.config"])
         .Select(x => x.Trim().ToLowerInvariant()).Where(x => x.Length > 0 && !x.Contains('\'')).ToList();
 
-    async Task<Dizin> DizinOlusturAsync(OracleConnection c, Sema0 s, List<string>? tani, CancellationToken ct)
+    // Tablo önceliği: sunucu (düğüm) ve IIS / web / uygulama sunucusu sınıfları önce — web.config'in kapsayıcısı neredeyse hep bunlar
+    static readonly Regex _oncelik = new(@"NODE|_NT_1$|UNIX|COMPUTER|HOST|IIS|WEB|APP_?POOL|VIRTUAL_?DIR|J2EE|APPLICATION_SERVER|RUNNING_SOFTWARE|SOFTWARE|DOTNET|ASP|CONFIGURATION_DOCUMENT",
+        RegexOptions.IgnoreCase);
+
+    // ornek > 0: yalnız o kadar belgeyle (tanı); asama: ilerleme metni; seviyeSn: seviye başına süre sınırı
+    async Task<Dizin> DizinOlusturAsync(OracleConnection c, Sema0 s, List<string>? tani, CancellationToken ct, int ornek = 0, Action<string>? asama = null, int? seviyeSn = null)
     {
         var d = new Dizin();
         string yolK = s.Yol != null ? $", {s.Yol}" : "", ustK = s.Ust != null ? $", {s.Ust}" : "";
         string kosul = string.Join(" OR ", Desenler.Select(x => $"LOWER({s.AdK}) LIKE '%{x.Replace("%", "")}%'"));
-        int max = C.GetValue("MaxBelge", 50000);
+        int max = ornek > 0 ? ornek : C.GetValue("MaxBelge", 50000);
         var ham = new List<(string Id, string Ad, string? Ust)>();
+        asama?.Invoke("web.config belgeleri listeleniyor");
         using (var cmd = c.CreateCommand())
         {
             cmd.CommandText = $"SELECT {s.Id}, {s.AdK}{ustK}{yolK} FROM {Sema}.{Tablo} WHERE ({kosul}) AND ROWNUM <= {max}";
-            cmd.CommandTimeout = SorguSn;
+            cmd.CommandTimeout = Math.Max(SorguSn, 300);
             using var r = await cmd.ExecuteReaderAsync(ct);
             while (await r.ReadAsync(ct))
             {
@@ -226,41 +240,51 @@ sealed class UcmdbService(IConfiguration cfg, ILogger<UcmdbService> log)
                 ham.Add((id, string.IsNullOrEmpty(yol) ? ad : $"{ad} ({yol})", string.IsNullOrEmpty(ust) ? null : ust));
             }
         }
-        if (ham.Count >= max) d.Notlar.Add($"UCMDB: {max} belge sınırına ulaşıldı (Ucmdb:MaxBelge).");
-        tani?.Add($"Belge sayısı ({string.Join(", ", Desenler)}): {ham.Count}");
+        if (ornek == 0 && ham.Count >= max) d.Notlar.Add($"UCMDB: {max} belge sınırına ulaşıldı (Ucmdb:MaxBelge).");
+        tani?.Add($"Belge ({string.Join(", ", Desenler)}): {ham.Count}{(ornek > 0 ? " (örnek)" : "")} · üst kolonu dolu: {ham.Count(h => h.Ust != null)}");
 
-        // kapsayıcı zinciri: her seviyede bilinmeyen kimlikler, ilgili kolonları olan tüm CDM tablolarında aranır (birleştirilir)
         var bilgi = new Dictionary<string, (HashSet<string> T, string? Ad, string? Dns, string? Ust)>(StringComparer.OrdinalIgnoreCase);
         var zincir = ham.ToDictionary(h => h.Id, h => new List<string>(), StringComparer.OrdinalIgnoreCase);
         var dugumAd = C.GetSection("DugumTablolari").Get<string[]>() is { Length: > 0 } dt ? dt.Select(Ad).ToHashSet() :
             ["CDM_NODE_1", "CDM_HOST_NODE_1", "CDM_NT_1", "CDM_UNIX_1", "CDM_COMPUTER_1", "CDM_HOST_1"];
+        bool Dugum((HashSet<string> T, string? Ad, string? Dns, string? Ust) b) => b.T.Any(dugumAd.Contains) || b.Dns != null;
         var aday = s.Kolon.Where(t => t.Value.ContainsKey(s.Id) && !s.Bos.Contains(t.Key) && !t.Key.Equals(Tablo, StringComparison.OrdinalIgnoreCase)
                 && (t.Value.ContainsKey(s.AdK) || (s.Ust != null && t.Value.ContainsKey(s.Ust)) || t.Value.ContainsKey("A_PRIMARY_DNS_NAME")))
-            .Select(t => t.Key).OrderBy(t => dugumAd.Contains(t) ? 0 : 1).ThenBy(t => t).Take(C.GetValue("MaxTablo", 2000)).ToList();
+            .Select(t => t.Key).Take(C.GetValue("MaxTablo", 3000)).ToList();
+        int Puan(string t) => dugumAd.Contains(t) ? 0 : _oncelik.IsMatch(t) ? 1 : 2;
+        tani?.Add($"Aranacak tablo: {aday.Count} (öncelikli: {aday.Count(t => Puan(t) < 2)})");
         string idTip = s.Kolon[Tablo][s.Id];
-        var gorulen = ham.ToDictionary(h => h.Id, h => new HashSet<string>([h.Id], StringComparer.OrdinalIgnoreCase), StringComparer.OrdinalIgnoreCase);   // döngü koruması
+        var gorulen = ham.ToDictionary(h => h.Id, h => new HashSet<string>([h.Id], StringComparer.OrdinalIgnoreCase), StringComparer.OrdinalIgnoreCase);
         var sunucuOf = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
-        int seviye = 0, maxSeviye = C.GetValue("MaxSeviye", 6);
         var isabet = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-        // belgenin şu anki ucu (yürünecek kimlik)
-        var uc = ham.ToDictionary(h => h.Id, h => h.Ust, StringComparer.OrdinalIgnoreCase);
+        int seviye = 0, maxSeviye = C.GetValue("MaxSeviye", 6), sn = seviyeSn ?? C.GetValue("SeviyeSureSaniye", 120);
+        double yeter = C.GetValue("YeterOran", 0.98);
+        var uc = ham.ToDictionary(h => h.Id, h => h.Ust, StringComparer.OrdinalIgnoreCase);   // belgenin yürünecek ucu
         while (seviye++ < maxSeviye)
         {
             var sor = uc.Values.OfType<string>().Where(x => !bilgi.ContainsKey(x) && IdGecerli(x)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
-            // belge tablosunda üst kolonu yoksa bağ tablolarından (END2 = belge → END1)
-            if (seviye == 1 && s.Ust == null) sor = [];
             if (sor.Count > 0)
             {
-                // önce düğüm tabloları ve önceki seviyelerde isabet alan tablolar; her kimliğin adı ve üstü (ya da düğüm olduğu) bulununca durulur
-                foreach (var t in aday.OrderBy(t => dugumAd.Contains(t) ? 0 : 1).ThenByDescending(t => isabet.GetValueOrDefault(t)).ToList())
+                var sira = aday.OrderByDescending(t => isabet.GetValueOrDefault(t) > 0).ThenBy(Puan).ThenByDescending(t => isabet.GetValueOrDefault(t)).ThenBy(t => t).ToList();
+                var saat = System.Diagnostics.Stopwatch.StartNew();
+                int i = 0;
+                bool Tamam() => sor.All(x => bilgi.TryGetValue(x, out var bb) && bb.Ad != null && (bb.Ust != null || Dugum(bb)));
+                double Oran() => sor.Count(bilgi.ContainsKey) / (double)sor.Count;
+                foreach (var t in sira)
                 {
                     ct.ThrowIfCancellationRequested();
-                    if (sor.All(x => bilgi.TryGetValue(x, out var bb) && bb.Ad != null && (bb.Ust != null || Dugum(bb)))) break;
+                    i++;
+                    if (Tamam()) break;
+                    // öncelikli tablolar bitti ve kimliklerin neredeyse hepsi bulunduysa geri kalan yüzlerce sınıf tablosu taranmaz
+                    if (Puan(t) == 2 && isabet.GetValueOrDefault(t) == 0 && Oran() >= yeter) { tani?.Add($"  seviye {seviye}: %{Oran() * 100:0} bulundu, kalan {sira.Count - i + 1} tablo atlandı"); break; }
+                    if (saat.Elapsed.TotalSeconds > sn) { d.Notlar.Add($"UCMDB seviye {seviye}: {sn} sn sınırı ({i}/{sira.Count} tablo, %{Oran() * 100:0} bulundu)"); tani?.Add(d.Notlar[^1]); break; }
+                    if (i % 10 == 1) asama?.Invoke($"seviye {seviye}/{maxSeviye}: {i}/{sira.Count} tablo · {sor.Count(bilgi.ContainsKey)}/{sor.Count} kapsayıcı bulundu");
                     var k = s.Kolon[t];
                     var sec = new List<string> { s.Id };
                     string? aK = k.ContainsKey(s.AdK) ? s.AdK : null, dK = k.ContainsKey("A_PRIMARY_DNS_NAME") ? "A_PRIMARY_DNS_NAME" : null, uK = s.Ust != null && k.ContainsKey(s.Ust) ? s.Ust : null;
                     foreach (var x in new[] { aK, dK, uK }) if (x != null) sec.Add(x);
-                    foreach (var parca in sor.Chunk(500))
+                    int once = isabet.GetValueOrDefault(t);
+                    foreach (var parca in sor.Chunk(1000))
                     {
                         using var cmd = c.CreateCommand();
                         cmd.CommandText = $"SELECT {string.Join(", ", sec)} FROM {Sema}.{t} WHERE {s.Id} IN ({string.Join(",", parca.Select(x => Lit(k.GetValueOrDefault(s.Id) ?? idTip, x)))})";
@@ -270,8 +294,8 @@ sealed class UcmdbService(IConfiguration cfg, ILogger<UcmdbService> log)
                             using var r = await cmd.ExecuteReaderAsync(ct);
                             while (await r.ReadAsync(ct))
                             {
-                                string id = Deger(r.GetValue(0)); int i = 1;
-                                string? ad = aK != null ? Deger(r.GetValue(i++)) : null, dns = dK != null ? Deger(r.GetValue(i++)) : null, ust = uK != null ? Deger(r.GetValue(i++)) : null;
+                                string id = Deger(r.GetValue(0)); int j = 1;
+                                string? ad = aK != null ? Deger(r.GetValue(j++)) : null, dns = dK != null ? Deger(r.GetValue(j++)) : null, ust = uK != null ? Deger(r.GetValue(j++)) : null;
                                 var e = bilgi.TryGetValue(id, out var x) ? x : ([], null, null, null);
                                 if (e.T.Add(t)) isabet[t] = isabet.GetValueOrDefault(t) + 1;
                                 bilgi[id] = (e.T, string.IsNullOrEmpty(e.Ad) ? (string.IsNullOrEmpty(ad) ? null : ad) : e.Ad,
@@ -280,15 +304,18 @@ sealed class UcmdbService(IConfiguration cfg, ILogger<UcmdbService> log)
                         }
                         catch (OracleException ex) { tani?.Add($"  {t}: {ex.Message}"); break; }
                     }
+                    if (tani != null && isabet.GetValueOrDefault(t) > once) tani.Add($"  seviye {seviye}: {t} → {isabet[t] - once} kimlik");
                 }
             }
-            // üst kolonu boş kalanlar için bağ tabloları (END1 = kapsayıcı, END2 = parça)
-            var bagSor = uc.Where(kv => kv.Value == null && !sunucuOf.ContainsKey(kv.Key)).Select(kv => seviye == 1 ? kv.Key : null).OfType<string>()
+            // üstü boş kalanlar için bağ tabloları (END1 = kapsayıcı, END2 = parça); 1. seviyede belgenin kendisi
+            var bagSor = uc.Where(kv => kv.Value == null && seviye == 1 && !sunucuOf.ContainsKey(kv.Key)).Select(kv => kv.Key)
                 .Concat(sor.Where(x => bilgi.TryGetValue(x, out var b) && b.Ust == null && !Dugum(b))).Where(IdGecerli).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
             var bagUst = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             if (bagSor.Count > 0)
+            {
+                asama?.Invoke($"seviye {seviye}/{maxSeviye}: bağ tabloları ({bagSor.Count} kimlik)");
                 foreach (var t in s.Bag)
-                    foreach (var parca in bagSor.Chunk(500))
+                    foreach (var parca in bagSor.Chunk(1000))
                     {
                         using var cmd = c.CreateCommand();
                         string tip = s.Kolon[t]["END2_ID"];
@@ -301,7 +328,9 @@ sealed class UcmdbService(IConfiguration cfg, ILogger<UcmdbService> log)
                         }
                         catch (OracleException ex) { tani?.Add($"  {t}: {ex.Message}"); break; }
                     }
-            // uçları ilerlet (1. seviyede üstü boş belgeler bağ tablosundaki kapsayıcıdan başlar)
+                if (tani != null && bagUst.Count > 0) tani.Add($"  seviye {seviye}: bağ tablolarından {bagUst.Count} kapsayıcı");
+            }
+            // uçları ilerlet
             bool ilerledi = false;
             foreach (var bid in uc.Keys.ToList())
             {
@@ -315,9 +344,9 @@ sealed class UcmdbService(IConfiguration cfg, ILogger<UcmdbService> log)
                 uc[bid] = sonraki != null && gorulen[bid].Add(u) && !gorulen[bid].Contains(sonraki) ? sonraki : null;
                 ilerledi |= uc[bid] != null;
             }
+            asama?.Invoke($"seviye {seviye} bitti · sunucusu bulunan belge {sunucuOf.Count}/{ham.Count}");
             if (!ilerledi) break;
         }
-        bool Dugum((HashSet<string> T, string? Ad, string? Dns, string? Ust) b) => b.T.Any(dugumAd.Contains) || b.Dns != null;
 
         foreach (var h in ham)
         {
@@ -546,14 +575,19 @@ sealed class UcmdbService(IConfiguration cfg, ILogger<UcmdbService> log)
                 }
             }
             catch (Exception ex) when (ex is not OperationCanceledException) { S("Örnek belge okunamadı: " + ex.Message); }
+            var (hz, hh, ha, hg) = DizinDurumu();
+            S($"Tam liste: {(hz ? $"hazır · {_dizin!.Belgeler.Count} belge, sunucusu bulunan {_dizin.Belgeler.Count(b => b.Sunucu != null)} · {_dizin.Zaman.ToLocalTime():dd.MM HH:mm}" : ha != null ? $"hazırlanıyor ({hg} sn): {ha}" : hh != null ? "HATA: " + hh : "hazırlanmadı")}");
+            foreach (var n in _dizin?.Notlar ?? []) S("  " + n);
+            S("5 örnek belgeyle zincir denemesi (seviye başına en çok 20 sn):");
             var notlar = new List<string>();
             Dizin d;
-            try { d = await DizinOlusturAsync(c, s, notlar, ct); _dizin = d; }
-            catch (Exception ex) when (ex is not OperationCanceledException) { S("Dizin: " + ex.Message); return sb.ToString(); }
-            foreach (var n in notlar.Concat(d.Notlar)) S(n);
+            try { d = await DizinOlusturAsync(c, s, notlar, ct, 5, null, 20); }
+            catch (Exception ex) when (ex is not OperationCanceledException) { S("Zincir: " + ex.Message); return sb.ToString(); }
+            foreach (var n in notlar) S(n);
             S("Zincir örnekleri:");
             foreach (var b in d.Belgeler.Take(5)) S($"  {b.Ad} → {(b.Zincir.Count == 0 ? "(üst bulunamadı)" : string.Join(" → ", b.Zincir))} ⇒ sunucu: {b.Sunucu ?? "?"}");
-            if (ip != null && env != null)
+            if (ip != null && env != null && _dizin == null) S($"IP {ip}: tam liste hazır olmadığı için belgeleri aranamadı.");
+            if (ip != null && env != null && _dizin != null)
             {
                 var adlar = env.AppsOnIp(ip).Select(h => h.UnixName).Where(x => !string.IsNullOrWhiteSpace(x)).Distinct().ToList();
                 S($"IP {ip} · ERT sunucu adı: {(adlar.Count == 0 ? "(yok)" : string.Join(", ", adlar))}");

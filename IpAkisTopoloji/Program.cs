@@ -1189,8 +1189,8 @@ app.MapPost("/api/tls/toplu/{id}/durdur", (string id, HttpContext ctx, IConfigur
 app.MapPost("/api/ucmdb/belgeler", async (UcmdbIstek req, UcmdbService u, EnvanterService envanter, CancellationToken ct) =>
 {
     if (!u.Acik) return Results.Ok(new { acik = false });
-    var (hazir, hata) = u.DizinDurumu();
-    if (!hazir) return Results.Ok(new { acik = true, hazir = false, hata });
+    var (hazir, hata, asama, gecen) = u.DizinDurumu();
+    if (!hazir) return Results.Ok(new { acik = true, hazir = false, hata, asama, gecen });
     var ips = (req.Ips ?? []).Select(x => LookupQuery.TryParseIpv4(x, out string v) ? v : null).OfType<string>().Distinct().Take(5000).ToList();
     var b = u.Belgeler(ips, await envanter.GetAsync(false, ct));
     return Results.Ok(new { acik = true, hazir = true, belgeler = b.ToDictionary(kv => kv.Key, kv => kv.Value.Select(x => new { id = x.Id, ad = x.Ad, sunucu = x.Sunucu })) });

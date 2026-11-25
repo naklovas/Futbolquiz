@@ -920,6 +920,12 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
   Kopyala, Esc / dışına tıkla kapatır, bilgi satırında maskelenen sayısı ve UCMDB zinciri). `Ayristir` / `Db` (WCF client = giden, service / baseAddress = gelen, appSettings /
   setting / rewrite URL'leri = giden, connectionStrings → yalnız sunucu / port / DB) YAZILDI ama şimdilik yalnız tanıda kullanılıyor — FQDN / giden satırlarına bağlamak sonraki adım
   (kullanıcı onayıyla). Sahte XML ile çözme (düz / zip / gzip / UTF-16), maskeleme (sızıntı yok) ve ayrıştırma; mock'la arayüz denendi; Oracle tarafı canlıda denenmedi.
+  "HAZIRLANIYOR'DA KALDI" (canlı): zincir taraması her seviyede yüzlerce CDM tablosunu alfabetik sırayla geziyordu → tablo sırası: önce isabet alanlar, sonra `DugumTablolari`,
+  sonra adı `_oncelik` (NODE / NT / UNIX / HOST / IIS / WEB / APP_POOL / VIRTUAL_DIR / J2EE / APPLICATION_SERVER / RUNNING_SOFTWARE / SOFTWARE…) olanlar, en son diğerleri; öncelikli
+  olmayan ve isabetsiz tablolara kimliklerin `YeterOran`=0,98'i bulunduysa geçilmez; seviye başına `SeviyeSureSaniye`=120 sınırı (not düşülür); IN listesi 1000. İlerleme `_asama`
+  ("seviye 2/6: 41/812 tablo · 3120/3400 kapsayıcı bulundu"), `/api/ucmdb/belgeler` → `asama`, `gecen`; arayüzde tablonun üstünde bant + hücrede süre; hata olursa bant kırmızı
+  (tanı bağlantısıyla) ve dizin 5 dk geçmeden yeniden başlatılmaz (`_hataZaman`). Tanı artık tam dizini KURMAZ: tam listenin durumu + 5 örnek belgeyle zincir (seviye başına 20 sn),
+  seviye başına hangi tablodan kaç kimlik geldiği (`seviye N: CDM_X → k kimlik`), bağ tabloları; IP belgeleri yalnız tam liste hazırsa.
 - **Fiziksel envanter** (`FizikselEnvanter.cs`, `wwwroot/fiziksel.js`, sekme "Fiziksel envanter" `data-ui="fiziksel"`, `?fiziksel=1&kabin=&host=`;
   claude.ai sohbetindeki görev tanımı: "Bu kabin kapanırsa hangi uygulamalar etkilenir?"): veri doku DB'de HAZIR — NlyteCollector (nlyte OData →
   dbo.NlyteRaw) + `EXEC dbo.sp_KabinZincirYenile` doldurur; DeltaFlow YALNIZ OKUR (yazmaz, prosedürü çağırmaz). Betik kullanıcıda

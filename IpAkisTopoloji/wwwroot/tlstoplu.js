@@ -269,7 +269,7 @@ function ttSatirlar() {
 
 // UCMDB web.config kolonu (kullanıcı: "önce sadece web.config görüntüle; bir kolonda olsun"): satırlardaki IP'lerin belgeleri bir kez sorulur.
 // Sunucudaki dizin ilk seferde arka planda hazırlanır (hazir=false) → 5 sn sonra yeniden sorulur. UCMDB tanımlı değilse / eski DLL'de kolon gizlenir.
-const ttWc = { acik: null, hata: null, belgeler: {}, sorulan: new Set(), istek: false, sonraki: 0 };
+const ttWc = { acik: null, hata: null, asama: null, gecen: 0, belgeler: {}, sorulan: new Set(), istek: false, sonraki: 0 };
 async function ttWcYukle() {
   if (ttWc.acik === false || ttWc.istek || Date.now() < ttWc.sonraki) return;
   const ips = [...new Set((tt.body?.satirlar ?? []).map(r => r.ip))].filter(ip => ip && !ttWc.sorulan.has(ip));
@@ -280,7 +280,7 @@ async function ttWcYukle() {
     if ([403, 404, 405].includes(r.status)) { ttWc.acik = false; return; }
     const b = await r.json().catch(() => ({ error: `HTTP ${r.status}` }));
     if (!r.ok) throw new Error(b.error || `HTTP ${r.status}`);
-    ttWc.acik = !!b.acik; ttWc.hata = b.hata ?? null;
+    ttWc.acik = !!b.acik; ttWc.hata = b.hata ?? null; ttWc.asama = b.hazir ? null : b.asama ?? null; ttWc.gecen = b.gecen ?? 0;
     if (b.hazir) { ips.forEach(ip => ttWc.sorulan.add(ip)); Object.assign(ttWc.belgeler, b.belgeler ?? {}); }
     else if (b.acik) ttWc.sonraki = Date.now() + (b.hata ? 30000 : 5000);
   } catch (e) { ttWc.hata = e.message; ttWc.sonraki = Date.now() + 30000; }
@@ -293,7 +293,7 @@ function ttWcHtml(r) {
   if (l?.length) return `<button type="button" class="tt-wc" data-wc="${esc(r.ip)}" title="${esc(l.map(x => x.ad).join("\n"))}">📄 görüntüle${l.length > 1 ? ` (${l.length})` : ""}</button>`;
   if (ttWc.sorulan.has(r.ip)) return `<span class="small muted" title="UCMDB'de bu sunucuya (ERT sunucu adı / IP) bağlı web.config yok">yok</span>`;
   return ttWc.hata ? `<span class="small" style="color:var(--err)" title="${esc(ttWc.hata)}">UCMDB okunamadı</span>`
-    : `<span class="small muted" title="UCMDB'deki web.config listesi hazırlanıyor (ilk seferde birkaç dakika sürebilir)">${ttWc.acik == null ? "…" : "hazırlanıyor…"}</span>`;
+    : `<span class="small muted" title="${esc("UCMDB'deki web.config listesi hazırlanıyor (ilk seferde birkaç dakika sürebilir)" + (ttWc.asama ? "\n" + ttWc.asama : ""))}">${ttWc.acik == null ? "…" : `hazırlanıyor… ${ttWc.gecen ? ttSure(ttWc.gecen) : ""}`}</span>`;
 }
 function ttWcAc(ip) {
   const l = ttWc.belgeler[ip] ?? [];
@@ -370,6 +370,9 @@ function ttCiz() {
     </div>
     ${!b.bitti ? `<div class="tt-bar"><i style="width:${pct}%"></i></div>` : ""}
     ${!b.bitti ? ttAdimHtml(b) : ""}
+    ${ttWc.acik && !ttWc.sorulan.size && (ttWc.asama || ttWc.hata) ? `<div class="small ${ttWc.hata ? "" : "muted"}" style="margin:0 0 6px${ttWc.hata ? ";color:var(--err)" : ""}">${ttWc.hata
+      ? `UCMDB web.config listesi hazırlanamadı: ${esc(ttWc.hata)} (5 dk sonra yeniden denenir; ayrıntı: <a href="api/ucmdb/tani" target="_blank" rel="noopener">tanı</a>)`
+      : `<span class="spinner"></span> UCMDB web.config listesi hazırlanıyor · ${esc(ttWc.asama)} · ${ttSure(ttWc.gecen)}`}</div>` : ""}
     <div class="tbl-wrap" style="max-height:62vh"><table>
       <thead><tr><th>IP</th><th>Sunucu</th>${wk ? `<th title="UCMDB'de bu sunucuya ait web.config (görüntüle; şifre / anahtar değerleri maskeli)">web.config</th>` : ""}${gk ? `<th title="▼ Gelen: bu sunucuya gelen bağlantı (port bu sunucunun portu) · ▲ Giden: bu sunucunun başka sunucuya yaptığı bağlantı (port hedefin portu)">Yön</th><th title="Giden bağlantıda çağrılan sunucu">Hedef (giden)</th>` : ""}<th title="Gelen: bu sunucunun dinlediği port · Giden: hedefin portu">Port</th><th title="Gelen: bu portun ERT uygulaması · Giden: hedefin ERT uygulaması">Uygulama (ERT)</th>${sk ? `<th>Şifreleme</th>` : ""}<th>TLS sürümü</th><th class="num">El sıkışması</th>${sk ? `<th class="num" title="AppResponse flow_tcp: bu porta gelen TCP trafiği (bağlantı / satır sayısı)">TCP trafiği</th>` : ""}<th class="num">İstemci</th><th>Not</th>${fk ? `<th title="Servise erişilen adlar; DNS = istemcilerin bağlanırken çözdüğü ad (Carbon Black), VIP DNS = sunucunun üyesi olduğu VIP'e bağlanırken, IIS = IIS logundaki Host başlığı, sertifika = Nessus'un gördüğü sertifika adları, sunucu DNS = Nessus'un sunucu adı">FQDN</th><th title="En çok kullanılan ad + port + http/https (TLS görüldüyse ya da sertifika varsa https)">Önerilen URL</th><th title="Gelen: IIS logunda görülen istek yolları (sayı / GUID parçaları {n} / {guid}); giden: Palo Alto URL logundaki yollar. IIS dışı gelen servislerde yol ağ verisinde yok">Endpoint (IIS / FW)</th><th>VIP</th><th>IIS website (ERT)</th>` : ""}</tr></thead>
       <tbody>${list.length ? list.map(r => `<tr${r.surumler?.some(s => tlsEski(s.surum)) || r.sifreleme === "sifresiz" ? ` class="tls-eski-satir"` : ""}>
