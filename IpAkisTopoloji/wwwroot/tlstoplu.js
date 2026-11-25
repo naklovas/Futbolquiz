@@ -267,6 +267,79 @@ function ttSatirlar() {
       .some(x => String(x ?? "").toLocaleLowerCase("tr").includes(q))));
 }
 
+// UCMDB web.config kolonu (kullanıcı: "önce sadece web.config görüntüle; bir kolonda olsun"): satırlardaki IP'lerin belgeleri bir kez sorulur.
+// Sunucudaki dizin ilk seferde arka planda hazırlanır (hazir=false) → 5 sn sonra yeniden sorulur. UCMDB tanımlı değilse / eski DLL'de kolon gizlenir.
+const ttWc = { acik: null, hata: null, belgeler: {}, sorulan: new Set(), istek: false, sonraki: 0 };
+async function ttWcYukle() {
+  if (ttWc.acik === false || ttWc.istek || Date.now() < ttWc.sonraki) return;
+  const ips = [...new Set((tt.body?.satirlar ?? []).map(r => r.ip))].filter(ip => ip && !ttWc.sorulan.has(ip));
+  if (!ips.length) return;
+  ttWc.istek = true;
+  try {
+    const r = await fetch("api/ucmdb/belgeler", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ips }) });
+    if ([403, 404, 405].includes(r.status)) { ttWc.acik = false; return; }
+    const b = await r.json().catch(() => ({ error: `HTTP ${r.status}` }));
+    if (!r.ok) throw new Error(b.error || `HTTP ${r.status}`);
+    ttWc.acik = !!b.acik; ttWc.hata = b.hata ?? null;
+    if (b.hazir) { ips.forEach(ip => ttWc.sorulan.add(ip)); Object.assign(ttWc.belgeler, b.belgeler ?? {}); }
+    else if (b.acik) ttWc.sonraki = Date.now() + (b.hata ? 30000 : 5000);
+  } catch (e) { ttWc.hata = e.message; ttWc.sonraki = Date.now() + 30000; }
+  finally { ttWc.istek = false; }
+  if (uiMode === "tls" && $("#ttSonuc")) ttCiz();
+  if (ttWc.sonraki > Date.now()) setTimeout(() => { if (uiMode === "tls" && $("#ttSonuc")) ttWcYukle(); }, ttWc.sonraki - Date.now() + 50);
+}
+function ttWcHtml(r) {
+  const l = ttWc.belgeler[r.ip];
+  if (l?.length) return `<button type="button" class="tt-wc" data-wc="${esc(r.ip)}" title="${esc(l.map(x => x.ad).join("\n"))}">📄 görüntüle${l.length > 1 ? ` (${l.length})` : ""}</button>`;
+  if (ttWc.sorulan.has(r.ip)) return `<span class="small muted" title="UCMDB'de bu sunucuya (ERT sunucu adı / IP) bağlı web.config yok">yok</span>`;
+  return ttWc.hata ? `<span class="small" style="color:var(--err)" title="${esc(ttWc.hata)}">UCMDB okunamadı</span>`
+    : `<span class="small muted" title="UCMDB'deki web.config listesi hazırlanıyor (ilk seferde birkaç dakika sürebilir)">${ttWc.acik == null ? "…" : "hazırlanıyor…"}</span>`;
+}
+function ttWcAc(ip) {
+  const l = ttWc.belgeler[ip] ?? [];
+  if (!l.length) return;
+  let m = $("#ttWcModal");
+  if (!m) {
+    m = document.createElement("div");
+    m.className = "modal"; m.id = "ttWcModal"; m.hidden = true;
+    m.innerHTML = `<div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="ttWcBaslik" style="width:min(1300px,96vw)">
+      <div class="modal-head"><b id="ttWcBaslik"></b><span style="display:flex;gap:8px;align-items:center"><select id="ttWcSec" style="max-width:520px"></select>
+        <button type="button" id="ttWcKopya">Kopyala</button><button type="button" id="ttWcKapat">✕ Kapat</button></span></div>
+      <div class="small muted" id="ttWcBilgi" style="padding:6px 16px;border-bottom:1px solid var(--line)"></div>
+      <div class="modal-body" style="padding:0"><pre id="ttWcMetin" class="tt-wc-pre"></pre></div></div>`;
+    document.body.append(m);
+    $("#ttWcKapat").addEventListener("click", () => { m.hidden = true; });
+    m.addEventListener("click", ev => { if (ev.target === m) m.hidden = true; });
+    document.addEventListener("keydown", ev => { if (ev.key === "Escape" && !m.hidden) m.hidden = true; });
+    $("#ttWcSec").addEventListener("change", e => ttWcGoster(e.target.value));
+    $("#ttWcKopya").addEventListener("click", async () => {
+      try { await navigator.clipboard.writeText($("#ttWcMetin").textContent); $("#ttWcKopya").textContent = "✓ Kopyalandı"; }
+      catch { const r = document.createRange(); r.selectNodeContents($("#ttWcMetin")); getSelection().removeAllRanges(); getSelection().addRange(r); }
+      setTimeout(() => { if ($("#ttWcKopya")) $("#ttWcKopya").textContent = "Kopyala"; }, 1500);
+    });
+  }
+  $("#ttWcBaslik").textContent = `web.config · ${ip}${l[0].sunucu ? " · " + l[0].sunucu : ""}`;
+  $("#ttWcSec").innerHTML = l.map(x => `<option value="${esc(x.id)}">${esc(x.ad)}</option>`).join("");
+  $("#ttWcSec").hidden = l.length < 2;
+  m.hidden = false;
+  ttWcGoster(l[0].id);
+}
+async function ttWcGoster(id) {
+  const pre = $("#ttWcMetin"), bilgi = $("#ttWcBilgi");
+  pre.textContent = ""; bilgi.innerHTML = `<span class="spinner"></span> UCMDB'den okunuyor…`;
+  try {
+    const r = await fetch(`api/ucmdb/belge?id=${encodeURIComponent(id)}`);
+    const b = await r.json().catch(() => ({ error: `HTTP ${r.status}` }));
+    if (!r.ok || b.error) throw new Error(b.error || `HTTP ${r.status}`);
+    if ($("#ttWcSec").value !== id) return;
+    pre.textContent = b.metin ?? "";
+    bilgi.innerHTML = [`<b>${esc(b.ad)}</b>`, b.sunucu ? `sunucu ${esc(b.sunucu)}` : "", `${fmt(b.boyut ?? 0)} bayt (${esc(b.bicim ?? "")})`,
+      b.maske ? `<span style="color:var(--warn, #b26b00)">${fmt(b.maske)} gizli değer *** ile maskelendi (şifre / anahtar / token)</span>` : "",
+      b.zincir?.length ? `<span title="${esc(b.zincir.join(" → "))}">UCMDB: ${esc(b.zincir.join(" → "))}</span>` : ""].filter(Boolean).join(" · ")
+      + (b.metin == null ? ` · <span style="color:var(--err)">içerik çözülemedi</span>` : "");
+  } catch (e) { bilgi.innerHTML = `<span style="color:var(--err)">${esc(e.message)}</span>`; }
+}
+
 function ttCiz() {
   const el = $("#ttSonuc"), b = tt.body;
   if (!el || !b) return;
@@ -277,6 +350,7 @@ function ttCiz() {
   const sk = b.sifresiz !== false;   // ek trafik sorgusu yapıldıysa şifreleme / trafik kolonları
   const fk = !!b.fqdn;               // FQDN / endpoint araması yapıldıysa ad / URL / yol kolonları
   const fqBulunan = all.filter(r => r.fqdn?.length).length;
+  const wk = ttWc.acik !== false;   // UCMDB tanımlıysa web.config kolonu
   const gk = !!b.giden;              // giden el sıkışmaları da alındıysa Yön ve Hedef kolonları
   const nGelen = all.filter(r => (r.yon ?? "gelen") === "gelen" && r.port).length, nGiden = all.filter(r => r.yon === "giden").length;
   const pct = b.toplamParca ? Math.round((b.parca ?? 0) * 100 / b.toplamParca) : 0;
@@ -297,10 +371,10 @@ function ttCiz() {
     ${!b.bitti ? `<div class="tt-bar"><i style="width:${pct}%"></i></div>` : ""}
     ${!b.bitti ? ttAdimHtml(b) : ""}
     <div class="tbl-wrap" style="max-height:62vh"><table>
-      <thead><tr><th>IP</th><th>Sunucu</th>${gk ? `<th title="▼ Gelen: bu sunucuya gelen bağlantı (port bu sunucunun portu) · ▲ Giden: bu sunucunun başka sunucuya yaptığı bağlantı (port hedefin portu)">Yön</th><th title="Giden bağlantıda çağrılan sunucu">Hedef (giden)</th>` : ""}<th title="Gelen: bu sunucunun dinlediği port · Giden: hedefin portu">Port</th><th title="Gelen: bu portun ERT uygulaması · Giden: hedefin ERT uygulaması">Uygulama (ERT)</th>${sk ? `<th>Şifreleme</th>` : ""}<th>TLS sürümü</th><th class="num">El sıkışması</th>${sk ? `<th class="num" title="AppResponse flow_tcp: bu porta gelen TCP trafiği (bağlantı / satır sayısı)">TCP trafiği</th>` : ""}<th class="num">İstemci</th><th>Not</th>${fk ? `<th title="Servise erişilen adlar; DNS = istemcilerin bağlanırken çözdüğü ad (Carbon Black), VIP DNS = sunucunun üyesi olduğu VIP'e bağlanırken, IIS = IIS logundaki Host başlığı, sertifika = Nessus'un gördüğü sertifika adları, sunucu DNS = Nessus'un sunucu adı">FQDN</th><th title="En çok kullanılan ad + port + http/https (TLS görüldüyse ya da sertifika varsa https)">Önerilen URL</th><th title="Gelen: IIS logunda görülen istek yolları (sayı / GUID parçaları {n} / {guid}); giden: Palo Alto URL logundaki yollar. IIS dışı gelen servislerde yol ağ verisinde yok">Endpoint (IIS / FW)</th><th>VIP</th><th>IIS website (ERT)</th>` : ""}</tr></thead>
+      <thead><tr><th>IP</th><th>Sunucu</th>${wk ? `<th title="UCMDB'de bu sunucuya ait web.config (görüntüle; şifre / anahtar değerleri maskeli)">web.config</th>` : ""}${gk ? `<th title="▼ Gelen: bu sunucuya gelen bağlantı (port bu sunucunun portu) · ▲ Giden: bu sunucunun başka sunucuya yaptığı bağlantı (port hedefin portu)">Yön</th><th title="Giden bağlantıda çağrılan sunucu">Hedef (giden)</th>` : ""}<th title="Gelen: bu sunucunun dinlediği port · Giden: hedefin portu">Port</th><th title="Gelen: bu portun ERT uygulaması · Giden: hedefin ERT uygulaması">Uygulama (ERT)</th>${sk ? `<th>Şifreleme</th>` : ""}<th>TLS sürümü</th><th class="num">El sıkışması</th>${sk ? `<th class="num" title="AppResponse flow_tcp: bu porta gelen TCP trafiği (bağlantı / satır sayısı)">TCP trafiği</th>` : ""}<th class="num">İstemci</th><th>Not</th>${fk ? `<th title="Servise erişilen adlar; DNS = istemcilerin bağlanırken çözdüğü ad (Carbon Black), VIP DNS = sunucunun üyesi olduğu VIP'e bağlanırken, IIS = IIS logundaki Host başlığı, sertifika = Nessus'un gördüğü sertifika adları, sunucu DNS = Nessus'un sunucu adı">FQDN</th><th title="En çok kullanılan ad + port + http/https (TLS görüldüyse ya da sertifika varsa https)">Önerilen URL</th><th title="Gelen: IIS logunda görülen istek yolları (sayı / GUID parçaları {n} / {guid}); giden: Palo Alto URL logundaki yollar. IIS dışı gelen servislerde yol ağ verisinde yok">Endpoint (IIS / FW)</th><th>VIP</th><th>IIS website (ERT)</th>` : ""}</tr></thead>
       <tbody>${list.length ? list.map(r => `<tr${r.surumler?.some(s => tlsEski(s.surum)) || r.sifreleme === "sifresiz" ? ` class="tls-eski-satir"` : ""}>
         <td class="mono"><a href="${esc(ipTabUrl(r.ip))}" target="_blank" rel="noopener" title="IP sorgusunu yeni sekmede aç">${esc(r.ip)}</a></td>
-        <td class="small">${esc(r.sunucu ?? "")}</td>
+        <td class="small">${esc(r.sunucu ?? "")}</td>${wk ? `<td style="white-space:nowrap">${ttWcHtml(r)}</td>` : ""}
         ${gk ? `<td class="small" style="white-space:nowrap">${r.yon === "giden" ? `<b style="color:var(--out, #b26b00)">▲ Giden</b>` : r.port ? `<b style="color:var(--in)">▼ Gelen</b>` : ""}</td>
           <td class="small">${ttHedefHtml(r)}</td>` : ""}
         <td class="mono" title="${r.yon === "giden" ? "hedefin portu" : "bu sunucunun portu"}">${esc(r.port || "—")}${gk && r.port ? `<div class="small muted">${r.yon === "giden" ? "hedef portu" : "kendi portu"}</div>` : ""}</td>
@@ -308,7 +382,7 @@ function ttCiz() {
         ${sk ? `<td>${r.port ? ttSifHtml(r) : ""}</td>` : ""}<td>${ttSurumHtml(r)}</td><td class="num">${r.sayi ? fmt(r.sayi) : ""}</td>${sk ? `<td class="num">${r.trafik ? fmt(r.trafik) : ""}</td>` : ""}<td class="num">${r.istemci ? fmt(r.istemci) : ""}</td>
         <td class="small muted">${r.surumler?.length ? esc(r.not ?? "") : ""}</td>
         ${fk ? `<td>${ttFqdnHtml(r)}</td><td class="mono small">${r.url ? esc(r.url) : ""}</td><td>${ttUcHtml(r)}</td><td class="mono small">${esc(r.vip ?? "")}</td><td class="small">${esc(r.website ?? "")}</td>` : ""}</tr>`).join("")
-        : `<tr><td colspan="${(sk ? 10 : 8) + (fk ? 5 : 0) + (gk ? 2 : 0)}" class="unk">${all.length ? "Filtreye uyan satır yok." : b.bitti ? "Sonuç yok." : "Sonuçlar geldikçe burada listelenecek…"}</td></tr>`}</tbody></table></div>
+        : `<tr><td colspan="${(sk ? 10 : 8) + (fk ? 5 : 0) + (gk ? 2 : 0) + (wk ? 1 : 0)}" class="unk">${all.length ? "Filtreye uyan satır yok." : b.bitti ? "Sonuç yok." : "Sonuçlar geldikçe burada listelenecek…"}</td></tr>`}</tbody></table></div>
     ${b.mesajlar?.length ? `<div class="msgs">${esc(b.mesajlar.join("\n"))}</div>` : ""}`;
   $("#ttAra").addEventListener("input", e => { tt.filtre = e.target.value; const pos = e.target.selectionStart; ttCiz(); const i = $("#ttAra"); i.focus(); i.setSelectionRange(pos, pos); });
   $("#ttEski").addEventListener("change", e => { tt.yalnizEski = e.target.checked; ttCiz(); });
@@ -316,6 +390,8 @@ function ttCiz() {
   $("#ttSif")?.addEventListener("change", e => { tt.yalnizSifresiz = e.target.checked; ttCiz(); });
   $("#ttYon")?.addEventListener("change", e => { tt.yon = e.target.value; ttCiz(); });
   $("#ttCsv").addEventListener("click", ttCsv);
+  el.querySelectorAll("[data-wc]").forEach(x => x.addEventListener("click", () => ttWcAc(x.dataset.wc)));
+  ttWcYukle();
 }
 
 function ttCsv() {

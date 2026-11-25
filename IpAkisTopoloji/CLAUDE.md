@@ -12,7 +12,7 @@ topoloji çizer ve şirket içi AI'a etki analizi yaptırır. Canlıda IIS'te, W
 - Repo `naklovas/Futbolquiz`, dal `claude/kod-analizi-aciklama-1vwqfv`, klasör `IpAkisTopoloji/`
   (repo adı ilgisiz; proje ayrı repoya taşınabilir). `TrafikPaketi/TrafikServisi.cs` başka projeye verilen
   taşınabilir trafik servisi (tek dosya).
-- .NET 9 minimal API (`net9.0`), paketler: `Microsoft.Data.SqlClient`, `Microsoft.AspNetCore.Authentication.Negotiate`.
+- .NET 9 minimal API (`net9.0`), paketler: `Microsoft.Data.SqlClient`, `Microsoft.AspNetCore.Authentication.Negotiate`, `Oracle.ManagedDataAccess.Core` (yalnız UCMDB).
 - Arayüz: `wwwroot/topoloji.html` (IP görünümü + ortak yardımcılar, inline script) ve `wwwroot/uygulama.js`
   (uygulama görünümü, topoloji.html'deki global yardımcıları kullanır). Dış CDN/font yok (iç ağ).
   `wwwroot/deltaflow.svg` logo. Kök adres `/` topoloji.html'i açar.
@@ -50,6 +50,7 @@ topoloji çizer ve şirket içi AI'a etki analizi yaptırır. Canlıda IIS'te, W
 | `araclar/HttpSysTopla.ps1` | İSTEĞE BAĞLI: sunucularda elle `netsh http show servicestate` → DF_HTTPSYS_URL (DeltaFlow bağlanmaz) |
 | `Zafiyet.cs` | Açıklık taraması: kurala (CVE) ya da anlık exe listesine uyan süreçler tüm sunucularda, Carbon Black toplu (`wwwroot/zafiyet.html`) |
 | `Nessus.cs` | Nessus / Tenable.sc: repository'deki tarama sonuçlarından teknoloji, sertifika, OS, kurulu yazılım |
+| `Ucmdb.cs` | UCMDB (Oracle, MFUCMDB.CDM_CONFIGURATION_DOCUMENT_1) web.config belgeleri: sunucu eşleşmesi, içerik (zip / gzip / düz) maskeli görüntüleme |
 | `Yetki.cs` | İşlem + sayfa yetkileri (yazma, topoloji, dışa aktarma, toplu tahmin, TLS, fiziksel, açıklık taraması, erişim, işlev, etiket, eksik, imza, segment) — DokuPanel site kayıtları |
 | `AuthHelper.cs` | Kullanıcının verdiği DokuPanel yetki helper'ı (namespace `AppRel`), anahtar config'den |
 
@@ -902,6 +903,23 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
   `gecen`, `grupGecen`, `adimlar` [{ad, durum, bitti, sure}]; arayüzde ilerleme çubuğunun altında adım listesi (`ttAdimHtml`, süren önce) ve "x dk geçti".
   SNI denemeleri `Tls:SniBeklemeSaniye`=120 (BeklemeSaniye'den büyük olamaz); SNI'li deneme zaman aşımına düşerse o kutuda kalan SNI denemeleri atlanır ve `_sniYok` işaretlenmez
   (yavaşlık kolon yokluğu sayılmaz).
+  WEB.CONFIG (UCMDB) (kullanıcı: "boş geldi; web.config'ten çıkabilir dediler — MFUCMDB.CDM_CONFIGURATION_DOCUMENT_1, A_DOCUMENT_CONTEN(T) blob, Oracle"; sonra "önce sadece
+  web.config görüntüle, bir kolonda olsun — ilk hedef bu"): `Ucmdb.cs` `UcmdbService` — Oracle'a DOĞRUDAN, yalnız okuma (`Oracle.ManagedDataAccess.Core`; bağlantı cümlesi
+  `Ucmdb:Baglanti` yalnız appsettings.Production.json'da; isteğe bağlı `WalletKlasoru` / `TnsAdmin`). Şema ALL_TAB_COLUMNS'tan (CDM% tabloları): kimlik CMDB_ID, ad A_NAME,
+  içerik ilk A_DOCUMENT_CONTEN* BLOB, üst A_ROOT_CONTAINER (yoksa / boşsa END1_ID–END2_ID'li COMPOSITION / CONTAINMENT tabloları), yol A_*PATH|LOCATION; hepsi `Ucmdb:*Kolonu`
+  ile değişir; RAW kimlik HEXTORAW. DİZİN (arka planda, `OnbellekSaat`=12): LOWER(ad) LIKE `DosyaDesenleri` (varsayılan web.config), `MaxBelge`=50000; kapsayıcı zinciri seviye
+  seviye (`MaxSeviye`=6) — bilinmeyen kimlikler CMDB_ID + (A_NAME | üst | A_PRIMARY_DNS_NAME) kolonlu dolu CDM tablolarında aranır (önce `DugumTablolari` CDM_NODE_1 / NT / UNIX…,
+  sonra isabet alanlar; ad + üst bulununca durur), düğüme (düğüm tablosu ya da A_PRIMARY_DNS_NAME) varınca sunucu adı. IP → ERT UNIXNAME / IP → tam ve kısa ad eşleşmesi.
+  İÇERİK: zip (PK, girdi adı eşleşen ya da ilk) / gzip / zlib / düz; BOM'lu UTF-8 / UTF-16, yoksa UTF-8, olmazsa 1254; `MaxBoyut`=5 MB. `Maskele`: bağlantı cümlesi Password / Pwd /
+  AccountKey, key adında pass / secret / token / apikey / credential / sifre geçen appSettings değerleri (iki öznitelik sırası), password / validationKey / decryptionKey / clientSecret…
+  öznitelikleri, gizli adlı setting değerleri, URL kullanıcı:şifre@ ve gizli sorgu parametreleri → *** (sayısı gösterilir). Uçlar (sayfa yetkisi Tls): POST `/api/ucmdb/belgeler {ips}`
+  → {acik, hazir, hata, belgeler: ip → [{id, ad, sunucu}]} (dizin yoksa arka planda başlatır, hazir=false), GET `/api/ucmdb/belge?id=` (yalnız dizindeki kimlik; metin maskeli, biçim,
+  boyut, zincir), GET `/api/ucmdb/tani?ip=` düz metin (bağlantı + Oracle sürümü, kolonlar ve seçilenler, 5 örnek belgenin boyut / ilk bayt / biçim / bulunan adres sayısı — içerik
+  basılmaz, dizin istatistiği + zincir örnekleri, IP'nin belgeleri ve ayrıştırılmış adresleri). Arayüz: TLS toplu tablosunda Sunucu'dan sonra "web.config" kolonu (`ttWc`, `ttWcYukle`:
+  satır IP'leri bir kez, hazırlanıyorsa 5 sn sonra; 403 / 404 / UCMDB tanımsızsa kolon gizli) → "📄 görüntüle (N)" / "yok" / "hazırlanıyor…"; pencere `#ttWcModal` (belge seçici,
+  Kopyala, Esc / dışına tıkla kapatır, bilgi satırında maskelenen sayısı ve UCMDB zinciri). `Ayristir` / `Db` (WCF client = giden, service / baseAddress = gelen, appSettings /
+  setting / rewrite URL'leri = giden, connectionStrings → yalnız sunucu / port / DB) YAZILDI ama şimdilik yalnız tanıda kullanılıyor — FQDN / giden satırlarına bağlamak sonraki adım
+  (kullanıcı onayıyla). Sahte XML ile çözme (düz / zip / gzip / UTF-16), maskeleme (sızıntı yok) ve ayrıştırma; mock'la arayüz denendi; Oracle tarafı canlıda denenmedi.
 - **Fiziksel envanter** (`FizikselEnvanter.cs`, `wwwroot/fiziksel.js`, sekme "Fiziksel envanter" `data-ui="fiziksel"`, `?fiziksel=1&kabin=&host=`;
   claude.ai sohbetindeki görev tanımı: "Bu kabin kapanırsa hangi uygulamalar etkilenir?"): veri doku DB'de HAZIR — NlyteCollector (nlyte OData →
   dbo.NlyteRaw) + `EXEC dbo.sp_KabinZincirYenile` doldurur; DeltaFlow YALNIZ OKUR (yazmaz, prosedürü çağırmaz). Betik kullanıcıda

@@ -44,6 +44,7 @@ builder.Services.AddSingleton<HttpSysKayitService>();
 builder.Services.AddSingleton<SegmentTaramaService>();
 builder.Services.AddSingleton<ServisImzaService>();
 builder.Services.AddSingleton<NessusService>();
+builder.Services.AddSingleton<UcmdbService>();
 builder.Services.AddSingleton<FizikselService>();
 builder.Services.AddSingleton<ZafiyetService>();
 builder.Services.AddSingleton<BirimService>();
@@ -1184,6 +1185,36 @@ app.MapPost("/api/tls/toplu/{id}/durdur", (string id, HttpContext ctx, IConfigur
     TlsToplu.Get(id)?.Cts.Cancel(); return Results.Ok();
 });
 
+// UCMDB web.config (TLS toplu tablosundaki "web.config" kolonu): IP → belgeler (dizin arka planda hazırlanır), belge içeriği (gizli değerler maskeli), tanı
+app.MapPost("/api/ucmdb/belgeler", async (UcmdbIstek req, UcmdbService u, EnvanterService envanter, CancellationToken ct) =>
+{
+    if (!u.Acik) return Results.Ok(new { acik = false });
+    var (hazir, hata) = u.DizinDurumu();
+    if (!hazir) return Results.Ok(new { acik = true, hazir = false, hata });
+    var ips = (req.Ips ?? []).Select(x => LookupQuery.TryParseIpv4(x, out string v) ? v : null).OfType<string>().Distinct().Take(5000).ToList();
+    var b = u.Belgeler(ips, await envanter.GetAsync(false, ct));
+    return Results.Ok(new { acik = true, hazir = true, belgeler = b.ToDictionary(kv => kv.Key, kv => kv.Value.Select(x => new { id = x.Id, ad = x.Ad, sunucu = x.Sunucu })) });
+});
+app.MapGet("/api/ucmdb/belge", async (string id, UcmdbService u, CancellationToken ct) =>
+{
+    if (!u.Acik) return Results.NotFound(new { error = "UCMDB bağlantısı tanımlı değil (Ucmdb:Baglanti)." });
+    try
+    {
+        var r = await u.BelgeAsync(id, ct);
+        if (r == null) return Results.NotFound(new { error = "Belge bulunamadı (dizin yenilenmiş olabilir; sayfayı yenileyin)." });
+        var (b, metin, bicim, boyut, maske) = r.Value;
+        return Results.Ok(new { id = b.Id, ad = b.Ad, sunucu = b.Sunucu, zincir = b.Zincir, bicim, boyut, maske, metin });
+    }
+    catch (Exception ex) when (ex is not OperationCanceledException) { return Results.Ok(new { error = "UCMDB okunamadı: " + ex.Message }); }
+});
+app.MapGet("/api/ucmdb/tani", async (string? ip, UcmdbService u, EnvanterService envanter, CancellationToken ct) =>
+{
+    EnvanterSnapshot? env = null;
+    try { env = await envanter.GetAsync(false, ct); } catch (Exception ex) when (ex is not OperationCanceledException) { }
+    string? v = ip != null && LookupQuery.TryParseIpv4(ip, out string x) ? x : null;
+    return Results.Text(await u.TaniAsync(v, env, ct), "text/plain; charset=utf-8");
+});
+
 // IP kartı (Gelen portlar ve çalışan süreçler tablosu): o IP'nin Nessus özeti — port başına TLS sürümleri, teknoloji, sertifika
 app.MapGet("/api/nessus/ip", async (string ip, NessusService n, CancellationToken ct) =>
 {
@@ -2065,4 +2096,5 @@ record L4Row(string Vifg, string ClientIp, string ServerIp, string Port, int Hit
 record L7Row(string Vifg, string ClientIp, string ServerIp, string Url, int Hit);
 
 // Portlar: girişte IP + port verilen satırlar (ip → portlar; yalnız bu portlar listelenir); Fqdn: FQDN / endpoint araması
+record UcmdbIstek(List<string>? Ips);
 record TlsTopluIstek(List<string>? Ips, int? Saat, bool? Sifresiz, bool? Fqdn = null, Dictionary<string, List<string>>? Portlar = null, bool? Giden = null);

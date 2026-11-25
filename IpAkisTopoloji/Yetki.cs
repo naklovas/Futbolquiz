@@ -70,6 +70,7 @@ static class Yetki
         if (B("/api/segment/exeag")) return ([Segment, Etiket, Islev], "Segment / etiket tarama");
         if (B("/api/segment")) return ([Segment, Etiket], "Segment / etiket tarama");
         if (B("/api/tls/toplu")) return ([Tls], "TLS toplu sorgu");
+        if (B("/api/ucmdb")) return ([Tls], "UCMDB web.config");
         if (B("/api/fiziksel") && !B("/api/fiziksel/ip")) return ([Fiziksel], "Fiziksel envanter");
         if (B("/api/envanter/yenile")) return ([Yazma], "Envanteri yeniden yükleme");
         return null;
