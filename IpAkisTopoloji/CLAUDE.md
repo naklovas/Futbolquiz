@@ -863,6 +863,21 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
   =49152 hariç). Arayüzde "Şifreleme" + "TCP trafiği" kolonları (kutucuk kapalıysa gizli), "N portta olası şifresiz", "Yalnız olası şifresiz",
   olası şifresiz satır kırmızı; CSV ŞİFRELEME / ŞİFRELEME NOTU / TCP TRAFİĞİ. Tek IP panelinde bu ayrım henüz yok (IP sorgusunun flow_tcp verisi
   orada zaten var, ek sorgusuz eklenebilir).
+  FQDN / ENDPOINT URL (kullanıcı: mailde "ilgili servislerin FQDN / endpoint URL bilgilerinin paylaşılması" istendi; elde IP + port, tek uygulama, ~1000 sunucu →
+  "toplu TLS içine ekleyebiliriz"): "FQDN / endpoint URL bilgisini de al" kutucuğu (localStorage `df.ttFqdn`, istek `fqdn`) → grup başına TLS sorgusuyla aynı anda
+  `TlsToplu.UcNoktaAsync`: (1) Carbon Black `(TERM(ip)…) remote_ip IN (…) direction=outbound domain=*` → `stats by remote_ip remote_port domain` (istemcilerin bağlanırken
+  çözdüğü DNS adı; sunucunun üyesi olduğu VIP ip'leri de sorguya girer, VIP ip:port'taki ad üye portuna "DNS · VIP x" kaynağıyla yazılır; IP biçimli ad atılır), `Tls:UcCbSaat`=24;
+  (2) IIS logu (HttpSys:IisIndexleri) `iis_sip IN (…)`, yol küçük harf + GUID → {guid}, sayı parçası → {n}, `coalesce(cs_host, cs_Host)` Host başlığı (alan çıkarılıyorsa),
+  stats ip × port × yol; tarama / sağlık yolları (`HttpSysEslesme.IisTarama`, ilk parça) atılır; `Tls:UcIisSaat` (boşsa HttpSys:IisSaat=1); (3) Nessus `SunucularAsync`
+  (port sertifika adları, TLS → https, sunucu DNS adı; `Tls:UcNessus`=true). Sorgu başına `Tls:UcSureSaniye`=180. `TlsTopluSatir` ek alanları: Fqdn [TlsFqdn(Ad, Kaynaklar, Sayi,
+  Istemci)] (sıra: CB DNS > IIS Host > sertifika > sunucu DNS; en çok 12), Uclar [TlsUc(Yol, Istek, Istemci, Metot, Site)] (ilk 25), Url (ilk joker olmayan ad + http/https
+  (TLS / sertifika / 443-8443-9443) + port; 80/443'te port yazılmaz), Website (ERT WEBSITE, IP + port), Vip (üye portu = satır portu → LbIp:LbPort (havuz)), Istenen.
+  CB / IIS'te görülen portlar da satır olur. AppResponse hatasında FQDN açıksa satırlar yine üretilir (TLS kolonu "alınamadı"). IP + PORT GİRİŞİ: `ttCiftler` satırdaki IP'den
+  sonraki ilk 1–65535 sayı (sekme / : / ; ayraçlı); Excel (`ttXlsxMetni`) artık satır yapısını korur (sharedStrings dizinle çözülür, <row> → satır, hücre → sekme);
+  "Yalnız verilen portlar" kutucuğu (varsayılan açık) → istek `portlar {ip: [port]}` → yalnız o portlar (veri olmasa da satır). `Tls:TopluMaxIp` varsayılanı 2000.
+  Arayüz kolonları: FQDN (kaynak rozetleri DNS / VIP DNS / IIS / sertifika / sunucu DNS, ilk 3 + açılır), Önerilen URL, Endpoint (IIS) (ilk 3 + açılır), VIP, IIS website (ERT);
+  özet "N / M portta FQDN bulundu"; CSV IIS WEBSITE, VIP, ÖNERİLEN URL, FQDN, FQDN KAYNAKLARI, ENDPOINT URL'LERİ (URL + yol (istek)). Sahte envanter + sahte Splunk ile uçtan
+  uca, Playwright'la Excel'den IP + port okuma denendi. IIS dışı (Java / nginx…) servislerde yol ağ verisinde yok (yalnız FQDN + port).
 - **Fiziksel envanter** (`FizikselEnvanter.cs`, `wwwroot/fiziksel.js`, sekme "Fiziksel envanter" `data-ui="fiziksel"`, `?fiziksel=1&kabin=&host=`;
   claude.ai sohbetindeki görev tanımı: "Bu kabin kapanırsa hangi uygulamalar etkilenir?"): veri doku DB'de HAZIR — NlyteCollector (nlyte OData →
   dbo.NlyteRaw) + `EXEC dbo.sp_KabinZincirYenile` doldurur; DeltaFlow YALNIZ OKUR (yazmaz, prosedürü çağırmaz). Betik kullanıcıda

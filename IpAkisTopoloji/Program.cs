@@ -1151,15 +1151,21 @@ app.MapGet("/api/tls", async (string ip, int? saat, string? port, IConfiguration
 });
 
 // Toplu TLS: IP listesi (Excel'den yapıştırılan kolon) → arka plan işi; IP × port × uygulama × TLS sürümleri (yalnız gelen)
-app.MapPost("/api/tls/toplu", (TlsTopluIstek req, HttpContext ctx, IConfiguration cfg, IHttpClientFactory factory, EnvanterService envanter) =>
+app.MapPost("/api/tls/toplu", (TlsTopluIstek req, HttpContext ctx, IConfiguration cfg, IHttpClientFactory factory, EnvanterService envanter, NessusService nessus) =>
 {
     if (!Yetki.Var(cfg, ctx, Yetki.Tls)) return Yetki.Red(ctx, "TLS toplu sorgu");
     var ips = (req.Ips ?? []).Select(x => LookupQuery.TryParseIpv4(x, out string v) ? v : null).OfType<string>().Distinct().ToList();
     if (ips.Count == 0) return Results.BadRequest(new { error = "Geçerli IPv4 adresi yok." });
-    int max = cfg.GetValue("Tls:TopluMaxIp", 500);
+    int max = cfg.GetValue("Tls:TopluMaxIp", 2000);
     if (ips.Count > max) return Results.BadRequest(new { error = $"En çok {max} IP sorgulanabilir ({ips.Count} verildi; Tls:TopluMaxIp)." });
     int saat = Math.Clamp(req.Saat ?? cfg.GetValue("Tls:Saat", 24), 1, cfg.GetValue("Tls:MaxSaat", 24));
-    var j = TlsToplu.Start(ips, saat, req.Sifresiz ?? false, ctx.User.Identity?.Name ?? "", cfg, factory.CreateClient("appresponse"), envanter);
+    Dictionary<string, HashSet<string>>? istenen = null;
+    foreach (var (k, ps) in req.Portlar ?? [])
+        if (LookupQuery.TryParseIpv4(k, out string kip))
+            foreach (var pt in ps ?? []) if (int.TryParse(pt?.Trim(), out int pn) && pn is > 0 and < 65536)
+                ((istenen ??= [])[kip] = istenen.GetValueOrDefault(kip) ?? []).Add(pn.ToString());
+    var j = TlsToplu.Start(ips, saat, req.Sifresiz ?? false, ctx.User.Identity?.Name ?? "", cfg, factory.CreateClient("appresponse"), envanter,
+        req.Fqdn ?? false, istenen, factory.CreateClient("splunk"), nessus);
     return Results.Ok(new { id = j.Id, ipSayisi = ips.Count, toplamParca = j.ToplamParca });
 });
 app.MapGet("/api/tls/toplu/{id}", (string id, HttpContext ctx, IConfiguration cfg) =>
@@ -1168,7 +1174,7 @@ app.MapGet("/api/tls/toplu/{id}", (string id, HttpContext ctx, IConfiguration cf
     var j = TlsToplu.Get(id);
     if (j == null) return Results.NotFound(new { error = "İş bulunamadı (süresi dolmuş olabilir)." });
     lock (j) return Results.Ok(new { j.Id, j.Saat, j.Bas, j.Bit, ipSayisi = j.Ips.Count, j.Parca, j.ToplamParca, j.Bitti, j.Hata,
-        yontem = string.Join(", ", j.Yontemler), sifresiz = j.Sifresiz, mesajlar = j.Mesajlar.ToList(), satirlar = j.Satirlar.ToList() });
+        yontem = string.Join(", ", j.Yontemler), sifresiz = j.Sifresiz, fqdn = j.Fqdn, istenenPort = j.IstenenPort, mesajlar = j.Mesajlar.ToList(), satirlar = j.Satirlar.ToList() });
 });
 app.MapPost("/api/tls/toplu/{id}/durdur", (string id, HttpContext ctx, IConfiguration cfg) =>
 {
@@ -2056,4 +2062,5 @@ record AppResponseResult(string Appliance, int VifgCount, int RawL4, int RawL7,
 record L4Row(string Vifg, string ClientIp, string ServerIp, string Port, int Hit);
 record L7Row(string Vifg, string ClientIp, string ServerIp, string Url, int Hit);
 
-record TlsTopluIstek(List<string>? Ips, int? Saat, bool? Sifresiz);
+// Portlar: girişte IP + port verilen satırlar (ip → portlar; yalnız bu portlar listelenir); Fqdn: FQDN / endpoint araması
+record TlsTopluIstek(List<string>? Ips, int? Saat, bool? Sifresiz, bool? Fqdn = null, Dictionary<string, List<string>>? Portlar = null);
