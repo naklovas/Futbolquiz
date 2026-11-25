@@ -884,7 +884,8 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
   hedefin ERT uygulaması; FQDN açıksa CB `local_ip IN (grup) direction=outbound domain=*` → hedef ip:port'a bağlanırken çözülen ad (`UcVeri.GidenDns`) ve TLS görülmeyen
   ama CB'de adıyla bağlanılan hedefler de satır ("TLS el sıkışması görülmedi"). Önerilen URL HTTP olmayan bilinen portlarda (DB, SSH, RDP, LDAP, MQ… `_httpDegil`) üretilmez.
   Arayüz: "Yön" (▼ Gelen / ▲ Giden) ve "Hedef (giden)" kolonları, Port altında "kendi portu" / "hedef portu", "Yön" süzgeci, özette gelen / giden sayıları; CSV YÖN, HEDEF IP,
-  HEDEF SUNUCU. Şifresiz kontrolü (flow_tcp) yalnız gelen.
+  HEDEF SUNUCU. Şifresiz kontrolü (flow_tcp) yalnız gelen. Kolon sırası (kullanıcı: "TLS versiyonu kolonu gitti" — FQDN kolonları araya girince ekrandan taştı): IP, Sunucu,
+  [Yön, Hedef], Port, Uygulama, [Şifreleme], TLS sürümü, El sıkışması, [TCP], İstemci, Not, sonra FQDN grubu (FQDN, Önerilen URL, Endpoint, VIP, IIS website).
 - **Fiziksel envanter** (`FizikselEnvanter.cs`, `wwwroot/fiziksel.js`, sekme "Fiziksel envanter" `data-ui="fiziksel"`, `?fiziksel=1&kabin=&host=`;
   claude.ai sohbetindeki görev tanımı: "Bu kabin kapanırsa hangi uygulamalar etkilenir?"): veri doku DB'de HAZIR — NlyteCollector (nlyte OData →
   dbo.NlyteRaw) + `EXEC dbo.sp_KabinZincirYenile` doldurur; DeltaFlow YALNIZ OKUR (yazmaz, prosedürü çağırmaz). Betik kullanıcıda
