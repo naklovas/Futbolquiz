@@ -896,6 +896,12 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
   `DisUrl` = dış bacaktaki ilk ad + üye portu (TLS görüldüyse https). Arayüz: Hedef hücresinde "VIP · havuz", "→ üye ip:port [dış|iç] TLS rozeti + ad", "Dış adres: …";
   kaynak rozetleri SNI / SNI dış / FW; CSV DIŞ BACAK (VIP HAVUZ ÜYELERİ), DIŞ KURUM URL. Sahte envanter (çıkış VIP'i + dış üyeler) + sahte Splunk (CB giden DNS, PAN url)
   ile uçtan uca denendi; AppResponse SNI kolonu ve PAN alan adları canlıda teyit edilmedi.
+  İLERLEME (kullanıcı: "%0'da bayadır"): yüzde = biten grup / grup; tek IP tek grup olduğundan iş bitene kadar %0 kalıyordu (TLS + CB / IIS / Nessus + dış bacak sırayla).
+  `TlsTopluIs.Adimlar` (`TlsAdim` ad, durum, başlangıç, bitiş; grup başında sıfırlanır, `GrupBas`) — `CekAsync(..., ilerleme)` kutu başına "bağlanıyor / n. deneme: X (en çok N sn) /
+  tamam · yöntem · satır / alınamadı", `Izle(j, ad, task)` CB DNS (gelen / giden), IIS, Nessus, flow_tcp, Palo Alto; dış bacak TLS ayrı etiketle. GET `/api/tls/toplu/{id}` →
+  `gecen`, `grupGecen`, `adimlar` [{ad, durum, bitti, sure}]; arayüzde ilerleme çubuğunun altında adım listesi (`ttAdimHtml`, süren önce) ve "x dk geçti".
+  SNI denemeleri `Tls:SniBeklemeSaniye`=120 (BeklemeSaniye'den büyük olamaz); SNI'li deneme zaman aşımına düşerse o kutuda kalan SNI denemeleri atlanır ve `_sniYok` işaretlenmez
+  (yavaşlık kolon yokluğu sayılmaz).
 - **Fiziksel envanter** (`FizikselEnvanter.cs`, `wwwroot/fiziksel.js`, sekme "Fiziksel envanter" `data-ui="fiziksel"`, `?fiziksel=1&kabin=&host=`;
   claude.ai sohbetindeki görev tanımı: "Bu kabin kapanırsa hangi uygulamalar etkilenir?"): veri doku DB'de HAZIR — NlyteCollector (nlyte OData →
   dbo.NlyteRaw) + `EXEC dbo.sp_KabinZincirYenile` doldurur; DeltaFlow YALNIZ OKUR (yazmaz, prosedürü çağırmaz). Betik kullanıcıda

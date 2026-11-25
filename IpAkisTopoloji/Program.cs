@@ -1174,7 +1174,9 @@ app.MapGet("/api/tls/toplu/{id}", (string id, HttpContext ctx, IConfiguration cf
     var j = TlsToplu.Get(id);
     if (j == null) return Results.NotFound(new { error = "İş bulunamadı (süresi dolmuş olabilir)." });
     lock (j) return Results.Ok(new { j.Id, j.Saat, j.Bas, j.Bit, ipSayisi = j.Ips.Count, j.Parca, j.ToplamParca, j.Bitti, j.Hata,
-        yontem = string.Join(", ", j.Yontemler), sifresiz = j.Sifresiz, fqdn = j.Fqdn, giden = j.Giden, istenenPort = j.IstenenPort, mesajlar = j.Mesajlar.ToList(), satirlar = j.Satirlar.ToList() });
+        yontem = string.Join(", ", j.Yontemler), sifresiz = j.Sifresiz, fqdn = j.Fqdn, giden = j.Giden, istenenPort = j.IstenenPort, mesajlar = j.Mesajlar.ToList(), satirlar = j.Satirlar.ToList(),
+        gecen = (int)(DateTime.UtcNow - j.Basladi).TotalSeconds, grupGecen = (int)(DateTime.UtcNow - j.GrupBas).TotalSeconds,
+        adimlar = j.Adimlar.Select(a => new { ad = a.Ad, durum = a.Durum, bitti = a.Bit != null, sure = (int)((a.Bit ?? DateTime.UtcNow) - a.Bas).TotalSeconds }).ToList() });
 });
 app.MapPost("/api/tls/toplu/{id}/durdur", (string id, HttpContext ctx, IConfiguration cfg) =>
 {

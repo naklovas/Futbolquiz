@@ -20,6 +20,25 @@ const TT_SIF = {
 const ttSifHtml = r => { const x = TT_SIF[r.sifreleme] ?? TT_SIF.bilinmiyor;
   return `<span class="tt-sif ${x[1]}" title="${esc(x[2] + (r.ipucu ? " · " + r.ipucu : ""))}">${x[0]}</span>${r.ipucu ? `<div class="small muted">${esc(r.ipucu.split(":")[0])}</div>` : ""}`; };
 
+// Süre: 75 → "1 dk 15 sn"
+function ttSure(sn) {
+  sn = Math.max(0, sn | 0);
+  return sn < 60 ? `${sn} sn` : sn < 3600 ? `${Math.floor(sn / 60)} dk ${sn % 60} sn` : `${Math.floor(sn / 3600)} sa ${Math.floor(sn % 3600 / 60)} dk`;
+}
+// Sürmekte olan grubun adımları: hangi kutu / sorgu bekleniyor, ne kadar süredir (yüzde grup bitince ilerler)
+function ttAdimHtml(b) {
+  const a = b.adimlar ?? [];
+  if (!a.length) return `<div class="small muted">${b.grupGecen != null ? `Grup ${fmt((b.parca ?? 0) + 1)} hazırlanıyor (envanter) · ${ttSure(b.grupGecen)}` : ""}</div>`;
+  const sure = a.filter(x => !x.bitti), biten = a.filter(x => x.bitti);
+  const satir = x => `<li title="${esc(x.ad + " · " + x.durum + " · " + ttSure(x.sure))}" class="${x.bitti ? (/^(hata|alınamadı|iptal)/.test(x.durum) ? "tt-ad-hata" : "tt-ad-ok") : "tt-ad-sur"}">
+      ${x.bitti ? (/^(hata|alınamadı|iptal)/.test(x.durum) ? "✗" : "✓") : `<span class="spinner"></span>`} <b>${esc(x.ad)}</b>
+      <span class="muted">· ${esc(x.durum)} · ${ttSure(x.sure)}</span></li>`;
+  return `<div class="tt-adim small">
+    <div class="muted">Grup ${fmt((b.parca ?? 0) + 1)} / ${fmt(b.toplamParca ?? 0)} · ${ttSure(b.grupGecen ?? 0)} — yüzde, grubun tüm adımları bitince ilerler.
+      ${sure.length ? `Bekleniyor: ${sure.length} adım` : "Satırlar hazırlanıyor"}</div>
+    <ul>${sure.map(satir).join("")}${biten.map(satir).join("")}</ul></div>`;
+}
+
 // Satır başına IP + port çiftleri (kullanıcı: "elimizde IP ve port var"): "10.1.1.1<sekme>443", "10.1.1.1:443", "10.1.1.1;443" — satırdaki
 // IP'den sonraki ilk 1–65535 arası sayı port sayılır; IP'siz / portsuz satırlar atlanır. Sonuç ip → Set(port)
 function ttCiftler(metin) {
@@ -266,7 +285,7 @@ function ttCiz() {
   el.innerHTML = `
     <div class="toolbar">
       <h2 style="margin:0">Sonuç</h2>
-      ${!b.bitti ? `<span class="small"><span class="spinner"></span> ${fmt(b.parca ?? 0)} / ${fmt(b.toplamParca ?? 0)} grup · %${pct}</span>` : b.hata ? `<span class="small" style="color:var(--err)">${esc(b.hata)}</span>` : `<span class="small" style="color:var(--ok)">✓ tamamlandı</span>`}
+      ${!b.bitti ? `<span class="small"><span class="spinner"></span> ${fmt(b.parca ?? 0)} / ${fmt(b.toplamParca ?? 0)} grup · %${pct}${b.gecen != null ? ` · ${ttSure(b.gecen)} geçti` : ""}</span>` : b.hata ? `<span class="small" style="color:var(--err)">${esc(b.hata)}</span>` : `<span class="small" style="color:var(--ok)">✓ tamamlandı</span>`}
       <span class="small muted">${fmt(b.ipSayisi ?? 0)} IP · ${fmt(ipTls)} IP'de TLS görüldü · ${fmt(eski.length)} satırda eski sürüm ${sk ? ` · <b style="color:${sifresiz.length ? "var(--err)" : "inherit"}">${fmt(sifresiz.length)} portta olası şifresiz</b>` : ""}${b.bas ? ` · ${fmtT(b.bas)} – ${fmtT(b.bit)}` : ""}${b.yontem ? ` · ${esc(b.yontem)}` : ""}${fk ? ` · ${fmt(fqBulunan)} / ${fmt(all.filter(r => r.port).length)} portta FQDN bulundu` : ""}${b.istenenPort ? ` · yalnız verilen ${fmt(b.istenenPort)} IP:port` : ""}${gk ? ` · ▼ ${fmt(nGelen)} gelen, ▲ ${fmt(nGiden)} giden` : ""}</span>
       ${gk ? `<select id="ttYon" title="Gelen: sunucu hizmet veriyor (port sunucunun portu) · Giden: sunucu başka servisi çağırıyor (port hedefin portu)"><option value="">Yön: Tümü</option><option value="gelen"${tt.yon === "gelen" ? " selected" : ""}>▼ Gelen</option><option value="giden"${tt.yon === "giden" ? " selected" : ""}>▲ Giden</option></select>` : ""}
       <input type="search" id="ttAra" placeholder="ara: IP, sunucu, uygulama, sürüm" value="${esc(tt.filtre)}" style="margin-left:auto;min-width:220px">
@@ -276,6 +295,7 @@ function ttCiz() {
       <button type="button" data-csv id="ttCsv"${all.length ? "" : " disabled"}>Excel (CSV)</button>
     </div>
     ${!b.bitti ? `<div class="tt-bar"><i style="width:${pct}%"></i></div>` : ""}
+    ${!b.bitti ? ttAdimHtml(b) : ""}
     <div class="tbl-wrap" style="max-height:62vh"><table>
       <thead><tr><th>IP</th><th>Sunucu</th>${gk ? `<th title="▼ Gelen: bu sunucuya gelen bağlantı (port bu sunucunun portu) · ▲ Giden: bu sunucunun başka sunucuya yaptığı bağlantı (port hedefin portu)">Yön</th><th title="Giden bağlantıda çağrılan sunucu">Hedef (giden)</th>` : ""}<th title="Gelen: bu sunucunun dinlediği port · Giden: hedefin portu">Port</th><th title="Gelen: bu portun ERT uygulaması · Giden: hedefin ERT uygulaması">Uygulama (ERT)</th>${sk ? `<th>Şifreleme</th>` : ""}<th>TLS sürümü</th><th class="num">El sıkışması</th>${sk ? `<th class="num" title="AppResponse flow_tcp: bu porta gelen TCP trafiği (bağlantı / satır sayısı)">TCP trafiği</th>` : ""}<th class="num">İstemci</th><th>Not</th>${fk ? `<th title="Servise erişilen adlar; DNS = istemcilerin bağlanırken çözdüğü ad (Carbon Black), VIP DNS = sunucunun üyesi olduğu VIP'e bağlanırken, IIS = IIS logundaki Host başlığı, sertifika = Nessus'un gördüğü sertifika adları, sunucu DNS = Nessus'un sunucu adı">FQDN</th><th title="En çok kullanılan ad + port + http/https (TLS görüldüyse ya da sertifika varsa https)">Önerilen URL</th><th title="Gelen: IIS logunda görülen istek yolları (sayı / GUID parçaları {n} / {guid}); giden: Palo Alto URL logundaki yollar. IIS dışı gelen servislerde yol ağ verisinde yok">Endpoint (IIS / FW)</th><th>VIP</th><th>IIS website (ERT)</th>` : ""}</tr></thead>
       <tbody>${list.length ? list.map(r => `<tr${r.surumler?.some(s => tlsEski(s.surum)) || r.sifreleme === "sifresiz" ? ` class="tls-eski-satir"` : ""}>

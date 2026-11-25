@@ -58,7 +58,7 @@ static class TlsAkis
     // el sıkışmaları (toplu sorgu); değilse sunucu ya da istemci. Kutu başına sırayla: gruplu + metrik → gruplu → ham.
     internal static async Task<(List<Ham> Satirlar, List<TlsCihaz> Cihazlar, List<string> Mesajlar, bool Kesik)> CekAsync(
         IReadOnlyList<string> ips, DateTime bas, DateTime bit, IReadOnlyList<string> portlar, bool gelenYalniz,
-        IConfiguration cfg, HttpClient http, CancellationToken ct, string? sniKol = null)
+        IConfiguration cfg, HttpClient http, CancellationToken ct, string? sniKol = null, Action<string, string, bool>? ilerleme = null)
     {
         var t = cfg.GetSection("Tls");
         string kaynak = t["Kaynak"] ?? "tls_handshakes";
@@ -69,6 +69,8 @@ static class TlsAkis
         string sni = sniKol ?? t["Sni"] ?? "";
         if (sniKol != null && _sniYok) sni = "";
         int bekle = t.GetValue("BeklemeSaniye", 300);
+        // SNI'li denemeler daha kısa beklenir: kolon / gruplama sorunluysa rapor uzun sürüp zaman aşımına düşebiliyor, ardından SNI'siz deneme yine tam süre bekliyordu
+        int bekleSni = Math.Clamp(t.GetValue("SniBeklemeSaniye", 120), 10, Math.Max(10, bekle));
 
         string PortF(string k) => portlar.Count > 0 ? " and (" + string.Join(" or ", portlar.Select(p => $"{k} == {p}")) + ")" : "";
         string srvF = "(" + string.Join(" or ", ips.Select(ip => $"{srvIp} == {ip}")) + ")" + PortF(srvPort);
@@ -106,11 +108,17 @@ static class TlsAkis
         {
             var satirlar = new List<Ham>();
             string? yontem = null, hata = null;
+            bool sniZaman = false;   // SNI'li deneme zaman aşımına düştü (kolon yok değil, yavaş) → kalan SNI denemeleri atlanır
             try
             {
+                ilerleme?.Invoke(n.Ad, "bağlanıyor", false);
                 var (_, baseUrl, jwt) = await AppResponseService.ConnectAsync(n.I, cfg, http, ct);
+                int no = 0;
                 foreach (var d in denemeler)
                 {
+                    no++;
+                    if (d.Sni && sniZaman) continue;
+                    ilerleme?.Invoke(n.Ad, $"{no}/{denemeler.Count}. deneme: {d.Ad} (en çok {(d.Sni ? bekleSni : bekle)} sn)", false);
                     try
                     {
                         var tmp = new List<Ham>();
@@ -125,7 +133,7 @@ static class TlsAkis
                                 topn = 100000
                             })!.AsObject();
                             if (d.Grup != null) dd["group_by"] = JsonSerializer.SerializeToNode(d.Grup);
-                            var data = await AppResponseService.RunSingleAsync(baseUrl, jwt, dd, sil, http, ct, bekle);
+                            var data = await AppResponseService.RunSingleAsync(baseUrl, jwt, dd, sil, http, ct, d.Sni ? bekleSni : bekle);
                             foreach (var a in data.OfType<JsonArray>())
                             {
                                 string C(int i) => i < a.Count ? a[i]?.ToString() ?? "" : "";
@@ -137,15 +145,16 @@ static class TlsAkis
                         break;
                     }
                     catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
-                    catch (Exception ex) { hata = ex.Message; }
+                    catch (Exception ex) { hata = ex.Message; if (d.Sni && ex is TimeoutException) sniZaman = true; }
                 }
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
             catch (Exception ex) { hata = ex is TaskCanceledException ? "Zaman aşımı" : ex.Message; }
-            return (n.Ad, satirlar, yontem, hata);
+            ilerleme?.Invoke(n.Ad, yontem != null ? $"tamam · {yontem} · {satirlar.Count} satır" : "alınamadı: " + Kisalt(hata, 120), true);
+            return (n.Ad, satirlar, yontem, hata, sniZaman);
         }));
 
-        if (sniKol != null && sni != "" && sonuc.Any(s => s.yontem != null) && sonuc.All(s => s.yontem == null || !s.yontem.EndsWith("+ SNI")))
+        if (sniKol != null && sni != "" && sonuc.Any(s => s.yontem != null) && !sonuc.Any(s => s.sniZaman) && sonuc.All(s => s.yontem == null || !s.yontem.EndsWith("+ SNI")))
             _sniYok = true;
         var cihazlar = sonuc.Select(s => new TlsCihaz(s.Ad, s.satirlar.Count, s.yontem, s.yontem == null ? Kisalt(s.hata, 300) : null)).ToList();
         var mesajlar = sonuc.Where(s => s.yontem == null).Select(s => $"[{s.Ad}] {Kisalt(s.hata, 300)}").ToList();
@@ -310,7 +319,22 @@ class TlsTopluIs
     public List<string> Mesajlar = [];
     public HashSet<string> Yontemler = [];
     public CancellationTokenSource Cts = new();
+    // Sürmekte olan grubun adımları (AppResponse kutuları, Carbon Black, IIS, Nessus, dış bacak…): ekranda "%0"da ne beklendiği görünsün
+    public List<TlsAdim> Adimlar = [];
+    public DateTime GrupBas = DateTime.UtcNow;
+    public void Adim(string ad, string durum, bool bitti = false)
+    {
+        lock (this)
+        {
+            int i = Adimlar.FindIndex(a => a.Ad == ad);
+            var bas = i >= 0 && Adimlar[i].Bit == null ? Adimlar[i].Bas : DateTime.UtcNow;
+            var yeni = new TlsAdim(ad, durum, bas, bitti ? DateTime.UtcNow : null);
+            if (i >= 0) Adimlar[i] = yeni; else Adimlar.Add(yeni);
+        }
+    }
 }
+
+record TlsAdim(string Ad, string Durum, DateTime Bas, DateTime? Bit);
 
 static class TlsToplu
 {
@@ -338,15 +362,17 @@ static class TlsToplu
                 foreach (var grup in ips.Chunk(parca))
                 {
                     j.Cts.Token.ThrowIfCancellationRequested();
+                    lock (j) { j.Adimlar.Clear(); j.GrupBas = DateTime.UtcNow; }
                     List<TlsAkis.Ham> ham = [];
                     bool tlsHata = false;
                     // TCP trafiği (şifresiz kontrolü) TLS sorgusuyla AYNI ANDA başlar (sırayla beklemek süreyi ikiye katlıyordu)
-                    var akisTask = sifresiz ? TlsAkis.AkisAsync(grup, bas, bit, cfg, http, j.Cts.Token) : null;
+                    var akisTask = sifresiz ? Izle(j, "TCP trafiği (AppResponse flow_tcp)", TlsAkis.AkisAsync(grup, bas, bit, cfg, http, j.Cts.Token)) : null;
                     // FQDN / endpoint: Carbon Black DNS adları + IIS logu + Nessus, TLS sorgusuyla aynı anda
-                    var ucTask = j.Fqdn ? UcNoktaAsync(grup, env, cfg, splunk!, nessus, j.Cts.Token, giden) : null;
+                    var ucTask = j.Fqdn ? UcNoktaAsync(grup, env, cfg, splunk!, nessus, j.Cts.Token, giden, j) : null;
                     try
                     {
-                        var (s, cihazlar, mesajlar, _) = await TlsAkis.CekAsync(grup, bas, bit, [], !giden, cfg, http, j.Cts.Token, sniKol);
+                        var (s, cihazlar, mesajlar, _) = await TlsAkis.CekAsync(grup, bas, bit, [], !giden, cfg, http, j.Cts.Token, sniKol,
+                            (c, d, b) => j.Adim("AppResponse TLS · " + c, d, b));
                         ham = s;
                         foreach (var c in cihazlar.Where(c => c.Yontem != null)) lock (j) j.Yontemler.Add(c.Yontem!);
                         lock (j) foreach (var m in mesajlar) if (!j.Mesajlar.Contains(m) && j.Mesajlar.Count < 30) j.Mesajlar.Add(m);
@@ -497,7 +523,17 @@ static class TlsToplu
         "5432", "5672", "5985", "5986", "6379", "9092", "11211", "27017", "47001", "50000", "61616"];
     static string? UrlYap(string? ad, bool https, string port) =>
         ad == null || _httpDegil.Contains(port) ? null : $"{(https ? "https" : "http")}://{ad}" + ((https && port == "443") || (!https && port == "80") ? "" : ":" + port);
-    static async Task<UcVeri> UcNoktaAsync(string[] grup, EnvanterSnapshot env, IConfiguration cfg, HttpClient http, NessusService? nessus, CancellationToken ct, bool giden = false)
+    // Bir alt sorguyu işin adım listesine yazar (başladı / bitti / hata); j yoksa yalnız bekler
+    static async Task<T> Izle<T>(TlsTopluIs? j, string ad, Task<T> t)
+    {
+        if (j == null) return await t;
+        j.Adim(ad, "sürüyor");
+        try { var r = await t; j.Adim(ad, "tamam", true); return r; }
+        catch (OperationCanceledException) { j.Adim(ad, "iptal", true); throw; }
+        catch (Exception ex) { j.Adim(ad, "hata: " + (ex.Message.Length > 100 ? ex.Message[..100] + "…" : ex.Message), true); throw; }
+    }
+
+    static async Task<UcVeri> UcNoktaAsync(string[] grup, EnvanterSnapshot env, IConfiguration cfg, HttpClient http, NessusService? nessus, CancellationToken ct, bool giden = false, TlsTopluIs? j = null)
     {
         var v = new UcVeri();
         var end = DateTimeOffset.Now;
@@ -509,10 +545,10 @@ static class TlsToplu
         string index = s["Index"] ?? "carbonblack", st = s["Sourcetype"] ?? "bit9:carbonblack:json";
         string terms = string.Join(" OR ", hedef.Select(x => $"TERM({x})")), inList = string.Join(",", hedef.Select(x => $"\"{x}\""));
         var cbSaat = Math.Clamp(cfg.GetValue("Tls:UcCbSaat", 24.0), 1, 168);
-        var cbTask = SplunkService.ExportAsync($"""
+        var cbTask = Izle(j, "Carbon Black DNS adları (gelen)", SplunkService.ExportAsync($"""
             search index={index} sourcetype="{st}" ({terms}) remote_ip IN ({inList}) direction=outbound domain=*
             | stats count dc(local_ip) as ist by remote_ip remote_port domain
-            """, new LookupQuery(grup[0], end.AddHours(-cbSaat), end), cfg, http, ct, "Carbon Black (DNS adları)", sure);
+            """, new LookupQuery(grup[0], end.AddHours(-cbSaat), end), cfg, http, ct, "Carbon Black (DNS adları)", sure));
 
         var idx = cfg.GetSection("HttpSys:IisIndexleri").Get<string[]>() is { Length: > 0 } a ? a : ["iis_msy", "iis_csy"];
         Task<SplunkResult>? iisTask = null;
@@ -520,7 +556,7 @@ static class TlsToplu
         {
             string gterms = string.Join(" OR ", grup.Select(x => $"TERM({x})")), gin = string.Join(",", grup.Select(x => $"\"{x}\""));
             var iisSaat = Math.Clamp(cfg.GetValue("Tls:UcIisSaat", cfg.GetValue("HttpSys:IisSaat", 1.0)), 0.25, 72);
-            iisTask = SplunkService.ExportAsync($$"""
+            iisTask = Izle(j, "IIS logu (endpoint yolları)", SplunkService.ExportAsync($$"""
                 search ({{string.Join(" OR ", idx.Select(x => "index=" + x))}}) ({{gterms}})
                 | fields host source _raw cs_host cs_Host
                 | rex "^\S+ \S+ (?<iis_sip>\S+) (?<iis_m>\S+) (?<iis_uri>\S+) \S+ (?<iis_port>\d+) \S+ (?<iis_cip>\S+)"
@@ -532,16 +568,16 @@ static class TlsToplu
                 | eval hh=lower(coalesce(cs_host, cs_Host, ""))
                 | stats count dc(iis_cip) as ist values(hh) as hh values(iis_site) as site latest(iis_m) as m by iis_sip iis_port iis_yol
                 | eval hh=mvjoin(mvindex(hh, 0, 4), "|||"), site=mvjoin(mvindex(site, 0, 2), ",")
-                """, new LookupQuery(grup[0], end.AddHours(-iisSaat), end), cfg, http, ct, "IIS logu (endpoint)", sure);
+                """, new LookupQuery(grup[0], end.AddHours(-iisSaat), end), cfg, http, ct, "IIS logu (endpoint)", sure));
         }
         else v.Mesajlar.Add("HttpSys:IisIndexleri geçersiz: IIS endpoint araması yapılmadı.");
         // giden: sunucunun kendi giden olaylarındaki hedef ad (domain) — hangi servislere hangi adla bağlanıyor
         string gin0 = string.Join(",", grup.Select(x => $"\"{x}\""));
-        var gidenTask = giden ? SplunkService.ExportAsync($"""
+        var gidenTask = giden ? Izle(j, "Carbon Black DNS adları (giden)", SplunkService.ExportAsync($"""
             search index={index} sourcetype="{st}" ({string.Join(" OR ", grup.Select(x => $"TERM({x})"))}) local_ip IN ({gin0}) direction=outbound domain=*
             | stats count by local_ip remote_ip remote_port domain
-            """, new LookupQuery(grup[0], end.AddHours(-cbSaat), end), cfg, http, ct, "Carbon Black (giden DNS adları)", sure) : null;
-        var nesTask = nessus is { Acik: true } && cfg.GetValue("Tls:UcNessus", true) ? nessus.SunucularAsync(grup, null, ct) : null;
+            """, new LookupQuery(grup[0], end.AddHours(-cbSaat), end), cfg, http, ct, "Carbon Black (giden DNS adları)", sure)) : null;
+        var nesTask = nessus is { Acik: true } && cfg.GetValue("Tls:UcNessus", true) ? Izle(j, "Nessus (sertifika / DNS adları)", nessus.SunucularAsync(grup, null, ct)) : null;
 
         static string? V(Dictionary<string, string> r, string k) => r.TryGetValue(k, out var x) && !string.IsNullOrWhiteSpace(x) ? x.Trim() : null;
         static long L(string? x) => long.TryParse(x, out var n) ? n : 0;
@@ -709,7 +745,8 @@ static class TlsToplu
         List<TlsAkis.Ham> ham = [];
         if (uyeIp.Count > 0)
         {
-            var (h, cihazlar, mesajlar, _) = await TlsAkis.CekAsync(uyeIp, bas, bit, [], true, cfg, http, ct, sniKol);
+            var (h, cihazlar, mesajlar, _) = await TlsAkis.CekAsync(uyeIp, bas, bit, [], true, cfg, http, ct, sniKol,
+                (c, d, b) => j.Adim($"VIP dış bacağı TLS ({uyeIp.Count} üye) · " + c, d, b));
             ham = h;
             lock (j) foreach (var m in mesajlar) if (!j.Mesajlar.Contains(m) && j.Mesajlar.Count < 30) j.Mesajlar.Add("Dış bacak: " + m);
         }
@@ -727,13 +764,13 @@ static class TlsToplu
                 {
                     var end = DateTimeOffset.Now;
                     double saat = Math.Clamp(cfg.GetValue("Tls:UcCbSaat", 24.0), 1, 168);
-                    var r = await SplunkService.ExportAsync($"""
+                    var r = await Izle(j, $"Palo Alto hedef adları ({fwHedef.Count} IP)", SplunkService.ExportAsync($"""
                         search index={idx} ({string.Join(" OR ", fwHedef.Select(x => $"TERM({x})"))}) {dIp} IN ({string.Join(",", fwHedef.Select(x => $"\"{x}\""))})
                         | eval ad=coalesce({string.Join(", ", alanlar)})
                         | where isnotnull(ad) AND ad!="" AND ad!="-"
                         | stats count by {dIp} {dPort} ad
                         """, new LookupQuery(fwHedef[0], end.AddHours(-saat), end), cfg, splunk, ct, "Palo Alto (hedef adı / URL)",
-                        TimeSpan.FromSeconds(Math.Clamp(cfg.GetValue("Tls:UcSureSaniye", 180.0), 10, 900)));
+                        TimeSpan.FromSeconds(Math.Clamp(cfg.GetValue("Tls:UcSureSaniye", 180.0), 10, 900))));
                     lock (j) foreach (var m in r.Messages) if (!j.Mesajlar.Contains(m) && j.Mesajlar.Count < 30) j.Mesajlar.Add(m);
                     foreach (var row in r.Rows)
                     {
