@@ -25,6 +25,8 @@ record TlsSonuc(string Ip, DateTime Bas, DateTime Bit, string? Yontem, List<TlsS
 static class TlsAkis
 {
     static readonly ConcurrentDictionary<string, (DateTime At, TlsSonuc S)> _cache = new();
+    static volatile bool _sniYok;   // kutularda SNI kolonu yok / gruplanamıyor: toplu sorguda bir daha denenmez
+    internal static bool SniYok => _sniYok;
 
     // tls.version değeri → ad (0x0300 SSL 3.0 … 0x0304 TLS 1.3); ad kolonu "TLSv1.2" gibi gelirse "TLS 1.2"
     public static string SurumAd(string v)
@@ -56,13 +58,16 @@ static class TlsAkis
     // el sıkışmaları (toplu sorgu); değilse sunucu ya da istemci. Kutu başına sırayla: gruplu + metrik → gruplu → ham.
     internal static async Task<(List<Ham> Satirlar, List<TlsCihaz> Cihazlar, List<string> Mesajlar, bool Kesik)> CekAsync(
         IReadOnlyList<string> ips, DateTime bas, DateTime bit, IReadOnlyList<string> portlar, bool gelenYalniz,
-        IConfiguration cfg, HttpClient http, CancellationToken ct)
+        IConfiguration cfg, HttpClient http, CancellationToken ct, string? sniKol = null)
     {
         var t = cfg.GetSection("Tls");
         string kaynak = t["Kaynak"] ?? "tls_handshakes";
         string cliIp = t["IstemciIp"] ?? "cli_tcp.ip", srvIp = t["SunucuIp"] ?? "srv_tcp.ip", srvPort = t["SunucuPort"] ?? "srv_tcp.port";
         string surum = t["Surum"] ?? "tls.version", surumAd = t["SurumAd"] ?? "tls.version_name", metrik = t["Metrik"] ?? "sum_tls.session_attempted";
-        string sni = t["Sni"] ?? "";   // boş: SNI istenmez (gruplamayı bozabilir)
+        // SNI (TLS ClientHello'da istenen sunucu adı): Tls:Sni ya da toplu sorgunun FQDN / giden kipi (sniKol). Kolon kutuda yoksa
+        // ya da gruplama bozulursa SNI'siz denemelere düşülür; bir kez hiç alınamazsa süreç boyunca denenmez (_sniYok)
+        string sni = sniKol ?? t["Sni"] ?? "";
+        if (sniKol != null && _sniYok) sni = "";
         int bekle = t.GetValue("BeklemeSaniye", 300);
 
         string PortF(string k) => portlar.Count > 0 ? " and (" + string.Join(" or ", portlar.Select(p => $"{k} == {p}")) + ")" : "";
@@ -74,15 +79,27 @@ static class TlsAkis
         bool sil = cfg.GetValue("DeleteReportInstances", true);
         long sBas = new DateTimeOffset(bas).ToUnixTimeSeconds(), sBit = new DateTimeOffset(bit).ToUnixTimeSeconds();
 
-        var tlsKol = new List<string> { surum }; if (sni != "") tlsKol.Add(sni);
-        var tlsKolAd = new List<string> { surumAd }; if (sni != "") tlsKolAd.Add(sni);
         string[] anahtar = [cliIp, srvIp, srvPort];
-        var denemeler = new List<(string Ad, string[] Kol, string[]? Grup, bool Metrik)>
+        var denemeler = new List<(string Ad, string[] Kol, string[]? Grup, bool Metrik, bool Sni)>();
+        if (sni != "")
         {
-            ("gruplu (tls.version)", [.. anahtar, .. tlsKol, metrik], [.. anahtar, .. tlsKol], true),
-            ("gruplu, metriksiz", [.. anahtar, .. tlsKol], [.. anahtar, .. tlsKol], false),
-            ("ham satırlar", [.. anahtar, .. tlsKolAd], null, false),
-        };
+            denemeler.Add(("gruplu (tls.version) + SNI", [.. anahtar, surum, sni, metrik], [.. anahtar, surum, sni], true, true));
+            denemeler.Add(("gruplu, metriksiz + SNI", [.. anahtar, surum, sni], [.. anahtar, surum, sni], false, true));
+        }
+        if (sniKol == null || sni == "")   // Tls:Sni ayarıyla eski davranış: SNI'li ham satırlar
+        {
+            var tlsKol = new List<string> { surum }; if (sni != "") tlsKol.Add(sni);
+            var tlsKolAd = new List<string> { surumAd }; if (sni != "") tlsKolAd.Add(sni);
+            denemeler.Add(("gruplu (tls.version)", [.. anahtar, .. tlsKol, metrik], [.. anahtar, .. tlsKol], true, sni != ""));
+            denemeler.Add(("gruplu, metriksiz", [.. anahtar, .. tlsKol], [.. anahtar, .. tlsKol], false, sni != ""));
+            denemeler.Add(("ham satırlar", [.. anahtar, .. tlsKolAd], null, false, sni != ""));
+        }
+        else
+        {
+            denemeler.Add(("gruplu (tls.version)", [.. anahtar, surum, metrik], [.. anahtar, surum], true, false));
+            denemeler.Add(("gruplu, metriksiz", [.. anahtar, surum], [.. anahtar, surum], false, false));
+            denemeler.Add(("ham satırlar", [.. anahtar, surumAd], null, false, false));
+        }
 
         var names = cfg.GetSection("Servers").GetChildren().Select((s, i) => (Ad: s["Name"] ?? $"Cihaz {i + 1}", I: i)).ToList();
         var sonuc = await Task.WhenAll(names.Select(async n =>
@@ -112,8 +129,8 @@ static class TlsAkis
                             foreach (var a in data.OfType<JsonArray>())
                             {
                                 string C(int i) => i < a.Count ? a[i]?.ToString() ?? "" : "";
-                                long sayi = d.Metrik && double.TryParse(C(3 + tlsKol.Count), NumberStyles.Any, CultureInfo.InvariantCulture, out var v) ? (long)v : 1;
-                                tmp.Add(new Ham(n.Ad, Ip(C(0)), Ip(C(1)), C(2), SurumAd(C(3)), sni != "" ? C(4) : null, sayi));
+                                long sayi = d.Metrik && double.TryParse(C(d.Sni ? 5 : 4), NumberStyles.Any, CultureInfo.InvariantCulture, out var v) ? (long)v : 1;
+                                tmp.Add(new Ham(n.Ad, Ip(C(0)), Ip(C(1)), C(2), SurumAd(C(3)), d.Sni ? C(4) : null, sayi));
                             }
                         }
                         satirlar = tmp; yontem = d.Ad; hata = null;
@@ -128,6 +145,8 @@ static class TlsAkis
             return (n.Ad, satirlar, yontem, hata);
         }));
 
+        if (sniKol != null && sni != "" && sonuc.Any(s => s.yontem != null) && sonuc.All(s => s.yontem == null || !s.yontem.EndsWith("+ SNI")))
+            _sniYok = true;
         var cihazlar = sonuc.Select(s => new TlsCihaz(s.Ad, s.satirlar.Count, s.yontem, s.yontem == null ? Kisalt(s.hata, 300) : null)).ToList();
         var mesajlar = sonuc.Where(s => s.yontem == null).Select(s => $"[{s.Ad}] {Kisalt(s.hata, 300)}").ToList();
         bool kesik = sonuc.Any(s => s.yontem == "ham satırlar" && s.satirlar.Count >= 100000);
@@ -263,7 +282,11 @@ record TlsTopluSatir(string Ip, string? Sunucu, string Port, string? Uygulama, b
     List<TlsFqdn>? Fqdn = null, List<TlsUc>? Uclar = null, string? Url = null, string? Website = null, string? Vip = null, bool Istenen = false,
     // Yön (kullanıcı: "tek IP yazarsam giden gelen ne varsa baksın"): "gelen" = IP sunucu (Port onun portu); "giden" = IP istemci, Hedef:Port çağrılan servis,
     // Uygulama hedefin ERT uygulaması
-    string Yon = "gelen", string? Hedef = null, string? HedefSunucu = null);
+    string Yon = "gelen", string? Hedef = null, string? HedefSunucu = null,
+    // Giden hedef bir VIP ise havuz üyeleri = "dış bacak" (kullanıcı: "dış kurum tahsilatlarında gidenlerde URL yok, muhtemelen VIP üzerinden gidiyor"):
+    // F5'in arkasındaki gerçek hedefler, o bacağın TLS sürümü ve SNI'si (AppResponse, istemci F5), Palo Alto'daki hedef adı / URL
+    List<TlsUye>? Uyeler = null, string? DisUrl = null);
+record TlsUye(string Ip, string? Port, bool Dis, List<TlsTopluSurum> Surumler, List<string> Sni, List<string> Adlar);
 // Servise erişilen ad: Kaynaklar = "DNS (Carbon Black)" (istemcilerin çözdüğü ad), "DNS · VIP ip:port", "IIS Host", "Sertifika (Nessus)", "Sunucu DNS (Nessus)"
 record TlsFqdn(string Ad, List<string> Kaynaklar, long Sayi, int Istemci);
 // IIS logunda görülen yol (sayı / GUID parçaları {n} / {guid}), istek ve istemci sayısı, örnek metot, site
@@ -305,6 +328,8 @@ static class TlsToplu
         var j = new TlsTopluIs { Kullanici = kullanici, Saat = saat, Ips = ips, Bas = bas, Bit = bit, ToplamParca = (ips.Count + parca - 1) / parca, Sifresiz = sifresiz,
             Fqdn = fqdn && splunk != null, IstenenPort = istenen?.Sum(x => x.Value.Count) ?? 0, Giden = giden };
         _isler[j.Id] = j;
+        // SNI (TLS'te istenen sunucu adı) FQDN / giden kipinde istenir (Tls:TopluSni, varsayılan tls.sni; boş = istenmez)
+        string? sniKol = (j.Fqdn || giden) && (cfg["Tls:TopluSni"] ?? "tls.sni") is { Length: > 0 } sk ? sk : null;
         _ = Task.Run(async () =>
         {
             try
@@ -321,7 +346,7 @@ static class TlsToplu
                     var ucTask = j.Fqdn ? UcNoktaAsync(grup, env, cfg, splunk!, nessus, j.Cts.Token, giden) : null;
                     try
                     {
-                        var (s, cihazlar, mesajlar, _) = await TlsAkis.CekAsync(grup, bas, bit, [], !giden, cfg, http, j.Cts.Token);
+                        var (s, cihazlar, mesajlar, _) = await TlsAkis.CekAsync(grup, bas, bit, [], !giden, cfg, http, j.Cts.Token, sniKol);
                         ham = s;
                         foreach (var c in cihazlar.Where(c => c.Yontem != null)) lock (j) j.Yontemler.Add(c.Yontem!);
                         lock (j) foreach (var m in mesajlar) if (!j.Mesajlar.Contains(m) && j.Mesajlar.Count < 30) j.Mesajlar.Add(m);
@@ -359,15 +384,23 @@ static class TlsToplu
                     catch (OperationCanceledException) when (j.Cts.IsCancellationRequested) { throw; }
                     catch (Exception ex) { lock (j) if (j.Mesajlar.Count < 30) j.Mesajlar.Add("FQDN / endpoint bilgisi alınamadı: " + ex.Message); }
                     var yeni = new List<TlsTopluSatir>();
+                    var gidenTum = new List<TlsTopluSatir>();
                     foreach (var ip in grup)
                     {
                         var ipAkis = akis?.Where(kv => TlsAkis.AyniIpDis(kv.Key.Ip, ip)).ToDictionary(kv => kv.Key.Port, kv => kv.Value);
                         HashSet<string>? sadece = istenen != null && istenen.TryGetValue(ip, out var ist) && ist.Count > 0 ? ist : null;
                         var ek = uc == null ? [] : uc.Portlar(ip, env);
                         var satirlar = Satirlar(ip, ham.Where(h => TlsAkis.AyniIpDis(h.Srv, ip)).ToList(), ipAkis, sifresiz, env, cfg, ek, sadece);
-                        yeni.AddRange(satirlar.Select(r => Zenginlestir(tlsHata ? r with { Not = "TLS verisi alınamadı (hata)", Sifreleme = "bilinmiyor" } : r, uc, env, sadece != null)));
-                        if (giden) yeni.AddRange(GidenSatirlar(ip, ham.Where(h => TlsAkis.AyniIpDis(h.Cli, ip) && !TlsAkis.AyniIpDis(h.Srv, ip)).ToList(), uc, env, tlsHata));
+                        var hamGelen = ham.Where(h => TlsAkis.AyniIpDis(h.Srv, ip)).ToList();
+                        yeni.AddRange(satirlar.Select(r => Zenginlestir(tlsHata ? r with { Not = "TLS verisi alınamadı (hata)", Sifreleme = "bilinmiyor" } : r, uc, env, sadece != null, hamGelen)));
+                        if (giden) gidenTum.AddRange(GidenSatirlar(ip, ham.Where(h => TlsAkis.AyniIpDis(h.Cli, ip) && !TlsAkis.AyniIpDis(h.Srv, ip)).ToList(), uc, env, tlsHata));
                     }
+                    // giden hedefi VIP olanların havuz üyeleri (dış bacak) + dış hedeflerin Palo Alto adları: grup başına tek ek sorgu
+                    if (gidenTum.Count > 0)
+                        try { gidenTum = await DisBacakAsync(gidenTum, env, cfg, http, splunk, bas, bit, sniKol, j); }
+                        catch (OperationCanceledException) when (j.Cts.IsCancellationRequested) { throw; }
+                        catch (Exception ex) { lock (j) if (j.Mesajlar.Count < 30) j.Mesajlar.Add("VIP dış bacağı / firewall adları alınamadı: " + ex.Message); }
+                    yeni.AddRange(gidenTum);
                     lock (j) { j.Satirlar.AddRange(yeni); j.Parca++; }
                 }
             }
@@ -564,7 +597,7 @@ static class TlsToplu
     }
 
     // Satıra FQDN adayları, endpoint yolları, önerilen temel URL, IIS website (ERT) ve VIP adresi eklenir
-    static TlsTopluSatir Zenginlestir(TlsTopluSatir r, UcVeri? uc, EnvanterSnapshot env, bool istenen)
+    static TlsTopluSatir Zenginlestir(TlsTopluSatir r, UcVeri? uc, EnvanterSnapshot env, bool istenen, List<TlsAkis.Ham>? ham = null)
     {
         if (r.Port == "") return r with { Istenen = istenen };
         string ip = r.Ip, port = r.Port;
@@ -582,6 +615,9 @@ static class TlsToplu
             ad[a] = (e.K, e.N + n, e.I + ist);
         }
         if (uc.Dns.TryGetValue((ip, port), out var dl)) foreach (var d in dl) Ekle(d.Ad, "DNS (Carbon Black)", d.N, d.Ist);
+        // SNI: istemcilerin TLS el sıkışmasında istediği ad (AppResponse) — servise hangi adla erişildiğinin en doğrudan kanıtı
+        foreach (var g in (ham ?? []).Where(h => h.Port == port && !string.IsNullOrWhiteSpace(h.Sni)).GroupBy(h => h.Sni!))
+            Ekle(g.Key, "SNI (AppResponse)", g.Sum(h => h.Sayi), g.Select(h => h.Cli).Distinct().Count());
         foreach (var vm in vipler)
             if (vm.LbPort != null && uc.Dns.TryGetValue((vm.LbIp, vm.LbPort), out var vl))
                 foreach (var d in vl) Ekle(d.Ad, $"DNS · VIP {vm.LbIp}:{vm.LbPort}", d.N, d.Ist);
@@ -603,7 +639,7 @@ static class TlsToplu
             if (!string.IsNullOrWhiteSpace(ns.Dns)) Ekle(ns.Dns, "Sunucu DNS (Nessus)", 0, 0);
         }
         // sıra: istemcilerin kullandığı (CB, bağlantı sayısı) > IIS Host > sertifika > sunucu DNS adı
-        int Oncelik(List<string> k) => k.Any(x => x.StartsWith("DNS")) ? 0 : k.Contains("IIS Host") ? 1 : k.Contains("Sertifika (Nessus)") ? 2 : 3;
+        int Oncelik(List<string> k) => k.Any(x => x.StartsWith("DNS") || x.StartsWith("SNI")) ? 0 : k.Contains("IIS Host") ? 1 : k.Contains("Sertifika (Nessus)") ? 2 : 3;
         var fq = ad.Select(kv => new TlsFqdn(kv.Key, kv.Value.K, kv.Value.N, kv.Value.I))
             .OrderBy(x => Oncelik(x.Kaynaklar)).ThenByDescending(x => x.Sayi).ThenBy(x => x.Ad).Take(12).ToList();
         string? host = fq.FirstOrDefault(x => !x.Ad.StartsWith("*") && Oncelik(x.Kaynaklar) < 3)?.Ad ?? fq.FirstOrDefault(x => !x.Ad.StartsWith("*"))?.Ad;
@@ -630,15 +666,140 @@ static class TlsToplu
             bool ertte = uyg != null;
             uyg ??= env.AppNamesOnIp(h).FirstOrDefault(a => !env.IsSystemApp(a));
             string? web = happ.Where(a => a.Port == p).Select(a => a.Website).FirstOrDefault(w => !string.IsNullOrWhiteSpace(w));
-            List<TlsFqdn>? fq = null;
+            var fqL = new List<TlsFqdn>();
+            foreach (var g in hs.Where(x => !string.IsNullOrWhiteSpace(x.Sni)).GroupBy(x => x.Sni!.Trim().TrimEnd('.').ToLowerInvariant()))
+                fqL.Add(new TlsFqdn(g.Key, ["SNI (AppResponse)"], g.Sum(x => x.Sayi), 0));
             if (uc != null && uc.GidenDns.TryGetValue((ip, h, p), out var dl))
-                fq = dl.GroupBy(x => x.Ad).Select(g => new TlsFqdn(g.Key, ["DNS (Carbon Black)"], g.Sum(x => x.N), 0)).OrderByDescending(x => x.Sayi).Take(8).ToList();
+                foreach (var g in dl.GroupBy(x => x.Ad))
+                {
+                    int i = fqL.FindIndex(f => f.Ad == g.Key);
+                    if (i >= 0) fqL[i] = fqL[i] with { Kaynaklar = [.. fqL[i].Kaynaklar, "DNS (Carbon Black)"] };
+                    else fqL.Add(new TlsFqdn(g.Key, ["DNS (Carbon Black)"], g.Sum(x => x.N), 0));
+                }
+            List<TlsFqdn>? fq = fqL.Count > 0 ? fqL.OrderByDescending(x => x.Sayi).Take(8).ToList() : null;
+            // hedef bir VIP ise: havuz adı ve üyeleri (dış bacak; TLS / SNI / firewall adları DisBacakAsync'te)
+            var vu = env.VipMembers(h, p);
+            string? vipTxt = vu.Count == 0 ? null : "VIP" + (vu.Select(x => x.Pool).FirstOrDefault(x => !string.IsNullOrWhiteSpace(x)) is { } pool ? " · havuz " + pool.Replace("/Common/", "") : "");
+            List<TlsUye>? uyeler = vu.Count == 0 ? null : vu.Select(x => new TlsUye(x.Ip, x.Port, !Ozel(x.Ip), [], [], [])).DistinctBy(x => (x.Ip, x.Port)).Take(30).ToList();
             bool https = hs.Count > 0 || p is "443" or "8443" or "9443";
             string? ad = fq?.FirstOrDefault()?.Ad;
             string? url = UrlYap(ad, https, p);
             string? not = hs.Count > 0 ? null : tlsHata ? "TLS verisi alınamadı (hata)" : "TLS el sıkışması görülmedi (Carbon Black'te bağlantı var)";
             yield return new TlsTopluSatir(ip, host, p, uyg, ertte, surumler, top, 0, hs.Select(x => x.Cihaz).Distinct().ToList(), not,
-                hs.Count > 0 ? "tls" : "bilinmiyor", Fqdn: fq, Url: url, Website: web, Yon: "giden", Hedef: h, HedefSunucu: Host(env, h));
+                hs.Count > 0 ? "tls" : "bilinmiyor", Fqdn: fq, Url: url, Website: web, Vip: vipTxt, Yon: "giden", Hedef: h, HedefSunucu: Host(env, h), Uyeler: uyeler);
         }
+    }
+
+    static bool Ozel(string ip)
+    {
+        if (!IPAddress.TryParse(ip, out var a) || a.AddressFamily != System.Net.Sockets.AddressFamily.InterNetwork) return true;
+        var b = a.GetAddressBytes();
+        return b[0] == 10 || b[0] == 127 || (b[0] == 172 && b[1] is >= 16 and <= 31) || (b[0] == 192 && b[1] == 168) || (b[0] == 100 && b[1] is >= 64 and <= 127) || (b[0] == 169 && b[1] == 254);
+    }
+
+    // DIŞ BACAK: giden hedefi VIP olan satırlarda havuz üyelerinin (F5 → gerçek hedef) TLS sürümü ve SNI'si (AppResponse, sunucu = üye; istemci F5
+    // olduğu için sunucuya bağlanamayan bacak) + üyelerin ve doğrudan dış hedeflerin Palo Alto loglarındaki adı / URL'si (Tls:FwAdAlanlari).
+    static async Task<List<TlsTopluSatir>> DisBacakAsync(List<TlsTopluSatir> satirlar, EnvanterSnapshot env, IConfiguration cfg, HttpClient http, HttpClient? splunk,
+        DateTime bas, DateTime bit, string? sniKol, TlsTopluIs j)
+    {
+        var ct = j.Cts.Token;
+        var uyeIp = satirlar.SelectMany(r => r.Uyeler ?? []).Select(u => u.Ip).Distinct().Take(cfg.GetValue("Tls:DisBacakMaxIp", 200)).ToList();
+        var disHedef = satirlar.Where(r => r.Uyeler == null && r.Hedef != null && !Ozel(r.Hedef)).Select(r => r.Hedef!).Distinct().ToList();
+        // (1) üyelerin TLS el sıkışmaları (gelen = üye sunucu)
+        List<TlsAkis.Ham> ham = [];
+        if (uyeIp.Count > 0)
+        {
+            var (h, cihazlar, mesajlar, _) = await TlsAkis.CekAsync(uyeIp, bas, bit, [], true, cfg, http, ct, sniKol);
+            ham = h;
+            lock (j) foreach (var m in mesajlar) if (!j.Mesajlar.Contains(m) && j.Mesajlar.Count < 30) j.Mesajlar.Add("Dış bacak: " + m);
+        }
+        // (2) Palo Alto: hedef IP'ye giden oturumlarda ad / URL alanları (URL filtreleme / SSL inceleme logu varsa)
+        var fwAd = new Dictionary<(string Ip, string Port), List<(string Ad, long N)>>();
+        var fwUrl = new Dictionary<(string Ip, string Port), List<(string Yol, long N)>>();
+        var fwHedef = uyeIp.Concat(disHedef).Distinct().Take(300).ToList();
+        if (splunk != null && fwHedef.Count > 0 && FirewallService.Enabled(cfg) && cfg.GetValue("Tls:DisBacakFirewall", true))
+        {
+            var f = cfg.GetSection("Firewall");
+            string idx = f["Index"] ?? "fw_paloalto", dIp = f["Alanlar:DestIp"] ?? "dest_ip", dPort = f["Alanlar:DestPort"] ?? "dest_port";
+            var alanlar = cfg.GetSection("Tls:FwAdAlanlari").Get<string[]>() is { Length: > 0 } fa ? fa : ["url", "dest_hostname", "dest_name", "server_name", "sni", "hostname"];
+            if (new[] { idx, dIp, dPort }.Concat(alanlar).All(x => Regex.IsMatch(x, @"^[A-Za-z0-9_.\-]+$")))
+                try
+                {
+                    var end = DateTimeOffset.Now;
+                    double saat = Math.Clamp(cfg.GetValue("Tls:UcCbSaat", 24.0), 1, 168);
+                    var r = await SplunkService.ExportAsync($"""
+                        search index={idx} ({string.Join(" OR ", fwHedef.Select(x => $"TERM({x})"))}) {dIp} IN ({string.Join(",", fwHedef.Select(x => $"\"{x}\""))})
+                        | eval ad=coalesce({string.Join(", ", alanlar)})
+                        | where isnotnull(ad) AND ad!="" AND ad!="-"
+                        | stats count by {dIp} {dPort} ad
+                        """, new LookupQuery(fwHedef[0], end.AddHours(-saat), end), cfg, splunk, ct, "Palo Alto (hedef adı / URL)",
+                        TimeSpan.FromSeconds(Math.Clamp(cfg.GetValue("Tls:UcSureSaniye", 180.0), 10, 900)));
+                    lock (j) foreach (var m in r.Messages) if (!j.Mesajlar.Contains(m) && j.Mesajlar.Count < 30) j.Mesajlar.Add(m);
+                    foreach (var row in r.Rows)
+                    {
+                        string? ip = row.GetValueOrDefault(dIp)?.Trim(), port = row.GetValueOrDefault(dPort)?.Trim() ?? "", ad = row.GetValueOrDefault("ad")?.Trim();
+                        if (string.IsNullOrEmpty(ip) || string.IsNullOrEmpty(ad)) continue;
+                        long n = long.TryParse(row.GetValueOrDefault("count"), out var c) ? c : 0;
+                        // "host/yol" ya da "https://host:port/yol" → ad = host, yol ayrıca (endpoint)
+                        var m2 = Regex.Match(ad, @"^(?:[a-z]+://)?([^/:?\s]+)(?::\d+)?(/[^?\s]*)?", RegexOptions.IgnoreCase);
+                        if (!m2.Success) continue;
+                        string host = m2.Groups[1].Value.TrimEnd('.').ToLowerInvariant();
+                        if (_ipRx.IsMatch(host) || host.Length < 3) continue;
+                        var key = (ip, port);
+                        if (!fwAd.TryGetValue(key, out var l)) fwAd[key] = l = [];
+                        l.Add((host, n));
+                        if (m2.Groups[2].Success && m2.Groups[2].Value.Length > 1)
+                        {
+                            if (!fwUrl.TryGetValue(key, out var u)) fwUrl[key] = u = [];
+                            u.Add((m2.Groups[2].Value, n));
+                        }
+                    }
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException) { lock (j) if (j.Mesajlar.Count < 30) j.Mesajlar.Add("Palo Alto hedef adları alınamadı: " + ex.Message); }
+        }
+        List<(string Ad, long N)> FwAd(string ip, string? port) =>
+            fwAd.Where(kv => kv.Key.Ip == ip && (port == null || kv.Key.Port == port || kv.Key.Port == "")).SelectMany(kv => kv.Value).ToList();
+
+        return satirlar.Select(r =>
+        {
+            var fq = (r.Fqdn ?? []).ToList();
+            void Ekle(string ad, string kaynak, long n)
+            {
+                int i = fq.FindIndex(x => x.Ad == ad);
+                if (i >= 0) { if (!fq[i].Kaynaklar.Contains(kaynak)) fq[i] = fq[i] with { Kaynaklar = [.. fq[i].Kaynaklar, kaynak], Sayi = fq[i].Sayi + n }; }
+                else fq.Add(new TlsFqdn(ad, [kaynak], n, 0));
+            }
+            List<TlsUye>? uyeler = null;
+            bool https = r.Surumler.Count > 0 || r.Port is "443" or "8443" or "9443";
+            if (r.Uyeler != null)
+            {
+                uyeler = r.Uyeler.Select(u =>
+                {
+                    var hs = ham.Where(x => x.Srv == u.Ip && (u.Port == null || x.Port == u.Port)).ToList();
+                    long top = hs.Sum(x => x.Sayi);
+                    var sur = hs.GroupBy(x => x.Surum).Select(g => (S: g.Key, N: g.Sum(x => x.Sayi))).OrderByDescending(x => x.N)
+                        .Select(x => new TlsTopluSurum(x.S, x.N, top > 0 ? Math.Round(x.N * 100.0 / top, 1) : 0)).ToList();
+                    var sni = hs.Select(x => x.Sni).Where(x => !string.IsNullOrWhiteSpace(x)).Select(x => x!.Trim().TrimEnd('.').ToLowerInvariant()).Distinct().Take(5).ToList();
+                    var adlar = FwAd(u.Ip, u.Port).GroupBy(x => x.Ad).OrderByDescending(g => g.Sum(x => x.N)).Select(g => g.Key).Take(5).ToList();
+                    foreach (var s in sni) Ekle(s, "SNI · dış bacak", hs.Where(x => x.Sni != null && x.Sni.Trim().TrimEnd('.').ToLowerInvariant() == s).Sum(x => x.Sayi));
+                    foreach (var a in adlar) Ekle(a, "Firewall (Palo Alto)", 0);
+                    if (sur.Count > 0) https = true;
+                    return u with { Surumler = sur, Sni = sni, Adlar = adlar };
+                }).ToList();
+            }
+            else if (r.Hedef != null && !Ozel(r.Hedef))
+                foreach (var g in FwAd(r.Hedef, r.Port).GroupBy(x => x.Ad)) Ekle(g.Key, "Firewall (Palo Alto)", g.Sum(x => x.N));
+            // Palo Alto URL yolları giden satırın endpoint'i olur
+            var yollar = (r.Uyeler?.Select(u => (u.Ip, u.Port)) ?? (r.Hedef != null ? [(r.Hedef, (string?)r.Port)] : []))
+                .SelectMany(k => fwUrl.Where(kv => kv.Key.Ip == k.Item1 && (k.Item2 == null || kv.Key.Port == k.Item2)).SelectMany(kv => kv.Value))
+                .GroupBy(x => x.Yol).Select(g => new TlsUc(g.Key, g.Sum(x => x.N), 0, null, "Palo Alto")).OrderByDescending(x => x.Istek).Take(25).ToList();
+            var fqS = fq.Count > 0 ? fq.OrderBy(x => x.Kaynaklar.Any(k => k.StartsWith("SNI")) ? 0 : x.Kaynaklar.Any(k => k.StartsWith("Firewall")) ? 1 : 2)
+                .ThenByDescending(x => x.Sayi).Take(10).ToList() : null;
+            string? url = r.Url ?? UrlYap(fqS?.FirstOrDefault()?.Ad, https, r.Port);
+            // dış kurum adresi: dış bacaktaki (üye) ilk ad + üyenin portu; üyenin TLS'i görüldüyse https
+            var du = uyeler?.FirstOrDefault(u => u.Sni.Count > 0 || u.Adlar.Count > 0);
+            string? disUrl = du == null ? null : UrlYap(du.Sni.FirstOrDefault() ?? du.Adlar.First(), du.Surumler.Count > 0 || du.Port is "443" or "8443" or "9443", du.Port ?? r.Port);
+            return r with { Fqdn = fqS, Uyeler = uyeler, Url = url, DisUrl = disUrl, Uclar = yollar.Count > 0 ? yollar : r.Uclar };
+        }).ToList();
     }
 }

@@ -886,6 +886,16 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
   Arayüz: "Yön" (▼ Gelen / ▲ Giden) ve "Hedef (giden)" kolonları, Port altında "kendi portu" / "hedef portu", "Yön" süzgeci, özette gelen / giden sayıları; CSV YÖN, HEDEF IP,
   HEDEF SUNUCU. Şifresiz kontrolü (flow_tcp) yalnız gelen. Kolon sırası (kullanıcı: "TLS versiyonu kolonu gitti" — FQDN kolonları araya girince ekrandan taştı): IP, Sunucu,
   [Yön, Hedef], Port, Uygulama, [Şifreleme], TLS sürümü, El sıkışması, [TCP], İstemci, Not, sonra FQDN grubu (FQDN, Önerilen URL, Endpoint, VIP, IIS website).
+  DIŞ KURUM / VIP DIŞ BACAĞI (kullanıcı: dış kurum tahsilatlarında gidenlerde URL yok, "muhtemelen VIP üzerinden gidiyor"; "yap bişeyler, yakalayalım"): (1) SNI —
+  `TlsAkis.CekAsync(..., sniKol)`: FQDN / giden kipinde `Tls:TopluSni` (varsayılan `tls.sni`, boş = kapalı) ile önce "gruplu + SNI" denemeleri, olmazsa SNI'siz; hiçbir kutuda
+  SNI'li deneme tutmazsa `_sniYok` (süreç boyunca denenmez). Gelen satırda SNI adları FQDN'e "SNI (AppResponse)" kaynağıyla (öncelik DNS ile aynı), giden satırda da.
+  (2) Giden hedef VIP ise (`env.VipMembers(hedef, port)`): `Vip` "VIP · havuz X", `Uyeler` [TlsUye(Ip, Port, Dis (özel olmayan IP), Surumler, Sni, Adlar)] — `DisBacakAsync`
+  grup başına: üye IP'lerinin TLS el sıkışmaları (`CekAsync` sunucu = üye; istemci F5 olduğundan sunucuya bağlanamayan bacak, `Tls:DisBacakMaxIp`=200) → üyenin sürümü + SNI
+  ("SNI · dış bacak"); (3) Palo Alto (`Firewall:Index`, `Alanlar:DestIp/DestPort`): üyeler + doğrudan dış hedefler için `coalesce(Tls:FwAdAlanlari = url, dest_hostname,
+  dest_name, server_name, sni, hostname)` → host "Firewall (Palo Alto)" kaynağıyla, URL yolu giden satırın endpoint'i (`TlsUc` Site "Palo Alto"); `Tls:DisBacakFirewall`=true.
+  `DisUrl` = dış bacaktaki ilk ad + üye portu (TLS görüldüyse https). Arayüz: Hedef hücresinde "VIP · havuz", "→ üye ip:port [dış|iç] TLS rozeti + ad", "Dış adres: …";
+  kaynak rozetleri SNI / SNI dış / FW; CSV DIŞ BACAK (VIP HAVUZ ÜYELERİ), DIŞ KURUM URL. Sahte envanter (çıkış VIP'i + dış üyeler) + sahte Splunk (CB giden DNS, PAN url)
+  ile uçtan uca denendi; AppResponse SNI kolonu ve PAN alan adları canlıda teyit edilmedi.
 - **Fiziksel envanter** (`FizikselEnvanter.cs`, `wwwroot/fiziksel.js`, sekme "Fiziksel envanter" `data-ui="fiziksel"`, `?fiziksel=1&kabin=&host=`;
   claude.ai sohbetindeki görev tanımı: "Bu kabin kapanırsa hangi uygulamalar etkilenir?"): veri doku DB'de HAZIR — NlyteCollector (nlyte OData →
   dbo.NlyteRaw) + `EXEC dbo.sp_KabinZincirYenile` doldurur; DeltaFlow YALNIZ OKUR (yazmaz, prosedürü çağırmaz). Betik kullanıcıda
