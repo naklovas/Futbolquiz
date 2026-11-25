@@ -70,7 +70,7 @@ const iv = { tag: "", data: null, q: "", poll: null, sel: null, seq: 0, pick: nu
   .iv-drawer ul { margin:0; padding-left:18px; display:grid; gap:4px; }
   .iv-drawer .why { background:var(--bg); border:1px solid var(--line); border-radius:8px; padding:10px 12px; line-height:1.45; }
   .iv-drawer .fix { display:flex; gap:6px; flex-wrap:wrap; }
-  .iv-drawer .fix input { flex:1; min-width:180px; }
+  .iv-drawer .fix input, .iv-drawer .fix select { flex:1; min-width:180px; }
   .iv-drawer table { font-size:12px; }
   .iv-ver { display:flex; gap:10px; align-items:center; flex-wrap:wrap; font-size:12.5px; border:1px solid var(--line); border-radius:10px;
     padding:8px 12px; margin:0 0 12px; background:var(--bg); }
@@ -305,7 +305,9 @@ async function ivDrawer(ip) {
       ${dt?.gerekce ? `<div class="why" style="margin-top:8px">${esc(dt.gerekce)}</div>` : ""}
     </div>
     ${iv.data.yazabilir ? `<div><h4>Kümeyi düzelt</h4><div class="fix">
-      <input id="ivFix" list="ivKumeList" placeholder="Küme adı" value="${esc(p.kume || "")}"><datalist id="ivKumeList">${kumeler.map(k => `<option value="${esc(k)}">`).join("")}</datalist>
+      <select id="ivFixSel" title="Haritadaki tüm kümeler; yeni küme için en alttaki seçenek">${kumeler.map(k => `<option value="${esc(k)}"${k === p.kume ? " selected" : ""}>${esc(k)}${k === p.kume ? " (şu an)" : ""}</option>`).join("")}
+        <option value="__yeni"${kumeler.includes(p.kume) ? "" : " selected"}>+ Yeni küme…</option></select>
+      <input id="ivFix" placeholder="Yeni küme adı"${kumeler.includes(p.kume) ? " hidden" : ""}>
       <button class="primary" id="ivFixSave">Kaydet</button>${dt?.kaynak?.startsWith("Elle") ? `<button id="ivFixClear" title="Elle atamayı kaldırır; sunucu bir sonraki çalıştırmada yeniden sınıflanır">Elle atamayı kaldır</button>` : ""}</div>
       <div class="eg-sub">Elle atanan küme AI'ca değiştirilmez.</div></div>` : ""}
     ${list("MSY sanal sunucu", p.msy)}${list("ÇSY sanal sunucu", p.csy)}${list("Envanter Kahini", p.kahin)}
@@ -322,7 +324,14 @@ async function ivDrawer(ip) {
       await ivLoad();
     } catch (e) { alert(e.message); }
   };
-  $("#ivFixSave")?.addEventListener("click", () => { const v = $("#ivFix").value.trim(); if (v) save(v); });
+  // Küme seçici (kullanıcı: "küme değiştirde yalnız mevcut küme geliyor" — eskiden datalist'li kutu mevcut adla dolu açılıyor, tarayıcı listeyi ona göre süzüyordu)
+  $("#ivFixSel")?.addEventListener("change", () => { const yeni = $("#ivFixSel").value === "__yeni"; $("#ivFix").hidden = !yeni; if (yeni) $("#ivFix").focus(); });
+  $("#ivFixSave")?.addEventListener("click", () => {
+    const sv = $("#ivFixSel").value, v = (sv === "__yeni" ? $("#ivFix").value : sv).trim();
+    if (!v) { alert("Küme adı yazın."); return; }
+    if (v === p.kume) { alert("Sunucu zaten bu kümede."); return; }
+    save(v);
+  });
   $("#ivFixClear")?.addEventListener("click", () => save(null));
 }
 
