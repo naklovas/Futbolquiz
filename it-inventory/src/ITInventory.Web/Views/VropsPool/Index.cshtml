@@ -242,7 +242,7 @@ else
                                         {
                                             <a asp-controller="Servers" asp-action="Create"
                                                asp-route-countryId="@selectedCountryId"
-                                               asp-route-hostName="@(v.GuestHostName ?? v.Name)"
+                                               asp-route-hostName="@v.Name"
                                                asp-route-ipAddress="@v.IpAddress"
                                                asp-route-operatingSystem="@v.OperatingSystem"
                                                asp-route-esxiHostName="@v.HostName"

@@ -84,7 +84,17 @@ public class VropsPoolController : Controller
         // kimligini tutan bir alanimiz henuz yok. Aktarim calistiginda o alan
         // eklenecek ve bu kontrol ona tasinacak.
         var hostAdlari = icerikler.SelectMany(i => i.Hosts).Select(h => h.Name).Distinct().ToList();
-        var vmAdlari = icerikler.SelectMany(i => i.Vms).Select(v => v.Name).Distinct().ToList();
+        // VM adi VE konuk isletim sistemindeki ad, ikisi birden. Bir donem
+        // "envantere ekle" baglantisi konuk adini gonderiyordu; o adla
+        // kaydedilmis satirlar yalnizca VM adina bakildiginda eslesmiyor ve
+        // sonsuza kadar "Not added" gorunuyordu -- kullanici da ayni makineyi
+        // ikinci kez ekliyordu.
+        var vmAdlari = icerikler.SelectMany(i => i.Vms)
+            .SelectMany(v => new[] { v.Name, v.GuestHostName })
+            .Where(a => !string.IsNullOrWhiteSpace(a))
+            .Select(a => a!)
+            .Distinct()
+            .ToList();
 
         var mevcutCihazlar = await _db.PhysicalDevices
             .Where(d => hostAdlari.Contains(d.DeviceName)
@@ -112,7 +122,13 @@ public class VropsPoolController : Controller
                 if (cihazSozluk.TryGetValue(h.Name, out var cihazId)) h.ExistingPhysicalDeviceId = cihazId;
 
             foreach (var v in icerik.Vms)
-                if (sunucuSozluk.TryGetValue(v.Name, out var sunucuId)) v.ExistingServerId = sunucuId;
+            {
+                if (sunucuSozluk.TryGetValue(v.Name, out var sunucuId))
+                    v.ExistingServerId = sunucuId;
+                else if (!string.IsNullOrWhiteSpace(v.GuestHostName)
+                         && sunucuSozluk.TryGetValue(v.GuestHostName, out var konukId))
+                    v.ExistingServerId = konukId;
+            }
         }
 
         ViewBag.SelectedCountryName = ulkeler.FirstOrDefault(c => c.Id == seciliUlkeId.Value)?.DisplayName

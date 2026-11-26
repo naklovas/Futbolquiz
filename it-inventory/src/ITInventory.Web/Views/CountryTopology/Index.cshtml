@@ -1,4 +1,4 @@
-@model ITInventory.Data.Entities.CountryTopologyFile?
+﻿@model ITInventory.Data.Entities.CountryTopologyFile?
 @{
     ViewData["Title"] = "Network Topology";
     bool isAdmin = ViewBag.IsAdmin ?? false;
@@ -79,7 +79,17 @@ else
             }
             else
             {
-                <p class="text-xs text-slate-400 mb-4">No inline preview available for this file type -- use Download to open it in Visio/draw.io.</p>
+                @* Bu uyari 12 piksel soluk gri bir satirdi ve goruldugu yoktu:
+                   kullanicilar dosyayi yukleyip "gorunmuyor" diye bildiriyordu.
+                   Yukleme basarili, onizleme o bicim icin yok -- ikisi ayri sey,
+                   ve bunu ekranin soylemesi gerekiyor. *@
+                <div class="bg-amber-50 border border-amber-200 text-amber-800 rounded-md px-4 py-3 text-sm mb-4">
+                    <span class="font-medium">The file was uploaded successfully.</span>
+                    Visio and draw.io diagrams cannot be displayed in the browser, so no preview is
+                    shown here. Use <span class="font-medium">Download</span> to open
+                    <span class="font-mono text-xs">@Model.FileName</span> in Visio or draw.io.
+                    To have the diagram appear on this screen, upload it as PDF, PNG or JPG instead.
+                </div>
             }
         }
 
