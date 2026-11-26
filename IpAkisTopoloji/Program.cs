@@ -1195,7 +1195,7 @@ app.MapPost("/api/ucmdb/belgeler", async (UcmdbIstek req, UcmdbService u, Envant
     var env = await envanter.GetAsync(false, ct);
     var b = u.Belgeler(ips, env);
     return Results.Ok(new { acik = true, hazir = true, belgeler = b.ToDictionary(kv => kv.Key, kv => u.PortAta(kv.Key, kv.Value, env)
-        .Select(x => new { id = x.Belge.Id, ad = x.Belge.Ad, sunucu = x.Belge.Sunucu, portlar = x.Portlar, neden = x.Neden })) });
+        .Select(x => new { id = x.Belge.Id, ad = x.Belge.Ad, yol = x.Belge.Yol, sunucu = x.Belge.Sunucu, ipler = x.Belge.Ipler, eslesme = x.Belge.Eslesme, portlar = x.Portlar, neden = x.Neden })) });
 });
 // Pencere açılınca: tek IP için port eşleşmesi IIS logu (Splunk, önbellekli) ve web.config içeriğiyle (baseAddress) inceltilir
 app.MapGet("/api/ucmdb/ip", async (string ip, UcmdbService u, EnvanterService envanter, IConfiguration cfg, IHttpClientFactory factory, CancellationToken ct) =>
@@ -1212,7 +1212,7 @@ app.MapGet("/api/ucmdb/ip", async (string ip, UcmdbService u, EnvanterService en
         try { (iis, iisHata) = await iisTask; } catch (Exception ex) when (ex is not OperationCanceledException) { iisHata = ex.Message; }
     }
     return Results.Ok(new { hazir = true, iisHata, icerikHata, belgeler = u.PortAta(v, l, env, iis)
-        .Select(x => new { id = x.Belge.Id, ad = x.Belge.Ad, sunucu = x.Belge.Sunucu, portlar = x.Portlar, neden = x.Neden }) });
+        .Select(x => new { id = x.Belge.Id, ad = x.Belge.Ad, yol = x.Belge.Yol, sunucu = x.Belge.Sunucu, ipler = x.Belge.Ipler, eslesme = x.Belge.Eslesme, portlar = x.Portlar, neden = x.Neden }) });
 });
 app.MapGet("/api/ucmdb/belge", async (string id, UcmdbService u, CancellationToken ct) =>
 {
@@ -1222,7 +1222,7 @@ app.MapGet("/api/ucmdb/belge", async (string id, UcmdbService u, CancellationTok
         var r = await u.BelgeAsync(id, ct);
         if (r == null) return Results.NotFound(new { error = "Belge bulunamadı (dizin yenilenmiş olabilir; sayfayı yenileyin)." });
         var (b, metin, bicim, boyut, maske) = r.Value;
-        return Results.Ok(new { id = b.Id, ad = b.Ad, sunucu = b.Sunucu, zincir = b.Zincir, bicim, boyut, maske, metin });
+        return Results.Ok(new { id = b.Id, ad = b.Ad, yol = b.Yol, sunucu = b.Sunucu, ipler = b.Ipler, zincir = b.Zincir, bicim, boyut, maske, metin });
     }
     catch (Exception ex) when (ex is not OperationCanceledException) { return Results.Ok(new { error = "UCMDB okunamadı: " + ex.Message }); }
 });

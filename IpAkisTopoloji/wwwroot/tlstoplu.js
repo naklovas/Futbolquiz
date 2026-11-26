@@ -296,12 +296,21 @@ function ttWcHtml(r) {
     const n = p ? l.filter(x => x.portlar?.includes(p)).length : l.length, bel = l.filter(x => !x.portlar?.length).length;
     const ipucu = esc(l.map(x => `${x.portlar?.length ? "port " + x.portlar.join(", ") : "port belirsiz"} · ${x.ad}`).join("\n"));
     const btn = (metin, sinif = "") => `<button type="button" class="tt-wc ${sinif}" data-wc="${esc(r.ip)}" data-port="${esc(p ?? "")}" title="${ipucu}">${metin}</button>`;
-    if (!p || n) return btn(`📄 görüntüle (${n})`) + (p && bel ? `<div class="small muted">+${bel} port belirsiz</div>` : "");
-    return bel ? btn(`📄 port belirsiz (${bel})`, "tt-wc-zayif") : btn(`diğer portlarda (${l.length})`, "tt-wc-zayif");
+    const goster = !p ? l : n ? l.filter(x => x.portlar?.includes(p)) : l.filter(x => !x.portlar?.length);
+    const yollar = goster.length ? `<div class="tt-wc-yol">${goster.slice(0, 3).map(x => `<a href="#" data-wcid="${esc(x.id)}" data-wc="${esc(r.ip)}" data-port="${esc(p ?? "")}" title="${esc((x.yol ?? x.ad) + (x.eslesme ? " · " + x.eslesme : ""))}">${esc(ttWcKisa(x))}</a>`).join("")}${goster.length > 3 ? `<span class="muted">+${goster.length - 3} daha</span>` : ""}</div>` : "";
+    if (!p || n) return btn(`📄 görüntüle (${n})`) + yollar + (p && bel ? `<div class="small muted">+${bel} port belirsiz</div>` : "");
+    return (bel ? btn(`📄 port belirsiz (${bel})`, "tt-wc-zayif") : btn(`diğer portlarda (${l.length})`, "tt-wc-zayif")) + yollar;
   }
   if (ttWc.sorulan.has(r.ip)) return `<span class="small muted" title="UCMDB'de bu sunucuya (ERT sunucu adı / IP) bağlı web.config yok">yok</span>`;
   return ttWc.hata ? `<span class="small" style="color:var(--err)" title="${esc(ttWc.hata)}">UCMDB okunamadı</span>`
     : `<span class="small muted" title="${esc("UCMDB'deki web.config listesi hazırlanıyor (ilk seferde birkaç dakika sürebilir)" + (ttWc.asama ? "\n" + ttWc.asama : ""))}">${ttWc.acik == null ? "…" : `hazırlanıyor… ${ttWc.gecen ? ttSure(ttWc.gecen) : ""}`}</span>`;
+}
+// Yolun kısa hali: "D:\inetpub\wwwroot\KrediWS\api\web.config" → "…\KrediWS\api"
+function ttWcKisa(x) {
+  const y = (x.yol ?? "").replace(/[\\/]+web\.config$/i, "");
+  if (!y) return x.ad;
+  const p = y.split(/[\\/]/).filter(Boolean);
+  return p.length > 2 ? "…\\" + p.slice(-2).join("\\") : y;
 }
 // Seçici: satırın portu en üstte, sonra diğer portlar, en sonda port belirlenemeyenler (optgroup)
 function ttWcSecici(ip, port, secili) {
@@ -311,13 +320,13 @@ function ttWcSecici(ip, port, secili) {
   for (const x of l) (x.portlar?.length ? x.portlar : ["?"]).forEach(p => ekle(p, x));
   const anahtar = [...gruplar.keys()].sort((a, b) => (a === port ? -1 : b === port ? 1 : a === "?" ? 1 : b === "?" ? -1 : (+a) - (+b)));
   $("#ttWcSec").innerHTML = anahtar.map(k => `<optgroup label="${k === "?" ? "Port belirlenemeyen" : `Port ${esc(k)}${k === port ? " (bu satır)" : ""}`} — ${gruplar.get(k).length}">`
-    + gruplar.get(k).map(x => `<option value="${esc(x.id)}" data-port="${esc(k)}">${esc(x.ad)}</option>`).join("") + `</optgroup>`).join("");
+    + gruplar.get(k).map(x => `<option value="${esc(x.id)}" data-port="${esc(k)}">${esc(x.yol ?? x.ad)}</option>`).join("") + `</optgroup>`).join("");
   const ilk = [...$("#ttWcSec").options].find(o => o.value === secili) ?? $("#ttWcSec").options[0];
   if (ilk) ilk.selected = true;
   $("#ttWcSec").hidden = l.length < 2;
   return ilk?.value;
 }
-function ttWcAc(ip, port) {
+function ttWcAc(ip, port, secId) {
   const l = ttWc.belgeler[ip] ?? [];
   if (!l.length) return;
   let m = $("#ttWcModal");
@@ -344,7 +353,7 @@ function ttWcAc(ip, port) {
   m.dataset.ip = ip; m.dataset.port = port ?? "";
   $("#ttWcBaslik").textContent = `web.config · ${ip}${l[0].sunucu ? " · " + l[0].sunucu : ""}${port ? " · satır portu " + port : ""}`;
   m.hidden = false;
-  ttWcGoster(ttWcSecici(ip, port, null));
+  ttWcGoster(ttWcSecici(ip, port, secId ?? null));
   ttWcIncelt(ip, port);
 }
 // IIS logu + web.config içeriğiyle port eşleşmesini incelt (arka planda; seçili belge korunur, tablo sayıları güncellenir)
@@ -372,7 +381,8 @@ async function ttWcIncelt(ip, port) {
 }
 function ttWcPortYaz(id) {
   const m = $("#ttWcModal"), x = (ttWc.belgeler[m?.dataset.ip] ?? []).find(b => b.id === id), el = $("#ttWcPort");
-  if (el) el.innerHTML = !x ? "" : x.portlar?.length ? `Port <b>${esc(x.portlar.join(", "))}</b> <span class="muted">(${esc(x.neden ?? "")})</span>` : `<span style="color:var(--warn, #b26b00)">port belirlenemedi</span>`;
+  if (el) el.innerHTML = !x ? "" : (x.portlar?.length ? `Port <b>${esc(x.portlar.join(", "))}</b> <span class="muted">(${esc(x.neden ?? "")})</span>` : `<span style="color:var(--warn, #b26b00)">port belirlenemedi</span>`)
+    + (x.eslesme ? ` · <span title="${esc(x.eslesme === "UCMDB IP" ? "Sunucunun IP'si UCMDB'den: " + (x.ipler ?? []).join(", ") : "UCMDB'de sunucunun IP'si bulunamadı; ERT'deki sunucu adıyla eşleşti")}">IP eşleşmesi: ${esc(x.eslesme)}</span>` : "");
 }
 async function ttWcGoster(id) {
   const pre = $("#ttWcMetin"), bilgi = $("#ttWcBilgi");
@@ -383,7 +393,7 @@ async function ttWcGoster(id) {
     if (!r.ok || b.error) throw new Error(b.error || `HTTP ${r.status}`);
     if ($("#ttWcSec").value !== id) return;
     pre.textContent = b.metin ?? "";
-    bilgi.innerHTML = [`<b>${esc(b.ad)}</b>`, `<span id="ttWcPort"></span>`, b.sunucu ? `sunucu ${esc(b.sunucu)}` : "", `${fmt(b.boyut ?? 0)} bayt (${esc(b.bicim ?? "")})`,
+    bilgi.innerHTML = [`<b class="mono">${esc(b.yol ?? b.ad)}</b>`, `<span id="ttWcPort"></span>`, b.sunucu ? `sunucu ${esc(b.sunucu)}` : "", `${fmt(b.boyut ?? 0)} bayt (${esc(b.bicim ?? "")})`,
       b.maske ? `<span style="color:var(--warn, #b26b00)">${fmt(b.maske)} gizli değer *** ile maskelendi (şifre / anahtar / token)</span>` : "",
       b.zincir?.length ? `<span title="${esc(b.zincir.join(" → "))}">UCMDB: ${esc(b.zincir.join(" → "))}</span>` : ""].filter(Boolean).join(" · ")
       + (b.metin == null ? ` · <span style="color:var(--err)">içerik çözülemedi</span>` : "");
@@ -444,16 +454,22 @@ function ttCiz() {
   $("#ttSif")?.addEventListener("change", e => { tt.yalnizSifresiz = e.target.checked; ttCiz(); });
   $("#ttYon")?.addEventListener("change", e => { tt.yon = e.target.value; ttCiz(); });
   $("#ttCsv").addEventListener("click", ttCsv);
-  el.querySelectorAll("[data-wc]").forEach(x => x.addEventListener("click", () => ttWcAc(x.dataset.wc, x.dataset.port || null)));
+  el.querySelectorAll("[data-wc]").forEach(x => x.addEventListener("click", ev => { ev.preventDefault(); ttWcAc(x.dataset.wc, x.dataset.port || null, x.dataset.wcid || null); }));
   ttWcYukle();
 }
 
+// CSV: satırın portuna düşen web.config yolları (giden satırda tümü); portu belirlenemeyenler "(port belirsiz)" ekiyle
+function ttWcCsv(r) {
+  const l = ttWc.belgeler[r.ip] ?? [], p = r.yon !== "giden" && r.port ? String(r.port) : null;
+  const sec = !p ? l : [...l.filter(x => x.portlar?.includes(p)), ...l.filter(x => !x.portlar?.length)];
+  return sec.map(x => (x.yol ?? x.ad) + (p && !x.portlar?.length ? " (port belirsiz)" : "")).join(" | ");
+}
 function ttCsv() {
   if (!yetki.disari) return yetkiYok("Dışa aktarma");
   const Q = v => { v = String(v ?? ""); return /[;"\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v; };
   const fk = !!tt.body?.fqdn;
   const gk = !!tt.body?.giden;
-  const rows = [["IP", "SUNUCU", ...(gk ? ["YÖN", "HEDEF IP", "HEDEF SUNUCU", "DIŞ BACAK (VIP HAVUZ ÜYELERİ)", "DIŞ KURUM URL"] : []), "PORT", "UYGULAMA", "ERT PORTU", ...(fk ? ["IIS WEBSITE (ERT)", "VIP", "ÖNERİLEN URL", "FQDN", "FQDN KAYNAKLARI", "ENDPOINT URL'LERİ (IIS / FW)"] : []), "ŞİFRELEME", "ŞİFRELEME NOTU", "TLS SÜRÜMLERİ", "EN ÇOK KULLANILAN", "ESKİ SÜRÜM", "EL SIKIŞMASI", "TCP TRAFİĞİ", "İSTEMCİ", "KUTULAR", "NOT"]];
+  const rows = [["IP", "SUNUCU", ...(gk ? ["YÖN", "HEDEF IP", "HEDEF SUNUCU", "DIŞ BACAK (VIP HAVUZ ÜYELERİ)", "DIŞ KURUM URL"] : []), "PORT", "UYGULAMA", "ERT PORTU", ...(ttWc.acik ? ["WEB.CONFIG (UCMDB)"] : []), ...(fk ? ["IIS WEBSITE (ERT)", "VIP", "ÖNERİLEN URL", "FQDN", "FQDN KAYNAKLARI", "ENDPOINT URL'LERİ (IIS / FW)"] : []), "ŞİFRELEME", "ŞİFRELEME NOTU", "TLS SÜRÜMLERİ", "EN ÇOK KULLANILAN", "ESKİ SÜRÜM", "EL SIKIŞMASI", "TCP TRAFİĞİ", "İSTEMCİ", "KUTULAR", "NOT"]];
   const SIF_CSV = { tls: "TLS", sifresiz: "OLASI ŞİFRESİZ", protokol: "PROTOKOL İÇİNDE", trafikyok: "TRAFİK YOK", bilinmiyor: "BİLİNMİYOR" };
   // endpoint URL'leri: önerilen temel adres + IIS yolu (adres yoksa yalnız yol)
   const ucUrl = r => (r.uclar ?? []).map(u => `${r.url ?? ""}${u.yol} (${u.istek})`).join(" | ");
@@ -461,7 +477,7 @@ function ttCsv() {
     ...(gk ? [r.yon === "giden" ? "GİDEN (hedefin portu)" : r.port ? "GELEN (kendi portu)" : "", r.hedef ?? "", r.hedefSunucu ?? "",
       (r.uyeler ?? []).map(u => `${u.ip}${u.port ? ":" + u.port : ""} (${u.dis ? "dış" : "iç"})${u.surumler?.length ? " " + u.surumler.map(x => x.surum).join("/") : ""}${[...(u.sni ?? []), ...(u.adlar ?? [])].length ? " " + [...new Set([...(u.sni ?? []), ...(u.adlar ?? [])])].join(", ") : ""}`).join(" | "),
       r.disUrl ?? ""] : []),
-    r.port, r.uygulama, r.ertPortu ? "evet" : "hayır",
+    r.port, r.uygulama, r.ertPortu ? "evet" : "hayır", ...(ttWc.acik ? [ttWcCsv(r)] : []),
     ...(fk ? [r.website ?? "", r.vip ?? "", r.url ?? "", (r.fqdn ?? []).map(f => f.ad).join(" | "), (r.fqdn ?? []).map(f => `${f.ad}: ${f.kaynaklar.join(", ")}`).join(" | "), ucUrl(r)] : []),
     r.port ? SIF_CSV[r.sifreleme] ?? "" : "", r.ipucu ?? "",
     (r.surumler ?? []).map(s => `${s.surum} %${String(s.yuzde).replace(".", ",")}`).join(" | "), r.surumler?.[0]?.surum ?? "",

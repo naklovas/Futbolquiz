@@ -939,6 +939,16 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
   `ornek`=3): belge satırı, seviye seviye kapsayıcının bulunduğu tablolar ve dolu kolonları (`DokumSeviyeSaniye`=40, kimlik başına ilk 3 tablo), her kaydın TÜM bağ tablolarındaki
   (END1_ID / END2_ID) bağları ve bağlı ENDPOINT / PORT / BINDING / URL tablolarındaki kayıtlar; `&indir=1` → .txt. LOB okunmaz, PASS / PWD / SECRET / TOKEN / CREDENTIAL / PRIVATE
   adlı kolonlar ***; UCMDB'ye yazılmaz. Sahte verilerle PortCoz / Klasorler / PortAta ve mock'la arayüz denendi.
+  IP UCMDB'DEN + YOL KOLONU (kullanıcı: "bu tabloda IP alanı yok, nasıl getirdin" — cevap: zincirle sunucu ADINA çıkılıyor, IP ERT UNIXNAME'den; "en sağlam yolu deneyelim,
+  UCMDB'den alabiliyorsan onu al; web.config'in path'i alan olarak var, onu da tabloya getir"; kullanıcı Oracle'a sorgu atamıyor): `DugumIpAsync` — zincirin vardığı düğüm
+  kimlikleri için (1) düğüm satırlarındaki IP kolonları (A_…IP / IP_ADDRESS / ADDR; tür / maske / gateway… değil; zincir taramasında okunur, `Ci.Ip`), (2) adında IP_ADDRESS
+  geçen CDM tablolarında üst kolonu düğüm olan kayıtların A_NAME'i, (3) COMPOSITION / CONTAIN bağ tabloları ↔ IP tablosu JOIN (iki yön), `IpSureSaniye`=180; `IpGecerli`
+  (127. / 0. / yayın değil). `UcmdbBelge.Ipler`, `Dizin.IpBelge` (IP → belgeler). `Belgeler(ip)`: önce UCMDB IP'si bu IP olanlar (`Eslesme` "UCMDB IP"), sonra yalnız UCMDB'de IP'si
+  OLMAYAN sunucuların ERT ad eşleşmesi ("ERT sunucu adı"; aynı adlı başka IP'li sunucu karışmasın). YOL: `Ucmdb:YolKolonu` ya da A_PATH / A_DOCUMENT_PATH / A_FILE_PATH / A_FULL_PATH /
+  A_RESOURCE_PATH / A_DOCUMENT_LOCATION / A_LOCATION / A_FILE_LOCATION, yoksa metin tipli A_…PATH|LOCATION|DIRECTORY|FOLDER; `UcmdbBelge.Yol` ayrı (Ad artık yalnız A_NAME), Klasorler
+  yoldan. Tanıda "UCMDB IP'si bulunan belge N / M · yol kolonu X", IP tabloları, kaynak başına satır sayısı. Uçlar `yol`, `ipler`, `eslesme` döner. Arayüz: hücrede düğmenin
+  altında yollar (`ttWcKisa` "…\KrediWS\api", en çok 3 + "N daha", tıkla → o belge açılır `data-wcid`), seçicide tam yol, bilgi satırında tam yol + "IP eşleşmesi: UCMDB IP /
+  ERT sunucu adı" (ipucunda UCMDB IP'leri); CSV'de "WEB.CONFIG (UCMDB)" (satır portundakiler + "(port belirsiz)"). Mock'la denendi; Oracle'da denenmedi.
 - **Fiziksel envanter** (`FizikselEnvanter.cs`, `wwwroot/fiziksel.js`, sekme "Fiziksel envanter" `data-ui="fiziksel"`, `?fiziksel=1&kabin=&host=`;
   claude.ai sohbetindeki görev tanımı: "Bu kabin kapanırsa hangi uygulamalar etkilenir?"): veri doku DB'de HAZIR — NlyteCollector (nlyte OData →
   dbo.NlyteRaw) + `EXEC dbo.sp_KabinZincirYenile` doldurur; DeltaFlow YALNIZ OKUR (yazmaz, prosedürü çağırmaz). Betik kullanıcıda
