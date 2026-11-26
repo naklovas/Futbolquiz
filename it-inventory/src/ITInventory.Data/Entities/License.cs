@@ -1,4 +1,4 @@
-using ITInventory.Data.Common;
+﻿using ITInventory.Data.Common;
 
 namespace ITInventory.Data.Entities;
 
@@ -23,6 +23,14 @@ public class License : AuditableEntity
 
     /// <summary>Lisansın kendi geçerlilik/son kullanma tarihi (destek bitiş tarihinden farklı olabilir).</summary>
     public DateTime? ExpirationDate { get; set; }
+
+    /// <summary>
+    /// Suresiz lisans: bitis tarihi YOK.
+    ///
+    /// Bos bir tarih "henuz girilmedi" ile "hic bitmiyor" arasini ayirmiyordu.
+    /// Bu bayrak ikisini ayiriyor: isaretliyse alan bilerek bos, eksik degil.
+    /// </summary>
+    public bool IsPerpetual { get; set; }
 
     public string? Notes { get; set; }
 }

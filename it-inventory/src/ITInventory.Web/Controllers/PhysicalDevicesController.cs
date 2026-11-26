@@ -309,6 +309,8 @@ public class PhysicalDevicesController : Controller
             StartOfSupportDate = vm.StartOfSupportDate,
             EndOfSupportDate = vm.EndOfSupportDate,
             EndOfLifeDate = vm.EndOfLifeDate,
+            EndOfLifeNotAnnounced = vm.EndOfLifeNotAnnounced,
+            NoSupportContract = vm.NoSupportContract,
             Notes = vm.Notes,
             CreatedAt = DateTime.UtcNow,
             CreatedBy = _currentUser.Username
@@ -355,6 +357,8 @@ public class PhysicalDevicesController : Controller
             StartOfSupportDate = entity.StartOfSupportDate,
             EndOfSupportDate = entity.EndOfSupportDate,
             EndOfLifeDate = entity.EndOfLifeDate,
+            EndOfLifeNotAnnounced = entity.EndOfLifeNotAnnounced,
+            NoSupportContract = entity.NoSupportContract,
             Notes = entity.Notes
         };
 
@@ -439,6 +443,8 @@ public class PhysicalDevicesController : Controller
         entity.StartOfSupportDate = vm.StartOfSupportDate;
         entity.EndOfSupportDate = vm.EndOfSupportDate;
         entity.EndOfLifeDate = vm.EndOfLifeDate;
+        entity.EndOfLifeNotAnnounced = vm.EndOfLifeNotAnnounced;
+        entity.NoSupportContract = vm.NoSupportContract;
         entity.Notes = vm.Notes;
         entity.UpdatedAt = DateTime.UtcNow;
         entity.UpdatedBy = _currentUser.Username;

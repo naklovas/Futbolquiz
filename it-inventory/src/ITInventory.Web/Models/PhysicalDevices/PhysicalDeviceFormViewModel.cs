@@ -1,10 +1,10 @@
-using System.ComponentModel.DataAnnotations;
+﻿using System.ComponentModel.DataAnnotations;
 using ITInventory.Data.Common;
 using ITInventory.Web.Common;
 
 namespace ITInventory.Web.Models.PhysicalDevices;
 
-public class PhysicalDeviceFormViewModel
+public class PhysicalDeviceFormViewModel : IValidatableObject
 {
     public int Id { get; set; }
 
@@ -87,21 +87,57 @@ public class PhysicalDeviceFormViewModel
     [Display(Name = "License Info")]
     public string? LicenceInfo { get; set; }
 
-    [Required(ErrorMessage = "Support start date is required.")]
     [DataType(DataType.Date)]
     [Display(Name = "Support Start Date")]
     public DateTime? StartOfSupportDate { get; set; }
 
-    [Required(ErrorMessage = "Support end date is required.")]
     [DataType(DataType.Date)]
     [Display(Name = "Support End Date")]
     public DateTime? EndOfSupportDate { get; set; }
 
-    [Required(ErrorMessage = "End of life date is required.")]
     [DataType(DataType.Date)]
     [Display(Name = "End of Life Date")]
     public DateTime? EndOfLifeDate { get; set; }
 
+    [Display(Name = "End of life not announced yet")]
+    public bool EndOfLifeNotAnnounced { get; set; }
+
+    [Display(Name = "No separate hardware support contract")]
+    public bool NoSupportContract { get; set; }
+
     [Display(Name = "Notes")]
     public string? Notes { get; set; }
+
+    /// <summary>
+    /// Tarihler KOSULLU zorunlu. Donanimin ayri bakim anlasmasi yoksa ya da
+    /// uretici omur sonu tarihini henuz aciklamadiysa bos kalabilirler --
+    /// ama bu bilerek yapilmis bir secim olmali, unutulmus bir alan degil.
+    /// </summary>
+    public IEnumerable<ValidationResult> Validate(ValidationContext context)
+    {
+        if (!NoSupportContract && !StartOfSupportDate.HasValue)
+            yield return new ValidationResult(
+                "Enter the support start date, or tick the no-contract option.",
+                new[] { nameof(StartOfSupportDate) });
+
+        if (!NoSupportContract && !EndOfSupportDate.HasValue)
+            yield return new ValidationResult(
+                "Enter the support end date, or tick the no-contract option.",
+                new[] { nameof(EndOfSupportDate) });
+
+        if (NoSupportContract && (StartOfSupportDate.HasValue || EndOfSupportDate.HasValue))
+            yield return new ValidationResult(
+                "Clear the support dates, or untick the no-contract option.",
+                new[] { nameof(StartOfSupportDate) });
+
+        if (!EndOfLifeNotAnnounced && !EndOfLifeDate.HasValue)
+            yield return new ValidationResult(
+                "Enter the end of life date, or tick that it has not been announced.",
+                new[] { nameof(EndOfLifeDate) });
+
+        if (EndOfLifeNotAnnounced && EndOfLifeDate.HasValue)
+            yield return new ValidationResult(
+                "Clear the end of life date, or untick the not-announced option.",
+                new[] { nameof(EndOfLifeDate) });
+    }
 }

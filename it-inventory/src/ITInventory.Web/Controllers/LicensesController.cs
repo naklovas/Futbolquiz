@@ -1,4 +1,4 @@
-using ClosedXML.Excel;
+﻿using ClosedXML.Excel;
 using ITInventory.Data;
 using ITInventory.Data.Entities;
 using ITInventory.Web.Common;
@@ -176,6 +176,7 @@ public class LicensesController : Controller
             SupportStartDate = vm.SupportStartDate,
             SupportEndDate = vm.SupportEndDate,
             ExpirationDate = vm.ExpirationDate,
+            IsPerpetual = vm.IsPerpetual,
             Notes = vm.Notes,
             CreatedAt = DateTime.UtcNow,
             CreatedBy = _currentUser.Username
@@ -210,6 +211,7 @@ public class LicensesController : Controller
             SupportStartDate = entity.SupportStartDate,
             SupportEndDate = entity.SupportEndDate,
             ExpirationDate = entity.ExpirationDate,
+            IsPerpetual = entity.IsPerpetual,
             Notes = entity.Notes
         };
 
@@ -274,6 +276,7 @@ public class LicensesController : Controller
         entity.SupportStartDate = vm.SupportStartDate;
         entity.SupportEndDate = vm.SupportEndDate;
         entity.ExpirationDate = vm.ExpirationDate;
+        entity.IsPerpetual = vm.IsPerpetual;
         entity.Notes = vm.Notes;
         entity.UpdatedAt = DateTime.UtcNow;
         entity.UpdatedBy = _currentUser.Username;

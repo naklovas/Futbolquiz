@@ -1,4 +1,4 @@
-@model ITInventory.Web.Models.PagedResult<ITInventory.Data.Entities.License>
+﻿@model ITInventory.Web.Models.PagedResult<ITInventory.Data.Entities.License>
 @{
     ViewData["Title"] = "Licenses";
     var countries = (List<ITInventory.Data.Entities.Country>)ViewBag.Countries;
@@ -112,7 +112,18 @@ else
                         <td data-col="location" class="px-4 py-3 text-slate-700">@item.Location</td>
                         <td data-col="supportStart" class="px-4 py-3 text-slate-700">@(item.SupportStartDate?.ToString("dd.MM.yyyy") ?? "-")</td>
                         <td data-col="supportEnd" class="px-4 py-3 text-slate-700">@(item.SupportEndDate?.ToString("dd.MM.yyyy") ?? "-")</td>
-                        <td data-col="expiration" class="px-4 py-3 @(item.ExpirationDate.HasValue && item.ExpirationDate < DateTime.UtcNow ? "text-red-700 font-medium" : "text-slate-700")">@(item.ExpirationDate?.ToString("dd.MM.yyyy") ?? "-")</td>
+                        <td data-col="expiration" class="px-4 py-3 @(!item.IsPerpetual && item.ExpirationDate.HasValue && item.ExpirationDate < DateTime.UtcNow ? "text-red-700 font-medium" : "text-slate-700")">
+                            @* Suresiz lisansi bos hucre olarak gostermek, "girilmemis"
+                               ile ayni goruntuyu verirdi -- ayirt etmek icin yazi. *@
+                            @if (item.IsPerpetual)
+                            {
+                                <span class="text-slate-500">Perpetual</span>
+                            }
+                            else
+                            {
+                                @(item.ExpirationDate?.ToString("dd.MM.yyyy") ?? "-")
+                            }
+                        </td>
                         <td data-col="notes" class="px-4 py-3 text-slate-700 max-w-xs truncate" title="@item.Notes">@item.Notes</td>
                         @if (canEdit)
                         {

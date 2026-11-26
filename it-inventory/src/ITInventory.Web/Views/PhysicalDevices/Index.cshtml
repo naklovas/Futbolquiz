@@ -1,4 +1,4 @@
-@model ITInventory.Web.Models.PagedResult<ITInventory.Data.Entities.PhysicalDevice>
+﻿@model ITInventory.Web.Models.PagedResult<ITInventory.Data.Entities.PhysicalDevice>
 @{
     ViewData["Title"] = "Physical Devices";
     var countries = (List<ITInventory.Data.Entities.Country>)ViewBag.Countries;
@@ -138,8 +138,26 @@ else
                         <td data-col="branch" class="px-4 py-3 text-slate-700">@item.Branch</td>
                         <td data-col="licenceInfo" class="px-4 py-3 text-slate-700">@item.LicenceInfo</td>
                         <td data-col="supportStart" class="px-4 py-3 text-slate-700">@(item.StartOfSupportDate?.ToString("dd.MM.yyyy") ?? "-")</td>
-                        <td data-col="supportEnd" class="px-4 py-3 text-slate-700">@(item.EndOfSupportDate?.ToString("dd.MM.yyyy") ?? "-")</td>
-                        <td data-col="endOfLife" class="px-4 py-3 text-slate-700">@(item.EndOfLifeDate?.ToString("dd.MM.yyyy") ?? "-")</td>
+                        <td data-col="supportEnd" class="px-4 py-3 text-slate-700">
+                            @if (item.NoSupportContract)
+                            {
+                                <span class="text-slate-500">No contract</span>
+                            }
+                            else
+                            {
+                                @(item.EndOfSupportDate?.ToString("dd.MM.yyyy") ?? "-")
+                            }
+                        </td>
+                        <td data-col="endOfLife" class="px-4 py-3 text-slate-700">
+                            @if (item.EndOfLifeNotAnnounced)
+                            {
+                                <span class="text-slate-500">Not announced</span>
+                            }
+                            else
+                            {
+                                @(item.EndOfLifeDate?.ToString("dd.MM.yyyy") ?? "-")
+                            }
+                        </td>
                         <td data-col="notes" class="px-4 py-3 text-slate-700 max-w-xs truncate" title="@item.Notes">@item.Notes</td>
                         @if (canEdit)
                         {

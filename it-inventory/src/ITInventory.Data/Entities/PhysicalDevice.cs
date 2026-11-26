@@ -1,4 +1,4 @@
-using ITInventory.Data.Common;
+﻿using ITInventory.Data.Common;
 
 namespace ITInventory.Data.Entities;
 
@@ -40,6 +40,24 @@ public class PhysicalDevice : AuditableEntity
     public DateTime? StartOfSupportDate { get; set; }
     public DateTime? EndOfSupportDate { get; set; }
     public DateTime? EndOfLifeDate { get; set; }
+
+    /// <summary>
+    /// Ureticinin kullanim omru sonu tarihini HENUZ ACIKLAMADIGI cihazlar.
+    /// Yeni cikmis donanimda bu normaldir; tarih zorunlu tutuldugunda
+    /// kullanici uydurma bir tarih giriyordu ve yanlis zamanda uyari
+    /// uretiyordu. Uydurma tarih, bos alandan kotudur.
+    /// </summary>
+    public bool EndOfLifeNotAnnounced { get; set; }
+
+    /// <summary>
+    /// Donanimin AYRI bir bakim anlasmasi yok.
+    ///
+    /// Lisansin destek tarihleriyle donanimin destek tarihleri farkli
+    /// sozlesmelerdir ve ayri ayri takip edilir (bkz. ExpirationCheckService).
+    /// Ama her cihazin ayri bir donanim anlasmasi olmuyor; o durumda bu
+    /// isaretlenir ve tarihler bos birakilir.
+    /// </summary>
+    public bool NoSupportContract { get; set; }
 
     public string? Notes { get; set; }
 }

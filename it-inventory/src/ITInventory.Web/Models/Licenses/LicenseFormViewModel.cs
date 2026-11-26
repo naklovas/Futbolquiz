@@ -1,8 +1,8 @@
-using System.ComponentModel.DataAnnotations;
+﻿using System.ComponentModel.DataAnnotations;
 
 namespace ITInventory.Web.Models.Licenses;
 
-public class LicenseFormViewModel
+public class LicenseFormViewModel : IValidatableObject
 {
     public int Id { get; set; }
 
@@ -43,11 +43,31 @@ public class LicenseFormViewModel
     [Display(Name = "Support End Date")]
     public DateTime? SupportEndDate { get; set; }
 
-    [Required(ErrorMessage = "License expiration date is required.")]
     [DataType(DataType.Date)]
     [Display(Name = "License Expiration Date")]
     public DateTime? ExpirationDate { get; set; }
 
+    [Display(Name = "Perpetual licence (no expiry date)")]
+    public bool IsPerpetual { get; set; }
+
     [Display(Name = "Notes")]
     public string? Notes { get; set; }
+
+    /// <summary>
+    /// Bitis tarihi KOSULLU zorunlu: suresiz isaretlenmediyse gerekli.
+    /// Alani tamamen opsiyonel yapmak, "henuz girilmedi" ile "hic bitmiyor"
+    /// arasini silerdi.
+    /// </summary>
+    public IEnumerable<ValidationResult> Validate(ValidationContext context)
+    {
+        if (IsPerpetual && ExpirationDate.HasValue)
+            yield return new ValidationResult(
+                "A perpetual licence cannot have an expiry date. Clear the date or untick Perpetual.",
+                new[] { nameof(ExpirationDate) });
+
+        if (!IsPerpetual && !ExpirationDate.HasValue)
+            yield return new ValidationResult(
+                "Enter the expiry date, or tick Perpetual if the licence does not expire.",
+                new[] { nameof(ExpirationDate) });
+    }
 }
