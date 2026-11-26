@@ -36,7 +36,8 @@ sealed class UcmdbService(IConfiguration cfg, ILogger<UcmdbService> log)
         public Dictionary<string, Dictionary<string, string>> Kolon = new(StringComparer.OrdinalIgnoreCase);   // tablo → kolon → tip
         public HashSet<string> Bos = new(StringComparer.OrdinalIgnoreCase);                                     // NUM_ROWS = 0
         public string Id = "CMDB_ID", AdK = "A_NAME", Icerik = "";
-        public string? Ust, Yol;
+        public string? Ust;
+        public List<string> Yol = [];   // yol kolonları (satırda ilk dolu olan): canlıda A_RESOURCE_PATH / A_CONTENT_LOCATION
         public List<string> Bag = [];   // END1_ID / END2_ID tabloları (composition, containment)
     }
     Sema0? _sema;
@@ -91,11 +92,12 @@ sealed class UcmdbService(IConfiguration cfg, ILogger<UcmdbService> log)
               ?? throw new InvalidOperationException($"{Tablo} içinde BLOB içerik kolonu bulunamadı; Ucmdb:IcerikKolonu verin.");
         s.Ust = C["UstKolonu"] is { Length: > 0 } uk ? Ad(uk) : new[] { "A_ROOT_CONTAINER", "A_CONTAINER" }.FirstOrDefault(bk.ContainsKey);
         static bool Metin(string tip) => tip is "VARCHAR2" or "NVARCHAR2" or "CHAR" or "NCHAR" or "CLOB" or "NCLOB";
-        s.Yol = C["YolKolonu"] is { Length: > 0 } yk ? Ad(yk)
-            : new[] { "A_PATH", "A_DOCUMENT_PATH", "A_FILE_PATH", "A_FULL_PATH", "A_RESOURCE_PATH", "A_DOCUMENT_LOCATION", "A_LOCATION", "A_FILE_LOCATION" }
-                  .FirstOrDefault(k => bk.TryGetValue(k, out var t) && Metin(t))
-              ?? bk.Where(kv => Metin(kv.Value) && Regex.IsMatch(kv.Key, @"^A_.*(PATH|LOCATION|DIRECTORY|FOLDER)", RegexOptions.IgnoreCase)
-                     && !Regex.IsMatch(kv.Key, "CONTEN|CHECKSUM|SIZE|TYPE|ENCODING", RegexOptions.IgnoreCase)).Select(kv => kv.Key).FirstOrDefault();
+        s.Yol = C["YolKolonu"] is { Length: > 0 } yk ? yk.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Select(Ad).Where(bk.ContainsKey).ToList()
+            : new[] { "A_RESOURCE_PATH", "A_CONTENT_LOCATION", "A_PATH", "A_DOCUMENT_PATH", "A_FILE_PATH", "A_FULL_PATH", "A_DOCUMENT_LOCATION", "A_LOCATION", "A_FILE_LOCATION" }
+                  .Where(k => bk.TryGetValue(k, out var t) && Metin(t)).ToList();
+        if (s.Yol.Count == 0)
+            s.Yol = bk.Where(kv => Metin(kv.Value) && Regex.IsMatch(kv.Key, @"^A_.*(PATH|LOCATION|DIRECTORY|FOLDER)", RegexOptions.IgnoreCase)
+                     && !Regex.IsMatch(kv.Key, "CHECKSUM|SIZE|TYPE|ENCODING", RegexOptions.IgnoreCase)).Select(kv => kv.Key).Take(3).ToList();
         foreach (var k in new[] { s.Id, s.AdK, s.Icerik })
             if (!bk.ContainsKey(k)) throw new InvalidOperationException($"{Tablo}.{k} kolonu yok (Ucmdb ayarlarını kontrol edin).");
         s.Bag = s.Kolon.Where(t => t.Value.ContainsKey("END1_ID") && t.Value.ContainsKey("END2_ID") && Regex.IsMatch(t.Key, "COMPOSITION|CONTAINMENT|CONTAIN|COMPOSIT", RegexOptions.IgnoreCase)
@@ -236,7 +238,7 @@ sealed class UcmdbService(IConfiguration cfg, ILogger<UcmdbService> log)
     async Task<Dizin> DizinOlusturAsync(OracleConnection c, Sema0 s, List<string>? tani, CancellationToken ct, int ornek = 0, Action<string>? asama = null, int? seviyeSn = null)
     {
         var d = new Dizin();
-        string yolK = s.Yol != null ? $", {s.Yol}" : "", ustK = s.Ust != null ? $", {s.Ust}" : "";
+        string yolK = string.Concat(s.Yol.Select(y => ", " + y)), ustK = s.Ust != null ? $", {s.Ust}" : "";
         string kosul = string.Join(" OR ", Desenler.Select(x => $"LOWER({s.AdK}) LIKE '%{x.Replace("%", "")}%'"));
         int max = ornek > 0 ? ornek : C.GetValue("MaxBelge", 50000);
         var ham = new List<(string Id, string Ad, string? Yol, string? Ust)>();
@@ -250,7 +252,8 @@ sealed class UcmdbService(IConfiguration cfg, ILogger<UcmdbService> log)
             {
                 string id = Deger(r.GetValue(0)), ad = Deger(r.GetValue(1));
                 string? ust = s.Ust != null ? Deger(r.GetValue(2)) : null;
-                string? yol = s.Yol != null ? Deger(r.GetValue(s.Ust != null ? 3 : 2)) : null;
+                int yi = s.Ust != null ? 3 : 2;
+                string? yol = s.Yol.Select((_, i) => r.IsDBNull(yi + i) ? "" : Deger(r.GetValue(yi + i)).Trim()).FirstOrDefault(v => v.Length > 0);
                 if (id == "") continue;
                 ham.Add((id, ad, string.IsNullOrWhiteSpace(yol) ? null : yol.Trim(), string.IsNullOrEmpty(ust) ? null : ust));
             }
@@ -401,7 +404,7 @@ sealed class UcmdbService(IConfiguration cfg, ILogger<UcmdbService> log)
                 l.Add(belge);
             }
         }
-        tani?.Add($"UCMDB IP'si bulunan belge: {d.Belgeler.Count(b => b.Ipler != null)} / {d.Belgeler.Count} · yol kolonu: {s.Yol ?? "(yok — Ucmdb:YolKolonu verin)"}");
+        tani?.Add($"UCMDB IP'si bulunan belge: {d.Belgeler.Count(b => b.Ipler != null)} / {d.Belgeler.Count} · yol kolonu: {(s.Yol.Count == 0 ? "(yok — Ucmdb:YolKolonu verin)" : string.Join(" / ", s.Yol))} · yolu dolu belge: {d.Belgeler.Count(b => b.Yol != null)}");
         int bagli = d.Belgeler.Count(b => b.Sunucu != null);
         if (d.Belgeler.Count > 0 && bagli == 0) d.Notlar.Add("UCMDB: web.config belgeleri bulundu ama hiçbirinin sunucusu bulunamadı (kapsayıcı zinciri) — /api/ucmdb/tani ile bakın.");
         tani?.Add($"Sunucusu bulunan belge: {bagli} / {d.Belgeler.Count}");
@@ -473,7 +476,8 @@ sealed class UcmdbService(IConfiguration cfg, ILogger<UcmdbService> log)
                 {
                     if (sw.Elapsed.TotalSeconds > sn) break;
                     using var cmd = c.CreateCommand();
-                    cmd.CommandText = $"SELECT {s.Ust}, {s.AdK} FROM {Sema}.{t} WHERE {s.Ust} IN ({string.Join(",", parca.Select(x => Lit(k[s.Ust], x)))})";
+                    bool ham0 = k[s.Ust].Contains("RAW");
+                    cmd.CommandText = $"SELECT {s.Ust}, {s.AdK} FROM {Sema}.{t} WHERE {(ham0 ? s.Ust : $"UPPER({s.Ust})")} IN ({string.Join(",", parca.Select(x => Lit(k[s.Ust], ham0 ? x : x.ToUpperInvariant())))})";
                     cmd.CommandTimeout = SorguSn;
                     try { using var r = await cmd.ExecuteReaderAsync(ct); while (await r.ReadAsync(ct)) { Ekle(Deger(r.GetValue(0)), Deger(r.GetValue(1))); ustten++; } }
                     catch (OracleException ex) { tani?.Add($"  {t} üst kolonu: {ex.Message}"); break; }
@@ -861,7 +865,7 @@ sealed class UcmdbService(IConfiguration cfg, ILogger<UcmdbService> log)
             catch (Exception ex) { S("Şema: " + ex.Message); return sb.ToString(); }
             S($"Şema: {Sema} · CDM tablosu: {s.Kolon.Count} (boş: {s.Bos.Count}) · bağ tabloları: {(s.Bag.Count == 0 ? "yok" : string.Join(", ", s.Bag))}");
             S($"{Tablo} kolonları: {string.Join(", ", s.Kolon[Tablo].Select(kv => $"{kv.Key} {kv.Value}"))}");
-            S($"Kullanılan: kimlik {s.Id}, ad {s.AdK}, içerik {s.Icerik}, üst {s.Ust ?? "(yok → bağ tabloları)"}, yol {s.Yol ?? "(yok)"}");
+            S($"Kullanılan: kimlik {s.Id}, ad {s.AdK}, içerik {s.Icerik}, üst {s.Ust ?? "(yok → bağ tabloları)"}, yol {(s.Yol.Count == 0 ? "(yok)" : string.Join(" / ", s.Yol))}");
             // örnek belgeler: boyut + ilk baytlar + çözülen biçim (içerik basılmaz)
             try
             {

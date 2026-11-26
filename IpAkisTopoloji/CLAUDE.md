@@ -949,6 +949,11 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
   yoldan. Tanıda "UCMDB IP'si bulunan belge N / M · yol kolonu X", IP tabloları, kaynak başına satır sayısı. Uçlar `yol`, `ipler`, `eslesme` döner. Arayüz: hücrede düğmenin
   altında yollar (`ttWcKisa` "…\KrediWS\api", en çok 3 + "N daha", tıkla → o belge açılır `data-wcid`), seçicide tam yol, bilgi satırında tam yol + "IP eşleşmesi: UCMDB IP /
   ERT sunucu adı" (ipucunda UCMDB IP'leri); CSV'de "WEB.CONFIG (UCMDB)" (satır portundakiler + "(port belirsiz)"). Mock'la denendi; Oracle'da denenmedi.
+  CANLI KOLONLAR (kullanıcının dökümü, MFUCMDB.CDM_CONFIGURATION_DOCUMENT_1, 65 kolon): CMDB_ID RAW, A_ROOT_CONTAINER VARCHAR2 (RAW değil — metin kimlik), A_NAME,
+  A_DOCUMENT_CONTENT BLOB, A_DOCUMENT_CONTENT_TYPE, A_DOCUMENT_SIZE, A_DOCUMENT_CHECK_SUM, A_DOCUMENT_LAST_UPDATE_TIME NUMBER, A_DOCUMENT_EXTENSION, A_CODEPAGE,
+  A_RESOURCE_PATH, A_CONTENT_LOCATION, A_DISPLAY_LABEL, A_USER_LABEL, A_PORT_APPLICATION_TYPE (port numarası değil), A_KRITIKLIK_SEVIYESI… — IP / port kolonu YOK.
+  Yol artık birden çok kolon (`Sema0.Yol` liste; varsayılan sıra A_RESOURCE_PATH, A_CONTENT_LOCATION, …; `Ucmdb:YolKolonu` virgüllü verilebilir), satırda ilk dolu olan;
+  tanıda "yolu dolu belge". IP kaydının üst kolonu metinse karşılaştırma UPPER(...) ile (RAW onaltılık büyük harf).
 - **Fiziksel envanter** (`FizikselEnvanter.cs`, `wwwroot/fiziksel.js`, sekme "Fiziksel envanter" `data-ui="fiziksel"`, `?fiziksel=1&kabin=&host=`;
   claude.ai sohbetindeki görev tanımı: "Bu kabin kapanırsa hangi uygulamalar etkilenir?"): veri doku DB'de HAZIR — NlyteCollector (nlyte OData →
   dbo.NlyteRaw) + `EXEC dbo.sp_KabinZincirYenile` doldurur; DeltaFlow YALNIZ OKUR (yazmaz, prosedürü çağırmaz). Betik kullanıcıda
