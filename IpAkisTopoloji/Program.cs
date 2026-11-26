@@ -1192,8 +1192,27 @@ app.MapPost("/api/ucmdb/belgeler", async (UcmdbIstek req, UcmdbService u, Envant
     var (hazir, hata, asama, gecen) = u.DizinDurumu();
     if (!hazir) return Results.Ok(new { acik = true, hazir = false, hata, asama, gecen });
     var ips = (req.Ips ?? []).Select(x => LookupQuery.TryParseIpv4(x, out string v) ? v : null).OfType<string>().Distinct().Take(5000).ToList();
-    var b = u.Belgeler(ips, await envanter.GetAsync(false, ct));
-    return Results.Ok(new { acik = true, hazir = true, belgeler = b.ToDictionary(kv => kv.Key, kv => kv.Value.Select(x => new { id = x.Id, ad = x.Ad, sunucu = x.Sunucu })) });
+    var env = await envanter.GetAsync(false, ct);
+    var b = u.Belgeler(ips, env);
+    return Results.Ok(new { acik = true, hazir = true, belgeler = b.ToDictionary(kv => kv.Key, kv => u.PortAta(kv.Key, kv.Value, env)
+        .Select(x => new { id = x.Belge.Id, ad = x.Belge.Ad, sunucu = x.Belge.Sunucu, portlar = x.Portlar, neden = x.Neden })) });
+});
+// Pencere açılınca: tek IP için port eşleşmesi IIS logu (Splunk, önbellekli) ve web.config içeriğiyle (baseAddress) inceltilir
+app.MapGet("/api/ucmdb/ip", async (string ip, UcmdbService u, EnvanterService envanter, IConfiguration cfg, IHttpClientFactory factory, CancellationToken ct) =>
+{
+    if (!u.Acik || !LookupQuery.TryParseIpv4(ip, out string v)) return Results.BadRequest(new { error = "Geçersiz istek." });
+    if (!u.DizinDurumu().Hazir) return Results.Ok(new { hazir = false });
+    var env = await envanter.GetAsync(false, ct);
+    var l = u.Belgeler([v], env).GetValueOrDefault(v) ?? [];
+    List<HttpSysIis>? iis = null; string? iisHata = null, icerikHata = null;
+    if (l.Count > 0)
+    {
+        var iisTask = HttpSysEslesme.IisAsync(v, cfg, factory.CreateClient("splunk"), ct);
+        try { await u.IcerikleriYukleAsync(l, ct); } catch (Exception ex) when (ex is not OperationCanceledException) { icerikHata = ex.Message; }
+        try { (iis, iisHata) = await iisTask; } catch (Exception ex) when (ex is not OperationCanceledException) { iisHata = ex.Message; }
+    }
+    return Results.Ok(new { hazir = true, iisHata, icerikHata, belgeler = u.PortAta(v, l, env, iis)
+        .Select(x => new { id = x.Belge.Id, ad = x.Belge.Ad, sunucu = x.Belge.Sunucu, portlar = x.Portlar, neden = x.Neden }) });
 });
 app.MapGet("/api/ucmdb/belge", async (string id, UcmdbService u, CancellationToken ct) =>
 {
@@ -1206,6 +1225,20 @@ app.MapGet("/api/ucmdb/belge", async (string id, UcmdbService u, CancellationTok
         return Results.Ok(new { id = b.Id, ad = b.Ad, sunucu = b.Sunucu, zincir = b.Zincir, bicim, boyut, maske, metin });
     }
     catch (Exception ex) when (ex is not OperationCanceledException) { return Results.Ok(new { error = "UCMDB okunamadı: " + ex.Message }); }
+});
+// Test dökümü: ?tablo=CDM_X → kolonlar + örnek satırlar; tablo yoksa zincir (?ip= o sunucunun web.config'leri, yoksa örnek). ?indir=1 → .txt dosyası
+app.MapGet("/api/ucmdb/dokum", async (string? tablo, string? ip, int? ornek, bool? indir, UcmdbService u, EnvanterService envanter, CancellationToken ct) =>
+{
+    EnvanterSnapshot? env = null;
+    try { env = await envanter.GetAsync(false, ct); } catch (Exception ex) when (ex is not OperationCanceledException) { }
+    string? v = ip != null && LookupQuery.TryParseIpv4(ip, out string x) ? x : null;
+    string metin;
+    try { metin = await u.DokumAsync(tablo, v, env, ornek ?? (string.IsNullOrWhiteSpace(tablo) ? 3 : 5), ct); }
+    catch (Exception ex) when (ex is not OperationCanceledException) { metin = "Döküm alınamadı: " + ex.Message; }
+    if (indir == true)
+        return Results.File(Encoding.UTF8.GetPreamble().Concat(Encoding.UTF8.GetBytes(metin)).ToArray(), "text/plain; charset=utf-8",
+            $"ucmdb_{(string.IsNullOrWhiteSpace(tablo) ? "zincir" + (v != null ? "_" + v : "") : tablo.ToLowerInvariant())}_{DateTime.Now:yyyyMMdd_HHmm}.txt");
+    return Results.Text(metin, "text/plain; charset=utf-8");
 });
 app.MapGet("/api/ucmdb/tani", async (string? ip, UcmdbService u, EnvanterService envanter, CancellationToken ct) =>
 {

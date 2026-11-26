@@ -926,6 +926,19 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
   ("seviye 2/6: 41/812 tablo · 3120/3400 kapsayıcı bulundu"), `/api/ucmdb/belgeler` → `asama`, `gecen`; arayüzde tablonun üstünde bant + hücrede süre; hata olursa bant kırmızı
   (tanı bağlantısıyla) ve dizin 5 dk geçmeden yeniden başlatılmaz (`_hataZaman`). Tanı artık tam dizini KURMAZ: tam listenin durumu + 5 örnek belgeyle zincir (seviye başına 20 sn),
   seviye başına hangi tablodan kaç kimlik geldiği (`seviye N: CDM_X → k kimlik`), bağ tabloları; IP belgeleri yalnız tam liste hazırsa.
+  PORT BAZLI AYRIM (kullanıcı: "bir sunucudan çok sayıda web.config çıkıyor, port bazlı ayırabilir miyiz"; "UCMDB'de port bazlı ayrım var mı"): `PortAta(ip, belgeler, env, iis?)`
+  → `UcmdbPortlu(Belge, Portlar, Neden)` sırayla: (1) UCMDB binding — zincir taramasında düğüm olmayan tablolarda `PortKolonu` (A_…BINDING(S) / PORT(S) / PORT_NUMBER…, tür /
+  protokol / durum / ad değil) değerleri `PortCoz` ("http/*:80:", "*:443:host", "8443", URL) ile, en yakın kapsayıcının portları (`UcmdbBelge.Portlar`); (2) ERT WEBSITE (IP + port) ↔
+  `UcmdbBelge.Adlar` (zincirdeki site / dizin / havuz adları + `Klasorler`: belge yolundaki inetpub / wwwroot / sites… dışındaki klasörler) `AdEs` (harf-rakam eşit ya da ≥5 harfte
+  içerme); (3) IIS logu (`HttpSysEslesme.IisAsync`, port → uygulama /app) ↔ Adlar; (4) önbellekteki içerikten WCF gelen baseAddress portu. `/api/ucmdb/belgeler` (1)–(2)(+4) ile
+  `portlar`, `neden`; yeni GET `/api/ucmdb/ip?ip=` pencere açılınca IIS logu + `IcerikleriYukleAsync` (tek bağlantı, `PencereMaxBelge`=200) ile inceltir. Arayüz: hücre satırın
+  portuna düşen sayı ("📄 görüntüle (n)" + "+k port belirsiz"; yoksa "port belirsiz (k)" / "diğer portlarda (n)", giden satırda tümü); pencerede seçici optgroup'lu (satır portu
+  önce, diğer portlar, "Port belirlenemeyen"), bilgi satırında "Port 443 (neden)", `#ttWcPortNot` inceltme durumu; incelme sonrası `ttWc.belgeler[ip]` güncellenir, tablo yeniden çizilir.
+  TEST DÖKÜMÜ (kullanıcı: "o tablonun alanlarını çekip bir yere yazabilir miyiz test olarak"): GET `/api/ucmdb/dokum?tablo=CDM_X&ornek=5` (yalnız şemanın CDM% tabloları; kolon +
+  tip + LOB / port kolonu işareti + örnek satırlar, belge tablosunda yalnız web.config satırları) ya da tablo verilmeden zincir dökümü `?ip=` (o sunucunun belgeleri, yoksa örnek;
+  `ornek`=3): belge satırı, seviye seviye kapsayıcının bulunduğu tablolar ve dolu kolonları (`DokumSeviyeSaniye`=40, kimlik başına ilk 3 tablo), her kaydın TÜM bağ tablolarındaki
+  (END1_ID / END2_ID) bağları ve bağlı ENDPOINT / PORT / BINDING / URL tablolarındaki kayıtlar; `&indir=1` → .txt. LOB okunmaz, PASS / PWD / SECRET / TOKEN / CREDENTIAL / PRIVATE
+  adlı kolonlar ***; UCMDB'ye yazılmaz. Sahte verilerle PortCoz / Klasorler / PortAta ve mock'la arayüz denendi.
 - **Fiziksel envanter** (`FizikselEnvanter.cs`, `wwwroot/fiziksel.js`, sekme "Fiziksel envanter" `data-ui="fiziksel"`, `?fiziksel=1&kabin=&host=`;
   claude.ai sohbetindeki görev tanımı: "Bu kabin kapanırsa hangi uygulamalar etkilenir?"): veri doku DB'de HAZIR — NlyteCollector (nlyte OData →
   dbo.NlyteRaw) + `EXEC dbo.sp_KabinZincirYenile` doldurur; DeltaFlow YALNIZ OKUR (yazmaz, prosedürü çağırmaz). Betik kullanıcıda

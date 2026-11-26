@@ -11,7 +11,10 @@ using Oracle.ManagedDataAccess.Client;
 // DB adı — şifre, kullanıcı, machineKey hiçbir yere yazılmaz). DeltaFlow yalnız OKUR. Şema UCMDB sürümüne göre değişebildiği için kolonlar ALL_TAB_COLUMNS'tan
 // bulunur; belgenin hangi sunucuya ait olduğu kapsayıcı zinciri (root_container ya da composition / containment bağları) yukarı yürünerek bulunur.
 record UcmdbAdres(string Tur, string Anahtar, string Adres, string? Host, string? Port, string? Yol, string Dosya);
-record UcmdbBelge(string Id, string Ad, string? Sunucu, List<string> Zincir);
+// Adlar: zincirdeki IIS site / sanal dizin / havuz adları + belge yolundaki klasörler (port eşleşmesi için); Portlar: UCMDB'deki binding / port kolonlarından
+record UcmdbBelge(string Id, string Ad, string? Sunucu, List<string> Zincir, List<string>? Adlar = null, List<string>? Portlar = null);
+// Port ataması: Portlar boşsa "port belirlenemedi"; Neden: "UCMDB binding" / "ERT WEBSITE 'X'" / "IIS logu /app" / "web.config baseAddress"
+record UcmdbPortlu(UcmdbBelge Belge, List<string> Portlar, string? Neden);
 record UcmdbSonuc(List<UcmdbBelge> Belgeler, List<UcmdbAdres> Adresler, List<string> Notlar);
 
 sealed class UcmdbService(IConfiguration cfg, ILogger<UcmdbService> log)
@@ -243,11 +246,13 @@ sealed class UcmdbService(IConfiguration cfg, ILogger<UcmdbService> log)
         if (ornek == 0 && ham.Count >= max) d.Notlar.Add($"UCMDB: {max} belge sınırına ulaşıldı (Ucmdb:MaxBelge).");
         tani?.Add($"Belge ({string.Join(", ", Desenler)}): {ham.Count}{(ornek > 0 ? " (örnek)" : "")} · üst kolonu dolu: {ham.Count(h => h.Ust != null)}");
 
-        var bilgi = new Dictionary<string, (HashSet<string> T, string? Ad, string? Dns, string? Ust)>(StringComparer.OrdinalIgnoreCase);
+        var bilgi = new Dictionary<string, Ci>(StringComparer.OrdinalIgnoreCase);
         var zincir = ham.ToDictionary(h => h.Id, h => new List<string>(), StringComparer.OrdinalIgnoreCase);
+        var adlar = ham.ToDictionary(h => h.Id, h => new List<string>(), StringComparer.OrdinalIgnoreCase);
+        var portlar = ham.ToDictionary(h => h.Id, h => new List<string>(), StringComparer.OrdinalIgnoreCase);
         var dugumAd = C.GetSection("DugumTablolari").Get<string[]>() is { Length: > 0 } dt ? dt.Select(Ad).ToHashSet() :
             ["CDM_NODE_1", "CDM_HOST_NODE_1", "CDM_NT_1", "CDM_UNIX_1", "CDM_COMPUTER_1", "CDM_HOST_1"];
-        bool Dugum((HashSet<string> T, string? Ad, string? Dns, string? Ust) b) => b.T.Any(dugumAd.Contains) || b.Dns != null;
+        bool Dugum(Ci b) => b.T.Any(dugumAd.Contains) || b.Dns != null;
         var aday = s.Kolon.Where(t => t.Value.ContainsKey(s.Id) && !s.Bos.Contains(t.Key) && !t.Key.Equals(Tablo, StringComparison.OrdinalIgnoreCase)
                 && (t.Value.ContainsKey(s.AdK) || (s.Ust != null && t.Value.ContainsKey(s.Ust)) || t.Value.ContainsKey("A_PRIMARY_DNS_NAME")))
             .Select(t => t.Key).Take(C.GetValue("MaxTablo", 3000)).ToList();
@@ -283,6 +288,9 @@ sealed class UcmdbService(IConfiguration cfg, ILogger<UcmdbService> log)
                     var sec = new List<string> { s.Id };
                     string? aK = k.ContainsKey(s.AdK) ? s.AdK : null, dK = k.ContainsKey("A_PRIMARY_DNS_NAME") ? "A_PRIMARY_DNS_NAME" : null, uK = s.Ust != null && k.ContainsKey(s.Ust) ? s.Ust : null;
                     foreach (var x in new[] { aK, dK, uK }) if (x != null) sec.Add(x);
+                    // IIS site / sanal dizin binding ve port kolonları (düğüm tablolarında değil: sunucunun tüm portları olur)
+                    var pK = dugumAd.Contains(t) ? [] : k.Where(kv => PortKolonu(kv.Key, kv.Value)).Select(kv => kv.Key).Take(4).ToList();
+                    sec.AddRange(pK);
                     int once = isabet.GetValueOrDefault(t);
                     foreach (var parca in sor.Chunk(1000))
                     {
@@ -296,10 +304,12 @@ sealed class UcmdbService(IConfiguration cfg, ILogger<UcmdbService> log)
                             {
                                 string id = Deger(r.GetValue(0)); int j = 1;
                                 string? ad = aK != null ? Deger(r.GetValue(j++)) : null, dns = dK != null ? Deger(r.GetValue(j++)) : null, ust = uK != null ? Deger(r.GetValue(j++)) : null;
-                                var e = bilgi.TryGetValue(id, out var x) ? x : ([], null, null, null);
+                                if (!bilgi.TryGetValue(id, out var e)) bilgi[id] = e = new Ci();
                                 if (e.T.Add(t)) isabet[t] = isabet.GetValueOrDefault(t) + 1;
-                                bilgi[id] = (e.T, string.IsNullOrEmpty(e.Ad) ? (string.IsNullOrEmpty(ad) ? null : ad) : e.Ad,
-                                    string.IsNullOrEmpty(e.Dns) ? (string.IsNullOrEmpty(dns) ? null : dns) : e.Dns, string.IsNullOrEmpty(e.Ust) ? (string.IsNullOrEmpty(ust) ? null : ust) : e.Ust);
+                                if (string.IsNullOrEmpty(e.Ad) && !string.IsNullOrEmpty(ad)) e.Ad = ad;
+                                if (string.IsNullOrEmpty(e.Dns) && !string.IsNullOrEmpty(dns)) e.Dns = dns;
+                                if (string.IsNullOrEmpty(e.Ust) && !string.IsNullOrEmpty(ust)) e.Ust = ust;
+                                foreach (var pk in pK) foreach (var pt in PortCoz(Deger(r.GetValue(j++)))) e.Port.Add(pt);
                             }
                         }
                         catch (OracleException ex) { tani?.Add($"  {t}: {ex.Message}"); break; }
@@ -340,6 +350,8 @@ sealed class UcmdbService(IConfiguration cfg, ILogger<UcmdbService> log)
                 if (!bilgi.TryGetValue(u, out var b)) { uc[bid] = null; continue; }
                 zincir[bid].Add($"{string.Join("/", b.T.Select(x => x.Replace("CDM_", "").Replace("_1", "").ToLowerInvariant()))}: {b.Ad ?? "?"}");
                 if (Dugum(b)) { sunucuOf[bid] = b.Dns ?? b.Ad; uc[bid] = null; continue; }
+                if (b.Ad != null) adlar[bid].Add(b.Ad);
+                if (portlar[bid].Count == 0 && b.Port.Count > 0) portlar[bid].AddRange(b.Port.Order());   // en yakın kapsayıcının portları (site binding)
                 var sonraki = b.Ust ?? bagUst.GetValueOrDefault(u);
                 uc[bid] = sonraki != null && gorulen[bid].Add(u) && !gorulen[bid].Contains(sonraki) ? sonraki : null;
                 ilerledi |= uc[bid] != null;
@@ -351,7 +363,7 @@ sealed class UcmdbService(IConfiguration cfg, ILogger<UcmdbService> log)
         foreach (var h in ham)
         {
             var sv = sunucuOf.GetValueOrDefault(h.Id);
-            var belge = new UcmdbBelge(h.Id, h.Ad, sv, zincir[h.Id]);
+            var belge = new UcmdbBelge(h.Id, h.Ad, sv, zincir[h.Id], adlar[h.Id].Concat(Klasorler(h.Ad)).Distinct(StringComparer.OrdinalIgnoreCase).ToList(), portlar[h.Id]);
             d.Belgeler.Add(belge);
             if (string.IsNullOrWhiteSpace(sv)) continue;
             foreach (var anahtar in Anahtarlar(sv))
@@ -364,6 +376,88 @@ sealed class UcmdbService(IConfiguration cfg, ILogger<UcmdbService> log)
         if (d.Belgeler.Count > 0 && bagli == 0) d.Notlar.Add("UCMDB: web.config belgeleri bulundu ama hiçbirinin sunucusu bulunamadı (kapsayıcı zinciri) — /api/ucmdb/tani ile bakın.");
         tani?.Add($"Sunucusu bulunan belge: {bagli} / {d.Belgeler.Count}");
         return d;
+    }
+
+    sealed class Ci { public HashSet<string> T = new(StringComparer.OrdinalIgnoreCase); public string? Ad, Dns, Ust; public HashSet<string> Port = []; }
+
+    // binding / port taşıyan kolonlar (A_SERVER_BINDINGS, A_BINDINGS, A_PORT, A_NETWORK_PORT_NUMBER, A_HTTP_PORT…); tür / protokol / durum kolonları değil
+    static bool PortKolonu(string ad, string tip) =>
+        tip is "VARCHAR2" or "NVARCHAR2" or "CHAR" or "NCHAR" or "NUMBER" or "FLOAT" or "INTEGER"
+        && Regex.IsMatch(ad, @"^A_(.*_)?(BINDINGS?|PORTS?|PORT_NUMBER|PORTNUMBER)(_.*)?$", RegexOptions.IgnoreCase)
+        && !Regex.IsMatch(ad, "TYPE|PROTOCOL|STATUS|DESC|NAME|COUNT|SUPPORT|REPORT|EXPORT|IMPORT|TRANSPORT|PORTAL", RegexOptions.IgnoreCase);
+
+    // "443", "http/*:80:", "*:8080:host,https/*:443:", "https://ad:8443/" → portlar
+    internal static IEnumerable<string> PortCoz(string v)
+    {
+        v = v.Trim();
+        var l = new List<string>();
+        if (Regex.IsMatch(v, @"^\d{1,5}(\.0+)?$")) l.Add(v.Split('.')[0]);
+        foreach (Match m in Regex.Matches(v, @":(\d{1,5})(?=$|[:/\s,;|\]])")) l.Add(m.Groups[1].Value);
+        return l.Where(x => int.TryParse(x, out int n) && n is > 0 and < 65536).Select(x => int.Parse(x).ToString()).Distinct();
+    }
+
+    // belge yolundaki anlamlı klasörler: "web.config (D:\inetpub\wwwroot\KrediWS\api\web.config)" → KrediWS, api
+    static readonly HashSet<string> _genelKlasor = new(StringComparer.OrdinalIgnoreCase)
+        { "inetpub", "wwwroot", "sites", "site", "web", "webs", "websites", "www", "apps", "app", "application", "applications", "iis", "root", "httpdocs", "public",
+          "bin", "config", "program files", "program files (x86)", "web.config", "data", "deploy", "publish", "services", "service" };
+    internal static IEnumerable<string> Klasorler(string ad)
+    {
+        var m = Regex.Match(ad, @"\(([^()]*[\\/][^()]*)\)\s*$");
+        string yol = m.Success ? m.Groups[1].Value : ad.Contains('\\') || ad.Contains('/') ? ad : "";
+        return yol.Split(new[] { '\\', '/' }, StringSplitOptions.RemoveEmptyEntries).Select(x => x.Trim())
+            .Where(x => x.Length > 1 && !x.EndsWith(':') && !_genelKlasor.Contains(x) && !x.EndsWith(".config", StringComparison.OrdinalIgnoreCase));
+    }
+
+    static string Sade(string s) => Regex.Replace(s.ToLowerInvariant(), "[^a-z0-9ğüşıöç]", "");
+    static bool AdEs(string a, string b)
+    {
+        string x = Sade(a), y = Sade(b);
+        if (x.Length < 2 || y.Length < 2) return false;
+        if (x == y) return true;
+        var (k, u) = x.Length <= y.Length ? (x, y) : (y, x);
+        return k.Length >= 5 && u.Contains(k);
+    }
+
+    // Belge → port: UCMDB binding > ERT WEBSITE (IP + port) ↔ site / klasör adı > IIS logundaki uygulama (/app) ↔ klasör / sanal dizin adı > web.config içindeki baseAddress portu
+    public List<UcmdbPortlu> PortAta(string ip, List<UcmdbBelge> l, EnvanterSnapshot env, List<HttpSysIis>? iis = null)
+    {
+        var web = env.AppsOnIp(ip).Where(h => !string.IsNullOrWhiteSpace(h.Website) && !string.IsNullOrWhiteSpace(h.Port))
+            .Select(h => (W: h.Website!.Trim(), P: h.Port!.Trim())).Distinct().ToList();
+        var sonuc = new List<UcmdbPortlu>();
+        foreach (var b in l)
+        {
+            var adl = b.Adlar ?? [];
+            if (b.Portlar is { Count: > 0 }) { sonuc.Add(new(b, b.Portlar, "UCMDB binding")); continue; }
+            var w = web.Where(x => adl.Any(a => AdEs(a, x.W))).ToList();
+            if (w.Count > 0) { sonuc.Add(new(b, w.Select(x => x.P).Distinct().OrderBy(PortSira).ToList(), $"ERT WEBSITE '{string.Join("', '", w.Select(x => x.W).Distinct())}'")); continue; }
+            var iu = (iis ?? []).SelectMany(p => p.Uygulamalar.Select(u => (p.Port, u.Ad))).Where(x => x.Ad.Length > 1 && adl.Any(a => AdEs(a, x.Ad.TrimStart('/')))).ToList();
+            if (iu.Count > 0) { sonuc.Add(new(b, iu.Select(x => x.Port).Distinct().OrderBy(PortSira).ToList(), $"IIS logu /{string.Join(", /", iu.Select(x => x.Ad.TrimStart('/')).Distinct())}")); continue; }
+            if (_icerik.TryGetValue(b.Id, out var ic) && ic.Metin != null)
+            {
+                var gp = Ayristir(ic.Metin, b.Ad).Where(a => a.Tur == "gelen" && a.Port != null).Select(a => a.Port!).Distinct().ToList();
+                if (gp.Count > 0) { sonuc.Add(new(b, gp.OrderBy(PortSira).ToList(), "web.config baseAddress")); continue; }
+            }
+            sonuc.Add(new(b, [], null));
+        }
+        return sonuc;
+    }
+    static int PortSira(string p) => int.TryParse(p, out int n) ? n : 99999;
+
+    // Pencere için: belgelerin içeriği önbellekte yoksa tek bağlantıyla okunur (baseAddress portu için)
+    public async Task IcerikleriYukleAsync(List<UcmdbBelge> l, CancellationToken ct)
+    {
+        var eksik = l.Where(b => !_icerik.ContainsKey(b.Id)).Take(C.GetValue("PencereMaxBelge", 200)).ToList();
+        if (eksik.Count == 0) return;
+        using var c = await AcAsync(ct);
+        var s = await SemaAsync(c, ct);
+        var adOf = eksik.ToDictionary(b => b.Id, b => b.Ad, StringComparer.OrdinalIgnoreCase);
+        foreach (var (id, bayt) in await IcerikAsync(c, s, eksik.Select(b => b.Id).ToList(), ct))
+        {
+            var (metin, bicim) = Coz(bayt, adOf.GetValueOrDefault(id) ?? "");
+            int n = 0;
+            if (metin != null) (metin, n) = Maskele(metin);
+            _icerik[id] = (DateTime.UtcNow, metin, bicim, bayt.Length, n);
+        }
     }
 
     // sunucu adı anahtarları: tam ad, kısa ad (ilk noktaya kadar; IP değilse), IP
@@ -536,6 +630,141 @@ sealed class UcmdbService(IConfiguration cfg, ILogger<UcmdbService> log)
                 sonuc.Add(($"db://{host}{(inst != null ? "\\" + inst : "")}{(port != null ? ":" + port : "")}{(db != null ? "/" + db : "")}", host.ToLowerInvariant(), port));
         }
         return sonuc;
+    }
+
+    // ---------- döküm (test: kolonlar ve değerler; UCMDB'ye yazılmaz, LOB kolonları okunmaz, gizli adlı kolonlar maskeli) ----------
+    static readonly HashSet<string> _lob = ["BLOB", "CLOB", "NCLOB", "LONG", "LONG RAW", "BFILE", "XMLTYPE"];
+    static bool GizliKolon(string k) => Regex.IsMatch(k, "PASS|PWD|SECRET|TOKEN|CREDENTIAL|PRIVATE", RegexOptions.IgnoreCase);
+
+    async Task<List<Dictionary<string, string>>> SatirlarAsync(OracleConnection c, Sema0 s, string t, string? kosul, int max, CancellationToken ct)
+    {
+        var kol = s.Kolon[t].Where(kv => !_lob.Contains(kv.Value) && !kv.Value.StartsWith("TIMESTAMP WITH", StringComparison.Ordinal)).Select(kv => kv.Key).ToList();
+        var l = new List<Dictionary<string, string>>();
+        if (kol.Count == 0) return l;
+        using var cmd = c.CreateCommand();
+        cmd.CommandText = $"SELECT {string.Join(", ", kol)} FROM {Sema}.{t} WHERE {(kosul ?? "1=1")} AND ROWNUM <= {max}";
+        cmd.CommandTimeout = SorguSn;
+        using var r = await cmd.ExecuteReaderAsync(ct);
+        while (await r.ReadAsync(ct))
+        {
+            var d = new Dictionary<string, string>();
+            for (int i = 0; i < kol.Count; i++)
+            {
+                string v;
+                try { v = r.IsDBNull(i) ? "" : Deger(r.GetValue(i)); } catch (Exception ex) { v = "(okunamadı: " + ex.GetType().Name + ")"; }
+                if (v == "") continue;
+                if (GizliKolon(kol[i])) v = "***";
+                d[kol[i]] = v.Length > 300 ? v[..300] + "…" : v;
+            }
+            l.Add(d);
+        }
+        return l;
+    }
+
+    // tablo verilirse: kolonlar + örnek satırlar; verilmezse zincir dökümü (IP'nin ya da örnek web.config'lerin kapsayıcıları, bağları, bağlı uç noktalar)
+    public async Task<string> DokumAsync(string? tablo, string? ip, EnvanterSnapshot? env, int ornek, CancellationToken ct)
+    {
+        var sb = new StringBuilder();
+        void S(string x) => sb.AppendLine(x);
+        if (!Acik) return "Ucmdb:Baglanti boş.";
+        using var c = await AcAsync(ct);
+        var s = await SemaAsync(c, ct);
+        ornek = Math.Clamp(ornek, 1, 50);
+        void Yaz(string t, Dictionary<string, string> d, string girinti) { foreach (var (k, v) in d) S($"{girinti}{k} = {v}"); }
+
+        if (!string.IsNullOrWhiteSpace(tablo))
+        {
+            string t = Ad(tablo);
+            if (!s.Kolon.ContainsKey(t)) return $"{Sema}.{t} bulunamadı (yalnız {Sema} şemasındaki CDM% tabloları dökülebilir).";
+            S($"{Sema}.{t} — {s.Kolon[t].Count} kolon{(s.Bos.Contains(t) ? " (istatistiğe göre BOŞ)" : "")}");
+            foreach (var (k, tip) in s.Kolon[t]) S($"  {k,-40} {tip}{(_lob.Contains(tip) ? "  (LOB — dökümde okunmaz)" : "")}{(PortKolonu(k, tip) ? "  ← port / binding kolonu" : "")}");
+            string? kosul = t.Equals(Tablo, StringComparison.OrdinalIgnoreCase) ? "(" + string.Join(" OR ", Desenler.Select(x => $"LOWER({s.AdK}) LIKE '%{x.Replace("%", "")}%'")) + ")" : null;
+            var rows = await SatirlarAsync(c, s, t, kosul, ornek, ct);
+            S($"\nÖrnek {rows.Count} satır (boş değerler yazılmaz):");
+            for (int i = 0; i < rows.Count; i++) { S($"--- {i + 1}"); Yaz(t, rows[i], "  "); }
+            return sb.ToString();
+        }
+
+        // zincir dökümü
+        var belgeler = new List<(string Id, string Ad)>();
+        if (ip != null && env != null && _dizin != null)
+            belgeler = Belgeler([ip], env).GetValueOrDefault(ip)?.Take(ornek).Select(b => (b.Id, b.Ad)).ToList() ?? [];
+        if (belgeler.Count == 0)
+        {
+            if (ip != null) S(_dizin == null ? $"(tam liste hazır değil; {ip} yerine örnek belgeler)" : $"({ip} için belge yok; örnek belgeler)");
+            var rows = await SatirlarAsync(c, s, Tablo, "(" + string.Join(" OR ", Desenler.Select(x => $"LOWER({s.AdK}) LIKE '%{x.Replace("%", "")}%'")) + ")", ornek, ct);
+            belgeler = rows.Where(r => r.ContainsKey(s.Id)).Select(r => (r[s.Id], r.GetValueOrDefault(s.AdK) ?? "")).ToList();
+        }
+        var dugumAd = C.GetSection("DugumTablolari").Get<string[]>() is { Length: > 0 } dt ? dt.Select(Ad).ToHashSet() :
+            ["CDM_NODE_1", "CDM_HOST_NODE_1", "CDM_NT_1", "CDM_UNIX_1", "CDM_COMPUTER_1", "CDM_HOST_1"];
+        var aday = s.Kolon.Where(t => t.Value.ContainsKey(s.Id) && !s.Bos.Contains(t.Key)).Select(t => t.Key)
+            .OrderBy(t => dugumAd.Contains(t) ? 0 : _oncelik.IsMatch(t) ? 1 : 2).ThenBy(t => t).ToList();
+        var baglar = s.Kolon.Where(t => t.Value.ContainsKey("END1_ID") && t.Value.ContainsKey("END2_ID") && !s.Bos.Contains(t.Key)).Select(t => t.Key).ToList();
+        var ucTablo = aday.Where(t => Regex.IsMatch(t, "ENDPOINT|PORT|BINDING|URL|URI", RegexOptions.IgnoreCase)).ToList();
+        int sure = C.GetValue("DokumSeviyeSaniye", 40);
+        string idTip = s.Kolon[Tablo][s.Id];
+        var bulunan = new Dictionary<string, List<(string T, Dictionary<string, string> D)>>(StringComparer.OrdinalIgnoreCase);
+
+        async Task<List<(string T, Dictionary<string, string> D)>> BulAsync(string id, List<string> tablolar)
+        {
+            if (bulunan.TryGetValue(id, out var x)) return x;
+            var l = new List<(string, Dictionary<string, string>)>();
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            foreach (var t in tablolar)
+            {
+                if (sw.Elapsed.TotalSeconds > sure) { l.Add(("(süre)", new() { ["not"] = $"{sure} sn sınırı: kalan tablolara bakılmadı" })); break; }
+                try { foreach (var d in await SatirlarAsync(c, s, t, $"{s.Id} = {Lit(s.Kolon[t].GetValueOrDefault(s.Id) ?? idTip, id)}", 1, ct)) l.Add((t, d)); }
+                catch (OracleException) { }
+                // düğüm bulunduysa daha fazla tabloya bakmaya gerek yok (sınıf tabloları birden çok olabilir; ilk 3 isabet yeter)
+                if (l.Count >= 3 || l.Any(z => dugumAd.Contains(z.Item1))) break;
+            }
+            return bulunan[id] = l;
+        }
+
+        foreach (var (id, ad) in belgeler)
+        {
+            S($"\n=================== BELGE {ad} (id {id})");
+            foreach (var d in await SatirlarAsync(c, s, Tablo, $"{s.Id} = {Lit(idTip, id)}", 1, ct)) Yaz(Tablo, d, "  ");
+            string? simdi = id;
+            var gorulen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            for (int seviye = 0; seviye < 6 && simdi != null && IdGecerli(simdi) && gorulen.Add(simdi); seviye++)
+            {
+                if (seviye > 0)
+                {
+                    var bl = await BulAsync(simdi, aday);
+                    S($"\n  --- seviye {seviye}: kimlik {simdi} → {(bl.Count == 0 ? "hiçbir tabloda bulunamadı" : string.Join(", ", bl.Select(z => z.T)))}");
+                    foreach (var (t, d) in bl) { S($"    [{t}]"); Yaz(t, d, "      "); }
+                    if (bl.Any(z => dugumAd.Contains(z.T) || z.D.ContainsKey("A_PRIMARY_DNS_NAME"))) { S("    (sunucu düğümü — durduruldu)"); break; }
+                }
+                // bu kaydın bağları (her iki yön): bağlı uç nokta / port / URL kayıtları ayrıca dökülür
+                string? ust = null;
+                foreach (var bt in baglar)
+                {
+                    string tip = s.Kolon[bt]["END1_ID"];
+                    try
+                    {
+                        foreach (var d in await SatirlarAsync(c, s, bt, $"(END1_ID = {Lit(tip, simdi)} OR END2_ID = {Lit(tip, simdi)})", 20, ct))
+                        {
+                            string e1 = d.GetValueOrDefault("END1_ID") ?? "", e2 = d.GetValueOrDefault("END2_ID") ?? "";
+                            bool ben1 = e1.Equals(simdi, StringComparison.OrdinalIgnoreCase);
+                            string karsi = ben1 ? e2 : e1;
+                            S($"    bağ [{bt}] {(ben1 ? "bu → " : "← ")}{karsi}{(ben1 ? "" : " (kapsayıcı / kullanan)")}");
+                            if (!ben1 && Regex.IsMatch(bt, "COMPOSITION|CONTAIN", RegexOptions.IgnoreCase)) ust ??= karsi;
+                            if (ben1 && ucTablo.Count > 0 && IdGecerli(karsi))
+                                foreach (var (t, ud) in await BulAsync(karsi, ucTablo)) { S($"      → [{t}]"); Yaz(t, ud, "        "); }
+                        }
+                    }
+                    catch (OracleException ex) { S($"    bağ [{bt}]: {ex.Message}"); }
+                }
+                // üst: kayıttaki A_ROOT_CONTAINER (ya da ayarlı üst kolonu), yoksa composition / containment bağı
+                string? kolUst = null;
+                var kayitlar = seviye == 0 ? (await SatirlarAsync(c, s, Tablo, $"{s.Id} = {Lit(idTip, id)}", 1, ct)).Select(d => (Tablo, d)).ToList() : bulunan.GetValueOrDefault(simdi) ?? [];
+                if (s.Ust != null) kolUst = kayitlar.Select(z => z.Item2.GetValueOrDefault(s.Ust)).FirstOrDefault(v => !string.IsNullOrEmpty(v));
+                simdi = kolUst ?? ust;
+                if (simdi == null) S("    (üst bulunamadı — durduruldu)");
+            }
+        }
+        return sb.ToString();
     }
 
     // ---------- tanı (düz metin; içerik basılmaz, yalnız biçim ve bulunan adresler) ----------
