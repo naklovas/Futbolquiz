@@ -110,8 +110,22 @@ app.UseHttpsRedirection();
 app.Use(async (context, next) =>
 {
     context.Response.Headers.Append("X-Content-Type-Options", "nosniff");
-    context.Response.Headers.Append("X-Frame-Options", "DENY");
     context.Response.Headers.Append("Referrer-Policy", "strict-origin-when-cross-origin");
+
+    // X-Frame-Options DENY, bu uygulamanin KENDI sayfalarinin da cerceve
+    // icinde acilmasini engelliyor. Topoloji ekrani yuklenen PDF'i bir
+    // <iframe> icinde gosteriyor; DENY yuzunden tarayici onu reddediyor ve
+    // kullanici "yukledim ama gorunmuyor" diyordu.
+    //
+    // O tek uc nokta icin SAMEORIGIN: kendi sayfamiz cerceveleyebilir, baska
+    // siteler yine cerceveleyemez. Clickjacking korumasi geri kalan her yerde
+    // DENY olarak duruyor.
+    var yol = context.Request.Path;
+    var topolojiOnizleme = yol.StartsWithSegments("/CountryTopology/Preview",
+        StringComparison.OrdinalIgnoreCase);
+
+    context.Response.Headers.Append("X-Frame-Options", topolojiOnizleme ? "SAMEORIGIN" : "DENY");
+
     await next();
 });
 
