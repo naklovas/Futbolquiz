@@ -234,7 +234,8 @@ const TT_KAYNAK = k => k.startsWith("DNS · VIP") ? "VIP DNS" : k.startsWith("DN
 // Giden hedef hücresi: hedef IP + sunucu; hedef VIP ise havuz ve üyeleri (dış bacak: F5 → gerçek hedef), üyenin TLS sürümü, SNI / firewall adı, dış kurum adresi
 function ttHedefHtml(r) {
   if (r.yon !== "giden") return "";
-  let h = `<span class="mono"><a href="${esc(ipTabUrl(r.hedef))}" target="_blank" rel="noopener">${esc(r.hedef ?? "")}</a></span>${r.hedefSunucu ? `<div class="muted">${esc(r.hedefSunucu)}</div>` : ""}`;
+  let h = `<span class="mono"><a href="${esc(ipTabUrl(r.hedef))}" target="_blank" rel="noopener">${esc(r.hedef ?? "")}</a></span>${r.hedefSunucu ? `<div class="muted">${esc(r.hedefSunucu)}</div>` : ""}`
+    + (r.hedefSegment ? `<div class="muted" title="Hedefin segmenti">${esc(r.hedefSegment)}${r.hedefVlan ? ` · VLAN ${esc(r.hedefVlan)}` : ""}</div>` : "");
   if (!r.uyeler?.length) return h;
   const uye = u => `<div class="mono" style="margin-top:2px">→ ${esc(u.ip)}${u.port ? ":" + esc(u.port) : ""} <span class="tt-fk">${u.dis ? "dış" : "iç"}</span>
     ${(u.surumler ?? []).slice(0, 2).map(x => tlsBadge(x.surum)).join(" ")}${[...(u.sni ?? []), ...(u.adlar ?? [])].filter((x, i, a) => a.indexOf(x) === i).slice(0, 2).map(x => `<div class="muted" style="padding-left:12px">${esc(x)}</div>`).join("")}</div>`;
@@ -263,7 +264,7 @@ function ttSatirlar() {
     (!tt.yalnizEski || r.surumler?.some(s => tlsEski(s.surum))) &&
     (!tt.yalnizTls || r.surumler?.length) &&
     (!tt.yalnizSifresiz || tt.body?.sifresiz === false || r.sifreleme === "sifresiz") &&
-    (!q || [r.ip, r.sunucu, r.port, r.uygulama, r.url, r.disUrl, r.website, r.vip, r.hedef, r.hedefSunucu, ...(r.uyeler ?? []).flatMap(u => [u.ip, ...(u.sni ?? []), ...(u.adlar ?? [])]), ...(r.surumler ?? []).map(s => s.surum), ...(r.fqdn ?? []).map(f => f.ad), ...(r.uclar ?? []).map(u => u.yol)]
+    (!q || [r.ip, r.sunucu, r.segment, r.vlan, r.cidr, r.hedefSegment, r.port, r.uygulama, r.url, r.disUrl, r.website, r.vip, r.hedef, r.hedefSunucu, ...(r.uyeler ?? []).flatMap(u => [u.ip, ...(u.sni ?? []), ...(u.adlar ?? [])]), ...(r.surumler ?? []).map(s => s.surum), ...(r.fqdn ?? []).map(f => f.ad), ...(r.uclar ?? []).map(u => u.yol)]
       .some(x => String(x ?? "").toLocaleLowerCase("tr").includes(q))));
 }
 
@@ -288,6 +289,9 @@ async function ttWcYukle() {
   if (uiMode === "tls" && $("#ttSonuc")) ttCiz();
   if (ttWc.sonraki > Date.now()) setTimeout(() => { if (uiMode === "tls" && $("#ttSonuc")) ttWcYukle(); }, ttWc.sonraki - Date.now() + 50);
 }
+// Segment hücresi: ad, altında "VLAN x · CIDR"
+const ttSegHtml = (seg, vlan, cidr) => !seg && !vlan ? `<span class="muted">—</span>`
+  : `${esc(seg ?? "")}${vlan || (cidr && cidr !== seg) ? `<div class="muted">${[vlan ? "VLAN " + esc(vlan) : "", cidr && cidr !== seg ? `<span class="mono">${esc(cidr)}</span>` : ""].filter(Boolean).join(" · ")}</div>` : ""}`;
 // Satırın portuna düşen web.config'ler (port eşleşmesi: UCMDB binding / ERT WEBSITE / IIS logu / baseAddress); giden satırda tümü
 function ttWcHtml(r) {
   const l = ttWc.belgeler[r.ip];
@@ -435,10 +439,10 @@ function ttCiz() {
       ? `UCMDB web.config listesi hazırlanamadı: ${esc(ttWc.hata)} (5 dk sonra yeniden denenir; ayrıntı: <a href="api/ucmdb/tani" target="_blank" rel="noopener">tanı</a>)`
       : `<span class="spinner"></span> UCMDB web.config listesi hazırlanıyor · ${esc(ttWc.asama)} · ${ttSure(ttWc.gecen)}`}</div>` : ""}
     <div class="tbl-wrap" style="max-height:62vh"><table>
-      <thead><tr><th>IP</th><th>Sunucu</th>${wk ? `<th title="UCMDB'de bu sunucuya ait web.config (görüntüle; şifre / anahtar değerleri maskeli)">web.config</th>` : ""}${gk ? `<th title="▼ Gelen: bu sunucuya gelen bağlantı (port bu sunucunun portu) · ▲ Giden: bu sunucunun başka sunucuya yaptığı bağlantı (port hedefin portu)">Yön</th><th title="Giden bağlantıda çağrılan sunucu">Hedef (giden)</th>` : ""}<th title="Gelen: bu sunucunun dinlediği port · Giden: hedefin portu">Port</th><th title="Gelen: bu portun ERT uygulaması · Giden: hedefin ERT uygulaması">Uygulama (ERT)</th>${sk ? `<th>Şifreleme</th>` : ""}<th>TLS sürümü</th><th class="num">El sıkışması</th>${sk ? `<th class="num" title="AppResponse flow_tcp: bu porta gelen TCP trafiği (bağlantı / satır sayısı)">TCP trafiği</th>` : ""}<th class="num">İstemci</th><th>Not</th>${fk ? `<th title="Servise erişilen adlar; DNS = istemcilerin bağlanırken çözdüğü ad (Carbon Black), VIP DNS = sunucunun üyesi olduğu VIP'e bağlanırken, IIS = IIS logundaki Host başlığı, sertifika = Nessus'un gördüğü sertifika adları, sunucu DNS = Nessus'un sunucu adı">FQDN</th><th title="En çok kullanılan ad + port + http/https (TLS görüldüyse ya da sertifika varsa https)">Önerilen URL</th><th title="Gelen: IIS logunda görülen istek yolları (sayı / GUID parçaları {n} / {guid}); giden: Palo Alto URL logundaki yollar. IIS dışı gelen servislerde yol ağ verisinde yok">Endpoint (IIS / FW)</th><th>VIP</th><th>IIS website (ERT)</th>` : ""}</tr></thead>
+      <thead><tr><th>IP</th><th>Sunucu</th><th title="KonsolideSegmentler4: segment adı (EPG / Application Profile), VLAN ve CIDR">Segment / VLAN</th>${wk ? `<th title="UCMDB'de bu sunucuya ait web.config (görüntüle; şifre / anahtar değerleri maskeli)">web.config</th>` : ""}${gk ? `<th title="▼ Gelen: bu sunucuya gelen bağlantı (port bu sunucunun portu) · ▲ Giden: bu sunucunun başka sunucuya yaptığı bağlantı (port hedefin portu)">Yön</th><th title="Giden bağlantıda çağrılan sunucu">Hedef (giden)</th>` : ""}<th title="Gelen: bu sunucunun dinlediği port · Giden: hedefin portu">Port</th><th title="Gelen: bu portun ERT uygulaması · Giden: hedefin ERT uygulaması">Uygulama (ERT)</th>${sk ? `<th>Şifreleme</th>` : ""}<th>TLS sürümü</th><th class="num">El sıkışması</th>${sk ? `<th class="num" title="AppResponse flow_tcp: bu porta gelen TCP trafiği (bağlantı / satır sayısı)">TCP trafiği</th>` : ""}<th class="num">İstemci</th><th>Not</th>${fk ? `<th title="Servise erişilen adlar; DNS = istemcilerin bağlanırken çözdüğü ad (Carbon Black), VIP DNS = sunucunun üyesi olduğu VIP'e bağlanırken, IIS = IIS logundaki Host başlığı, sertifika = Nessus'un gördüğü sertifika adları, sunucu DNS = Nessus'un sunucu adı">FQDN</th><th title="En çok kullanılan ad + port + http/https (TLS görüldüyse ya da sertifika varsa https)">Önerilen URL</th><th title="Gelen: IIS logunda görülen istek yolları (sayı / GUID parçaları {n} / {guid}); giden: Palo Alto URL logundaki yollar. IIS dışı gelen servislerde yol ağ verisinde yok">Endpoint (IIS / FW)</th><th>VIP</th><th>IIS website (ERT)</th>` : ""}</tr></thead>
       <tbody>${list.length ? list.map(r => `<tr${r.surumler?.some(s => tlsEski(s.surum)) || r.sifreleme === "sifresiz" ? ` class="tls-eski-satir"` : ""}>
         <td class="mono"><a href="${esc(ipTabUrl(r.ip))}" target="_blank" rel="noopener" title="IP sorgusunu yeni sekmede aç">${esc(r.ip)}</a></td>
-        <td class="small">${esc(r.sunucu ?? "")}</td>${wk ? `<td style="white-space:nowrap">${ttWcHtml(r)}</td>` : ""}
+        <td class="small">${esc(r.sunucu ?? "")}</td><td class="small">${ttSegHtml(r.segment, r.vlan, r.cidr)}</td>${wk ? `<td style="white-space:nowrap">${ttWcHtml(r)}</td>` : ""}
         ${gk ? `<td class="small" style="white-space:nowrap">${r.yon === "giden" ? `<b style="color:var(--out, #b26b00)">▲ Giden</b>` : r.port ? `<b style="color:var(--in)">▼ Gelen</b>` : ""}</td>
           <td class="small">${ttHedefHtml(r)}</td>` : ""}
         <td class="mono" title="${r.yon === "giden" ? "hedefin portu" : "bu sunucunun portu"}">${esc(r.port || "—")}${gk && r.port ? `<div class="small muted">${r.yon === "giden" ? "hedef portu" : "kendi portu"}</div>` : ""}</td>
@@ -446,7 +450,7 @@ function ttCiz() {
         ${sk ? `<td>${r.port ? ttSifHtml(r) : ""}</td>` : ""}<td>${ttSurumHtml(r)}</td><td class="num">${r.sayi ? fmt(r.sayi) : ""}</td>${sk ? `<td class="num">${r.trafik ? fmt(r.trafik) : ""}</td>` : ""}<td class="num">${r.istemci ? fmt(r.istemci) : ""}</td>
         <td class="small muted">${r.surumler?.length ? esc(r.not ?? "") : ""}</td>
         ${fk ? `<td>${ttFqdnHtml(r)}</td><td class="mono small">${r.url ? esc(r.url) : ""}</td><td>${ttUcHtml(r)}</td><td class="mono small">${esc(r.vip ?? "")}</td><td class="small">${esc(r.website ?? "")}</td>` : ""}</tr>`).join("")
-        : `<tr><td colspan="${(sk ? 10 : 8) + (fk ? 5 : 0) + (gk ? 2 : 0) + (wk ? 1 : 0)}" class="unk">${all.length ? "Filtreye uyan satır yok." : b.bitti ? "Sonuç yok." : "Sonuçlar geldikçe burada listelenecek…"}</td></tr>`}</tbody></table></div>
+        : `<tr><td colspan="${(sk ? 10 : 8) + 1 + (fk ? 5 : 0) + (gk ? 2 : 0) + (wk ? 1 : 0)}" class="unk">${all.length ? "Filtreye uyan satır yok." : b.bitti ? "Sonuç yok." : "Sonuçlar geldikçe burada listelenecek…"}</td></tr>`}</tbody></table></div>
     ${b.mesajlar?.length ? `<div class="msgs">${esc(b.mesajlar.join("\n"))}</div>` : ""}`;
   $("#ttAra").addEventListener("input", e => { tt.filtre = e.target.value; const pos = e.target.selectionStart; ttCiz(); const i = $("#ttAra"); i.focus(); i.setSelectionRange(pos, pos); });
   $("#ttEski").addEventListener("change", e => { tt.yalnizEski = e.target.checked; ttCiz(); });
@@ -469,12 +473,12 @@ function ttCsv() {
   const Q = v => { v = String(v ?? ""); return /[;"\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v; };
   const fk = !!tt.body?.fqdn;
   const gk = !!tt.body?.giden;
-  const rows = [["IP", "SUNUCU", ...(gk ? ["YÖN", "HEDEF IP", "HEDEF SUNUCU", "DIŞ BACAK (VIP HAVUZ ÜYELERİ)", "DIŞ KURUM URL"] : []), "PORT", "UYGULAMA", "ERT PORTU", ...(ttWc.acik ? ["WEB.CONFIG (UCMDB)"] : []), ...(fk ? ["IIS WEBSITE (ERT)", "VIP", "ÖNERİLEN URL", "FQDN", "FQDN KAYNAKLARI", "ENDPOINT URL'LERİ (IIS / FW)"] : []), "ŞİFRELEME", "ŞİFRELEME NOTU", "TLS SÜRÜMLERİ", "EN ÇOK KULLANILAN", "ESKİ SÜRÜM", "EL SIKIŞMASI", "TCP TRAFİĞİ", "İSTEMCİ", "KUTULAR", "NOT"]];
+  const rows = [["IP", "SUNUCU", "SEGMENT", "VLAN", "CIDR", ...(gk ? ["YÖN", "HEDEF IP", "HEDEF SUNUCU", "HEDEF SEGMENT", "HEDEF VLAN", "DIŞ BACAK (VIP HAVUZ ÜYELERİ)", "DIŞ KURUM URL"] : []), "PORT", "UYGULAMA", "ERT PORTU", ...(ttWc.acik ? ["WEB.CONFIG (UCMDB)"] : []), ...(fk ? ["IIS WEBSITE (ERT)", "VIP", "ÖNERİLEN URL", "FQDN", "FQDN KAYNAKLARI", "ENDPOINT URL'LERİ (IIS / FW)"] : []), "ŞİFRELEME", "ŞİFRELEME NOTU", "TLS SÜRÜMLERİ", "EN ÇOK KULLANILAN", "ESKİ SÜRÜM", "EL SIKIŞMASI", "TCP TRAFİĞİ", "İSTEMCİ", "KUTULAR", "NOT"]];
   const SIF_CSV = { tls: "TLS", sifresiz: "OLASI ŞİFRESİZ", protokol: "PROTOKOL İÇİNDE", trafikyok: "TRAFİK YOK", bilinmiyor: "BİLİNMİYOR" };
   // endpoint URL'leri: önerilen temel adres + IIS yolu (adres yoksa yalnız yol)
   const ucUrl = r => (r.uclar ?? []).map(u => `${r.url ?? ""}${u.yol} (${u.istek})`).join(" | ");
-  for (const r of ttSatirlar()) rows.push([r.ip, r.sunucu,
-    ...(gk ? [r.yon === "giden" ? "GİDEN (hedefin portu)" : r.port ? "GELEN (kendi portu)" : "", r.hedef ?? "", r.hedefSunucu ?? "",
+  for (const r of ttSatirlar()) rows.push([r.ip, r.sunucu, r.segment ?? "", r.vlan ?? "", r.cidr ?? "",
+    ...(gk ? [r.yon === "giden" ? "GİDEN (hedefin portu)" : r.port ? "GELEN (kendi portu)" : "", r.hedef ?? "", r.hedefSunucu ?? "", r.hedefSegment ?? "", r.hedefVlan ?? "",
       (r.uyeler ?? []).map(u => `${u.ip}${u.port ? ":" + u.port : ""} (${u.dis ? "dış" : "iç"})${u.surumler?.length ? " " + u.surumler.map(x => x.surum).join("/") : ""}${[...(u.sni ?? []), ...(u.adlar ?? [])].length ? " " + [...new Set([...(u.sni ?? []), ...(u.adlar ?? [])])].join(", ") : ""}`).join(" | "),
       r.disUrl ?? ""] : []),
     r.port, r.uygulama, r.ertPortu ? "evet" : "hayır", ...(ttWc.acik ? [ttWcCsv(r)] : []),

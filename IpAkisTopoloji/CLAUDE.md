@@ -954,6 +954,10 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
   A_RESOURCE_PATH, A_CONTENT_LOCATION, A_DISPLAY_LABEL, A_USER_LABEL, A_PORT_APPLICATION_TYPE (port numarası değil), A_KRITIKLIK_SEVIYESI… — IP / port kolonu YOK.
   Yol artık birden çok kolon (`Sema0.Yol` liste; varsayılan sıra A_RESOURCE_PATH, A_CONTENT_LOCATION, …; `Ucmdb:YolKolonu` virgüllü verilebilir), satırda ilk dolu olan;
   tanıda "yolu dolu belge". IP kaydının üst kolonu metinse karşılaştırma UPPER(...) ile (RAW onaltılık büyük harf).
+  SEGMENT / VLAN (kullanıcı: "TLS sorgusunda sütun olarak segment VLAN bilgisi de ekleyelim mi"): `TlsTopluSatir.Segment / Vlan / Cidr / HedefSegment / HedefVlan` —
+  `TlsToplu.SegmentEkle` (env.FindSegment: ad = EPG > ApplicationProfile > açıklama > CIDR), grup sonunda tüm satırlara (hata satırları dahil). Arayüz: Sunucu'dan sonra
+  "Segment / VLAN" kolonu (`ttSegHtml`: ad, altında "VLAN x · CIDR"), giden satırda Hedef hücresinde hedefin segmenti + VLAN; aramada segment / VLAN / CIDR; CSV SEGMENT, VLAN,
+  CIDR (+ giden: HEDEF SEGMENT, HEDEF VLAN).
 - **Fiziksel envanter** (`FizikselEnvanter.cs`, `wwwroot/fiziksel.js`, sekme "Fiziksel envanter" `data-ui="fiziksel"`, `?fiziksel=1&kabin=&host=`;
   claude.ai sohbetindeki görev tanımı: "Bu kabin kapanırsa hangi uygulamalar etkilenir?"): veri doku DB'de HAZIR — NlyteCollector (nlyte OData →
   dbo.NlyteRaw) + `EXEC dbo.sp_KabinZincirYenile` doldurur; DeltaFlow YALNIZ OKUR (yazmaz, prosedürü çağırmaz). Betik kullanıcıda

@@ -294,7 +294,9 @@ record TlsTopluSatir(string Ip, string? Sunucu, string Port, string? Uygulama, b
     string Yon = "gelen", string? Hedef = null, string? HedefSunucu = null,
     // Giden hedef bir VIP ise havuz üyeleri = "dış bacak" (kullanıcı: "dış kurum tahsilatlarında gidenlerde URL yok, muhtemelen VIP üzerinden gidiyor"):
     // F5'in arkasındaki gerçek hedefler, o bacağın TLS sürümü ve SNI'si (AppResponse, istemci F5), Palo Alto'daki hedef adı / URL
-    List<TlsUye>? Uyeler = null, string? DisUrl = null);
+    List<TlsUye>? Uyeler = null, string? DisUrl = null,
+    // Segment (KonsolideSegmentler4; kullanıcı: "segment, VLAN bilgisi de kolon olsun"): satır IP'sinin, giden satırda ayrıca hedefin
+    string? Segment = null, string? Vlan = null, string? Cidr = null, string? HedefSegment = null, string? HedefVlan = null);
 record TlsUye(string Ip, string? Port, bool Dis, List<TlsTopluSurum> Surumler, List<string> Sni, List<string> Adlar);
 // Servise erişilen ad: Kaynaklar = "DNS (Carbon Black)" (istemcilerin çözdüğü ad), "DNS · VIP ip:port", "IIS Host", "Sertifika (Nessus)", "Sunucu DNS (Nessus)"
 record TlsFqdn(string Ad, List<string> Kaynaklar, long Sayi, int Istemci);
@@ -384,7 +386,7 @@ static class TlsToplu
                         lock (j) j.Mesajlar.Add($"{grup.First()}…{grup.Last()} ({grup.Length} IP) alınamadı: {ex.Message}");
                         if (ucTask == null)
                         {
-                            var hatali = grup.Select(ip => new TlsTopluSatir(ip, Host(env, ip), "", null, false, [], 0, 0, [], "TLS verisi alınamadı (hata)")).ToList();
+                            var hatali = grup.Select(ip => SegmentEkle(new TlsTopluSatir(ip, Host(env, ip), "", null, false, [], 0, 0, [], "TLS verisi alınamadı (hata)"), env)).ToList();
                             lock (j) { j.Satirlar.AddRange(hatali); j.Parca++; }
                             _ = akisTask?.ContinueWith(t => _ = t.Exception, TaskScheduler.Default);   // sonucu kullanılmayacak; hata gözlenmiş sayılsın
                             continue;
@@ -427,6 +429,7 @@ static class TlsToplu
                         catch (OperationCanceledException) when (j.Cts.IsCancellationRequested) { throw; }
                         catch (Exception ex) { lock (j) if (j.Mesajlar.Count < 30) j.Mesajlar.Add("VIP dış bacağı / firewall adları alınamadı: " + ex.Message); }
                     yeni.AddRange(gidenTum);
+                    yeni = yeni.Select(r => SegmentEkle(r, env)).ToList();
                     lock (j) { j.Satirlar.AddRange(yeni); j.Parca++; }
                 }
             }
@@ -724,6 +727,15 @@ static class TlsToplu
             yield return new TlsTopluSatir(ip, host, p, uyg, ertte, surumler, top, 0, hs.Select(x => x.Cihaz).Distinct().ToList(), not,
                 hs.Count > 0 ? "tls" : "bilinmiyor", Fqdn: fq, Url: url, Website: web, Vip: vipTxt, Yon: "giden", Hedef: h, HedefSunucu: Host(env, h), Uyeler: uyeler);
         }
+    }
+
+    // Segment adı (EPG > ApplicationProfile > açıklama > CIDR), VLAN, CIDR; giden satırda hedef IP'nin segmenti de
+    static TlsTopluSatir SegmentEkle(TlsTopluSatir r, EnvanterSnapshot env)
+    {
+        var s = env.FindSegment(r.Ip);
+        var h = r.Hedef != null && _ipRx.IsMatch(r.Hedef) ? env.FindSegment(r.Hedef) : null;
+        static string? V(string? v) => string.IsNullOrWhiteSpace(v) ? null : v.Trim();
+        return r with { Segment = s?.Label, Vlan = V(s?.Vlan), Cidr = s?.Cidr, HedefSegment = h?.Label, HedefVlan = V(h?.Vlan) };
     }
 
     static bool Ozel(string ip)
