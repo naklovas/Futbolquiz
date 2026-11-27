@@ -1242,6 +1242,49 @@ app.MapGet("/api/ucmdb/dokum", async (string? tablo, string? ip, int? ornek, boo
             $"ucmdb_{(string.IsNullOrWhiteSpace(tablo) ? "zincir" + (v != null ? "_" + v : "") : tablo.ToLowerInvariant())}_{DateTime.Now:yyyyMMdd_HHmm}.txt");
     return Results.Text(metin, "text/plain; charset=utf-8");
 });
+// web.config taraması sayfası (wwwroot/webconfig.html): kapsam (IP / segment / Nessus DMZ / tüm ağ) → arka plan işi; listeler artımlı (?db=&du=&de=&da=)
+app.MapGet("/api/ucmdb/segmentler", async (SegmentTaramaService seg, IConfiguration cfg, CancellationToken ct) =>
+{
+    try { return Results.Ok(new { segmentler = (await seg.ListeAsync(ct)).Select(x => new { ad = x.Ad, cidrler = x.Cidrler, sunucu = x.ErtSunucu }), dmzAsset = cfg["Zafiyet:DmzAsset"] }); }
+    catch (Exception ex) when (ex is not OperationCanceledException) { return Results.Ok(new { segmentler = Array.Empty<object>(), dmzAsset = cfg["Zafiyet:DmzAsset"], hata = ex.Message }); }
+});
+app.MapPost("/api/ucmdb/tara", async (WcTaramaIstek req, HttpContext ctx, UcmdbService u, EnvanterService envanter, NessusService nessus, CancellationToken ct) =>
+{
+    try { var j = await u.WcBaslatAsync(req, ctx.User?.Identity?.Name ?? "?", envanter, nessus, ct); return Results.Ok(new { id = j.Id }); }
+    catch (InvalidOperationException ex) { return Results.BadRequest(new { error = ex.Message }); }
+    catch (Exception ex) when (ex is not OperationCanceledException) { return Results.BadRequest(new { error = ex.Message }); }
+});
+app.MapGet("/api/ucmdb/tara/{id}", (string id, int? db, int? du, int? de, int? da, UcmdbService u) =>
+{
+    var j = u.WcIs(id);
+    if (j == null) return Results.NotFound(new { error = "Tarama bulunamadı (süresi dolmuş olabilir; yeniden başlatın)." });
+    static List<T> Den<T>(List<T> l, int? n) => l.Skip(Math.Clamp(n ?? 0, 0, l.Count)).ToList();
+    lock (j) return Results.Ok(new
+    {
+        j.Id, j.Kapsam, j.Toplam, j.Okunan, j.Asama, j.Bitti, j.Hata, mesajlar = j.Mesajlar.ToList(), aramalar = j.Aramalar,
+        gecen = (int)((j.BittiZaman ?? DateTime.UtcNow) - j.Basladi).TotalSeconds, icerikMb = Math.Round(j.IcerikBayt / 1048576.0, 1), j.IcerikKesik,
+        sayi = new { belge = j.Belgeler.Count, url = j.Urller.Count, exe = j.Exeler.Count, eslesme = j.Eslesmeler.Count },
+        db = db ?? 0, du = du ?? 0, de = de ?? 0, da = da ?? 0,
+        belgeler = Den(j.Belgeler, db), urller = Den(j.Urller, du), exeler = Den(j.Exeler, de), eslesmeler = Den(j.Eslesmeler, da)
+    });
+});
+// Tek dosya Excel (.xlsx): özet + web.config + adresler + exe + arama (ara=…&ara=… verilirse bellekte yeniden aranır)
+app.MapGet("/api/ucmdb/tara/{id}/excel", (string id, string[]? ara, bool? bk, HttpContext ctx, IConfiguration cfg, UcmdbService u) =>
+{
+    if (!Yetki.Var(cfg, ctx, Yetki.Disari)) return Yetki.Red(ctx, "Dışa aktarma");
+    var j = u.WcIs(id);
+    if (j == null) return Results.NotFound(new { error = "Tarama bulunamadı (süresi dolmuş olabilir; yeniden başlatın)." });
+    return Results.File(u.WcExcel(j, ara?.ToList(), bk ?? false), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        $"webconfig_tarama_{DateTime.Now:yyyyMMdd_HHmm}.xlsx");
+});
+app.MapPost("/api/ucmdb/tara/{id}/durdur", (string id, UcmdbService u) => { u.WcIs(id)?.Cts.Cancel(); return Results.Ok(); });
+app.MapPost("/api/ucmdb/tara/{id}/ara", (string id, WcAramaIstek req, UcmdbService u) =>
+{
+    var j = u.WcIs(id);
+    if (j == null) return Results.NotFound(new { error = "Tarama bulunamadı (süresi dolmuş olabilir; yeniden başlatın)." });
+    var (l, say, belge, aranan, kesik) = u.WcYenidenAra(j, req.Aramalar, req.BuyukKucuk ?? false);
+    return Results.Ok(new { eslesmeler = l, terimSayi = say, belge, aranan, kesik, bitti = j.Bitti });
+});
 app.MapGet("/api/ucmdb/tani", async (string? ip, UcmdbService u, EnvanterService envanter, CancellationToken ct) =>
 {
     EnvanterSnapshot? env = null;

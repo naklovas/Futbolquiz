@@ -1,0 +1,442 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DeltaFlow · web.config taraması</title>
+<link rel="icon" href="deltaflow.svg">
+<script>
+  try { const t = localStorage.getItem("deltaflow.theme"); if (t === "light" || t === "dark") document.documentElement.dataset.theme = t; } catch {}
+</script>
+<!--
+  web.config taraması (WebConfigTarama.cs, UCMDB): verilen IP'lerdeki / segmentlerdeki / Nessus DMZ asset'indeki ya da tüm ağdaki web.config'ler okunur
+  (şifre / anahtar / token değerleri maskelenir). Her zaman: içinde http / https geçen adresler ve ".exe" geçen yerler. İsteğe bağlı: metin araması
+  (tarama bitince yeni arama Oracle'a gitmeden bellekteki maskeli metinlerde yapılır).
+-->
+<style>
+  :root {
+    --bg: #f5f6f8; --panel: #ffffff; --text: #1d2330; --muted: #677084; --line: #dde1e8;
+    --in: #2f6fd6; --in-soft: #e5eefc; --ok: #2e8b57; --err: #c8353a; --warn: #b7791f; --hl: #fff2a8;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #14171d; --panel: #1c2028; --text: #e4e7ec; --muted: #9098a8; --line: #2d333e;
+      --in: #6ea0f0; --in-soft: #1f2d45; --ok: #5cc28a; --err: #ef6b6f; --warn: #e0b050; --hl: #5a4a10;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #14171d; --panel: #1c2028; --text: #e4e7ec; --muted: #9098a8; --line: #2d333e;
+    --in: #6ea0f0; --in-soft: #1f2d45; --ok: #5cc28a; --err: #ef6b6f; --warn: #e0b050; --hl: #5a4a10;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 "Segoe UI", system-ui, sans-serif; }
+  header { padding: 14px 20px; background: var(--panel); border-bottom: 1px solid var(--line); display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
+  header img { width: 30px; height: 30px; }
+  header h1 { margin: 0; font-size: 19px; }
+  header a { color: var(--muted); text-decoration: none; font-size: 13px; }
+  header a:hover { color: var(--in); }
+  header .sp { flex: 1; }
+  #me { font-size: 12.5px; color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 4px 12px; }
+  main { padding: 18px 20px 40px; max-width: 1800px; margin: 0 auto; display: grid; gap: 14px; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; }
+  .sub { color: var(--muted); font-size: 12.5px; }
+  input, select, button, textarea { font: inherit; color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; }
+  textarea { font-family: Consolas, ui-monospace, monospace; font-size: 12.5px; resize: vertical; width: 100%; }
+  button { cursor: pointer; }
+  button:disabled { opacity: .5; cursor: default; }
+  button.primary { background: var(--in); border-color: var(--in); color: #fff; font-weight: 600; }
+  .kapsam { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; }
+  .kutu { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; background: var(--bg); display: grid; gap: 6px; align-content: start; }
+  .kutu h3 { margin: 0; font-size: 13px; display: flex; gap: 8px; align-items: center; }
+  .kutu h3 label { display: flex; gap: 6px; align-items: center; cursor: pointer; }
+  .kutu.kapali { opacity: .55; }
+  .chips { display: flex; flex-wrap: wrap; gap: 4px; }
+  .chips span { font-size: 12px; border: 1px solid var(--line); border-radius: 999px; padding: 1px 8px; background: var(--panel); }
+  .chips span b { cursor: pointer; margin-left: 4px; color: var(--muted); }
+  .tools { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .tools .sp { flex: 1; }
+  .tools label { display: flex; gap: 6px; align-items: center; font-size: 13px; }
+  .run { border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; background: var(--bg); display: grid; gap: 6px; font-size: 13px; }
+  .pbar { position: relative; height: 22px; border-radius: 6px; background: var(--line); overflow: hidden; }
+  .pbar i { position: absolute; inset: 0 auto 0 0; background: var(--in); transition: width .6s; }
+  .pbar span { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 12.5px; text-shadow: 0 0 3px var(--panel); }
+  .stats { display: flex; gap: 10px; flex-wrap: wrap; }
+  .stat { border: 1px solid var(--line); border-radius: 10px; padding: 8px 14px; min-width: 130px; background: var(--bg); cursor: pointer; }
+  .stat.on { border-color: var(--in); box-shadow: 0 0 0 1px var(--in) inset; }
+  .stat b { display: block; font-size: 20px; font-variant-numeric: tabular-nums; }
+  .stat span { color: var(--muted); font-size: 11.5px; text-transform: uppercase; letter-spacing: .04em; }
+  .tabs { display: flex; gap: 6px; flex-wrap: wrap; }
+  .tabs button.on { background: var(--in); border-color: var(--in); color: #fff; }
+  .grid { border: 1px solid var(--line); border-radius: 10px; overflow: auto; max-height: calc(100vh - 260px); }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  th { position: sticky; top: 0; background: var(--bg); color: var(--muted); font-size: 11.5px; text-transform: uppercase; letter-spacing: .04em; text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--line); z-index: 1; white-space: nowrap; }
+  td { padding: 7px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  tr:hover td { background: var(--in-soft); }
+  tr[data-ac] { cursor: pointer; }
+  .mono { font-family: Consolas, ui-monospace, monospace; }
+  .small { font-size: 12px; } .muted { color: var(--muted); }
+  .kir { word-break: break-all; }
+  .num { text-align: right; font-variant-numeric: tabular-nums; }
+  .r { display: inline-block; font-size: 11px; font-weight: 700; border-radius: 999px; padding: 0 7px; border: 1px solid; }
+  .r.http { color: var(--warn); border-color: var(--warn); } .r.https { color: var(--ok); border-color: var(--ok); }
+  mark { background: var(--hl); color: inherit; border-radius: 2px; padding: 0 1px; }
+  .empty { padding: 40px; text-align: center; color: var(--muted); }
+  .foot { display: flex; justify-content: space-between; align-items: center; margin-top: 10px; color: var(--muted); font-size: 12.5px; gap: 10px; flex-wrap: wrap; }
+  .spinner { display: inline-block; width: 12px; height: 12px; border: 2px solid var(--line); border-top-color: var(--in); border-radius: 50%; animation: sp 0.8s linear infinite; vertical-align: -2px; }
+  @keyframes sp { to { transform: rotate(360deg); } }
+  .msgs { font-size: 12px; color: var(--muted); white-space: pre-wrap; }
+  .err { color: var(--err); }
+  .modal { position: fixed; inset: 0; z-index: 50; background: rgba(0, 0, 0, .45); display: flex; align-items: center; justify-content: center; }
+  .modal[hidden] { display: none; }
+  .modal-box { background: var(--panel); width: min(1400px, 96vw); height: 92vh; border-radius: 10px; display: flex; flex-direction: column; box-shadow: 0 12px 40px rgba(0,0,0,.35); }
+  .modal-head { display: flex; justify-content: space-between; gap: 10px; align-items: center; padding: 10px 16px; border-bottom: 1px solid var(--line); }
+  .modal-body { overflow: auto; flex: 1; font: 12px/1.5 Consolas, ui-monospace, monospace; }
+  .ln { display: flex; white-space: pre; }
+  .ln i { font-style: normal; color: var(--muted); min-width: 52px; text-align: right; padding: 0 10px 0 0; user-select: none; border-right: 1px solid var(--line); margin-right: 10px; }
+  .ln.hedef { background: var(--in-soft); }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<header>
+  <img src="deltaflow.svg" alt="">
+  <div><h1>web.config taraması</h1>
+    <div class="sub">UCMDB'deki web.config'ler · verilen IP'lerde, segmentlerde, Nessus DMZ'de ya da tüm ağda · http / https adresleri ve ".exe" geçen yerler her zaman listelenir · metin araması · şifre / anahtar / token değerleri maskelenir</div></div>
+  <span class="sp"></span>
+  <a href="./">← DeltaFlow</a>
+  <span id="me"></span>
+</header>
+<main>
+  <section class="panel" id="formPanel">
+    <div class="kapsam">
+      <div class="kutu" id="kIp"><h3><label><input type="checkbox" id="cIp" checked> IP'ler</label></h3>
+        <textarea id="ips" rows="5" placeholder="IP'leri yapıştırın (satır, virgül, sekme — Excel'den de olur)"></textarea>
+        <div class="sub" id="ipSay"></div></div>
+      <div class="kutu kapali" id="kSeg"><h3><label><input type="checkbox" id="cSeg"> Segmentler</label></h3>
+        <div class="tools"><input id="segIn" list="segListe" placeholder="segment adı ya da CIDR (10.1.2.0/24)" style="flex:1;min-width:180px"><button type="button" id="segEkle">Ekle</button></div>
+        <datalist id="segListe"></datalist>
+        <div class="chips" id="segChips"></div></div>
+      <div class="kutu kapali" id="kDmz"><h3><label><input type="checkbox" id="cDmz"> Nessus DMZ</label></h3>
+        <div class="sub" id="dmzBilgi">Nessus'taki DMZ asset'inin IP'lerindeki sunucular (açıklık taramasıyla aynı tanım: Zafiyet:DmzAsset).</div>
+        <input id="asset" placeholder="başka bir Nessus asset adı (boş = DMZ asset'i)"></div>
+      <div class="kutu kapali" id="kTum"><h3><label><input type="checkbox" id="cTum"> Tüm ağ</label></h3>
+        <div class="sub">UCMDB'deki bütün web.config'ler (binlerce olabilir; diğer seçimleri yok sayar).</div></div>
+      <div class="kutu"><h3>Aranacak metinler</h3>
+        <textarea id="ara" rows="5" placeholder="her satıra bir değer (ör. bir sunucu adı, servis adresi, connection string parçası)"></textarea>
+        <div class="tools"><label><input type="checkbox" id="bk"> Büyük / küçük harf duyarlı</label><span class="sp"></span>
+          <button type="button" id="araBtn" title="Tarama bittiyse Oracle'a gitmeden mevcut sonuçlarda arar">Ara</button></div>
+        <div class="sub">Arama boş da olsa http / https adresleri ve exe geçen yerler listelenir.</div></div>
+    </div>
+    <div class="tools" style="margin-top:12px">
+      <button type="button" class="primary" id="basla">▶ Taramayı başlat</button>
+      <button type="button" id="durdur" hidden>■ Durdur</button>
+      <span id="formHata" class="err small"></span>
+    </div>
+  </section>
+
+  <section class="panel" id="sonuc" hidden>
+    <div class="run" id="run"></div>
+    <div class="stats" id="stats" style="margin:12px 0"></div>
+    <div class="tools" style="margin-bottom:10px">
+      <div class="tabs" id="tabs">
+        <button type="button" data-tab="ara">Arama sonuçları</button>
+        <button type="button" data-tab="url" class="on">HTTP / HTTPS adresleri</button>
+        <button type="button" data-tab="exe">EXE geçen yerler</button>
+        <button type="button" data-tab="belge">Belgeler</button>
+      </div>
+      <span class="sp"></span>
+      <select id="gorunum" title="Aynı adres / exe birden çok web.config'te geçebilir"><option value="tekil">Benzersiz</option><option value="tum">Tüm satırlar</option></select>
+      <select id="sema"><option value="">http + https</option><option value="http">Yalnız http (şifresiz)</option><option value="https">Yalnız https</option></select>
+      <input type="search" id="q" placeholder="süz: adres, host, sunucu, IP, yol, metin…" style="min-width:260px">
+      <button type="button" id="csv" hidden title="Yalnız bu sekmenin görünen satırları (CSV)">Bu sekme (CSV)</button>
+      <button type="button" class="primary" id="xlsx" hidden title="Tek Excel dosyası: özet, web.config listesi, adresler (benzersiz + tüm), exe (benzersiz + tüm), arama sonuçları">📊 Excel (tüm sonuçlar)</button>
+    </div>
+    <div class="grid"><table><thead id="head"></thead><tbody id="body"></tbody></table></div>
+    <div class="foot"><span id="count"></span><span><button type="button" id="more" hidden>Daha fazla göster</button></span></div>
+    <div class="msgs" id="msgs"></div>
+  </section>
+</main>
+
+<div class="modal" id="modal" hidden>
+  <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="mBaslik">
+    <div class="modal-head"><div><b id="mBaslik"></b><div class="sub" id="mBilgi"></div></div>
+      <span style="display:flex;gap:8px"><button type="button" id="mKopya">Kopyala</button><button type="button" id="mKapat">✕ Kapat</button></span></div>
+    <div class="modal-body" id="mGovde"></div>
+  </div>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const fmt = n => Number(n ?? 0).toLocaleString("tr-TR");
+const sure = sn => sn < 60 ? `${sn} sn` : sn < 3600 ? `${Math.floor(sn / 60)} dk ${sn % 60} sn` : `${Math.floor(sn / 3600)} sa ${Math.floor(sn % 3600 / 60)} dk`;
+const IP_RX = /\b(?:\d{1,3}\.){3}\d{1,3}\b/g;
+
+const st = { yetki: {}, id: null, is: null, belgeler: [], urller: [], exeler: [], eslesmeler: [], belgeOf: new Map(), seg: [], tab: "url", limit: 1000,
+  timer: null, araSonuc: null, araTerimler: [] };
+
+// ---- form ----
+function kutuDurum() {
+  const tum = $("#cTum").checked;
+  [["#kIp", "#cIp"], ["#kSeg", "#cSeg"], ["#kDmz", "#cDmz"]].forEach(([k, c]) => $(k).classList.toggle("kapali", tum || !$(c).checked));
+  $("#kTum").classList.toggle("kapali", !tum);
+}
+["#cIp", "#cSeg", "#cDmz", "#cTum"].forEach(s => $(s).addEventListener("change", kutuDurum));
+const ipler = () => [...new Set(($("#ips").value.match(IP_RX) ?? []).filter(ip => ip.split(".").every(x => +x <= 255)))];
+$("#ips").addEventListener("input", () => { const n = ipler().length; $("#ipSay").textContent = n ? `${fmt(n)} IP` : ""; if (n) { $("#cIp").checked = true; kutuDurum(); } });
+function segCiz() {
+  $("#segChips").innerHTML = st.seg.map((s, i) => `<span>${esc(s)}<b data-sil="${i}" title="kaldır">×</b></span>`).join("");
+}
+function segEkle() {
+  const v = $("#segIn").value.trim();
+  if (!v) return;
+  v.split(/[\n,;]+/).map(x => x.trim()).filter(Boolean).forEach(x => { if (!st.seg.includes(x)) st.seg.push(x); });
+  $("#segIn").value = ""; $("#cSeg").checked = true; kutuDurum(); segCiz();
+}
+$("#segEkle").addEventListener("click", segEkle);
+$("#segIn").addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); segEkle(); } });
+$("#segChips").addEventListener("click", e => { const b = e.target.closest("[data-sil]"); if (b) { st.seg.splice(+b.dataset.sil, 1); segCiz(); } });
+const terimler = () => [...new Set($("#ara").value.split(/\r?\n/).map(x => x.trim()).filter(Boolean))];
+
+async function basla() {
+  $("#formHata").textContent = "";
+  const tum = $("#cTum").checked;
+  const req = { tum, aramalar: terimler(),
+    ips: !tum && $("#cIp").checked ? ipler() : [],
+    segmentler: !tum && $("#cSeg").checked ? st.seg : [],
+    dmz: !tum && $("#cDmz").checked, asset: $("#asset").value.trim() || null };
+  if (!tum && !req.ips.length && !req.segmentler.length && !req.dmz) { $("#formHata").textContent = "IP, segment, Nessus DMZ ya da tüm ağ seçin."; return; }
+  if (tum && !confirm("Tüm ağdaki web.config'ler taranacak (binlerce olabilir, uzun sürebilir). Devam edilsin mi?")) return;
+  $("#basla").disabled = true;
+  try {
+    const r = await fetch("api/ucmdb/tara", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(req) });
+    const b = await r.json().catch(() => ({ error: `HTTP ${r.status}` }));
+    if (r.status === 404 || r.status === 405) throw new Error("Sunucudaki DeltaFlow sürümünde web.config taraması yok (DLL güncel değil).");
+    if (r.status === 403) throw new Error(b.error || "Yetkiniz yok (TLS toplu sorgu yetkisi gerekir; DokuPanel).");
+    if (!r.ok) throw new Error(b.error || `HTTP ${r.status}`);
+    Object.assign(st, { id: b.id, is: null, belgeler: [], urller: [], exeler: [], eslesmeler: [], belgeOf: new Map(), limit: 1000, araSonuc: null, araTerimler: req.aramalar });
+    if (req.aramalar.length) sekme("ara");
+    $("#sonuc").hidden = false;
+    izle();
+  } catch (e) { $("#formHata").textContent = e.message; $("#basla").disabled = false; }
+}
+$("#basla").addEventListener("click", basla);
+$("#durdur").addEventListener("click", () => st.id && fetch(`api/ucmdb/tara/${st.id}/durdur`, { method: "POST" }));
+
+// ---- izleme (artımlı) ----
+async function izle() {
+  clearTimeout(st.timer);
+  const id = st.id;
+  try {
+    const r = await fetch(`api/ucmdb/tara/${id}?db=${st.belgeler.length}&du=${st.urller.length}&de=${st.exeler.length}&da=${st.eslesmeler.length}`);
+    const b = await r.json().catch(() => ({ error: `HTTP ${r.status}` }));
+    if (!r.ok) throw new Error(b.error || `HTTP ${r.status}`);
+    if (st.id !== id) return;
+    if (b.db === st.belgeler.length) { st.belgeler.push(...b.belgeler); b.belgeler.forEach(x => st.belgeOf.set(x.id, x)); }
+    if (b.du === st.urller.length) st.urller.push(...b.urller);
+    if (b.de === st.exeler.length) st.exeler.push(...b.exeler);
+    if (b.da === st.eslesmeler.length && !st.araSonuc) st.eslesmeler.push(...b.eslesmeler);
+    st.is = b;
+  } catch (e) { st.is = { ...(st.is ?? {}), bitti: true, hata: e.message }; }
+  ciz();
+  if (!st.is?.bitti) st.timer = setTimeout(izle, 2000);
+  else $("#basla").disabled = false;
+}
+
+// ---- yeniden arama (bellekteki maskeli metinlerde) ----
+async function ara() {
+  const t = terimler();
+  if (!st.id) { $("#formHata").textContent = t.length ? "Önce taramayı başlatın; aranacak metinler taramayla birlikte aranır." : ""; return; }
+  $("#araBtn").disabled = true; $("#formHata").textContent = "";
+  try {
+    const r = await fetch(`api/ucmdb/tara/${st.id}/ara`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ aramalar: t, buyukKucuk: $("#bk").checked }) });
+    const b = await r.json().catch(() => ({ error: `HTTP ${r.status}` }));
+    if (!r.ok) throw new Error(b.error || `HTTP ${r.status}`);
+    st.araSonuc = b; st.eslesmeler = b.eslesmeler; st.araTerimler = t; st.limit = 1000;
+    sekme("ara");
+  } catch (e) { $("#formHata").textContent = e.message; }
+  finally { $("#araBtn").disabled = false; }
+}
+$("#araBtn").addEventListener("click", ara);
+
+// ---- çizim ----
+function sekme(t) { st.tab = t; st.limit = 1000; document.querySelectorAll("#tabs [data-tab]").forEach(b => b.classList.toggle("on", b.dataset.tab === t)); ciz(); }
+$("#tabs").addEventListener("click", e => { const b = e.target.closest("[data-tab]"); if (b) sekme(b.dataset.tab); });
+$("#stats").addEventListener("click", e => { const b = e.target.closest("[data-tab]"); if (b) sekme(b.dataset.tab); });
+["#q", "#gorunum", "#sema"].forEach(s => $(s).addEventListener(s === "#q" ? "input" : "change", () => { st.limit = 1000; ciz(); }));
+$("#more").addEventListener("click", () => { st.limit += 1000; ciz(); });
+
+const bl = id => st.belgeOf.get(id) ?? {};
+const yolK = b => b.yol ?? b.ad ?? "";
+function vurgula(metin, terimler, bk) {
+  let h = esc(metin);
+  for (const t of terimler) {
+    if (!t) continue;
+    const rx = new RegExp(esc(t).replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), bk ? "g" : "gi");
+    h = h.replace(rx, m => `<mark>${m}</mark>`);
+  }
+  return h;
+}
+function sunucuHtml(b) { return `<span class="mono">${esc(b.ip ?? "")}</span>${b.sunucu ? `<div class="small muted">${esc(b.sunucu)}</div>` : ""}${b.segment ? `<div class="small muted">${esc(b.segment)}</div>` : ""}`; }
+
+// Görünüm başına satırlar ({hucreler, csv, ac:{id, satir}}) ve başlıklar
+function veri() {
+  const q = $("#q").value.trim().toLocaleLowerCase("tr"), tekil = $("#gorunum").value === "tekil", sema = $("#sema").value;
+  const uy = (...p) => !q || p.some(x => String(x ?? "").toLocaleLowerCase("tr").includes(q));
+  if (st.tab === "url") {
+    let l = st.urller.filter(u => !sema || u.sema === sema);
+    if (tekil) {
+      const g = new Map();
+      for (const u of l) { const k = u.url.toLowerCase(); const e = g.get(k) ?? { u, belge: new Set(), sunucu: new Set(), n: 0 }; e.belge.add(u.belge); const b = bl(u.belge); e.sunucu.add(b.sunucu ?? b.ip ?? "?"); e.n++; g.set(k, e); }
+      const s = [...g.values()].filter(e => uy(e.u.url, e.u.host, ...e.sunucu)).sort((a, b) => b.belge.size - a.belge.size || a.u.url.localeCompare(b.u.url));
+      return { bas: ["Adres", "Şema", "Host", "Port", "web.config", "Sunucular"], satir: s.map(e => ({
+        h: [`<span class="mono kir">${esc(e.u.url)}</span>`, `<span class="r ${e.u.sema}">${e.u.sema}</span>`, `<span class="mono">${esc(e.u.host)}</span>`, `<span class="mono">${esc(e.u.port ?? "")}</span>`,
+          `<span class="num">${fmt(e.belge.size)}</span>`, `<span class="small">${esc([...e.sunucu].slice(0, 4).join(", "))}${e.sunucu.size > 4 ? ` +${e.sunucu.size - 4}` : ""}</span>`],
+        csv: [e.u.url, e.u.sema, e.u.host, e.u.port ?? "", e.belge.size, [...e.sunucu].join(" | ")], ac: { id: e.u.belge, satir: e.u.satir } })) };
+    }
+    const s = l.filter(u => { const b = bl(u.belge); return uy(u.url, u.host, u.anahtar, b.ip, b.sunucu, b.segment, yolK(b)); });
+    return { bas: ["Sunucu / IP", "web.config", "Satır", "Anahtar", "Adres"], satir: s.map(u => { const b = bl(u.belge); return {
+      h: [sunucuHtml(b), `<span class="mono small kir">${esc(yolK(b))}</span>`, `<span class="num">${u.satir}</span>`, `<span class="small">${esc(u.anahtar ?? "")}</span>`,
+        `<span class="r ${u.sema}">${u.sema}</span> <span class="mono kir">${esc(u.url)}</span>`],
+      csv: [b.ip ?? "", b.sunucu ?? "", b.segment ?? "", yolK(b), u.satir, u.anahtar ?? "", u.sema, u.host, u.port ?? "", u.url], ac: { id: u.belge, satir: u.satir } }; }) };
+  }
+  if (st.tab === "exe") {
+    if (tekil) {
+      const g = new Map();
+      for (const x of st.exeler) { const k = x.exe.toLowerCase(); const e = g.get(k) ?? { x, belge: new Set(), sunucu: new Set() }; e.belge.add(x.belge); const b = bl(x.belge); e.sunucu.add(b.sunucu ?? b.ip ?? "?"); g.set(k, e); }
+      const s = [...g.values()].filter(e => uy(e.x.exe, ...e.sunucu)).sort((a, b) => b.belge.size - a.belge.size || a.x.exe.localeCompare(b.x.exe));
+      return { bas: ["Exe", "web.config", "Sunucular", "Örnek satır"], satir: s.map(e => ({
+        h: [`<span class="mono kir">${esc(e.x.exe)}</span>`, `<span class="num">${fmt(e.belge.size)}</span>`, `<span class="small">${esc([...e.sunucu].slice(0, 4).join(", "))}${e.sunucu.size > 4 ? ` +${e.sunucu.size - 4}` : ""}</span>`,
+          `<span class="mono small kir">${esc(e.x.metin)}</span>`],
+        csv: [e.x.exe, e.belge.size, [...e.sunucu].join(" | "), e.x.metin], ac: { id: e.x.belge, satir: e.x.satir } })) };
+    }
+    const s = st.exeler.filter(x => { const b = bl(x.belge); return uy(x.exe, x.metin, b.ip, b.sunucu, b.segment, yolK(b)); });
+    return { bas: ["Sunucu / IP", "web.config", "Satır", "Exe", "Satır metni"], satir: s.map(x => { const b = bl(x.belge); return {
+      h: [sunucuHtml(b), `<span class="mono small kir">${esc(yolK(b))}</span>`, `<span class="num">${x.satir}</span>`, `<span class="mono kir">${esc(x.exe)}</span>`, `<span class="mono small kir">${esc(x.metin)}</span>`],
+      csv: [b.ip ?? "", b.sunucu ?? "", b.segment ?? "", yolK(b), x.satir, x.exe, x.metin], ac: { id: x.belge, satir: x.satir } }; }) };
+  }
+  if (st.tab === "ara") {
+    const bk = $("#bk").checked, t = st.araTerimler;
+    const s = st.eslesmeler.filter(x => { const b = bl(x.belge); return uy(x.terim, x.metin, b.ip, b.sunucu, b.segment, yolK(b)); });
+    return { bas: ["Aranan", "Sunucu / IP", "web.config", "Satır", "Satır metni"], satir: s.map(x => { const b = bl(x.belge); return {
+      h: [`<b>${esc(x.terim)}</b>`, sunucuHtml(b), `<span class="mono small kir">${esc(yolK(b))}</span>`, `<span class="num">${x.satir}</span>`, `<span class="mono small kir">${vurgula(x.metin, t, bk)}</span>`],
+      csv: [x.terim, b.ip ?? "", b.sunucu ?? "", b.segment ?? "", yolK(b), x.satir, x.metin], ac: { id: x.belge, satir: x.satir } }; }) };
+  }
+  const s = st.belgeler.filter(b => uy(b.ip, b.sunucu, b.segment, yolK(b), b.hata));
+  return { bas: ["Sunucu / IP", "web.config", "Boyut", "http/https", "exe", "Eşleşme", "Not"], satir: s.map(b => ({
+    h: [sunucuHtml(b), `<span class="mono small kir">${esc(yolK(b))}</span>`, `<span class="num small">${fmt(b.boyut)} B<div class="muted">${esc(b.bicim)}</div></span>`,
+      `<span class="num">${b.url ? fmt(b.url) : ""}</span>`, `<span class="num">${b.exe ? fmt(b.exe) : ""}</span>`, `<span class="num">${b.eslesen ? fmt(b.eslesen) : ""}</span>`,
+      `<span class="small ${b.hata ? "err" : "muted"}">${esc(b.hata ?? (b.maske ? `${b.maske} gizli değer maskeli` : ""))}${b.eslesme ? `<div class="muted">IP: ${esc(b.eslesme)}</div>` : ""}</span>`],
+    csv: [b.ip ?? "", b.sunucu ?? "", b.segment ?? "", (b.ipler ?? []).join(" | "), yolK(b), b.boyut, b.bicim, b.url, b.exe, b.eslesen, b.maske, b.hata ?? ""], ac: { id: b.id, satir: null } })) };
+}
+const CSV_BAS = {
+  url: { tekil: ["ADRES", "ŞEMA", "HOST", "PORT", "WEB.CONFIG SAYISI", "SUNUCULAR"], tum: ["IP", "SUNUCU", "SEGMENT", "WEB.CONFIG", "SATIR", "ANAHTAR", "ŞEMA", "HOST", "PORT", "ADRES"] },
+  exe: { tekil: ["EXE", "WEB.CONFIG SAYISI", "SUNUCULAR", "ÖRNEK SATIR"], tum: ["IP", "SUNUCU", "SEGMENT", "WEB.CONFIG", "SATIR", "EXE", "SATIR METNİ"] },
+  ara: ["ARANAN", "IP", "SUNUCU", "SEGMENT", "WEB.CONFIG", "SATIR", "SATIR METNİ"],
+  belge: ["IP", "SUNUCU", "SEGMENT", "UCMDB IP'LERİ", "WEB.CONFIG", "BOYUT", "BİÇİM", "HTTP/HTTPS", "EXE", "EŞLEŞME", "MASKELENEN", "NOT"],
+};
+
+function ciz() {
+  const j = st.is;
+  if (!j) { $("#run").innerHTML = `<span class="spinner"></span> Başlatılıyor…`; return; }
+  const pct = j.toplam ? Math.round(j.okunan * 100 / j.toplam) : 0;
+  $("#durdur").hidden = !!j.bitti;
+  $("#run").innerHTML = `<div class="pbar"><i style="width:${j.bitti && !j.hata ? 100 : pct}%"></i><span>${fmt(j.okunan)} / ${fmt(j.toplam)} web.config · %${j.bitti && !j.hata ? 100 : pct}</span></div>
+    <div>${j.bitti ? (j.hata ? `<span class="err">${esc(j.hata)}</span>` : `<span style="color:var(--ok)">✓ tamamlandı</span>`) : `<span class="spinner"></span> ${esc(j.asama ?? "")}`}
+      <span class="muted"> · kapsam: ${esc(j.kapsam || "…")} · ${sure(j.gecen ?? 0)} · bellekte ${j.icerikMb ?? 0} MB maskeli metin</span></div>`;
+  const tekilUrl = new Set(st.urller.map(u => u.url.toLowerCase())).size, tekilExe = new Set(st.exeler.map(x => x.exe.toLowerCase())).size;
+  const sunucu = new Set(st.belgeler.map(b => b.sunucu ?? b.ip)).size;
+  const kart = (t, n, ad, ek = "") => `<div class="stat ${st.tab === t ? "on" : ""}" data-tab="${t}"><b>${fmt(n)}</b><span>${ad}</span>${ek ? `<div class="small muted">${ek}</div>` : ""}</div>`;
+  $("#stats").innerHTML = kart("belge", st.belgeler.length, "web.config", `${fmt(sunucu)} sunucu`)
+    + kart("url", tekilUrl, "http / https adresi", `${fmt(st.urller.length)} satır · ${fmt(new Set(st.urller.filter(u => u.sema === "http").map(u => u.url.toLowerCase())).size)} http`)
+    + kart("exe", tekilExe, "exe geçen yer", `${fmt(st.exeler.length)} satır`)
+    + kart("ara", st.eslesmeler.length, "arama eşleşmesi", st.araTerimler.length ? `${st.araTerimler.length} terim · ${fmt(new Set(st.eslesmeler.map(x => x.belge)).size)} web.config` : "arama yok");
+  $("#gorunum").hidden = !(st.tab === "url" || st.tab === "exe");
+  $("#sema").hidden = st.tab !== "url";
+  const v = veri();
+  $("#head").innerHTML = `<tr>${v.bas.map(b => `<th>${esc(b)}</th>`).join("")}</tr>`;
+  const bos = st.tab === "ara" && !st.araTerimler.length ? "Aranacak metin girilmedi. Yukarıdaki kutuya yazıp \"Ara\"ya basın." : j.bitti ? "Sonuç yok." : "Sonuçlar geldikçe burada listelenecek…";
+  $("#body").innerHTML = v.satir.length ? v.satir.slice(0, st.limit).map((r, i) => `<tr data-ac="${i}">${r.h.map(h => `<td>${h}</td>`).join("")}</tr>`).join("")
+    : `<tr><td colspan="${v.bas.length}" class="empty">${bos}</td></tr>`;
+  $("#body").onclick = e => { const tr = e.target.closest("tr[data-ac]"); if (tr) { const a = v.satir[+tr.dataset.ac].ac; ac(a.id, a.satir); } };
+  $("#count").textContent = v.satir.length ? `${fmt(Math.min(st.limit, v.satir.length))} / ${fmt(v.satir.length)} satır gösteriliyor · satıra tıklayınca web.config açılır` : "";
+  $("#more").hidden = v.satir.length <= st.limit;
+  $("#csv").hidden = !st.yetki.disari || !v.satir.length;
+  $("#csv").onclick = () => csv(v);
+  $("#xlsx").hidden = !st.yetki.disari || !st.belgeler.length;
+  const m = [...(j.mesajlar ?? [])];
+  if (st.araSonuc) m.push(`Arama ${fmt(st.araSonuc.aranan)} web.config'te yapıldı${st.araSonuc.bitti ? "" : " (tarama sürüyor: okunmuş olanlarda)"}${st.araSonuc.kesik ? " · sonuç sınırı ya da bellek sınırı nedeniyle eksik olabilir" : ""}.`);
+  $("#msgs").textContent = m.join("\n");
+}
+
+function csv(v) {
+  if (!st.yetki.disari) return;
+  const Q = x => { x = String(x ?? ""); return /[;"\n\r]/.test(x) ? `"${x.replace(/"/g, '""')}"` : x; };
+  const bas = st.tab === "url" || st.tab === "exe" ? CSV_BAS[st.tab][$("#gorunum").value] : CSV_BAS[st.tab];
+  const rows = [bas, ...v.satir.map(r => r.csv)];
+  const blob = new Blob(["﻿" + rows.map(r => r.map(Q).join(";")).join("\r\n")], { type: "text/csv;charset=utf-8" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob); a.download = `webconfig_${st.tab}_${new Date().toISOString().slice(0, 16).replace(/[:T]/g, "")}.csv`; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+}
+
+// ---- web.config penceresi (maskeli içerik; aranan metinler işaretli, ilgili satıra kayar) ----
+async function ac(id, satir) {
+  const b = bl(id);
+  $("#modal").hidden = false;
+  $("#mBaslik").textContent = yolK(b) || "web.config";
+  $("#mBilgi").textContent = [b.ip, b.sunucu, b.segment].filter(Boolean).join(" · ");
+  $("#mGovde").innerHTML = `<div class="empty"><span class="spinner"></span> UCMDB'den okunuyor…</div>`;
+  try {
+    const r = await fetch(`api/ucmdb/belge?id=${encodeURIComponent(id)}`);
+    const x = await r.json().catch(() => ({ error: `HTTP ${r.status}` }));
+    if (!r.ok || x.error) throw new Error(x.error || `HTTP ${r.status}`);
+    const bk = $("#bk").checked, t = st.araTerimler;
+    const satirlar = (x.metin ?? "").split("\n");
+    $("#mGovde").innerHTML = satirlar.map((s, i) => `<div class="ln${i + 1 === satir ? " hedef" : ""}" id="l${i + 1}"><i>${i + 1}</i><span>${t.length ? vurgula(s, t, bk) : esc(s)}</span></div>`).join("");
+    $("#mBilgi").textContent += ` · ${fmt(x.boyut)} bayt (${x.bicim})` + (x.maske ? ` · ${x.maske} gizli değer *** ile maskelendi` : "");
+    $("#mKopya").onclick = () => navigator.clipboard?.writeText(x.metin ?? "");
+    if (satir) document.getElementById("l" + satir)?.scrollIntoView({ block: "center" });
+  } catch (e) { $("#mGovde").innerHTML = `<div class="empty err">${esc(e.message)}</div>`; }
+}
+// Excel: sunucuda üretilir (tüm satırlar, ekrandaki 1000 sınırı yok); son arama terimleri de gönderilir
+$("#xlsx").addEventListener("click", () => {
+  if (!st.id) return;
+  const p = new URLSearchParams();
+  st.araTerimler.forEach(t => p.append("ara", t));
+  if ($("#bk").checked) p.set("bk", "true");
+  location.href = `api/ucmdb/tara/${st.id}/excel?${p}`;
+});
+$("#mKapat").addEventListener("click", () => { $("#modal").hidden = true; });
+$("#modal").addEventListener("click", e => { if (e.target === $("#modal")) $("#modal").hidden = true; });
+document.addEventListener("keydown", e => { if (e.key === "Escape") $("#modal").hidden = true; });
+
+// ---- açılış: yetki, segment listesi, DMZ asset adı ----
+function sayfaKilit(kul) {
+  document.querySelectorAll("main input, main select, main textarea, main button").forEach(x => { x.disabled = true; x.style.pointerEvents = "none"; });
+  const k = document.createElement("div");
+  k.style.cssText = "color:var(--err);padding:0 0 12px;font-weight:600";
+  k.textContent = `🔒 web.config taraması yetkiniz yok${kul ? " (" + kul + ")" : ""} — TLS toplu sorgu yetkisi gerekir. Yetki DokuPanel'den verilir.`;
+  $("#formPanel").prepend(k);
+}
+async function acilis() {
+  const me = await fetch("api/me").then(r => r.ok ? r.json() : null).catch(() => null);
+  if (me?.name) $("#me").textContent = "👤 " + me.name;
+  st.yetki = me?.yetki || {};
+  if (st.yetki.tls === false) { sayfaKilit(me?.name); return; }
+  const qs = new URLSearchParams(location.search);
+  if (qs.get("ip")) { $("#ips").value = qs.get("ip").split(",").join("\n"); $("#ips").dispatchEvent(new Event("input")); }
+  try {
+    const r = await fetch("api/ucmdb/segmentler");
+    if (r.ok) {
+      const b = await r.json();
+      $("#segListe").innerHTML = (b.segmentler ?? []).map(s => `<option value="${esc(s.ad)}">${esc((s.cidrler ?? []).slice(0, 3).join(", "))} · ${fmt(s.sunucu)} sunucu</option>`).join("");
+      $("#dmzBilgi").textContent = b.dmzAsset ? `Nessus asset'i: ${b.dmzAsset} (Zafiyet:DmzAsset) — IP'leri bu asset'e düşen sunucuların web.config'leri.` : "Zafiyet:DmzAsset tanımlı değil — aşağıya Nessus asset adını yazın.";
+    }
+  } catch {}
+}
+kutuDurum();
+acilis();
+</script>
+</body>
+</html>

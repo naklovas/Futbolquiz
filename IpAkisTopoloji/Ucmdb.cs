@@ -19,9 +19,10 @@ record UcmdbBelge(string Id, string Ad, string? Sunucu, List<string> Zincir, Lis
 record UcmdbPortlu(UcmdbBelge Belge, List<string> Portlar, string? Neden);
 record UcmdbSonuc(List<UcmdbBelge> Belgeler, List<UcmdbAdres> Adresler, List<string> Notlar);
 
-sealed class UcmdbService(IConfiguration cfg, ILogger<UcmdbService> log)
+sealed partial class UcmdbService(IConfiguration cfg, ILogger<UcmdbService> log)
 {
     IConfigurationSection C => cfg.GetSection("Ucmdb");
+    IConfiguration Kok => cfg;
     public bool Acik => !string.IsNullOrWhiteSpace(C["Baglanti"]);
     string Sema => Ad(C["Sema"] ?? "MFUCMDB");
     string Tablo => Ad(C["BelgeTablosu"] ?? "CDM_CONFIGURATION_DOCUMENT_1");

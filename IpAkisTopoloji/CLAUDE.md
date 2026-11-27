@@ -51,6 +51,7 @@ topoloji çizer ve şirket içi AI'a etki analizi yaptırır. Canlıda IIS'te, W
 | `Zafiyet.cs` | Açıklık taraması: kurala (CVE) ya da anlık exe listesine uyan süreçler tüm sunucularda, Carbon Black toplu (`wwwroot/zafiyet.html`) |
 | `Nessus.cs` | Nessus / Tenable.sc: repository'deki tarama sonuçlarından teknoloji, sertifika, OS, kurulu yazılım |
 | `Ucmdb.cs` | UCMDB (Oracle, MFUCMDB.CDM_CONFIGURATION_DOCUMENT_1) web.config belgeleri: sunucu eşleşmesi, içerik (zip / gzip / düz) maskeli görüntüleme |
+| `WebConfigTarama.cs` | web.config taraması (`wwwroot/webconfig.html`, `partial UcmdbService`): IP / segment / Nessus DMZ / tüm ağ; http/https adresleri, exe geçen yerler, metin araması, Excel |
 | `Yetki.cs` | İşlem + sayfa yetkileri (yazma, topoloji, dışa aktarma, toplu tahmin, TLS, fiziksel, açıklık taraması, erişim, işlev, etiket, eksik, imza, segment) — DokuPanel site kayıtları |
 | `AuthHelper.cs` | Kullanıcının verdiği DokuPanel yetki helper'ı (namespace `AppRel`), anahtar config'den |
 
@@ -965,6 +966,25 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
   siler (`BittiZaman`; eskiden başlangıçtan 1 saat sonra süren iş de silinirdi → "iş bulunamadı"); GET `/api/tls/toplu/{id}?den=N` yalnız N'den sonraki satırlar (`den`, `satirToplam`;
   satırlar yalnız eklenir), arayüz birleştirir (eski DLL'de den yok sayılır, tümü gelir); tablo ilk `TT_MAX_SATIR`=1000 satırı çizer (not satırı; arama / süzgeç / CSV tüm satırlarda).
   Mock'la: den 0 / 1200 / 2400, 1000 satır çizildi, arama 3600. satırı buldu. Süre: grup (Tls:TopluParca=20) sırayla; 2000 IP = 100 grup, saatler sürebilir.
+- **web.config taraması** (`WebConfigTarama.cs`, `wwwroot/webconfig.html`, sekme çubuğunda "web.config taraması ↗"; kullanıcı: "verdiğim IP'lerde ya da segmentlerde ya da tüm
+  ağda web.config taraması; text arayacağız; içinde http / https geçen adresleri ve exe geçen yerleri arasam da aramasam da listelesin — çok önemli"; "Nessus'un DMZ kategorisini de
+  ekleyelim"; "sonuçları Excel'e de çıkalım"): `UcmdbService` artık `partial`. KAPSAM (`WcKapsam`, birleşebilir): IP'ler (`Belgeler(ips)`: UCMDB IP'si / ERT adı), segment adları
+  ya da CIDR'lar (belgenin sunucu IP'lerinden biri — UCMDB IP'leri, yoksa ERT UNIXNAME → IP — segment Label / Cidr eşit ya da CIDR içinde), Nessus DMZ (`Asset` boşsa
+  `Zafiyet:DmzAsset`; `NessusService.AssetBulAsync` + `AssetIpleriAsync` → `Icerir(ip)`, iş başlamadan çözülür, hata hemen döner), "tüm ağ" (dizindeki bütün belgeler, sunucusuz
+  olanlar dahil; diğerlerini yok sayar). İŞ (`WcIs`, `_wcIsler`, bitmişler 2 saat sonra silinir, aynı anda `Ucmdb:WebConfigAyniAnda`=2): dizin hazır değilse beklenir; içerik
+  `IcerikAsync` ile `WebConfigParca`=100'erli, Oracle koparsa en çok 3 kez yeniden bağlanıp kaldığı belgeden sürer; her belge `Coz` → `Maskele` → `WcCikar` (satır satır: http /
+  https adresleri — HTML karşılıkları çözülür, `;` ayırır, `Temizle`, host / port / yol, satırın anahtarı key > name > contract > id; ".exe" geçen yerler — geriye ayraca kadar,
+  boşluklu yollar dahil, satır metni; belge başına en çok 500 adres / 300 exe) + verilmişse `WcAra` (satır içinde terim, büyük / küçük harf seçmeli, belge başına 200) → `WcBelge`
+  (IP, sunucu, segment, UCMDB IP'leri, eşleşme yolu, yol, boyut, biçim, maske, sayılar, hata), `WcUrl`, `WcExe`, `WcEslesme`. MASKELİ metin gzip'li bellekte (`Icerik`,
+  `WebConfigMaxBellekMB`=300; dolarsa `IcerikKesik`) → YENİ ARAMA Oracle'a gitmeden (`WcYenidenAra`, `WebConfigMaxEslesme`=20000); şifre aranırsa bulunmaz (maskeli).
+  Tarama içerikleri servis önbelleğine (`_icerik`) YAZMAZ (tüm ağda bellek). Uçlar (sayfa yetkisi Tls): GET `/api/ucmdb/segmentler` (segment listesi + dmzAsset adı; /api/segment/liste
+  Segment yetkisi istediği için ayrı), POST `/api/ucmdb/tara {ips, segmentler, dmz, asset, tum, aramalar}` → id, GET `/api/ucmdb/tara/{id}?db=&du=&de=&da=` (artımlı listeler),
+  POST `…/durdur`, POST `…/ara {aramalar, buyukKucuk}`, GET `…/excel?ara=&ara=&bk=` (Yetki:Disari; `WcExcel` → `Xlsx.Yaz` 7 sayfa: Özet, web.config, Adresler (benzersiz / tüm
+  satırlar), EXE (benzersiz / tüm satırlar), Arama; hücre 32.000 karakterde kesilir). Sayfa: kapsam kutuları (IP metinden regex, segment datalist + çip, Nessus DMZ + başka asset
+  adı, tüm ağ onaylı), aranacak metinler (satır başına bir, "Ara" taramadan sonra bellekte arar), ilerleme bandı (okunan / toplam, aşama, kapsam, bellekteki MB), kartlar (tıkla →
+  sekme), sekmeler Arama sonuçları | HTTP / HTTPS adresleri | EXE geçen yerler | Belgeler, "Benzersiz | Tüm satırlar", http / https süzgeci, metin süzgeci, ilk 1000 + "daha fazla",
+  satıra tıkla → web.config penceresi (satır numaralı, terimler işaretli, ilgili satır vurgulu ve ortada, Kopyala, Esc), "Bu sekme (CSV)" ve "📊 Excel (tüm sonuçlar)".
+  `?ip=a,b` derin bağlantı. Test: WcCikar / WcAra / WcExcel (openpyxl ile 7 sayfa) / WcYenidenAra küçük test projesinde; sayfa mock'la Playwright'ta; Oracle ve Nessus canlıda denenmedi.
 - **Fiziksel envanter** (`FizikselEnvanter.cs`, `wwwroot/fiziksel.js`, sekme "Fiziksel envanter" `data-ui="fiziksel"`, `?fiziksel=1&kabin=&host=`;
   claude.ai sohbetindeki görev tanımı: "Bu kabin kapanırsa hangi uygulamalar etkilenir?"): veri doku DB'de HAZIR — NlyteCollector (nlyte OData →
   dbo.NlyteRaw) + `EXEC dbo.sp_KabinZincirYenile` doldurur; DeltaFlow YALNIZ OKUR (yazmaz, prosedürü çağırmaz). Betik kullanıcıda
