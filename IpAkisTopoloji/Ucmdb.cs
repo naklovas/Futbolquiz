@@ -165,7 +165,8 @@ sealed partial class UcmdbService(IConfiguration cfg, ILogger<UcmdbService> log)
     }
 
     // IP → o sunucunun web.config belgeleri (ERT sunucu adı ya da IP ile; içerik okunmaz)
-    public Dictionary<string, List<UcmdbBelge>> Belgeler(IEnumerable<string> ips, EnvanterSnapshot env)
+    // hepsi=false: yalnız web.config'ler (DosyaDesenleri; TLS sayfası); true: dizindeki tüm .config'ler (web.config taraması)
+    public Dictionary<string, List<UcmdbBelge>> Belgeler(IEnumerable<string> ips, EnvanterSnapshot env, bool hepsi = false)
     {
         var dz = _dizin;
         var sonuc = new Dictionary<string, List<UcmdbBelge>>();
@@ -177,7 +178,7 @@ sealed partial class UcmdbService(IConfiguration cfg, ILogger<UcmdbService> log)
             var adlar = env.AppsOnIp(ip).Select(h => h.UnixName).Where(x => !string.IsNullOrWhiteSpace(x)).Select(x => x!).Append(ip);
             var adEs = adlar.SelectMany(Anahtarlar).Distinct().SelectMany(a => dz.Sunucu.GetValueOrDefault(a) ?? [])
                 .Where(b => b.Ipler == null).Select(b => b with { Eslesme = "ERT sunucu adı" });
-            var l = ipEs.Concat(adEs).DistinctBy(b => b.Id).OrderBy(b => b.Yol ?? b.Ad).ToList();
+            var l = ipEs.Concat(adEs).DistinctBy(b => b.Id).Where(b => hepsi || WebConfigMi(b)).OrderBy(b => b.Yol ?? b.Ad).ToList();
             if (l.Count > 0) sonuc[ip] = l;
         }
         return sonuc;
@@ -231,6 +232,12 @@ sealed partial class UcmdbService(IConfiguration cfg, ILogger<UcmdbService> log)
     List<string> Desenler => (C.GetSection("DosyaDesenleri").Get<string[]>() is { Length: > 0 } a ? a : ["web.config"])
         .Select(x => x.Trim().ToLowerInvariant()).Where(x => x.Length > 0 && !x.Contains('\'')).ToList();
 
+    // Dizine alınan belgeler: DosyaDesenleri (web.config) ∪ TaramaDesenleri (varsayılan ".config": applicationHost.config, machine.config, app / exe .config'ler —
+    // web.config taraması için); TLS sayfası ve port eşlemesi yalnız WebConfigMi olanları kullanır
+    List<string> DizinDesenleri => Desenler.Concat((C.GetSection("TaramaDesenleri").Get<string[]>() is { } t ? t : [".config"])
+        .Select(x => x.Trim().ToLowerInvariant()).Where(x => x.Length > 0 && !x.Contains('\''))).Distinct().ToList();
+    internal bool WebConfigMi(UcmdbBelge b) => Desenler.Any(d => b.Ad.Contains(d, StringComparison.OrdinalIgnoreCase));
+
     // Tablo önceliği: sunucu (düğüm) ve IIS / web / uygulama sunucusu sınıfları önce — web.config'in kapsayıcısı neredeyse hep bunlar
     static readonly Regex _oncelik = new(@"NODE|_NT_1$|UNIX|COMPUTER|HOST|IIS|WEB|APP_?POOL|VIRTUAL_?DIR|J2EE|APPLICATION_SERVER|RUNNING_SOFTWARE|SOFTWARE|DOTNET|ASP|CONFIGURATION_DOCUMENT",
         RegexOptions.IgnoreCase);
@@ -240,10 +247,10 @@ sealed partial class UcmdbService(IConfiguration cfg, ILogger<UcmdbService> log)
     {
         var d = new Dizin();
         string yolK = string.Concat(s.Yol.Select(y => ", " + y)), ustK = s.Ust != null ? $", {s.Ust}" : "";
-        string kosul = string.Join(" OR ", Desenler.Select(x => $"LOWER({s.AdK}) LIKE '%{x.Replace("%", "")}%'"));
+        string kosul = string.Join(" OR ", (ornek > 0 ? Desenler : DizinDesenleri).Select(x => $"LOWER({s.AdK}) LIKE '%{x.Replace("%", "")}%'"));
         int max = ornek > 0 ? ornek : C.GetValue("MaxBelge", 50000);
         var ham = new List<(string Id, string Ad, string? Yol, string? Ust)>();
-        asama?.Invoke("web.config belgeleri listeleniyor");
+        asama?.Invoke("config belgeleri listeleniyor");
         using (var cmd = c.CreateCommand())
         {
             cmd.CommandText = $"SELECT {s.Id}, {s.AdK}{ustK}{yolK} FROM {Sema}.{Tablo} WHERE ({kosul}) AND ROWNUM <= {max}";

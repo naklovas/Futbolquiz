@@ -51,7 +51,7 @@ topoloji çizer ve şirket içi AI'a etki analizi yaptırır. Canlıda IIS'te, W
 | `Zafiyet.cs` | Açıklık taraması: kurala (CVE) ya da anlık exe listesine uyan süreçler tüm sunucularda, Carbon Black toplu (`wwwroot/zafiyet.html`) |
 | `Nessus.cs` | Nessus / Tenable.sc: repository'deki tarama sonuçlarından teknoloji, sertifika, OS, kurulu yazılım |
 | `Ucmdb.cs` | UCMDB (Oracle, MFUCMDB.CDM_CONFIGURATION_DOCUMENT_1) web.config belgeleri: sunucu eşleşmesi, içerik (zip / gzip / düz) maskeli görüntüleme |
-| `WebConfigTarama.cs` | web.config taraması (`wwwroot/webconfig.html`, `partial UcmdbService`): IP / segment / Nessus DMZ / tüm ağ; http/https adresleri, exe geçen yerler, metin araması, Excel |
+| `WebConfigTarama.cs` | config taraması (`wwwroot/webconfig.html`, `partial UcmdbService`): web.config / applicationHost / machine / *.config; IP / segment / Nessus DMZ / tüm ağ; zafiyet göstergeleri (idunno, anticsrf, csrfsettings), http/https adresleri, exe, metin / regex araması, tanı, Excel |
 | `Yetki.cs` | İşlem + sayfa yetkileri (yazma, topoloji, dışa aktarma, toplu tahmin, TLS, fiziksel, açıklık taraması, erişim, işlev, etiket, eksik, imza, segment) — DokuPanel site kayıtları |
 | `AuthHelper.cs` | Kullanıcının verdiği DokuPanel yetki helper'ı (namespace `AppRel`), anahtar config'den |
 
@@ -985,6 +985,25 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
   sekme), sekmeler Arama sonuçları | HTTP / HTTPS adresleri | EXE geçen yerler | Belgeler, "Benzersiz | Tüm satırlar", http / https süzgeci, metin süzgeci, ilk 1000 + "daha fazla",
   satıra tıkla → web.config penceresi (satır numaralı, terimler işaretli, ilgili satır vurgulu ve ortada, Kopyala, Esc), "Bu sekme (CSV)" ve "📊 Excel (tüm sonuçlar)".
   `?ip=a,b` derin bağlantı. Test: WcCikar / WcAra / WcExcel (openpyxl ile 7 sayfa) / WcYenidenAra küçük test projesinde; sayfa mock'la Playwright'ta; Oracle ve Nessus canlıda denenmedi.
+  ZAFİYET GÖSTERGELERİ + TÜM *.config (kullanıcının e-postası, "açıklık için istemiştim"; "sana bırakıyorum, net anlayabileceğimiz indikatörler koy"): kurallar
+  `Ucmdb:ZafiyetKurallari` [{Ad, Desen, Regex, BuyukKucuk, Derece kesin | olasi | kontrol, Aciklama}], boşsa `VarsayilanKurallar`: "idunno" kesin zafiyetli (düzeltilmiş sürüm yok),
+  regex `<add[^>]*anticsrf` (harf duyarsız) zafiyetli olabilir, "csrfsettings" ek kontrol. Her taramada (arama olsun olmasın) TÜM metinde aranır (`WcKuralAra`; çok satırlı
+  `<add …>` da yakalanır, satır = eşleşmenin başladığı satır, metin tek satıra indirilir; kural başına belge başına 50, regex zaman aşımı 2 sn) → `WcBulgu` (Belge, Kural, Derece,
+  Satir, Metin), `WcBelge.Bulgu`. Serbest arama da aynı motor (`WcDesen` düz metin → Regex.Escape; `WcAra(id, metin, desenler, max)`), "Düzenli ifade (regex)" seçeneği
+  (`WcTaramaIstek.Regex / BuyukKucuk`, `WcAramaIstek.Regex`, excel `rx`); geçersiz regex 400. DOSYALAR: dizin artık `DizinDesenleri` = DosyaDesenleri ∪ `Ucmdb:TaramaDesenleri`
+  (varsayılan [".config"]) — applicationHost.config, machine.config, app / exe .config'ler de dizine girer (dizin büyür; `MaxBelge` sınırına dikkat); `Belgeler(ips, env, hepsi=false)`
+  ve dolayısıyla TLS sayfası / port eşlemesi yalnız `WebConfigMi` (DosyaDesenleri) olanları görür, tarama `hepsi=true`. `DosyaTuru(A_NAME)` web.config | applicationHost.config |
+  machine.config | diğer; `WcBelge.Tur`; istek `Turler` (boş = hepsi) süzer, `WcIs.KapsamTur` süzgeçten önceki sayılar. IP kapsamında UCMDB'de hiç config'i olmayan IP'ler
+  `WcIs.BelgesizIpler` (mesaj + Excel özet). TANI: GET `/api/ucmdb/dosyaturleri?yenile=` (`DosyaTurleriAsync`, 1 saat önbellek, yalnız sayım): tabloda LOWER(A_NAME) LIKE
+  '%config%' ada göre ilk 150 + adında / yol kolonlarında applicationhost / machine.config geçen satır sayısı + dizindeki tür başına belge / sunucusu bulunan / sunucu / UCMDB IP'li.
+  GET `/api/ucmdb/kurallar`. Tarama durumu `?dz=` (bulgular artımlı), `kurallar`, `belgesizIpler`, `kapsamTur`. Excel sayfaları: Özet (+ dosya türü ve kural başına satır / dosya /
+  sunucu, UCMDB'de config'i olmayan IP'ler, "DLL içine gömülü modül config taramasıyla bulunamaz" notu), Zafiyet (derece, kural, açıklama, sunucu, IP, segment, dosya türü, yol,
+  satır, eşleşen satır), Sunucu özeti (web.config sayısı, applicationHost / machine.config var | "UCMDB'de yok", diğer, kesin / olası / kontrol, en yüksek derece), Dosyalar, adresler,
+  exe, arama. Sayfa (başlık "config taraması", sekme çubuğunda "config taraması ↗"): "Dosya türleri" kutucukları, "Zafiyet göstergeleri" kutusu (kurallar rozetli), "🩺 UCMDB'de hangi
+  config'ler var?" (tanı tablosu: tür × UCMDB'de / adı-yolu geçen / dizinde / sunucusu bulunan / UCMDB IP'li + en sık adlar) ve "📋 Tanı özeti" (pencerede seçili metin: yalnız sayılar
+  ve ayarlar, IP'ler x.x.x.x — kullanıcı bunu iletir), sekmeler ⚠ Zafiyet göstergeleri (varsayılan) | Sunucular | Arama | HTTP / HTTPS | EXE | Dosyalar, derece süzgeci, kartlar
+  (zafiyet: derece başına sunucu sayısı; sunucu: applicationHost / machine.config'i olan; dosya: tür sayıları), pencerede kural eşleşmeleri kırmızı (`mark.z`), arama sarı;
+  vurgulama ham metinde regex ile (`vurgula(metin, desenler)`). Test: uct'de çok satırlı <add, Idunno, CSRFSettings, DosyaTuru, regex arama, geçersiz regex, Excel 9 sayfa; mock'la sayfa.
 - **Fiziksel envanter** (`FizikselEnvanter.cs`, `wwwroot/fiziksel.js`, sekme "Fiziksel envanter" `data-ui="fiziksel"`, `?fiziksel=1&kabin=&host=`;
   claude.ai sohbetindeki görev tanımı: "Bu kabin kapanırsa hangi uygulamalar etkilenir?"): veri doku DB'de HAZIR — NlyteCollector (nlyte OData →
   dbo.NlyteRaw) + `EXEC dbo.sp_KabinZincirYenile` doldurur; DeltaFlow YALNIZ OKUR (yazmaz, prosedürü çağırmaz). Betik kullanıcıda

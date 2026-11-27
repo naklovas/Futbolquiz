@@ -1254,7 +1254,7 @@ app.MapPost("/api/ucmdb/tara", async (WcTaramaIstek req, HttpContext ctx, UcmdbS
     catch (InvalidOperationException ex) { return Results.BadRequest(new { error = ex.Message }); }
     catch (Exception ex) when (ex is not OperationCanceledException) { return Results.BadRequest(new { error = ex.Message }); }
 });
-app.MapGet("/api/ucmdb/tara/{id}", (string id, int? db, int? du, int? de, int? da, UcmdbService u) =>
+app.MapGet("/api/ucmdb/tara/{id}", (string id, int? db, int? du, int? de, int? da, int? dz, UcmdbService u) =>
 {
     var j = u.WcIs(id);
     if (j == null) return Results.NotFound(new { error = "Tarama bulunamadı (süresi dolmuş olabilir; yeniden başlatın)." });
@@ -1263,27 +1263,40 @@ app.MapGet("/api/ucmdb/tara/{id}", (string id, int? db, int? du, int? de, int? d
     {
         j.Id, j.Kapsam, j.Toplam, j.Okunan, j.Asama, j.Bitti, j.Hata, mesajlar = j.Mesajlar.ToList(), aramalar = j.Aramalar,
         gecen = (int)((j.BittiZaman ?? DateTime.UtcNow) - j.Basladi).TotalSeconds, icerikMb = Math.Round(j.IcerikBayt / 1048576.0, 1), j.IcerikKesik,
-        sayi = new { belge = j.Belgeler.Count, url = j.Urller.Count, exe = j.Exeler.Count, eslesme = j.Eslesmeler.Count },
-        db = db ?? 0, du = du ?? 0, de = de ?? 0, da = da ?? 0,
-        belgeler = Den(j.Belgeler, db), urller = Den(j.Urller, du), exeler = Den(j.Exeler, de), eslesmeler = Den(j.Eslesmeler, da)
+        sayi = new { belge = j.Belgeler.Count, url = j.Urller.Count, exe = j.Exeler.Count, eslesme = j.Eslesmeler.Count, bulgu = j.Bulgular.Count },
+        db = db ?? 0, du = du ?? 0, de = de ?? 0, da = da ?? 0, dz = dz ?? 0,
+        kurallar = j.Kurallar.Select(x => x.K), belgesizIpler = j.BelgesizIpler, kapsamTur = j.KapsamTur, aramaRegex = j.AramaRegex, aramaBk = j.AramaBk,
+        belgeler = Den(j.Belgeler, db), urller = Den(j.Urller, du), exeler = Den(j.Exeler, de), eslesmeler = Den(j.Eslesmeler, da), bulgular = Den(j.Bulgular, dz)
     });
 });
 // Tek dosya Excel (.xlsx): özet + web.config + adresler + exe + arama (ara=…&ara=… verilirse bellekte yeniden aranır)
-app.MapGet("/api/ucmdb/tara/{id}/excel", (string id, string[]? ara, bool? bk, HttpContext ctx, IConfiguration cfg, UcmdbService u) =>
+app.MapGet("/api/ucmdb/tara/{id}/excel", (string id, string[]? ara, bool? bk, bool? rx, HttpContext ctx, IConfiguration cfg, UcmdbService u) =>
 {
     if (!Yetki.Var(cfg, ctx, Yetki.Disari)) return Yetki.Red(ctx, "Dışa aktarma");
     var j = u.WcIs(id);
     if (j == null) return Results.NotFound(new { error = "Tarama bulunamadı (süresi dolmuş olabilir; yeniden başlatın)." });
-    return Results.File(u.WcExcel(j, ara?.ToList(), bk ?? false), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        $"webconfig_tarama_{DateTime.Now:yyyyMMdd_HHmm}.xlsx");
+    try { return Results.File(u.WcExcel(j, ara?.ToList(), bk ?? false, rx ?? false), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        $"config_tarama_{DateTime.Now:yyyyMMdd_HHmm}.xlsx"); }
+    catch (InvalidOperationException ex) { return Results.BadRequest(new { error = ex.Message }); }
+});
+// Zafiyet kuralları (Ucmdb:ZafiyetKurallari ya da varsayılan) ve UCMDB'deki config dosyası türleri (tanı: sayım, içerik okunmaz)
+app.MapGet("/api/ucmdb/kurallar", (UcmdbService u) => Results.Ok(u.Kurallar()));
+app.MapGet("/api/ucmdb/dosyaturleri", async (bool? yenile, UcmdbService u, CancellationToken ct) =>
+{
+    try { return Results.Ok(await u.DosyaTurleriAsync(yenile == true, ct)); }
+    catch (Exception ex) when (ex is not OperationCanceledException) { return Results.BadRequest(new { error = ex.Message }); }
 });
 app.MapPost("/api/ucmdb/tara/{id}/durdur", (string id, UcmdbService u) => { u.WcIs(id)?.Cts.Cancel(); return Results.Ok(); });
 app.MapPost("/api/ucmdb/tara/{id}/ara", (string id, WcAramaIstek req, UcmdbService u) =>
 {
     var j = u.WcIs(id);
     if (j == null) return Results.NotFound(new { error = "Tarama bulunamadı (süresi dolmuş olabilir; yeniden başlatın)." });
-    var (l, say, belge, aranan, kesik) = u.WcYenidenAra(j, req.Aramalar, req.BuyukKucuk ?? false);
-    return Results.Ok(new { eslesmeler = l, terimSayi = say, belge, aranan, kesik, bitti = j.Bitti });
+    try
+    {
+        var (l, say, belge, aranan, kesik) = u.WcYenidenAra(j, req.Aramalar, req.BuyukKucuk ?? false, req.Regex ?? false);
+        return Results.Ok(new { eslesmeler = l, terimSayi = say, belge, aranan, kesik, bitti = j.Bitti });
+    }
+    catch (InvalidOperationException ex) { return Results.BadRequest(new { error = ex.Message }); }
 });
 app.MapGet("/api/ucmdb/tani", async (string? ip, UcmdbService u, EnvanterService envanter, CancellationToken ct) =>
 {
