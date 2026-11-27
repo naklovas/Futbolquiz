@@ -385,7 +385,10 @@ public class ServersController : Controller
         // Branch is shown/editable here (unlike Create, where it's taken from the ESXi host
         // instead and the field doesn't exist at all) -- see ServerFormViewModel.Branch for why
         // this isn't a blanket [Required] on the model.
-        if (string.IsNullOrWhiteSpace(vm.Branch))
+        //
+        // Cloud is the exception: the screen clears and locks Branch for it, since a cloud
+        // server sits in no branch. Demanding one anyway made that record unsaveable.
+        if (vm.LocationCategory != LocationCategory.Cloud && string.IsNullOrWhiteSpace(vm.Branch))
             ModelState.AddModelError(nameof(vm.Branch), "Branch is required.");
 
         // Every foreign key below arrives as a plain number from a form field. Checking that the

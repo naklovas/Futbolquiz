@@ -68,7 +68,10 @@ public class PhysicalDeviceFormViewModel : IValidatableObject
     [Display(Name = "Management IP")]
     public string? MgmtIp { get; set; }
 
-    [Required(ErrorMessage = "Branch is required.")]
+    // [Required] degil: Location Category = Cloud secildiginde ekran Branch
+    // alanini bosaltip kilitliyor (site.js initLocationCategoryToggle), cunku
+    // bulutta sube yok. Zorunluluk sabit kalinca o kayit "Branch is required."
+    // ile hic kaydedilemiyordu. Kural artik Validate() icinde, kategoriye bagli.
     [StringLength(150)]
     [Display(Name = "Branch")]
     public string? Branch { get; set; }
@@ -115,6 +118,13 @@ public class PhysicalDeviceFormViewModel : IValidatableObject
     /// </summary>
     public IEnumerable<ValidationResult> Validate(ValidationContext context)
     {
+        // Bulut disindaki her cihaz bir subede duruyor; bulutta sube yok ve
+        // ekran alani zaten bosaltip kilitliyor.
+        if (LocationCategory != Data.Common.LocationCategory.Cloud && string.IsNullOrWhiteSpace(Branch))
+            yield return new ValidationResult(
+                "Branch is required.",
+                new[] { nameof(Branch) });
+
         if (!NoSupportContract && !StartOfSupportDate.HasValue)
             yield return new ValidationResult(
                 "Enter the support start date, or tick the no-contract option.",
