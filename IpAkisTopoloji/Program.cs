@@ -1169,13 +1169,15 @@ app.MapPost("/api/tls/toplu", (TlsTopluIstek req, HttpContext ctx, IConfiguratio
         req.Fqdn ?? false, istenen, factory.CreateClient("splunk"), nessus, req.Giden ?? false);
     return Results.Ok(new { id = j.Id, ipSayisi = ips.Count, toplamParca = j.ToplamParca });
 });
-app.MapGet("/api/tls/toplu/{id}", (string id, HttpContext ctx, IConfiguration cfg) =>
+// ?den=N: yalnız N'inci satırdan sonrakiler (satırlar yalnız eklenir, değişmez) — 2000 IP'de her 3 sn'de tüm satırları (on binlerce) göndermesin
+app.MapGet("/api/tls/toplu/{id}", (string id, int? den, HttpContext ctx, IConfiguration cfg) =>
 {
     if (!Yetki.Var(cfg, ctx, Yetki.Tls)) return Yetki.Red(ctx, "TLS toplu sorgu");
     var j = TlsToplu.Get(id);
     if (j == null) return Results.NotFound(new { error = "İş bulunamadı (süresi dolmuş olabilir)." });
     lock (j) return Results.Ok(new { j.Id, j.Saat, j.Bas, j.Bit, ipSayisi = j.Ips.Count, j.Parca, j.ToplamParca, j.Bitti, j.Hata,
-        yontem = string.Join(", ", j.Yontemler), sifresiz = j.Sifresiz, fqdn = j.Fqdn, giden = j.Giden, istenenPort = j.IstenenPort, mesajlar = j.Mesajlar.ToList(), satirlar = j.Satirlar.ToList(),
+        yontem = string.Join(", ", j.Yontemler), sifresiz = j.Sifresiz, fqdn = j.Fqdn, giden = j.Giden, istenenPort = j.IstenenPort, mesajlar = j.Mesajlar.ToList(), den = Math.Clamp(den ?? 0, 0, j.Satirlar.Count), satirToplam = j.Satirlar.Count,
+        satirlar = j.Satirlar.Skip(Math.Clamp(den ?? 0, 0, j.Satirlar.Count)).ToList(),
         gecen = (int)(DateTime.UtcNow - j.Basladi).TotalSeconds, grupGecen = (int)(DateTime.UtcNow - j.GrupBas).TotalSeconds,
         adimlar = j.Adimlar.Select(a => new { ad = a.Ad, durum = a.Durum, bitti = a.Bit != null, sure = (int)((a.Bit ?? DateTime.UtcNow) - a.Bas).TotalSeconds }).ToList() });
 });

@@ -958,6 +958,13 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
   `TlsToplu.SegmentEkle` (env.FindSegment: ad = EPG > ApplicationProfile > açıklama > CIDR), grup sonunda tüm satırlara (hata satırları dahil). Arayüz: Sunucu'dan sonra
   "Segment / VLAN" kolonu (`ttSegHtml`: ad, altında "VLAN x · CIDR"), giden satırda Hedef hücresinde hedefin segmenti + VLAN; aramada segment / VLAN / CIDR; CSV SEGMENT, VLAN,
   CIDR (+ giden: HEDEF SEGMENT, HEDEF VLAN).
+  FİLTRE UZUNLUĞU + 2000 IP (canlı: "Dış bacak: [Finart] Rapor hata verdi … steelfilter parsing_error … got ` o` at position 3919" — dış bacakta 200 üye IP'si tek filtredeydi,
+  AppResponse ~3.900 karakterde kesiyor): `TlsAkis.CekAsync` artık sarmalayıcı — filtre `Tls:FiltreMaxKarakter`=3000'i aşacaksa IP'ler açgözlü parçalara bölünür, her parça
+  `CekTekAsync` (eski gövde) ile ayrı rapor, satırlar birleşir, kutu durumu birleşir, mesaj "N IP K parçada soruldu"; ilerleme "parça i/K (n IP) · …". Sahte HTTPS AppResponse
+  (3.900 üstünü reddeden) ile: 200 IP → 2970 + 2518 karakter, 200 satır; 20 IP gelen+giden tek rapor (1066). 2000 IP İÇİN: iş temizliği yalnız BİTMİŞ işleri bitişten 1 saat sonra
+  siler (`BittiZaman`; eskiden başlangıçtan 1 saat sonra süren iş de silinirdi → "iş bulunamadı"); GET `/api/tls/toplu/{id}?den=N` yalnız N'den sonraki satırlar (`den`, `satirToplam`;
+  satırlar yalnız eklenir), arayüz birleştirir (eski DLL'de den yok sayılır, tümü gelir); tablo ilk `TT_MAX_SATIR`=1000 satırı çizer (not satırı; arama / süzgeç / CSV tüm satırlarda).
+  Mock'la: den 0 / 1200 / 2400, 1000 satır çizildi, arama 3600. satırı buldu. Süre: grup (Tls:TopluParca=20) sırayla; 2000 IP = 100 grup, saatler sürebilir.
 - **Fiziksel envanter** (`FizikselEnvanter.cs`, `wwwroot/fiziksel.js`, sekme "Fiziksel envanter" `data-ui="fiziksel"`, `?fiziksel=1&kabin=&host=`;
   claude.ai sohbetindeki görev tanımı: "Bu kabin kapanırsa hangi uygulamalar etkilenir?"): veri doku DB'de HAZIR — NlyteCollector (nlyte OData →
   dbo.NlyteRaw) + `EXEC dbo.sp_KabinZincirYenile` doldurur; DeltaFlow YALNIZ OKUR (yazmaz, prosedürü çağırmaz). Betik kullanıcıda

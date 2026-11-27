@@ -213,10 +213,13 @@ async function ttBasla() {
 async function ttIzle() {
   const id = tt.id;
   try {
-    const r = await fetch(`api/tls/toplu/${id}`);
+    // yalnız yeni satırlar istenir (sunucu den'den sonrasını döner; eski DLL den'i yok sayıp hepsini döner → satirToplam yoksa tümü yerine konur)
+    const once = tt.id === id ? (tt.body?.satirlar ?? []) : [];
+    const r = await fetch(`api/tls/toplu/${id}?den=${once.length}`);
     const b = await r.json().catch(() => ({ error: `HTTP ${r.status}` }));
     if (!r.ok) throw new Error(b.error || `HTTP ${r.status}`);
     if (tt.id !== id) return;
+    if (b.satirToplam != null && b.den === once.length) b.satirlar = once.concat(b.satirlar ?? []);
     tt.body = b;
   } catch (e) { if (tt.id === id) tt.body = { ...(tt.body ?? {}), bitti: true, hata: e.message }; }
   if (uiMode === "tls" && $("#ttSonuc")) ttCiz();
@@ -405,10 +408,12 @@ async function ttWcGoster(id) {
   } catch (e) { bilgi.innerHTML = `<span style="color:var(--err)">${esc(e.message)}</span>`; }
 }
 
+const TT_MAX_SATIR = 1000;   // 2000 IP'de on binlerce satır olabilir; her 3 sn'de hepsini çizmek tarayıcıyı kilitler
 function ttCiz() {
   const el = $("#ttSonuc"), b = tt.body;
   if (!el || !b) return;
   const all = b.satirlar ?? [], list = ttSatirlar();
+  const kesik = list.length > TT_MAX_SATIR;
   const ipTls = new Set(all.filter(r => r.surumler?.length).map(r => r.ip)).size;
   const eski = all.filter(r => r.surumler?.some(s => tlsEski(s.surum)));
   const sifresiz = all.filter(r => r.sifreleme === "sifresiz");
@@ -440,7 +445,7 @@ function ttCiz() {
       : `<span class="spinner"></span> UCMDB web.config listesi hazırlanıyor · ${esc(ttWc.asama)} · ${ttSure(ttWc.gecen)}`}</div>` : ""}
     <div class="tbl-wrap" style="max-height:62vh"><table>
       <thead><tr><th>IP</th><th>Sunucu</th><th title="KonsolideSegmentler4: segment adı (EPG / Application Profile), VLAN ve CIDR">Segment / VLAN</th>${wk ? `<th title="UCMDB'de bu sunucuya ait web.config (görüntüle; şifre / anahtar değerleri maskeli)">web.config</th>` : ""}${gk ? `<th title="▼ Gelen: bu sunucuya gelen bağlantı (port bu sunucunun portu) · ▲ Giden: bu sunucunun başka sunucuya yaptığı bağlantı (port hedefin portu)">Yön</th><th title="Giden bağlantıda çağrılan sunucu">Hedef (giden)</th>` : ""}<th title="Gelen: bu sunucunun dinlediği port · Giden: hedefin portu">Port</th><th title="Gelen: bu portun ERT uygulaması · Giden: hedefin ERT uygulaması">Uygulama (ERT)</th>${sk ? `<th>Şifreleme</th>` : ""}<th>TLS sürümü</th><th class="num">El sıkışması</th>${sk ? `<th class="num" title="AppResponse flow_tcp: bu porta gelen TCP trafiği (bağlantı / satır sayısı)">TCP trafiği</th>` : ""}<th class="num">İstemci</th><th>Not</th>${fk ? `<th title="Servise erişilen adlar; DNS = istemcilerin bağlanırken çözdüğü ad (Carbon Black), VIP DNS = sunucunun üyesi olduğu VIP'e bağlanırken, IIS = IIS logundaki Host başlığı, sertifika = Nessus'un gördüğü sertifika adları, sunucu DNS = Nessus'un sunucu adı">FQDN</th><th title="En çok kullanılan ad + port + http/https (TLS görüldüyse ya da sertifika varsa https)">Önerilen URL</th><th title="Gelen: IIS logunda görülen istek yolları (sayı / GUID parçaları {n} / {guid}); giden: Palo Alto URL logundaki yollar. IIS dışı gelen servislerde yol ağ verisinde yok">Endpoint (IIS / FW)</th><th>VIP</th><th>IIS website (ERT)</th>` : ""}</tr></thead>
-      <tbody>${list.length ? list.map(r => `<tr${r.surumler?.some(s => tlsEski(s.surum)) || r.sifreleme === "sifresiz" ? ` class="tls-eski-satir"` : ""}>
+      <tbody>${list.length ? list.slice(0, TT_MAX_SATIR).map(r => `<tr${r.surumler?.some(s => tlsEski(s.surum)) || r.sifreleme === "sifresiz" ? ` class="tls-eski-satir"` : ""}>
         <td class="mono"><a href="${esc(ipTabUrl(r.ip))}" target="_blank" rel="noopener" title="IP sorgusunu yeni sekmede aç">${esc(r.ip)}</a></td>
         <td class="small">${esc(r.sunucu ?? "")}</td><td class="small">${ttSegHtml(r.segment, r.vlan, r.cidr)}</td>${wk ? `<td style="white-space:nowrap">${ttWcHtml(r)}</td>` : ""}
         ${gk ? `<td class="small" style="white-space:nowrap">${r.yon === "giden" ? `<b style="color:var(--out, #b26b00)">▲ Giden</b>` : r.port ? `<b style="color:var(--in)">▼ Gelen</b>` : ""}</td>
@@ -451,6 +456,7 @@ function ttCiz() {
         <td class="small muted">${r.surumler?.length ? esc(r.not ?? "") : ""}</td>
         ${fk ? `<td>${ttFqdnHtml(r)}</td><td class="mono small">${r.url ? esc(r.url) : ""}</td><td>${ttUcHtml(r)}</td><td class="mono small">${esc(r.vip ?? "")}</td><td class="small">${esc(r.website ?? "")}</td>` : ""}</tr>`).join("")
         : `<tr><td colspan="${(sk ? 10 : 8) + 1 + (fk ? 5 : 0) + (gk ? 2 : 0) + (wk ? 1 : 0)}" class="unk">${all.length ? "Filtreye uyan satır yok." : b.bitti ? "Sonuç yok." : "Sonuçlar geldikçe burada listelenecek…"}</td></tr>`}</tbody></table></div>
+    ${kesik ? `<div class="small muted" style="margin-top:4px">Ekranda ilk ${fmt(TT_MAX_SATIR)} / ${fmt(list.length)} satır gösteriliyor (tarayıcı donmasın diye). Tamamı Excel (CSV)'de; arama ve süzgeçler tüm satırlarda çalışır.</div>` : ""}
     ${b.mesajlar?.length ? `<div class="msgs">${esc(b.mesajlar.join("\n"))}</div>` : ""}`;
   $("#ttAra").addEventListener("input", e => { tt.filtre = e.target.value; const pos = e.target.selectionStart; ttCiz(); const i = $("#ttAra"); i.focus(); i.setSelectionRange(pos, pos); });
   $("#ttEski").addEventListener("change", e => { tt.yalnizEski = e.target.checked; ttCiz(); });

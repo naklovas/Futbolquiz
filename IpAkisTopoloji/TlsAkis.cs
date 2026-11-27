@@ -56,9 +56,52 @@ static class TlsAkis
 
     // Ortak çekirdek: verilen IP'ler için tüm kutularda tls_handshakes raporu. gelenYalniz: yalnız IP'lerin sunucu olduğu
     // el sıkışmaları (toplu sorgu); değilse sunucu ya da istemci. Kutu başına sırayla: gruplu + metrik → gruplu → ham.
+    // AppResponse STEELFILTER uzunluk sınırı (canlı: ~3.900 karakterde metin kesilip "syntax error … got ` o`" — dış bacakta 200 üye IP'si tek filtredeydi):
+    // filtre Tls:FiltreMaxKarakter'i aşacaksa IP'ler parçalara bölünür, her parça ayrı rapor; satırlar birleşir, kutu başına durum birleştirilir
     internal static async Task<(List<Ham> Satirlar, List<TlsCihaz> Cihazlar, List<string> Mesajlar, bool Kesik)> CekAsync(
         IReadOnlyList<string> ips, DateTime bas, DateTime bit, IReadOnlyList<string> portlar, bool gelenYalniz,
         IConfiguration cfg, HttpClient http, CancellationToken ct, string? sniKol = null, Action<string, string, bool>? ilerleme = null)
+    {
+        int limit = Math.Max(500, cfg.GetValue("Tls:FiltreMaxKarakter", 3000));
+        var t = cfg.GetSection("Tls");
+        string cliIp = t["IstemciIp"] ?? "cli_tcp.ip", srvIp = t["SunucuIp"] ?? "srv_tcp.ip", srvPort = t["SunucuPort"] ?? "srv_tcp.port";
+        int portUz = portlar.Sum(p => srvPort.Length + p.Length + 8);
+        int Uzunluk(IEnumerable<string> l) => l.Sum(ip => srvIp.Length + ip.Length + 8 + (gelenYalniz ? 0 : cliIp.Length + ip.Length + 8)) + portUz * (gelenYalniz ? 1 : 2) + 20;
+        if (ips.Count <= 1 || Uzunluk(ips) <= limit)
+            return await CekTekAsync(ips, bas, bit, portlar, gelenYalniz, cfg, http, ct, sniKol, ilerleme);
+        // açgözlü parçalama: her parça sınırın altında
+        var parcalar = new List<List<string>> { new() };
+        foreach (var ip in ips)
+        {
+            if (parcalar[^1].Count > 0 && Uzunluk(parcalar[^1].Append(ip)) > limit) parcalar.Add([]);
+            parcalar[^1].Add(ip);
+        }
+        var satirlar = new List<Ham>();
+        var cihaz = new Dictionary<string, (int Satir, string? Yontem, string? Hata)>();
+        var mesajlar = new List<string>();
+        bool kesik = false;
+        for (int i = 0; i < parcalar.Count; i++)
+        {
+            int no = i + 1;
+            var pc = parcalar[i];
+            var r = await CekTekAsync(pc, bas, bit, portlar, gelenYalniz, cfg, http, ct, sniKol,
+                ilerleme == null ? null : (c, d, b) => ilerleme(c, $"parça {no}/{parcalar.Count} ({pc.Count} IP) · {d}", b && no == parcalar.Count));
+            satirlar.AddRange(r.Satirlar);
+            foreach (var c in r.Cihazlar)
+            {
+                var e = cihaz.GetValueOrDefault(c.Ad);
+                cihaz[c.Ad] = (e.Satir + c.Satir, e.Yontem ?? c.Yontem, c.Yontem != null ? e.Hata : (e.Hata ?? c.Hata));
+            }
+            foreach (var m in r.Mesajlar) if (!mesajlar.Contains(m)) mesajlar.Add(m);
+            kesik |= r.Kesik;
+        }
+        mesajlar.Insert(0, $"Filtre uzun olduğu için {ips.Count} IP {parcalar.Count} parçada soruldu (Tls:FiltreMaxKarakter={limit}).");
+        return (satirlar, cihaz.Select(kv => new TlsCihaz(kv.Key, kv.Value.Satir, kv.Value.Yontem, kv.Value.Yontem == null ? kv.Value.Hata : null)).ToList(), mesajlar, kesik);
+    }
+
+    static async Task<(List<Ham> Satirlar, List<TlsCihaz> Cihazlar, List<string> Mesajlar, bool Kesik)> CekTekAsync(
+        IReadOnlyList<string> ips, DateTime bas, DateTime bit, IReadOnlyList<string> portlar, bool gelenYalniz,
+        IConfiguration cfg, HttpClient http, CancellationToken ct, string? sniKol, Action<string, string, bool>? ilerleme)
     {
         var t = cfg.GetSection("Tls");
         string kaynak = t["Kaynak"] ?? "tls_handshakes";
@@ -311,6 +354,7 @@ class TlsTopluIs
     public List<string> Ips = [];
     public int Parca, ToplamParca;
     public bool Bitti;
+    public DateTime? BittiZaman;
     public bool Sifresiz;   // ek flow_tcp sorgusu yapıldı mı (trafik var / TLS yok ayrımı)
     public bool Fqdn;       // FQDN / endpoint araması yapıldı mı (Carbon Black DNS, IIS logu, Nessus sertifika)
     public bool Giden;      // giden el sıkışmaları da alındı mı (IP istemci)
@@ -348,7 +392,8 @@ static class TlsToplu
         bool fqdn = false, Dictionary<string, HashSet<string>>? istenen = null, HttpClient? splunk = null, NessusService? nessus = null, bool giden = false)
     {
         // eski işler (1 saat) temizlenir
-        foreach (var kv in _isler.Where(kv => (DateTime.UtcNow - kv.Value.Basladi).TotalHours > 1).ToList()) _isler.TryRemove(kv.Key, out _);
+        // yalnız BİTMİŞ işler, bittikten 1 saat sonra silinir (2000 IP'lik sorgu 1 saati aşabilir; süren iş silinirse ekran "iş bulunamadı" der)
+        foreach (var kv in _isler.Where(kv => kv.Value.Bitti && (DateTime.UtcNow - (kv.Value.BittiZaman ?? kv.Value.Basladi)).TotalHours > 1).ToList()) _isler.TryRemove(kv.Key, out _);
         int parca = Math.Max(1, cfg.GetValue("Tls:TopluParca", 20));
         var (bas, bit) = TlsAkis.Aralik(saat);
         var j = new TlsTopluIs { Kullanici = kullanici, Saat = saat, Ips = ips, Bas = bas, Bit = bit, ToplamParca = (ips.Count + parca - 1) / parca, Sifresiz = sifresiz,
@@ -435,7 +480,7 @@ static class TlsToplu
             }
             catch (OperationCanceledException) { lock (j) j.Hata = "Durduruldu."; }
             catch (Exception ex) { lock (j) j.Hata = ex.Message; }
-            finally { j.Bitti = true; }
+            finally { j.BittiZaman = DateTime.UtcNow; j.Bitti = true; }
         });
         return j;
     }
