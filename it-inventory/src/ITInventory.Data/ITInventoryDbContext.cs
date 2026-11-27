@@ -25,6 +25,7 @@ public class ITInventoryDbContext : DbContext
     public DbSet<OriginCountry> OriginCountries => Set<OriginCountry>();
     public DbSet<Location> Locations => Set<Location>();
     public DbSet<CompanyContact> CompanyContacts => Set<CompanyContact>();
+    public DbSet<CompanyRole> CompanyRoles => Set<CompanyRole>();
     public DbSet<Application> Applications => Set<Application>();
     public DbSet<ActivityLog> ActivityLogs => Set<ActivityLog>();
     public DbSet<CountryTopologyFile> CountryTopologyFiles => Set<CountryTopologyFile>();

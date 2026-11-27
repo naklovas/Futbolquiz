@@ -42,7 +42,7 @@ public class CompaniesController : Controller
         }
         else
         {
-            var query = _db.Companies.Include(c => c.Country).Include(c => c.OriginCountry).Include(c => c.Contacts).AsQueryable();
+            var query = _db.Companies.Include(c => c.Country).Include(c => c.OriginCountry).Include(c => c.Contacts).Include(c => c.Roles).AsQueryable();
 
             if (!isAdmin)
                 query = query.Where(c => c.CountryId == scopedCountryId);
@@ -73,18 +73,18 @@ public class CompaniesController : Controller
         int? selectedCountryId = !viewAll && int.TryParse(countryId, out var parsedCountryId) ? parsedCountryId : null;
         if (!viewAll && !selectedCountryId.HasValue) return BadRequest("Please select a country (or All Countries) first.");
 
-        var query = _db.Companies.Include(c => c.Country).Include(c => c.OriginCountry).Include(c => c.Contacts).AsQueryable();
+        var query = _db.Companies.Include(c => c.Country).Include(c => c.OriginCountry).Include(c => c.Contacts).Include(c => c.Roles).AsQueryable();
         if (selectedCountryId.HasValue)
             query = query.Where(c => c.CountryId == selectedCountryId.Value);
 
         var items = await query.OrderBy(c => c.Country!.Name).ThenBy(c => c.Name).ToListAsync();
 
-        var headers = new[] { "Country", "Company Name", "Type", "Country of Origin", "Contacts", "Active" };
+        var headers = new[] { "Country", "Company Name", "Roles", "Country of Origin", "Contacts", "Active" };
         var rows = items.Select(c => new object?[]
         {
             c.Country?.DisplayName ?? c.Country?.Name,
             c.Name,
-            c.CompanyType == CompanyType.Other ? $"Other ({c.OtherTypeDescription})" : c.CompanyType.ToString(),
+            c.RollerMetni,
             c.OriginCountry?.Name,
             string.Join(", ", c.Contacts.Select(x => x.PersonName ?? x.Title ?? x.Email ?? "(contact)")),
             c.IsActive ? "Yes" : "No"
@@ -140,9 +140,6 @@ public class CompaniesController : Controller
         if (await _db.Companies.AnyAsync(c => c.Name == vm.Name && c.CountryId == country.Id))
             ModelState.AddModelError(nameof(vm.Name), "A company with this name already exists for this country.");
 
-        if (vm.CompanyType == CompanyType.Other && string.IsNullOrWhiteSpace(vm.OtherTypeDescription))
-            ModelState.AddModelError(nameof(vm.OtherTypeDescription), "Please specify the type.");
-
         OriginCountry? originCountry = null;
         if (vm.OriginCountryId.HasValue)
         {
@@ -161,17 +158,24 @@ public class CompaniesController : Controller
             return View(vm);
         }
 
+        // "En az bir rol" ve "Other secildiyse aciklama" kurallari
+        // CompanyFormViewModel.Validate icinde; buraya gelindiginde saglandilar.
+        var roller = RolleriDuzenle(vm.Roles);
+
         var entity = new Company
         {
             CountryId = country.Id,
             Name = vm.Name,
-            CompanyType = vm.CompanyType,
-            OtherTypeDescription = vm.CompanyType == CompanyType.Other ? vm.OtherTypeDescription : null,
+            CompanyType = roller[0],
+            OtherTypeDescription = roller.Contains(CompanyType.Other) ? vm.OtherTypeDescription : null,
             OriginCountryId = originCountry?.Id,
             IsActive = vm.IsActive,
             CreatedAt = DateTime.UtcNow,
             CreatedBy = _currentUser.Username
         };
+
+        foreach (var rol in roller)
+            entity.Roles.Add(new CompanyRole { Role = rol });
 
         foreach (var contact in vm.Contacts.Where(HasAnyValue))
         {
@@ -198,7 +202,7 @@ public class CompaniesController : Controller
 
         if (!_currentUser.CanEdit) return Forbid();
 
-        var company = await _db.Companies.Include(c => c.Contacts).FirstOrDefaultAsync(c => c.Id == id
+        var company = await _db.Companies.Include(c => c.Contacts).Include(c => c.Roles).FirstOrDefaultAsync(c => c.Id == id
             && (isAdmin || c.CountryId == scopedCountryId));
         if (company is null) return NotFound();
 
@@ -207,7 +211,8 @@ public class CompaniesController : Controller
             Id = company.Id,
             CountryId = company.CountryId,
             Name = company.Name,
-            CompanyType = company.CompanyType,
+            // Roles bos olan eski kayitlarda tek rollu haline duser.
+            Roles = company.EtkinRoller.ToList(),
             OtherTypeDescription = company.OtherTypeDescription,
             OriginCountryId = company.OriginCountryId,
             IsActive = company.IsActive,
@@ -238,7 +243,7 @@ public class CompaniesController : Controller
         if (!_currentUser.CanEdit) return Forbid();
         if (id != vm.Id) return BadRequest();
 
-        var entity = await _db.Companies.Include(c => c.Contacts).FirstOrDefaultAsync(c => c.Id == id
+        var entity = await _db.Companies.Include(c => c.Contacts).Include(c => c.Roles).FirstOrDefaultAsync(c => c.Id == id
             && (isAdmin || c.CountryId == scopedCountryId));
         if (entity is null) return NotFound();
 
@@ -260,9 +265,6 @@ public class CompaniesController : Controller
         if (await _db.Companies.AnyAsync(c => c.Name == vm.Name && c.CountryId == country.Id && c.Id != id))
             ModelState.AddModelError(nameof(vm.Name), "A company with this name already exists for this country.");
 
-        if (vm.CompanyType == CompanyType.Other && string.IsNullOrWhiteSpace(vm.OtherTypeDescription))
-            ModelState.AddModelError(nameof(vm.OtherTypeDescription), "Please specify the type.");
-
         OriginCountry? originCountry = null;
         if (vm.OriginCountryId.HasValue)
         {
@@ -281,14 +283,24 @@ public class CompaniesController : Controller
             return View(vm);
         }
 
+        var roller = RolleriDuzenle(vm.Roles);
+
         entity.CountryId = country.Id;
         entity.Name = vm.Name;
-        entity.CompanyType = vm.CompanyType;
-        entity.OtherTypeDescription = vm.CompanyType == CompanyType.Other ? vm.OtherTypeDescription : null;
+        entity.CompanyType = roller[0];
+        entity.OtherTypeDescription = roller.Contains(CompanyType.Other) ? vm.OtherTypeDescription : null;
         entity.OriginCountryId = originCountry?.Id;
         entity.IsActive = vm.IsActive;
         entity.UpdatedAt = DateTime.UtcNow;
         entity.UpdatedBy = _currentUser.Username;
+
+        // Rolleri kumeyle eslestir: isaretsiz kalanlar silinir, yeni
+        // isaretlenenler eklenir, zaten var olanlara dokunulmaz.
+        foreach (var fazlalik in entity.Roles.Where(r => !roller.Contains(r.Role)).ToList())
+            _db.CompanyRoles.Remove(fazlalik);
+
+        foreach (var rol in roller.Where(r => entity.Roles.All(mevcut => mevcut.Role != r)))
+            entity.Roles.Add(new CompanyRole { Role = rol });
 
         var postedContacts = vm.Contacts.Where(HasAnyValue).ToList();
         var postedIds = postedContacts.Where(c => c.Id != 0).Select(c => c.Id).ToHashSet();
@@ -354,6 +366,15 @@ public class CompaniesController : Controller
 
         return RedirectToAction(nameof(Index));
     }
+
+    /// <summary>
+    /// Gonderilen rolleri tekrarsiz ve sirali hale getirir. Ilk eleman
+    /// Companies.CompanyType kolonuna yazilacak birincil rol olur -- eski
+    /// raporlar o kolona bakmaya devam ettigi icin her zaman dolu kalmali.
+    /// Liste bos gelemez: "en az bir rol" kurali view model'de.
+    /// </summary>
+    private static List<CompanyType> RolleriDuzenle(IEnumerable<CompanyType> roller) =>
+        roller.Distinct().OrderBy(r => (int)r).ToList();
 
     private static bool HasAnyValue(CompanyContactFormViewModel c) =>
         !string.IsNullOrWhiteSpace(c.PersonName) || !string.IsNullOrWhiteSpace(c.Title) ||
