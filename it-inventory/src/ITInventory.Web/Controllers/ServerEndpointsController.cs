@@ -1,0 +1,296 @@
+using ITInventory.Data;
+using ITInventory.Data.Entities;
+using ITInventory.Web.Common;
+using ITInventory.Web.Models;
+using ITInventory.Web.Models.ServerEndpoints;
+using ITInventory.Web.Services;
+using ITInventory.Web.Services.Import;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.Rendering;
+using Microsoft.EntityFrameworkCore;
+
+namespace ITInventory.Web.Controllers;
+
+public class ServerEndpointsController : Controller
+{
+    private readonly ITInventoryDbContext _db;
+    private readonly ICurrentUserService _currentUser;
+    private readonly IActivityLogger _activityLogger;
+
+    public ServerEndpointsController(ITInventoryDbContext db, ICurrentUserService currentUser, IActivityLogger activityLogger)
+    {
+        _db = db;
+        _currentUser = currentUser;
+        _activityLogger = activityLogger;
+    }
+
+    [HttpGet]
+    public async Task<IActionResult> Index(string? countryId, int page = 1)
+    {
+        var isAdmin = User.IsAdministrator();
+        var scopedCountryId = User.ScopedCountryId();
+
+        var viewAll = isAdmin && countryId == "all";
+        int? selectedCountryId = !viewAll && int.TryParse(countryId, out var parsedCountryId) ? parsedCountryId : null;
+        var requiresSelection = isAdmin && !viewAll && !selectedCountryId.HasValue;
+
+        PagedResult<ServerEndpoint> items;
+        if (requiresSelection)
+        {
+            items = new PagedResult<ServerEndpoint> { Items = Array.Empty<ServerEndpoint>(), PageNumber = 1, PageSize = PaginationExtensions.DefaultPageSize, TotalCount = 0 };
+        }
+        else
+        {
+            var query = _db.ServerEndpoints
+                .Include(e => e.Server).ThenInclude(s => s!.Country)
+                .Include(e => e.Application)
+                .AsQueryable();
+
+            if (!isAdmin)
+                query = query.Where(e => e.Server!.CountryId == scopedCountryId);
+            else if (selectedCountryId.HasValue)
+                query = query.Where(e => e.Server!.CountryId == selectedCountryId.Value);
+
+            items = await query.OrderBy(e => e.Server!.Country!.Name).ThenBy(e => e.Server!.HostName).ToPagedResultAsync(page);
+        }
+
+        ViewBag.Countries = await _db.Countries.OrderBy(c => c.Name).ToListAsync();
+        ViewBag.SelectedCountryId = selectedCountryId;
+        ViewBag.ViewAll = viewAll;
+        ViewBag.RequiresSelection = requiresSelection;
+        ViewBag.CanEdit = _currentUser.CanEdit;
+        ViewBag.IsAdmin = isAdmin;
+
+        return View(items);
+    }
+
+    [HttpGet]
+    public async Task<IActionResult> Export(string? countryId)
+    {
+        var isAdmin = User.IsAdministrator();
+
+        if (!isAdmin) return Forbid();
+
+        var viewAll = countryId == "all";
+        int? selectedCountryId = !viewAll && int.TryParse(countryId, out var parsedCountryId) ? parsedCountryId : null;
+        if (!viewAll && !selectedCountryId.HasValue) return BadRequest("Please select a country (or All Countries) first.");
+
+        var query = _db.ServerEndpoints
+            .Include(e => e.Server).ThenInclude(s => s!.Country)
+            .Include(e => e.Application)
+            .AsQueryable();
+        if (selectedCountryId.HasValue)
+            query = query.Where(e => e.Server!.CountryId == selectedCountryId.Value);
+
+        var items = await query.OrderBy(e => e.Server!.Country!.Name).ThenBy(e => e.Server!.HostName).ToListAsync();
+
+        var headers = new[] { "Country", "Server", "IP Address", "Port", "Application", "Notes" };
+        var rows = items.Select(e => new object?[]
+        {
+            e.Server?.Country?.DisplayName ?? e.Server?.Country?.Name,
+            e.Server?.HostName,
+            e.IpAddress,
+            e.Port,
+            e.Application?.Name,
+            e.Notes
+        });
+
+        var bytes = ExcelImportHelpers.CreateExportBytes("Server Endpoints", headers, rows);
+        await _activityLogger.LogAsync("Export", "ServerEndpoint", details: $"{items.Count} record(s) exported to Excel.");
+        return File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", $"ServerEndpoints_Export_{DateTime.UtcNow:yyyyMMdd_HHmmss}.xlsx");
+    }
+
+    [HttpGet]
+    public async Task<IActionResult> Create()
+    {
+        if (!_currentUser.CanEdit) return Forbid();
+
+        await PopulateDropdowns();
+        return View(new ServerEndpointFormViewModel());
+    }
+
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> Create(ServerEndpointFormViewModel vm)
+    {
+        var isAdmin = User.IsAdministrator();
+        var scopedCountryId = User.ScopedCountryId();
+
+        if (!_currentUser.CanEdit) return Forbid();
+
+        // Every foreign key below arrives as a plain number from a form field. Checking that the
+        // number exists is not enough: the ids written into the new row have to COME FROM the
+        // rows the authorized lookups returned, never from the request. Otherwise the posted
+        // values still travel straight into the INSERT with only an existence test in the way.
+        var server = await _db.Servers.FirstOrDefaultAsync(s => s.Id == vm.ServerId
+            && (isAdmin || s.CountryId == scopedCountryId));
+        if (server is null)
+        {
+            ModelState.AddModelError(nameof(vm.ServerId), "Please select a valid server.");
+            await PopulateDropdowns();
+            return View(vm);
+        }
+
+        Application? application = null;
+        if (vm.ApplicationId.HasValue)
+        {
+            application = await _db.Applications.FirstOrDefaultAsync(a => a.Id == vm.ApplicationId.Value
+                && (isAdmin || a.CountryId == scopedCountryId));
+            if (application is null)
+            {
+                ModelState.AddModelError(nameof(vm.ApplicationId), "Please select a valid application.");
+                await PopulateDropdowns();
+                return View(vm);
+            }
+        }
+
+        if (!ModelState.IsValid)
+        {
+            await PopulateDropdowns();
+            return View(vm);
+        }
+
+        var entity = new ServerEndpoint
+        {
+            ServerId = server.Id,
+            IpAddress = vm.IpAddress,
+            Port = vm.Port,
+            ApplicationId = application?.Id,
+            Notes = vm.Notes,
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = _currentUser.Username
+        };
+
+        _db.ServerEndpoints.Add(entity);
+        await _db.SaveChangesAsync();
+        await _activityLogger.LogAsync("Create", "ServerEndpoint", $"{entity.IpAddress}:{entity.Port}");
+        return RedirectToAction(nameof(Index));
+    }
+
+    [HttpGet]
+    public async Task<IActionResult> Edit(int id)
+    {
+        var isAdmin = User.IsAdministrator();
+        var scopedCountryId = User.ScopedCountryId();
+
+        if (!_currentUser.CanEdit) return Forbid();
+
+        var entity = await _db.ServerEndpoints.Include(e => e.Server).FirstOrDefaultAsync(e => e.Id == id
+            && (isAdmin || e.Server!.CountryId == scopedCountryId));
+        if (entity is null) return NotFound();
+
+        var vm = new ServerEndpointFormViewModel
+        {
+            Id = entity.Id,
+            ServerId = entity.ServerId,
+            IpAddress = entity.IpAddress,
+            Port = entity.Port,
+            ApplicationId = entity.ApplicationId,
+            Notes = entity.Notes
+        };
+
+        await PopulateDropdowns();
+        return View(vm);
+    }
+
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> Edit(int id, ServerEndpointFormViewModel vm)
+    {
+        var isAdmin = User.IsAdministrator();
+        var scopedCountryId = User.ScopedCountryId();
+
+        if (!_currentUser.CanEdit) return Forbid();
+        if (id != vm.Id) return BadRequest();
+
+        var entity = await _db.ServerEndpoints.Include(e => e.Server).FirstOrDefaultAsync(e => e.Id == id
+            && (isAdmin || e.Server!.CountryId == scopedCountryId));
+        if (entity is null) return NotFound();
+
+        var server = await _db.Servers.FirstOrDefaultAsync(s => s.Id == vm.ServerId
+            && (isAdmin || s.CountryId == scopedCountryId));
+        if (server is null)
+        {
+            ModelState.AddModelError(nameof(vm.ServerId), "Please select a valid server.");
+            await PopulateDropdowns();
+            return View(vm);
+        }
+
+        // Every foreign key below arrives as a plain number from a form field. Checking that the
+        // number exists is not enough: the ids written onto the row have to COME FROM the rows
+        // the authorized lookups returned, never from the request. Otherwise the posted values
+        // still travel straight into the UPDATE with only an existence test in the way.
+        Application? application = null;
+        if (vm.ApplicationId.HasValue)
+        {
+            application = await _db.Applications.FirstOrDefaultAsync(a => a.Id == vm.ApplicationId.Value
+                && (isAdmin || a.CountryId == scopedCountryId));
+            if (application is null)
+            {
+                ModelState.AddModelError(nameof(vm.ApplicationId), "Please select a valid application.");
+                await PopulateDropdowns();
+                return View(vm);
+            }
+        }
+
+        if (!ModelState.IsValid)
+        {
+            await PopulateDropdowns();
+            return View(vm);
+        }
+
+        entity.ServerId = server.Id;
+        entity.IpAddress = vm.IpAddress;
+        entity.Port = vm.Port;
+        entity.ApplicationId = application?.Id;
+        entity.Notes = vm.Notes;
+        entity.UpdatedAt = DateTime.UtcNow;
+        entity.UpdatedBy = _currentUser.Username;
+
+        await _db.SaveChangesAsync();
+        await _activityLogger.LogAsync("Update", "ServerEndpoint", $"{entity.IpAddress}:{entity.Port}");
+        return RedirectToAction(nameof(Index));
+    }
+
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    public async Task<IActionResult> Delete(int id)
+    {
+        var isAdmin = User.IsAdministrator();
+        var scopedCountryId = User.ScopedCountryId();
+
+        if (!_currentUser.CanEdit) return Forbid();
+
+        var entity = await _db.ServerEndpoints.Include(e => e.Server).FirstOrDefaultAsync(e => e.Id == id
+            && (isAdmin || e.Server!.CountryId == scopedCountryId));
+        if (entity is null) return NotFound();
+
+        var label = $"{entity.IpAddress}:{entity.Port}";
+        _db.ServerEndpoints.Remove(entity);
+        await _db.SaveChangesAsync();
+        await _activityLogger.LogAsync("Delete", "ServerEndpoint", label);
+        return RedirectToAction(nameof(Index));
+    }
+
+    private async Task PopulateDropdowns()
+    {
+        var isAdmin = User.IsAdministrator();
+        var scopedCountryId = User.ScopedCountryId();
+
+        ViewBag.IsAdmin = isAdmin;
+
+        var serversQuery = isAdmin
+            ? _db.Servers.Include(s => s.Country).AsQueryable()
+            : _db.Servers.Include(s => s.Country).Where(s => s.CountryId == scopedCountryId);
+        var servers = await serversQuery.OrderBy(s => s.Country!.Name).ThenBy(s => s.HostName)
+            .Select(s => new { s.Id, Label = s.HostName + " (" + (s.Country!.DisplayName ?? s.Country.Name) + ")" })
+            .ToListAsync();
+        ViewBag.ServerOptions = new SelectList(servers, "Id", "Label");
+
+        var applicationsQuery = isAdmin
+            ? _db.Applications.AsQueryable()
+            : _db.Applications.Where(a => a.CountryId == scopedCountryId);
+        var applications = await applicationsQuery.OrderBy(a => a.Name).ToListAsync();
+        ViewBag.ApplicationOptions = new SelectList(applications, "Id", "Name");
+    }
+}

@@ -1,0 +1,201 @@
+@model ITInventory.Web.Models.Servers.ServerFormViewModel
+@{
+    var countryOptions = (Microsoft.AspNetCore.Mvc.Rendering.SelectList)ViewBag.CountryOptions;
+    var vendorOptions = (Microsoft.AspNetCore.Mvc.Rendering.SelectList)ViewBag.VendorOptions;
+    var hostPhysicalDeviceOptions = (Microsoft.AspNetCore.Mvc.Rendering.SelectList)ViewBag.HostPhysicalDeviceOptions;
+    bool isAdmin = ViewBag.IsAdmin ?? false;
+    // New Servers are always virtual (see ServersController.Create) -- the Physical/Virtual
+    // choice and the hardware-only fields only apply when editing a record created before
+    // that change. Editing one of those still shows the full form so it stays manageable.
+    bool isNew = Model.Id == 0;
+}
+
+<div asp-validation-summary="All" class="text-sm text-red-600 mb-3"></div>
+<input type="hidden" asp-for="Id" />
+<input type="hidden" asp-for="DeviceProfileId" />
+<input type="hidden" asp-for="SourceZiraatYdId" />
+
+<div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+    <div>
+        <label asp-for="CountryId" class="block text-sm font-medium text-slate-700 mb-1"></label>
+        @if (isAdmin)
+        {
+            <select asp-for="CountryId" asp-items="countryOptions" class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
+                <option value="">-- Select --</option>
+            </select>
+        }
+        else
+        {
+            <select asp-for="CountryId" asp-items="countryOptions" class="w-full rounded-md border border-slate-200 bg-slate-100 px-3 py-2 text-sm" disabled></select>
+            <input type="hidden" asp-for="CountryId" />
+        }
+        <span asp-validation-for="CountryId" class="text-sm text-red-600"></span>
+    </div>
+    @if (isNew)
+    {
+        <div>
+            <label asp-for="IpAddress" class="block text-sm font-medium text-slate-700 mb-1"></label>
+            <input asp-for="IpAddress" class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500" />
+            <span asp-validation-for="IpAddress" class="text-sm text-red-600"></span>
+            <p class="text-xs text-slate-400 mt-1">Creates this server's first Server Endpoint.</p>
+        </div>
+    }
+    else
+    {
+        <div>
+            <label asp-for="ApplianceType" class="block text-sm font-medium text-slate-700 mb-1"></label>
+            <select asp-for="ApplianceType" id="ApplianceType" class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
+                <option value="Physical">Physical</option>
+                <option value="Virtual">Virtual</option>
+            </select>
+        </div>
+    }
+    <div>
+        <label asp-for="HostName" class="block text-sm font-medium text-slate-700 mb-1"></label>
+        <input asp-for="HostName" class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500" />
+        <span asp-validation-for="HostName" class="text-sm text-red-600"></span>
+    </div>
+</div>
+
+<div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+    <div id="location-field" class="@(isNew ? "hidden" : "")">
+        <label asp-for="Location" class="block text-sm font-medium text-slate-700 mb-1"></label>
+        <input asp-for="Location" class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500" />
+        <span asp-validation-for="Location" class="text-sm text-red-600"></span>
+    </div>
+    <div id="host-physical-device-field" class="@(isNew ? "" : "hidden")">
+        <label asp-for="HostPhysicalDeviceId" class="block text-sm font-medium text-slate-700 mb-1"></label>
+        <select asp-for="HostPhysicalDeviceId" asp-items="hostPhysicalDeviceOptions" class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
+            <option value="">-- Select --</option>
+        </select>
+        <span asp-validation-for="HostPhysicalDeviceId" class="text-sm text-red-600"></span>
+        <p class="text-xs text-slate-400 mt-1">Which ESXi/physical server this virtual server runs on -- only "Server" category Physical Devices are listed.</p>
+    </div>
+    <div>
+        <label asp-for="OperatingSystem" class="block text-sm font-medium text-slate-700 mb-1"></label>
+        <input asp-for="OperatingSystem" class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500" />
+        <span asp-validation-for="OperatingSystem" class="text-sm text-red-600"></span>
+    </div>
+</div>
+
+@if (!isNew)
+{
+    <div id="hardware-fields">
+    <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
+        <div>
+            <label asp-for="Brand" class="block text-sm font-medium text-slate-700 mb-1"></label>
+            <input asp-for="Brand" class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500" />
+        </div>
+        <div>
+            <label asp-for="Model" class="block text-sm font-medium text-slate-700 mb-1"></label>
+            <input asp-for="Model" class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500" />
+        </div>
+        <div>
+            <label asp-for="SerialNo" class="block text-sm font-medium text-slate-700 mb-1"></label>
+            <input asp-for="SerialNo" class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500" />
+        </div>
+        <div>
+            <label asp-for="VendorSupplier" class="block text-sm font-medium text-slate-700 mb-1"></label>
+            <select asp-for="VendorSupplier" asp-items="vendorOptions" class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
+                <option value="">-- Select --</option>
+            </select>
+        </div>
+    </div>
+
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+        <div>
+            <label asp-for="StartOfSupportDate" class="block text-sm font-medium text-slate-700 mb-1"></label>
+            <input asp-for="StartOfSupportDate" class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500" />
+        </div>
+        <div>
+            <label asp-for="EndOfSupportDate" class="block text-sm font-medium text-slate-700 mb-1"></label>
+            <input asp-for="EndOfSupportDate" class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500" />
+        </div>
+        <div>
+            <label asp-for="EndOfLifeDate" class="block text-sm font-medium text-slate-700 mb-1"></label>
+            <input asp-for="EndOfLifeDate" class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500" />
+        </div>
+    </div>
+    </div>
+}
+
+@if (!isNew)
+{
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+        <div>
+            <label asp-for="LocationCategory" class="block text-sm font-medium text-slate-700 mb-1"></label>
+            <select asp-for="LocationCategory" id="LocationCategory" class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
+                <option value="Local">Local</option>
+                <option value="Turkiye">Türkiye</option>
+                <option value="Cloud">Cloud</option>
+            </select>
+        </div>
+        <div>
+            <label asp-for="Branch" class="block text-sm font-medium text-slate-700 mb-1"></label>
+            <select asp-for="Branch" id="Branch" class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
+                <option value="">-- Select --</option>
+            </select>
+            <span asp-validation-for="Branch" class="text-sm text-red-600"></span>
+        </div>
+        <div>
+            <label asp-for="SiteClassification" class="block text-sm font-medium text-slate-700 mb-1"></label>
+            <select asp-for="SiteClassification" class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
+                <option value="Primary">Primary Datacenter</option>
+                <option value="DisasterRecovery">Disaster Recovery</option>
+            </select>
+        </div>
+    </div>
+}
+else
+{
+    <p class="text-xs text-slate-400 mb-4">Location category, branch and site role are taken automatically from the selected ESXi / Physical Server host.</p>
+}
+
+<div class="mb-6">
+    <label asp-for="Notes" class="block text-sm font-medium text-slate-700 mb-1"></label>
+    <textarea asp-for="Notes" rows="3" class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500"></textarea>
+</div>
+
+<div class="flex gap-2">
+    <button type="submit" class="bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium px-5 py-2.5 rounded-md">Save</button>
+    <a asp-action="Index" class="border border-slate-300 text-slate-700 hover:bg-slate-50 text-sm font-medium px-5 py-2.5 rounded-md">Cancel</a>
+</div>
+
+<script>
+    document.addEventListener('DOMContentLoaded', function () {
+        // Location Category/Branch aren't rendered at all on "New Server" -- they're taken from
+        // the selected ESXi/Physical Server host server-side instead. Only present when editing.
+        if (document.getElementById('Branch')) {
+            initBranchCombobox('Branch', @Html.Raw(Json.Serialize(ViewBag.AllLocations)), @Html.Raw(Json.Serialize(Model.Branch)));
+            initLocationCategoryToggle('LocationCategory', 'Branch', 'Esenyurt Veri Merkezi');
+        }
+
+        // Only present when editing a record created before Servers became virtual-only --
+        // a "New Server" page has neither element, since there's nothing to toggle.
+        var applianceField = document.getElementById('ApplianceType');
+        var locationField = document.getElementById('location-field');
+        var hostField = document.getElementById('host-physical-device-field');
+        var hardwareFields = document.getElementById('hardware-fields');
+
+        function refreshApplianceFields() {
+            var isVirtual = applianceField.value === 'Virtual';
+            locationField.classList.toggle('hidden', isVirtual);
+            hostField.classList.toggle('hidden', !isVirtual);
+
+            // A VM's brand/model/serial/vendor/support dates belong to the physical host it
+            // runs on (tracked there instead), not to the VM itself -- hiding these fields for
+            // Virtual keeps the form from asking for hardware details that don't apply, and
+            // clearing them avoids silently submitting a stale value left over from switching
+            // away from Physical.
+            hardwareFields.classList.toggle('hidden', isVirtual);
+            if (isVirtual) {
+                hardwareFields.querySelectorAll('input, select').forEach(function (el) { el.value = ''; });
+            }
+        }
+
+        if (applianceField) {
+            applianceField.addEventListener('change', refreshApplianceFields);
+            refreshApplianceFields();
+        }
+    });
+</script>

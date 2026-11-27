@@ -1,0 +1,17 @@
+@model ErrorViewModel
+@{
+    ViewData["Title"] = "Error";
+}
+
+<div class="max-w-md mx-auto text-center py-16">
+    <div class="w-16 h-16 rounded-full bg-red-100 text-red-600 flex items-center justify-center mx-auto mb-4">
+        <i class="fa-solid fa-triangle-exclamation text-2xl"></i>
+    </div>
+    <h1 class="text-xl font-semibold text-slate-900 mb-2">An error occurred</h1>
+    <p class="text-slate-500 text-sm">An error occurred while processing your request.</p>
+
+    @if (Model.ShowRequestId)
+    {
+        <p class="text-xs text-slate-400 mt-3">Request ID: <code>@Model.RequestId</code></p>
+    }
+</div>

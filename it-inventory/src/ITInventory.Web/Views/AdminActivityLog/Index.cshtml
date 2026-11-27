@@ -1,0 +1,140 @@
+@model ITInventory.Web.Models.PagedResult<ITInventory.Data.Entities.ActivityLog>
+@{
+    ViewData["Title"] = "Activity Log";
+    var actionOptions = (string[])ViewBag.ActionOptions;
+    var entityTypeOptions = (string[])ViewBag.EntityTypeOptions;
+    bool hasSearched = ViewBag.HasSearched;
+    string? username = ViewBag.Username;
+    string? selectedAction = ViewBag.SelectedAction;
+    string? selectedEntityType = ViewBag.SelectedEntityType;
+    string? fromDate = ViewBag.FromDate;
+    string? toDate = ViewBag.ToDate;
+
+    string ActionBadgeClass(string action) => action switch
+    {
+        "Create" => "text-brand-700 bg-brand-50",
+        "Update" => "text-amber-700 bg-amber-50",
+        "Delete" => "text-red-700 bg-red-50",
+        "Import" => "text-purple-700 bg-purple-50",
+        "Export" => "text-blue-700 bg-blue-50",
+        "Login" => "text-slate-700 bg-slate-100",
+        "Logout" => "text-slate-500 bg-slate-100",
+        _ => "text-slate-700 bg-slate-100"
+    };
+}
+
+<div class="flex items-center justify-between mb-6">
+    <h2 class="text-xl font-semibold text-slate-900">Activity Log</h2>
+    @if (hasSearched && Model.Items.Any())
+    {
+        <a asp-action="Export" asp-route-username="@username" asp-route-actionFilter="@selectedAction" asp-route-entityType="@selectedEntityType" asp-route-fromDate="@fromDate" asp-route-toDate="@toDate"
+           class="inline-flex items-center gap-2 border border-slate-300 text-slate-700 hover:bg-slate-50 text-sm font-medium px-4 py-2 rounded-md">
+            <i class="fa-solid fa-file-arrow-down"></i>Export to Excel
+        </a>
+    }
+</div>
+
+<div class="bg-white rounded-lg shadow-sm border border-slate-200 p-4 mb-4">
+    <form method="get" class="flex flex-wrap items-end gap-3">
+        <input type="hidden" name="searched" value="true" />
+        <div>
+            <label class="block text-xs font-medium text-slate-500 mb-1">User</label>
+            <input type="text" name="username" value="@username" placeholder="Username or full name"
+                   class="rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500" />
+        </div>
+        <div>
+            <label class="block text-xs font-medium text-slate-500 mb-1">Action</label>
+            <select name="actionFilter" class="rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
+                <option value="">All Actions</option>
+                @foreach (var a in actionOptions)
+                {
+                    <option value="@a" selected="@(a == selectedAction)">@a</option>
+                }
+            </select>
+        </div>
+        <div>
+            <label class="block text-xs font-medium text-slate-500 mb-1">Entity Type</label>
+            <select name="entityType" class="rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
+                <option value="">All Types</option>
+                @foreach (var t in entityTypeOptions)
+                {
+                    <option value="@t" selected="@(t == selectedEntityType)">@t</option>
+                }
+            </select>
+        </div>
+        <div>
+            <label class="block text-xs font-medium text-slate-500 mb-1">From</label>
+            <input type="date" name="fromDate" value="@fromDate"
+                   class="rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500" />
+        </div>
+        <div>
+            <label class="block text-xs font-medium text-slate-500 mb-1">To</label>
+            <input type="date" name="toDate" value="@toDate"
+                   class="rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500" />
+        </div>
+        <button type="submit" onclick="showLoadingOverlay()" class="bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium px-4 py-2 rounded-md">
+            <i class="fa-solid fa-magnifying-glass mr-1.5"></i>Search
+        </button>
+        @if (hasSearched)
+        {
+            <a asp-action="Index" class="border border-slate-300 text-slate-700 hover:bg-slate-50 text-sm font-medium px-4 py-2 rounded-md">Clear</a>
+        }
+    </form>
+</div>
+
+@if (!hasSearched)
+{
+    <div class="text-center py-12 text-slate-400 bg-white rounded-lg border border-slate-200">
+        <i class="fa-solid fa-filter text-3xl mb-2"></i>
+        <p class="text-sm">Set filters above (or leave them blank for everything) and click Search to load activity.</p>
+    </div>
+}
+else if (!Model.Items.Any())
+{
+    <div class="text-center py-12 text-slate-400 bg-white rounded-lg border border-slate-200">
+        <i class="fa-solid fa-inbox text-3xl mb-2"></i>
+        <p class="text-sm">No activity found for the selected filters.</p>
+    </div>
+}
+else
+{
+    <div class="bg-white rounded-lg shadow-sm border border-slate-200">
+    <div class="overflow-x-auto">
+        <table class="min-w-full divide-y divide-slate-200 text-sm">
+            <thead class="bg-slate-50">
+                <tr>
+                    <th class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Time</th>
+                    <th class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">User</th>
+                    <th class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Country</th>
+                    <th class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Action</th>
+                    <th class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Entity</th>
+                    <th class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Name</th>
+                    <th class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Details</th>
+                    <th class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Environment</th>
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-100">
+                @foreach (var log in Model.Items)
+                {
+                    <tr class="hover:bg-slate-50">
+                        <td class="px-4 py-3 text-slate-500 whitespace-nowrap font-mono text-xs">@log.CreatedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</td>
+                        <td class="px-4 py-3 text-slate-700">
+                            <div class="font-medium">@(log.FullName ?? log.Username)</div>
+                            <div class="text-xs text-slate-400">@log.Username</div>
+                        </td>
+                        <td class="px-4 py-3 text-slate-700">@log.CountryName</td>
+                        <td class="px-4 py-3">
+                            <span class="inline-block @ActionBadgeClass(log.Action) text-xs font-medium px-2 py-0.5 rounded-full">@log.Action</span>
+                        </td>
+                        <td class="px-4 py-3 text-slate-700">@log.EntityType</td>
+                        <td class="px-4 py-3 text-slate-700 font-medium">@log.EntityName</td>
+                        <td class="px-4 py-3 text-slate-500 max-w-sm truncate" title="@log.Details">@log.Details</td>
+                        <td class="px-4 py-3 text-slate-400 font-mono text-xs">@log.EnvironmentName</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+    @await Html.PartialAsync("_Pagination", ITInventory.Web.Models.PaginationInfo.From(Model))
+    </div>
+}

@@ -1,0 +1,18 @@
+# Non-secret settings for ITInventory.Web. Double underscores map to nested appsettings.json
+# keys (Ldap__Domain -> "Ldap":{"Domain":...}) -- standard ASP.NET Core env var convention.
+#
+# TestLogin lets anyone log in with a single shared password without touching AD -- keep it
+# disabled ("false") on anything reachable by real users. It exists for local/demo use only.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: itinventory-web-config
+  labels:
+    app: itinventory-web
+data:
+  ASPNETCORE_ENVIRONMENT: "Production"
+  Ldap__Domain: "fintek.local"
+  Ldap__Servers__0: "fintek.local"
+  Ldap__Port: "636"
+  Ldap__UseSsl: "true"
+  TestLogin__Enabled: "false"

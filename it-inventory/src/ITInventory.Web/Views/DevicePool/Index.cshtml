@@ -1,0 +1,139 @@
+@model List<ITInventory.Web.Models.DevicePool.DiscoveredDeviceDto>
+@{
+    ViewData["Title"] = "Device Pool";
+    var countries = (List<string>)ViewBag.Countries;
+    var categories = (List<ITInventory.Data.Entities.DeviceCategory>)ViewBag.Categories;
+    string? selectedCountry = ViewBag.SelectedCountry;
+    var countryDisplayNames = (Dictionary<string, string>)ViewBag.CountryDisplayNames;
+    int? selectedCategoryId = ViewBag.SelectedCategoryId;
+    bool isAdmin = ViewBag.IsAdmin;
+    bool canEdit = ViewBag.CanEdit;
+    bool noCountryAssigned = ViewBag.NoCountryAssigned ?? false;
+    int? matchedCountryId = ViewBag.MatchedCountryId;
+}
+
+<h2 class="text-xl font-semibold text-slate-900 mb-1">Device Pool</h2>
+<p class="text-sm text-slate-500 mb-6">Devices discovered in Nessus scans. Select from the relevant row to add it to the inventory.</p>
+
+@if (noCountryAssigned)
+{
+    <div class="bg-amber-50 border border-amber-200 text-amber-700 rounded-md px-4 py-3 text-sm">
+        No country is assigned to your account. Please contact your system administrator.
+    </div>
+}
+else
+{
+    <div class="flex flex-wrap items-center gap-3 mb-4">
+        <form method="get" class="flex flex-wrap items-center gap-3">
+            @if (isAdmin)
+            {
+                <select name="country" onchange="showLoadingOverlay(); this.form.submit();" class="rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
+                    <option value="">-- Select Country --</option>
+                    @foreach (var c in countries)
+                    {
+                        <option value="@c" selected="@(c == selectedCountry)">@(countryDisplayNames.TryGetValue(c, out var cdn) ? cdn : c)</option>
+                    }
+                </select>
+            }
+            <select name="categoryId" onchange="showLoadingOverlay(); this.form.submit();" class="rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
+                <option value="">All Categories</option>
+                @foreach (var cat in categories)
+                {
+                    <option value="@cat.Id" selected="@(cat.Id == selectedCategoryId)">@(cat.Name == "ESXi / Physical Server" ? "ESXi / Physical Server / Virtual Server" : cat.Name)</option>
+                }
+            </select>
+        </form>
+        @if (selectedCountry != null && Model.Any())
+        {
+            <div class="relative max-w-xs ml-auto">
+                <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm"></i>
+                <input type="text" oninput="filterRows(this, 'pool-table')" placeholder="Search devices..."
+                       class="w-full pl-9 pr-3 py-2 text-sm rounded-md border border-slate-300 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500" />
+            </div>
+        }
+    </div>
+
+    @if (selectedCountry is null)
+    {
+        <div class="bg-blue-50 border border-blue-200 text-blue-700 rounded-md px-4 py-3 text-sm">
+            <i class="fa-solid fa-circle-info mr-1.5"></i>Select a country to view devices.
+        </div>
+    }
+    else if (!Model.Any())
+    {
+        <div class="text-center py-12 text-slate-400 bg-white rounded-lg border border-slate-200">
+            <i class="fa-solid fa-inbox text-3xl mb-2"></i>
+            <p class="text-sm">No discovered devices found for this country/category.</p>
+        </div>
+    }
+    else
+    {
+        <div class="bg-white rounded-lg shadow-sm border border-slate-200">
+        <div class="overflow-x-auto">
+            <table id="pool-table" class="min-w-full divide-y divide-slate-200 text-sm">
+                <thead class="bg-slate-50">
+                    <tr>
+                        <th class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">IP Address</th>
+                        <th class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">DNS / Netbios</th>
+                        <th class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">MAC</th>
+                        <th class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Operating System</th>
+                        <th class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Device Profile</th>
+                        <th class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Category</th>
+                        <th class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Last Seen</th>
+                        @if (canEdit)
+                        {
+                            <th class="px-4 py-3"></th>
+                        }
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100">
+                    @foreach (var d in Model)
+                    {
+                        <tr class="hover:bg-slate-50">
+                            <td class="px-4 py-3 text-slate-700 font-mono text-xs">@d.IpAddress</td>
+                            <td class="px-4 py-3 text-slate-700">@(d.DnsName ?? d.NetbiosName)</td>
+                            <td class="px-4 py-3 text-slate-700 font-mono text-xs">@d.MacAddress</td>
+                            <td class="px-4 py-3 text-slate-700">@d.OperatingSystem</td>
+                            <td class="px-4 py-3 text-slate-700">@d.DeviceProfile</td>
+                            <td class="px-4 py-3 text-slate-700">@d.CategoryName</td>
+                            <td class="px-4 py-3 text-slate-700">@(d.LastSeenAt?.ToString("dd.MM.yyyy") ?? "-")</td>
+                            @if (canEdit)
+                            {
+                                <td class="px-4 py-3 text-right whitespace-nowrap">
+                                    @if (d.AlreadyInInventory)
+                                    {
+                                        <span class="inline-flex items-center gap-1 text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full text-xs font-medium">
+                                            <i class="fa-solid fa-check"></i>In Inventory
+                                        </span>
+                                    }
+                                    else
+                                    {
+                                        <div class="flex justify-end gap-2">
+                                            <a class="text-xs font-medium text-brand-700 bg-brand-50 hover:bg-brand-100 px-2.5 py-1.5 rounded-md whitespace-nowrap"
+                                               asp-controller="PhysicalDevices" asp-action="Create"
+                                               asp-route-fromPool="true"
+                                               asp-route-sourceId="@d.ZiraatYdId"
+                                               asp-route-countryId="@matchedCountryId"
+                                               asp-route-categoryId="@d.CategoryId">
+                                                <i class="fa-solid fa-desktop mr-1"></i>Add as Physical Device
+                                            </a>
+                                            <a class="text-xs font-medium text-blue-700 bg-blue-50 hover:bg-blue-100 px-2.5 py-1.5 rounded-md whitespace-nowrap"
+                                               asp-controller="Servers" asp-action="Create"
+                                               asp-route-fromPool="true"
+                                               asp-route-sourceId="@d.ZiraatYdId"
+                                               asp-route-countryId="@matchedCountryId">
+                                                <i class="fa-solid fa-server mr-1"></i>Add Virtual Server
+                                            </a>
+                                        </div>
+                                    }
+                                </td>
+                            }
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+        @await Html.PartialAsync("_Pagination", (ITInventory.Web.Models.PaginationInfo)ViewBag.Pagination)
+        </div>
+    }
+}

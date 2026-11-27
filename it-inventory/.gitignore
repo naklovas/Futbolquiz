@@ -1,0 +1,14 @@
+bin/
+obj/
+.vs/
+*.user
+*.suo
+.idea/
+*.DotSettings.user
+
+# Üst dizindeki (repo kökü) .gitignore "dist/" desenini eleyip bu vendor
+# kütüphane klasörlerini de yok sayıyor; site.js/bootstrap.min.css gibi
+# çalışma zamanında gereken dosyalar burada olduğu için tekrar dahil ediyoruz.
+!src/ITInventory.Web/wwwroot/lib/**/dist/
+!src/ITInventory.Web/wwwroot/lib/**/dist/**
+it-inventory/src/ITInventory.Web/wwwroot/lib/

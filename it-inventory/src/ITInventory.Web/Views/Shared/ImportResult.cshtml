@@ -1,0 +1,48 @@
+@model ITInventory.Web.Models.Import.ImportResultViewModel
+@{
+    ViewData["Title"] = "Import Result";
+}
+
+<h2 class="text-xl font-semibold text-slate-900 mb-6">Import Result — @Model.EntityName</h2>
+
+<div class="bg-brand-50 border border-brand-200 text-brand-700 rounded-md px-4 py-3 text-sm mb-5">
+    <i class="fa-solid fa-circle-check mr-1.5"></i>
+    @Model.SuccessCount record(s) imported successfully.
+</div>
+
+@if (Model.Errors.Any())
+{
+    <div class="bg-amber-50 border border-amber-200 text-amber-700 rounded-md px-4 py-3 text-sm mb-3">
+        <i class="fa-solid fa-triangle-exclamation mr-1.5"></i>
+        @Model.Errors.Count row(s) were skipped due to errors:
+    </div>
+
+    <div class="bg-white rounded-lg shadow-sm border border-slate-200 overflow-x-auto mb-5">
+        <table class="min-w-full divide-y divide-slate-200 text-sm">
+            <thead class="bg-slate-50">
+                <tr>
+                    <th class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs w-24">Row</th>
+                    <th class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Error</th>
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-100">
+                @foreach (var err in Model.Errors)
+                {
+                    <tr>
+                        <td class="px-4 py-3 text-slate-700">@err.RowNumber</td>
+                        <td class="px-4 py-3 text-red-700">@err.Message</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+<div class="flex gap-2">
+    <a asp-action="@Model.BackToListAction" class="bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium px-5 py-2.5 rounded-md">
+        <i class="fa-solid fa-list mr-1.5"></i>Back to List
+    </a>
+    <a asp-action="@Model.ImportAgainAction" class="border border-slate-300 text-slate-700 hover:bg-slate-50 text-sm font-medium px-5 py-2.5 rounded-md">
+        Import More
+    </a>
+</div>

@@ -1,0 +1,71 @@
+@model List<ITInventory.Data.Entities.Location>
+@{
+    ViewData["Title"] = "Locations";
+}
+
+<div class="flex items-center justify-between mb-6">
+    <h2 class="text-xl font-semibold text-slate-900">Locations</h2>
+    <div class="flex gap-2">
+        <a asp-action="Import" class="inline-flex items-center gap-2 border border-slate-300 text-slate-700 hover:bg-slate-50 text-sm font-medium px-4 py-2 rounded-md">
+            <i class="fa-solid fa-file-excel"></i>Import from Excel
+        </a>
+        <a asp-action="Create" class="inline-flex items-center gap-2 bg-brand-600 hover:bg-brand-700 text-white text-sm font-medium px-4 py-2 rounded-md">
+            <i class="fa-solid fa-plus"></i>New Location
+        </a>
+    </div>
+</div>
+
+<p class="text-sm text-slate-500 mb-4">
+    Branches per country. Used to auto-suggest the "Branch" field on the Physical Devices, Servers,
+    Licenses and Circuits forms.
+</p>
+
+@if (TempData["Error"] is string error)
+{
+    <div class="bg-red-50 border border-red-200 text-red-700 rounded-md px-4 py-3 text-sm mb-4">@error</div>
+}
+
+<div class="mb-4 relative max-w-xs">
+    <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm"></i>
+    <input type="text" oninput="filterRows(this, 'locations-table')" placeholder="Search locations..."
+           class="w-full pl-9 pr-3 py-2 text-sm rounded-md border border-slate-300 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500" />
+</div>
+
+<div class="bg-white rounded-lg shadow-sm border border-slate-200 overflow-x-auto">
+    <table id="locations-table" class="min-w-full divide-y divide-slate-200 text-sm">
+        <thead class="bg-slate-50">
+            <tr>
+                <th class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Country</th>
+                <th class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Branch</th>
+                <th class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Class</th>
+                <th class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Active</th>
+                <th class="px-4 py-3"></th>
+            </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-100">
+            @foreach (var l in Model)
+            {
+                <tr class="hover:bg-slate-50">
+                    <td class="px-4 py-3 text-slate-700 font-medium">@(l.Country?.DisplayName ?? l.Country?.Name)</td>
+                    <td class="px-4 py-3 text-slate-700">@l.Branch</td>
+                    <td class="px-4 py-3 text-slate-700">@l.Class</td>
+                    <td class="px-4 py-3">
+                        @if (l.IsActive)
+                        {
+                            <span class="inline-flex items-center gap-1 text-brand-700 bg-brand-50 px-2 py-0.5 rounded-full text-xs font-medium"><i class="fa-solid fa-circle-check"></i>Yes</span>
+                        }
+                        else
+                        {
+                            <span class="inline-flex items-center gap-1 text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full text-xs font-medium">No</span>
+                        }
+                    </td>
+                    <td class="px-4 py-3 text-right whitespace-nowrap">
+                        <a asp-action="Edit" asp-route-id="@l.Id" class="text-brand-600 hover:text-brand-800 mr-3" title="Edit"><i class="fa-solid fa-pen"></i></a>
+                        <button type="button" onclick="openConfirmModal('delete-form-@l.Id', 'Are you sure you want to delete this location?')" class="text-red-600 hover:text-red-800" title="Delete"><i class="fa-solid fa-trash"></i></button>
+                        <form id="delete-form-@l.Id" asp-action="Delete" asp-route-id="@l.Id" method="post" class="hidden"></form>
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+</div>

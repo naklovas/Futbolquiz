@@ -1,0 +1,276 @@
+﻿@model List<ITInventory.Web.Models.VropsPool.VropsDatacenterContent>
+@{
+    ViewData["Title"] = "Aria Pool";
+    var countries = (List<ITInventory.Data.Entities.Country>)ViewBag.Countries;
+    int? selectedCountryId = ViewBag.SelectedCountryId;
+    string? selectedCountryName = ViewBag.SelectedCountryName;
+    bool isAdmin = ViewBag.IsAdmin;
+    bool canEdit = ViewBag.CanEdit;
+    bool isConfigured = ViewBag.IsConfigured;
+    bool showSystemVms = ViewBag.ShowSystemVms;
+    bool noCountryAssigned = ViewBag.NoCountryAssigned ?? false;
+    bool noDatacenterMapped = ViewBag.NoDatacenterMapped ?? false;
+}
+
+<div class="flex items-baseline justify-between flex-wrap gap-3 mb-1">
+    <h2 class="text-xl font-semibold text-slate-900">Aria Pool</h2>
+    @if (isAdmin)
+    {
+        <a asp-action="Alanlar" onclick="showLoadingOverlay()"
+           class="text-sm font-medium text-brand-700 hover:text-brand-800">Aria Fields &rarr;</a>
+    }
+</div>
+<p class="text-sm text-slate-500 mb-6">
+    ESXi hosts and the virtual machines running on them, read live from Aria Operations.
+    Add a host to Physical Devices, or a virtual machine to Servers.
+</p>
+
+@if (!isConfigured)
+{
+    <div class="bg-amber-50 border border-amber-200 text-amber-800 rounded-md px-4 py-3 text-sm mb-4">
+        <span class="font-medium">Aria Operations is not configured.</span>
+        Set <code class="bg-amber-100 px-1 rounded">Vrops:Host</code> in appsettings and the
+        <code class="bg-amber-100 px-1 rounded">Vrops__Username</code> /
+        <code class="bg-amber-100 px-1 rounded">Vrops__Password</code> environment variables on the server.
+    </div>
+}
+
+@if (noCountryAssigned)
+{
+    <div class="bg-amber-50 border border-amber-200 text-amber-700 rounded-md px-4 py-3 text-sm">
+        No country is assigned to your account. Please contact your system administrator.
+    </div>
+}
+else
+{
+    <div class="flex flex-wrap items-center gap-3 mb-4">
+        <form method="get" class="flex flex-wrap items-center gap-3">
+            @if (isAdmin)
+            {
+                <select name="countryId" onchange="showLoadingOverlay(); this.form.submit();"
+                        class="rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
+                    <option value="">-- Select Country --</option>
+                    @foreach (var c in countries)
+                    {
+                        <option value="@c.Id" selected="@(c.Id == selectedCountryId)">@(c.DisplayName ?? c.Name)</option>
+                    }
+                </select>
+            }
+            <label class="inline-flex items-center gap-2 text-sm text-slate-600">
+                <input type="checkbox" name="showSystemVms" value="true" checked="@showSystemVms"
+                       onchange="showLoadingOverlay(); this.form.submit();"
+                       class="rounded border-slate-300 text-brand-600 focus:ring-brand-500" />
+                Show vSphere system VMs
+            </label>
+            @if (selectedCountryId.HasValue && !isAdmin)
+            {
+                <input type="hidden" name="countryId" value="@selectedCountryId" />
+            }
+        </form>
+    </div>
+
+    @if (noDatacenterMapped)
+    {
+        <div class="bg-amber-50 border border-amber-200 text-amber-700 rounded-md px-4 py-3 text-sm">
+            No Aria datacenter is mapped to <span class="font-medium">@selectedCountryName</span> yet.
+            An administrator maps datacenter names to countries in <span class="font-medium">dbo.VropsDatacenters</span>.
+        </div>
+    }
+
+    @foreach (var dc in Model)
+    {
+        <div class="mb-8">
+            <div class="flex items-baseline gap-3 mb-3">
+                <h3 class="text-base font-semibold text-slate-800">@dc.DatacenterName</h3>
+                @if (string.IsNullOrEmpty(dc.Error))
+                {
+                    <span class="text-xs text-slate-400">
+                        @dc.Hosts.Count hosts &middot; @dc.Vms.Count virtual machines
+                        &middot; read @dc.FetchedAt.ToLocalTime().ToString("HH:mm")
+                    </span>
+                }
+            </div>
+
+            @if (!string.IsNullOrEmpty(dc.Error))
+            {
+                <div class="bg-red-50 border border-red-200 text-red-700 rounded-md px-4 py-3 text-sm">
+                    @dc.Error
+                </div>
+            }
+            else if (dc.DetailsSkipped)
+            {
+                <div class="bg-amber-50 border border-amber-200 text-amber-800 rounded-md px-4 py-3 text-sm mb-3">
+                    IP, operating system and hardware columns are empty here because this list is
+                    larger than the per-request limit. Each of those values needs its own call to
+                    Aria, so they are not fetched for very large lists. Raise
+                    <code class="bg-amber-100 px-1 rounded">Vrops:DetailLimit</code> to fetch them anyway.
+                </div>
+            }
+            else
+            {
+                @* ---------------- ESXi hosts ---------------- *@
+                <div class="bg-white border border-slate-200 rounded-lg overflow-hidden mb-5">
+                    <div class="px-4 py-2 bg-slate-50 border-b border-slate-200 text-xs font-medium text-slate-500 uppercase tracking-wider">
+                        ESXi Hosts &rarr; Physical Devices
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table class="min-w-full text-sm">
+                            <thead>
+                                <tr class="border-b border-slate-200">
+                                    <th class="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wider">Host Name</th>
+                                    <th class="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wider">IP</th>
+                                    <th class="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wider">Model</th>
+                                    <th class="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wider">Version</th>
+                                    <th class="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wider">VMs</th>
+                                    <th class="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wider">Status</th>
+                                    <th class="px-4 py-2"></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                            @foreach (var h in dc.Hosts)
+                            {
+                                <tr class="border-b border-slate-100 hover:bg-slate-50">
+                                    <td class="px-4 py-2 font-medium text-slate-800">@h.Name</td>
+                                    <td class="px-4 py-2 text-slate-600 tabular-nums">@(h.IpAddress ?? "—")</td>
+                                    <td class="px-4 py-2 text-slate-600">@(h.Model ?? "—")</td>
+                                    <td class="px-4 py-2 text-slate-600">@(h.Version ?? "—")</td>
+                                    <td class="px-4 py-2 text-slate-600">@h.VmCount</td>
+                                    <td class="px-4 py-2">
+                                        @if (h.AlreadyInInventory)
+                                        {
+                                            <span class="inline-flex items-center gap-1 text-xs text-brand-700 bg-brand-50 px-2 py-0.5 rounded">
+                                                <i class="fa-solid fa-check"></i> In inventory
+                                            </span>
+                                        }
+                                        else
+                                        {
+                                            <span class="text-xs text-slate-400">Not added</span>
+                                        }
+                                    </td>
+                                    <td class="px-4 py-2 text-right">
+                                        @if (canEdit && !h.AlreadyInInventory)
+                                        {
+                                            <a asp-controller="PhysicalDevices" asp-action="Create"
+                                               asp-route-countryId="@selectedCountryId"
+                                               asp-route-deviceName="@h.Name"
+                                               asp-route-ipAddress="@h.IpAddress"
+                                               asp-route-brand="@h.Vendor"
+                                               asp-route-model="@h.Model"
+                                               asp-route-softwareVersion="@h.Version"
+                                               asp-route-serialNo="@h.SerialNo"
+                                               onclick="showLoadingOverlay()"
+                                               class="text-xs font-medium text-brand-700 hover:text-brand-800">
+                                                Add as Device
+                                            </a>
+                                        }
+                                        else if (h.AlreadyInInventory)
+                                        {
+                                            <a asp-controller="PhysicalDevices" asp-action="Edit" asp-route-id="@h.ExistingPhysicalDeviceId"
+                                               onclick="showLoadingOverlay()"
+                                               class="text-xs font-medium text-slate-500 hover:text-slate-700">
+                                                Open
+                                            </a>
+                                        }
+                                    </td>
+                                </tr>
+                            }
+                            @if (dc.Hosts.Count == 0)
+                            {
+                                <tr><td colspan="7" class="px-4 py-6 text-center text-slate-400 text-sm">No ESXi host found in this datacenter.</td></tr>
+                            }
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                @* ---------------- virtual machines ---------------- *@
+                @* Zaten bir kod blogunun icindeyiz (else { ... }), burada C# dogrudan
+                   yazilir; "@{" kullanmak Razor'da hata verir. *@
+                var vms = showSystemVms ? dc.Vms : dc.Vms.Where(v => !v.IsSystemVm).ToList();
+                var hiddenCount = dc.Vms.Count - vms.Count;
+
+                <div class="bg-white border border-slate-200 rounded-lg overflow-hidden">
+                    <div class="px-4 py-2 bg-slate-50 border-b border-slate-200 text-xs font-medium text-slate-500 uppercase tracking-wider flex items-center justify-between">
+                        <span>Virtual Machines &rarr; Servers</span>
+                        @if (hiddenCount > 0)
+                        {
+                            <span class="normal-case tracking-normal text-slate-400">@hiddenCount vSphere system VM(s) hidden</span>
+                        }
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table class="min-w-full text-sm">
+                            <thead>
+                                <tr class="border-b border-slate-200">
+                                    <th class="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wider">Virtual Machine</th>
+                                    <th class="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wider">IP</th>
+                                    <th class="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wider">Operating System</th>
+                                    <th class="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wider">Runs on (ESXi Host)</th>
+                                    <th class="px-4 py-2 text-left font-medium text-slate-500 text-xs uppercase tracking-wider">Status</th>
+                                    <th class="px-4 py-2"></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                            @foreach (var v in vms.OrderBy(x => x.HostName).ThenBy(x => x.Name))
+                            {
+                                <tr class="border-b border-slate-100 hover:bg-slate-50">
+                                    <td class="px-4 py-2 font-medium text-slate-800">
+                                        @v.Name
+                                        @if (v.IsSystemVm)
+                                        {
+                                            <span class="ml-1 text-xs text-slate-400">(system)</span>
+                                        }
+                                    </td>
+                                    <td class="px-4 py-2 text-slate-600 tabular-nums">@(v.IpAddress ?? "—")</td>
+                                    <td class="px-4 py-2 text-slate-600">@(v.OperatingSystem ?? "—")</td>
+                                    <td class="px-4 py-2 text-slate-600">
+                                        <i class="fa-solid fa-server text-slate-300 mr-1"></i>@v.HostName
+                                    </td>
+                                    <td class="px-4 py-2">
+                                        @if (v.AlreadyInInventory)
+                                        {
+                                            <span class="inline-flex items-center gap-1 text-xs text-brand-700 bg-brand-50 px-2 py-0.5 rounded">
+                                                <i class="fa-solid fa-check"></i> In inventory
+                                            </span>
+                                        }
+                                        else
+                                        {
+                                            <span class="text-xs text-slate-400">Not added</span>
+                                        }
+                                    </td>
+                                    <td class="px-4 py-2 text-right">
+                                        @if (canEdit && !v.AlreadyInInventory && !v.IsSystemVm)
+                                        {
+                                            <a asp-controller="Servers" asp-action="Create"
+                                               asp-route-countryId="@selectedCountryId"
+                                               asp-route-hostName="@v.Name"
+                                               asp-route-ipAddress="@v.IpAddress"
+                                               asp-route-operatingSystem="@v.OperatingSystem"
+                                               asp-route-esxiHostName="@v.HostName"
+                                               onclick="showLoadingOverlay()"
+                                               class="text-xs font-medium text-brand-700 hover:text-brand-800">
+                                                Add as Server
+                                            </a>
+                                        }
+                                        else if (v.AlreadyInInventory)
+                                        {
+                                            <a asp-controller="Servers" asp-action="Edit" asp-route-id="@v.ExistingServerId"
+                                               onclick="showLoadingOverlay()"
+                                               class="text-xs font-medium text-slate-500 hover:text-slate-700">
+                                                Open
+                                            </a>
+                                        }
+                                    </td>
+                                </tr>
+                            }
+                            @if (vms.Count == 0)
+                            {
+                                <tr><td colspan="6" class="px-4 py-6 text-center text-slate-400 text-sm">No virtual machine to show.</td></tr>
+                            }
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            }
+        </div>
+    }
+}
