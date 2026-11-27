@@ -16,7 +16,9 @@ public class PhysicalDeviceFormViewModel : IValidatableObject
     [Display(Name = "Category")]
     public int? CategoryId { get; set; }
 
-    [Display(Name = "Device Profile (from pool)")]
+    // Eskiden yalnizca Cihaz Havuzu'ndan aktarimda doluyordu ve formda gizliydi;
+    // artik kategoriye gore suzulmus bir liste olarak secilebiliyor.
+    [Display(Name = "Device Profile")]
     public int? DeviceProfileId { get; set; }
 
     public int? SourceZiraatYdId { get; set; }

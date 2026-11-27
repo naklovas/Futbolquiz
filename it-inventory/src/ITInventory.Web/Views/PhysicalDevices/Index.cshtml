@@ -92,6 +92,7 @@ else
                         <th data-col="country" class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Country</th>
                     }
                     <th data-col="category" class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Category</th>
+                    <th data-col="deviceProfile" data-default-hidden="true" class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Device Profile</th>
                     <th data-col="deviceName" class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Device Name</th>
                     <th data-col="brandModel" class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Brand/Model</th>
                     <th data-col="applianceType" class="px-4 py-3 text-left font-medium text-slate-500 uppercase tracking-wider text-xs">Physical/Virtual</th>
@@ -124,6 +125,7 @@ else
                             <td data-col="country" class="px-4 py-3 text-slate-700">@(item.Country?.DisplayName ?? item.Country?.Name)</td>
                         }
                         <td data-col="category" class="px-4 py-3 text-slate-700">@item.Category?.Name</td>
+                        <td data-col="deviceProfile" class="px-4 py-3 text-slate-700">@(item.DeviceProfile?.DisplayName ?? item.DeviceProfile?.ProfileName)</td>
                         <td data-col="deviceName" class="px-4 py-3 text-slate-700 font-medium">@item.DeviceName</td>
                         <td data-col="brandModel" class="px-4 py-3 text-slate-700">@item.Brand @item.Model</td>
                         <td data-col="applianceType" class="px-4 py-3 text-slate-700">@item.ApplianceType</td>

@@ -132,6 +132,50 @@ function initLocationCategoryToggle(categorySelectId, branchSelectId, evmBranchV
     refresh();
 }
 
+// Fills the Device Profile <select> with the profiles belonging to the
+// currently selected Category. `profiles` is an array of
+// { Id, CategoryId, Label } for every catalogue profile that has a category.
+//
+// The profile is a narrower statement than the category -- "Video Conference
+// System" under Audio/Video -- so it only means anything inside one category.
+// Changing the category therefore rebuilds the list and drops a selection that
+// no longer belongs; the server rejects a mismatched pair as well, this is only
+// the half the user can see.
+//
+// Keeps the value the record arrived with, including a profile that came from
+// the device pool, as long as it still fits the selected category.
+function initDeviceProfileFilter(categorySelectId, profileSelectId, profiles, currentValue) {
+    var categoryField = document.getElementById(categorySelectId);
+    var profileSelect = document.getElementById(profileSelectId);
+    if (!categoryField || !profileSelect) return;
+
+    var list = profiles || [];
+    var chosen = currentValue ? String(currentValue) : '';
+
+    function rebuild() {
+        var categoryId = categoryField.value;
+        // Secim kullanicinin en son yaptigi secimdir; ilk acilista kayitla gelen deger.
+        if (profileSelect.value) chosen = profileSelect.value;
+
+        while (profileSelect.options.length > 1) profileSelect.remove(1);
+
+        var stillValid = false;
+        list.filter(function (p) { return String(p.CategoryId) === String(categoryId); })
+            .forEach(function (p) {
+                var opt = document.createElement('option');
+                opt.value = String(p.Id);
+                opt.textContent = p.Label;
+                if (String(p.Id) === chosen) { opt.selected = true; stillValid = true; }
+                profileSelect.appendChild(opt);
+            });
+
+        if (!stillValid) profileSelect.value = '';
+    }
+
+    categoryField.addEventListener('change', rebuild);
+    rebuild();
+}
+
 // Lightweight custom combobox for a handful of static suggestions (e.g. Location "Class").
 // A plain HTML5 <input list="..."> + <datalist> looks similar but its native suggestion
 // popup is unreliable about reopening once the field already holds a value that matches an

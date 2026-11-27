@@ -47,6 +47,7 @@ public class PhysicalDevicesController : Controller
             var query = _db.PhysicalDevices
                 .Include(d => d.Country)
                 .Include(d => d.Category)
+                .Include(d => d.DeviceProfile)
                 .AsQueryable();
 
             if (!isAdmin)
@@ -265,6 +266,18 @@ public class PhysicalDevicesController : Controller
                 await PopulateDropdowns();
                 return View(vm);
             }
+
+            // Profil artik formdan seciliyor; kategorisiyle celisen bir profil
+            // kaydedilirse cihaz kategorisine gore filtrelenen ekranlarda
+            // bulunamaz. Ekran kategori degisince secimi temizliyor, bu da
+            // sunucu tarafindaki karsiligi.
+            if (deviceProfile.CategoryId != category.Id)
+            {
+                ModelState.AddModelError(nameof(vm.DeviceProfileId),
+                    "The selected device profile does not belong to the selected category.");
+                await PopulateDropdowns();
+                return View(vm);
+            }
         }
 
         ZiraatYd? poolRecord = null;
@@ -412,6 +425,18 @@ public class PhysicalDevicesController : Controller
             if (deviceProfile is null)
             {
                 ModelState.AddModelError(nameof(vm.DeviceProfileId), "Please select a valid device profile.");
+                await PopulateDropdowns();
+                return View(vm);
+            }
+
+            // Profil artik formdan seciliyor; kategorisiyle celisen bir profil
+            // kaydedilirse cihaz kategorisine gore filtrelenen ekranlarda
+            // bulunamaz. Ekran kategori degisince secimi temizliyor, bu da
+            // sunucu tarafindaki karsiligi.
+            if (deviceProfile.CategoryId != category.Id)
+            {
+                ModelState.AddModelError(nameof(vm.DeviceProfileId),
+                    "The selected device profile does not belong to the selected category.");
                 await PopulateDropdowns();
                 return View(vm);
             }
@@ -672,6 +697,16 @@ public class PhysicalDevicesController : Controller
 
         ViewBag.CountryOptions = new SelectList(countries, "Id", "Label");
         ViewBag.CategoryOptions = new SelectList(await _db.DeviceCategories.OrderBy(c => c.Name).ToListAsync(), "Id", "Name");
+
+        // Cihaz profili secenekleri. Form bunlari SECILEN KATEGORIYE gore
+        // suzuyor, bu yuzden CategoryId de gonderiliyor. Kategorisi olmayan
+        // satir (katalogdaki "NULL / Unmapped") disarida: hicbir kategoride
+        // gorunmemesi gerekiyor.
+        ViewBag.DeviceProfileOptions = await _db.DeviceProfileCatalogs
+            .Where(p => p.CategoryId != null)
+            .Select(p => new { p.Id, p.CategoryId, Label = p.DisplayName ?? p.ProfileName })
+            .OrderBy(p => p.Label)
+            .ToListAsync();
         ViewBag.AllLocations = await _db.Locations.Where(l => l.IsActive)
             .Select(l => new { l.CountryId, l.Branch }).ToListAsync();
 
