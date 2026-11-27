@@ -73,5 +73,10 @@ internal static class SeedData
         ("Sunucu (Unix/Mainframe)", "Server (Unix/Mainframe)", 1),
         ("Ağ Cihazı (Switch / HCI)", "Network Device (Switch / HCI)", 2),
         ("Ağ Cihazı (Router / Firewall)", "Network Device (Router / Firewall)", 3),
+        // Video konferans sistemleri (codec, MCU/bridge) Ses/Görüntü kategorisine ait.
+        // Bu satır envantere elle girişi etkilemez -- orada yalnızca kategori seçilir;
+        // tarama servisi bu profil adını raporlamaya başlarsa cihaz havuzundan gelen
+        // kayıtların doğru kategoriye düşmesini sağlar.
+        ("Video Konferans Sistemi", "Video Conference System", 4),
     };
 }
