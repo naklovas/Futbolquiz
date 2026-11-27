@@ -8,7 +8,7 @@ using System.Text.RegularExpressions;
 // http / https geçen adresleri ve exe geçen yerleri her zaman listelesin"). UCMDB dizinindeki belgeler kapsama göre seçilir, içerikler Oracle'dan yüzerli okunur,
 // çözülür ve MASKELENİR (şifre / anahtar / token hiçbir listeye ve aramaya girmez); maskeli metin gzip'li bellekte tutulur → yeni arama Oracle'ı yeniden taramaz.
 record WcBelge(string Id, string Ad, string? Yol, string? Sunucu, string? Ip, List<string> Ipler, string? Segment, string? Eslesme, int Boyut, string Bicim, int Maske,
-    int Url, int Exe, int Eslesen, string? Hata, string Tur = "web.config", int Bulgu = 0);
+    int Url, int Exe, int Eslesen, string? Hata, string Tur = "web.config", int Bulgu = 0, bool WebForms = false, string? WfNeden = null);
 record WcUrl(string Belge, string Url, string Sema, string Host, string? Port, string? Yol, int Satir, string? Anahtar);
 record WcExe(string Belge, string Exe, int Satir, string Metin);
 record WcEslesme(string Belge, string Terim, int Satir, string Metin);
@@ -242,13 +242,14 @@ sealed partial class UcmdbService
                         WcCikar(b.Id, metin, urller, exeler);
                         if (j.AramaDesen.Count > 0) es = WcAra(b.Id, metin, j.AramaDesen, 200);
                         bulgu = WcKuralAra(b.Id, metin, j.Kurallar);
+                        var (wf, wfNeden) = tur == "web.config" && !FrameworkConfig(b.Yol ?? b.Ad) ? WcWebForms(metin) : (false, null);
                         if (Interlocked.Read(ref j.IcerikBayt) < maxBayt)
                         {
                             var gz = Sikistir(metin);
                             j.Icerik[b.Id] = gz; Interlocked.Add(ref j.IcerikBayt, gz.Length);
                         }
                         else j.IcerikKesik = true;
-                        belge = new(b.Id, b.Ad, b.Yol, b.Sunucu, ip, b.Ipler ?? [], seg, b.Eslesme, by.Length, bicim, maske, urller.Count, exeler.Count, es.Count, null, tur, bulgu.Count);
+                        belge = new(b.Id, b.Ad, b.Yol, b.Sunucu, ip, b.Ipler ?? [], seg, b.Eslesme, by.Length, bicim, maske, urller.Count, exeler.Count, es.Count, null, tur, bulgu.Count, wf, wfNeden);
                     }
                 }
                 lock (j) { j.Belgeler.Add(belge); j.Urller.AddRange(urller); j.Exeler.AddRange(exeler); j.Eslesmeler.AddRange(es); j.Bulgular.AddRange(bulgu); }
@@ -292,6 +293,30 @@ sealed partial class UcmdbService
     }
 
     static string Kisa(string s, int n) => s.Length <= n ? s : s[..n] + "…";
+
+    // Web Forms (ASP.NET .aspx sayfaları; Idunno.AntiCsrf yalnız bunlarda anlamlı) göstergeleri — yalnız uygulama web.config'lerinde; .NET'in kendi kök web.config'i
+    // (…\Microsoft.NET\Framework…\Config\web.config) PageHandlerFactory vb. içerdiği için sayılmaz. http(s) adreslerindeki ".aspx" (başka servise giden link) sayılmaz.
+    static readonly (string Ad, Regex R)[] _wfGosterge =
+    [
+        (".aspx sayfası", new(@"[\w\-/~]\.aspx\b", RegexOptions.IgnoreCase | RegexOptions.Compiled)),
+        ("Web Forms denetimleri (tagPrefix)", new(@"\btagPrefix\s*=", RegexOptions.IgnoreCase | RegexOptions.Compiled)),
+        ("ViewState ayarı", new(@"\b(?:enableViewState(?:Mac)?|viewStateEncryptionMode|enableEventValidation|maxPageStateFieldLength)\s*=", RegexOptions.IgnoreCase | RegexOptions.Compiled)),
+        ("PageHandlerFactory", new(@"PageHandlerFactory", RegexOptions.IgnoreCase | RegexOptions.Compiled)),
+        ("ASP.NET AJAX (ScriptModule / AjaxControlToolkit)", new(@"System\.Web\.Handlers\.ScriptModule|AjaxControlToolkit", RegexOptions.IgnoreCase | RegexOptions.Compiled)),
+    ];
+    static readonly Regex _wfUrl = new(@"\bhttps?://\S+", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    internal static bool FrameworkConfig(string yol) => Regex.IsMatch(yol ?? "", @"microsoft\.net[\\/]framework", RegexOptions.IgnoreCase);
+    internal static (bool WebForms, string? Neden) WcWebForms(string metin)
+    {
+        if (Regex.IsMatch(metin, @"<aspNetCore\b|AspNetCoreModule", RegexOptions.IgnoreCase) && !_wfGosterge.Any(g => g.R.IsMatch(_wfUrl.Replace(metin, ""))))
+            return (false, null);
+        var satirlar = metin.Split('\n');
+        var bulunan = new List<string>();
+        foreach (var (ad, rx) in _wfGosterge)
+            for (int i = 0; i < satirlar.Length; i++)
+                if (rx.IsMatch(_wfUrl.Replace(satirlar[i], ""))) { bulunan.Add($"{ad} (satır {i + 1})"); break; }
+        return bulunan.Count == 0 ? (false, null) : (true, string.Join("; ", bulunan));
+    }
 
     // Varsayılan zafiyet göstergeleri (kullanıcının e-postası): idunno kesin zafiyetli (düzeltilmiş sürüm yok), <add …anticsrf olası, csrfsettings ek kontrol.
     // Ucmdb:ZafiyetKurallari [{Ad, Desen, Regex, BuyukKucuk, Derece (kesin | olasi | kontrol), Aciklama}] verilirse onlar.
@@ -420,24 +445,26 @@ sealed partial class UcmdbService
             var kb = bulgular.Where(x => x.Kural == k.Ad).ToList();
             ozet.Add(new object?[] { $"Zafiyet: {k.Ad} ({DereceAd(k.Derece)})", $"{kb.Count} satır · {kb.Select(x => x.Belge).Distinct().Count()} dosya · {kb.Select(x => B(x.Belge)?.Sunucu ?? B(x.Belge)?.Ip).Distinct().Count()} sunucu" });
         }
+        ozet.Add(new object?[] { "Web Forms web.config", $"{belgeler.Count(b => b.WebForms)} dosya · {belgeler.Where(b => b.WebForms).Select(b => b.Sunucu ?? b.Ip).Distinct().Count()} sunucu (göstergeler: .aspx, tagPrefix, ViewState ayarı, PageHandlerFactory, ASP.NET AJAX)" });
         if (j.BelgesizIpler.Count > 0) ozet.Add(new object?[] { "UCMDB'de config'i olmayan IP", string.Join(", ", j.BelgesizIpler) });
-        var zaf = new List<object?[]> { new object?[] { "DERECE", "KURAL", "AÇIKLAMA", "SUNUCU", "IP", "SEGMENT", "DOSYA TÜRÜ", "DOSYA YOLU", "SATIR", "EŞLEŞEN SATIR" } };
+        var zaf = new List<object?[]> { new object?[] { "DERECE", "KURAL", "AÇIKLAMA", "SUNUCU", "IP", "SEGMENT", "DOSYA TÜRÜ", "DOSYA YOLU", "WEB FORMS (DOSYA)", "SATIR", "EŞLEŞEN SATIR" } };
         var kAc = j.Kurallar.ToDictionary(x => x.K.Ad, x => x.K.Aciklama);
         zaf.AddRange(bulgular.OrderBy(x => DereceSira(x.Derece)).ThenBy(x => B(x.Belge)?.Sunucu).ThenBy(x => x.Satir).Select(x => { var b = B(x.Belge);
-            return new object?[] { DereceAd(x.Derece), x.Kural, kAc.GetValueOrDefault(x.Kural), b?.Sunucu, b?.Ip, b?.Segment, b?.Tur, K(b?.Yol ?? b?.Ad), x.Satir, K(x.Metin) }; }));
+            return new object?[] { DereceAd(x.Derece), x.Kural, kAc.GetValueOrDefault(x.Kural), b?.Sunucu, b?.Ip, b?.Segment, b?.Tur, K(b?.Yol ?? b?.Ad), b?.WebForms == true ? "evet" : "", x.Satir, K(x.Metin) }; }));
         if (bulgular.Count == 0) zaf.Add(new object?[] { "—", "Taranan dosyalarda zafiyet göstergesi bulunamadı" });
-        var sun = new List<object?[]> { new object?[] { "SUNUCU", "IP", "SEGMENT", "WEB.CONFIG", "APPLICATIONHOST.CONFIG", "MACHINE.CONFIG", "DİĞER .CONFIG", "KESİN", "OLASI", "KONTROL", "EN YÜKSEK DERECE" } };
+        var sun = new List<object?[]> { new object?[] { "SUNUCU", "IP", "SEGMENT", "WEB FORMS", "WEB.CONFIG", "APPLICATIONHOST.CONFIG", "MACHINE.CONFIG", "DİĞER .CONFIG", "KESİN", "OLASI", "KONTROL", "EN YÜKSEK DERECE" } };
         sun.AddRange(belgeler.GroupBy(b => b.Sunucu ?? b.Ip ?? "(sunucusu bilinmeyen)").OrderBy(g => g.Key).Select(g =>
         {
             var ids = g.Select(b => b.Id).ToHashSet();
             var bl = bulgular.Where(x => ids.Contains(x.Belge)).ToList();
             int N(string d) => bl.Count(x => x.Derece == d);
+            int wf = g.Count(b => b.WebForms);
             return new object?[] { g.Key, string.Join(" | ", g.Select(b => b.Ip).OfType<string>().Distinct()), g.Select(b => b.Segment).FirstOrDefault(x => x != null),
-                g.Count(b => b.Tur == "web.config"), g.Any(b => b.Tur == "applicationHost.config") ? "var" : "UCMDB'de yok", g.Any(b => b.Tur == "machine.config") ? "var" : "UCMDB'de yok",
+                wf > 0 ? $"evet ({wf} web.config)" : "", g.Count(b => b.Tur == "web.config"), g.Any(b => b.Tur == "applicationHost.config") ? "var" : "UCMDB'de yok", g.Any(b => b.Tur == "machine.config") ? "var" : "UCMDB'de yok",
                 g.Count(b => b.Tur == "diğer"), N("kesin"), N("olasi"), N("kontrol"), bl.Count == 0 ? "—" : DereceAd(bl.MinBy(x => DereceSira(x.Derece))!.Derece) };
         }));
-        var bel = new List<object?[]> { new object?[] { "IP", "SUNUCU", "SEGMENT", "UCMDB IP'LERİ", "IP EŞLEŞMESİ", "DOSYA TÜRÜ", "DOSYA ADI", "DOSYA YOLU", "BOYUT", "BİÇİM", "ZAFİYET", "HTTP/HTTPS", "EXE", "ARAMA", "MASKELENEN", "NOT" } };
-        bel.AddRange(belgeler.Select(b => new object?[] { b.Ip, b.Sunucu, b.Segment, string.Join(" | ", b.Ipler), b.Eslesme, b.Tur, b.Ad, K(b.Yol ?? b.Ad), b.Boyut, b.Bicim, b.Bulgu, b.Url, b.Exe, b.Eslesen, b.Maske, b.Hata }));
+        var bel = new List<object?[]> { new object?[] { "IP", "SUNUCU", "SEGMENT", "UCMDB IP'LERİ", "IP EŞLEŞMESİ", "DOSYA TÜRÜ", "DOSYA ADI", "DOSYA YOLU", "WEB FORMS", "WEB FORMS GÖSTERGESİ", "BOYUT", "BİÇİM", "ZAFİYET", "HTTP/HTTPS", "EXE", "ARAMA", "MASKELENEN", "NOT" } };
+        bel.AddRange(belgeler.Select(b => new object?[] { b.Ip, b.Sunucu, b.Segment, string.Join(" | ", b.Ipler), b.Eslesme, b.Tur, b.Ad, K(b.Yol ?? b.Ad), b.WebForms ? "evet" : "", b.WfNeden, b.Boyut, b.Bicim, b.Bulgu, b.Url, b.Exe, b.Eslesen, b.Maske, b.Hata }));
         var uTek = new List<object?[]> { new object?[] { "ADRES", "ŞEMA", "HOST", "PORT", "YOL", "DOSYA SAYISI", "SUNUCULAR" } };
         uTek.AddRange(urller.GroupBy(u => u.Url.ToLowerInvariant()).OrderByDescending(g => g.Select(x => x.Belge).Distinct().Count()).ThenBy(g => g.Key)
             .Select(g => { var u = g.First(); return new object?[] { K(u.Url), u.Sema, u.Host, u.Port, K(u.Yol), g.Select(x => x.Belge).Distinct().Count(), Sunucular(g.Select(x => x.Belge).Distinct()) }; }));

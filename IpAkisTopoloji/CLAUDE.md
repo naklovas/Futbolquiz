@@ -1004,6 +1004,13 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
   ve ayarlar, IP'ler x.x.x.x — kullanıcı bunu iletir), sekmeler ⚠ Zafiyet göstergeleri (varsayılan) | Sunucular | Arama | HTTP / HTTPS | EXE | Dosyalar, derece süzgeci, kartlar
   (zafiyet: derece başına sunucu sayısı; sunucu: applicationHost / machine.config'i olan; dosya: tür sayıları), pencerede kural eşleşmeleri kırmızı (`mark.z`), arama sarı;
   vurgulama ham metinde regex ile (`vurgula(metin, desenler)`). Test: uct'de çok satırlı <add, Idunno, CSRFSettings, DosyaTuru, regex arama, geçersiz regex, Excel 9 sayfa; mock'la sayfa.
+  WEB FORMS İŞARETİ (kullanıcı: "Web Forms varsa işaretle, arama yaparken"; Idunno.AntiCsrf yalnız Web Forms'ta anlamlı; Carbon Black'te DLL izi yok — Splunk'a moduleload / filemod
+  gelmiyor, binaryinfo yalnız md5): `WcWebForms(metin)` yalnız tür web.config olan ve .NET'in kök config'i olmayan (`FrameworkConfig`: yolda Microsoft.NET\Framework) dosyalarda;
+  göstergeler (http(s) adreslerindeki ".aspx" atılarak, satır satır): .aspx sayfası (defaultDocument, loginUrl…), tagPrefix (Web Forms denetimleri), ViewState ayarları (enableViewState(Mac),
+  viewStateEncryptionMode, enableEventValidation, maxPageStateFieldLength), PageHandlerFactory, ASP.NET AJAX (System.Web.Handlers.ScriptModule, AjaxControlToolkit); ASP.NET Core
+  (aspNetCore) ve MVC (System.Web.Mvc, yalnız <pages namespaces>) göstergesizse işaretlenmez. `WcBelge.WebForms / WfNeden` ("ViewState ayarı (satır 3); …"). Sayfa: "Web Forms" rozeti
+  (zafiyet / dosyalar; ipucunda gösterge), Sunucular'da "Web Forms" kolonu, "Yalnız Web Forms" süzgeci (zafiyet, sunucular, dosyalar), sunucu kartında sayı, tanı özetinde satır;
+  Excel: Dosyalar WEB FORMS + GÖSTERGESİ, Sunucu özeti WEB FORMS, Zafiyet WEB FORMS (DOSYA), Özet sayısı.
 - **Fiziksel envanter** (`FizikselEnvanter.cs`, `wwwroot/fiziksel.js`, sekme "Fiziksel envanter" `data-ui="fiziksel"`, `?fiziksel=1&kabin=&host=`;
   claude.ai sohbetindeki görev tanımı: "Bu kabin kapanırsa hangi uygulamalar etkilenir?"): veri doku DB'de HAZIR — NlyteCollector (nlyte OData →
   dbo.NlyteRaw) + `EXEC dbo.sp_KabinZincirYenile` doldurur; DeltaFlow YALNIZ OKUR (yazmaz, prosedürü çağırmaz). Betik kullanıcıda

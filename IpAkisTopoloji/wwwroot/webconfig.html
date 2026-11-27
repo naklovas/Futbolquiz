@@ -103,6 +103,7 @@
   .kural code { font-family: Consolas, ui-monospace, monospace; background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 0 5px; }
   .turlar { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 13px; }
   .turlar label { display: flex; gap: 6px; align-items: center; }
+  .wf { display: inline-block; font-size: 10.5px; font-weight: 700; border-radius: 4px; padding: 0 5px; margin-left: 4px; background: #6b3fa0; color: #fff; vertical-align: 1px; cursor: help; }
   .var { color: var(--ok); font-weight: 600; } .yok { color: var(--err); }
   .tani table { font-size: 12.5px; } .tani td, .tani th { padding: 5px 8px; }
   [hidden] { display: none !important; }
@@ -172,6 +173,7 @@
       </div>
       <span class="sp"></span>
       <select id="derece"><option value="">tüm dereceler</option><option value="kesin">Kesin zafiyetli</option><option value="olasi">Zafiyetli olabilir</option><option value="kontrol">Ek kontrol gerekli</option></select>
+      <label class="small" title="Yalnız Web Forms (.aspx) uygulaması olan dosyalar / sunucular"><input type="checkbox" id="yalnizWf"> Yalnız Web Forms</label>
       <select id="gorunum" title="Aynı adres / exe birden çok dosyada geçebilir"><option value="tekil">Benzersiz</option><option value="tum">Tüm satırlar</option></select>
       <select id="sema"><option value="">http + https</option><option value="http">Yalnız http (şifresiz)</option><option value="https">Yalnız https</option></select>
       <input type="search" id="q" placeholder="süz: adres, host, sunucu, IP, yol, metin…" style="min-width:260px">
@@ -300,7 +302,7 @@ $("#araBtn").addEventListener("click", ara);
 function sekme(t) { st.tab = t; st.limit = 1000; document.querySelectorAll("#tabs [data-tab]").forEach(b => b.classList.toggle("on", b.dataset.tab === t)); ciz(); }
 $("#tabs").addEventListener("click", e => { const b = e.target.closest("[data-tab]"); if (b) sekme(b.dataset.tab); });
 $("#stats").addEventListener("click", e => { const b = e.target.closest("[data-tab]"); if (b) sekme(b.dataset.tab); });
-["#q", "#gorunum", "#sema", "#derece"].forEach(s => $(s).addEventListener(s === "#q" ? "input" : "change", () => { st.limit = 1000; ciz(); }));
+["#q", "#gorunum", "#sema", "#derece", "#yalnizWf"].forEach(s => $(s).addEventListener(s === "#q" ? "input" : "change", () => { st.limit = 1000; ciz(); }));
 $("#more").addEventListener("click", () => { st.limit += 1000; ciz(); });
 
 const bl = id => st.belgeOf.get(id) ?? {};
@@ -319,10 +321,12 @@ function vurgula(metin, desenler) {
   for (const [a, b, cls] of ar) { if (a < p) continue; h += esc(metin.slice(p, a)) + `<mark${cls ? ` class="${cls}"` : ""}>` + esc(metin.slice(a, b)) + "</mark>"; p = b; }
   return h + esc(metin.slice(p));
 }
+const wfK = b => b.webForms ? `<span class="wf" title="Web Forms göstergesi: ${esc(b.wfNeden ?? "")}">Web Forms</span>` : "";
 const turK = b => b.tur && b.tur !== "web.config" ? ` <span class="small muted">[${esc(b.tur === "diğer" ? b.ad : b.tur)}]</span>` : "";
 function sunucuGrup() {
   const g = new Map();
-  for (const b of st.belgeler) { const k = b.sunucu ?? b.ip ?? "(sunucusu bilinmeyen)"; const e = g.get(k) ?? { ad: k, ipler: new Set(), segment: null, belge: [], tur: {}, d: { kesin: 0, olasi: 0, kontrol: 0 }, ilk: null };
+  for (const b of st.belgeler) { const k = b.sunucu ?? b.ip ?? "(sunucusu bilinmeyen)"; const e = g.get(k) ?? { ad: k, ipler: new Set(), segment: null, belge: [], tur: {}, d: { kesin: 0, olasi: 0, kontrol: 0 }, ilk: null, wf: 0 };
+    if (b.webForms) e.wf++;
     if (b.ip) e.ipler.add(b.ip); e.segment ??= b.segment; e.belge.push(b); e.tur[b.tur ?? "web.config"] = (e.tur[b.tur ?? "web.config"] ?? 0) + 1; g.set(k, e); }
   const of = new Map(); for (const e of g.values()) for (const b of e.belge) of.set(b.id, e);
   for (const z of st.bulgular) { const e = of.get(z.belge); if (!e) continue; e.d[z.derece] = (e.d[z.derece] ?? 0) + 1; if (!e.ilk || DSIRA[z.derece] < DSIRA[e.ilk.derece]) e.ilk = z; }
@@ -332,28 +336,30 @@ function sunucuHtml(b) { return `<span class="mono">${esc(b.ip ?? "")}</span>${b
 
 // Görünüm başına satırlar ({hucreler, csv, ac:{id, satir}}) ve başlıklar
 function veri() {
+  const wfS = $("#yalnizWf").checked, wfOk = b => !wfS || b.webForms;
   const q = $("#q").value.trim().toLocaleLowerCase("tr"), tekil = $("#gorunum").value === "tekil", sema = $("#sema").value;
   const uy = (...p) => !q || p.some(x => String(x ?? "").toLocaleLowerCase("tr").includes(q));
   if (st.tab === "zaf") {
     const d = $("#derece").value, kAc = new Map(st.kurallar.map(k => [k.ad, k.aciklama]));
-    const s = st.bulgular.filter(x => (!d || x.derece === d) && (() => { const b = bl(x.belge); return uy(x.kural, x.metin, b.ip, b.sunucu, b.segment, yolK(b), b.tur); })())
+    const s = st.bulgular.filter(x => (!d || x.derece === d) && (() => { const b = bl(x.belge); return wfOk(b) && uy(x.kural, x.metin, b.ip, b.sunucu, b.segment, yolK(b), b.tur); })())
       .sort((a, b) => (DSIRA[a.derece] ?? 9) - (DSIRA[b.derece] ?? 9) || String(bl(a.belge).sunucu ?? "").localeCompare(String(bl(b.belge).sunucu ?? "")) || a.satir - b.satir);
     const kd = kuralDesen();
     return { bas: ["Derece", "Kural", "Sunucu / IP", "Dosya", "Satır", "Eşleşen satır"], satir: s.map(x => { const b = bl(x.belge); return {
-      h: [dRozet(x.derece), `<b>${esc(x.kural)}</b><div class="small muted">${esc(kAc.get(x.kural) ?? "")}</div>`, sunucuHtml(b), `<span class="mono small kir">${esc(yolK(b))}</span>${turK(b)}`,
+      h: [dRozet(x.derece), `<b>${esc(x.kural)}</b><div class="small muted">${esc(kAc.get(x.kural) ?? "")}</div>`, sunucuHtml(b), `<span class="mono small kir">${esc(yolK(b))}</span>${turK(b)}${wfK(b)}`,
         `<span class="num">${x.satir}</span>`, `<span class="mono small kir">${vurgula(x.metin, kd)}</span>`],
-      csv: [DERECE[x.derece] ?? x.derece, x.kural, kAc.get(x.kural) ?? "", b.sunucu ?? "", b.ip ?? "", b.segment ?? "", b.tur ?? "", yolK(b), x.satir, x.metin], ac: { id: x.belge, satir: x.satir } }; }) };
+      csv: [DERECE[x.derece] ?? x.derece, x.kural, kAc.get(x.kural) ?? "", b.sunucu ?? "", b.ip ?? "", b.segment ?? "", b.tur ?? "", yolK(b), b.webForms ? "evet" : "", x.satir, x.metin], ac: { id: x.belge, satir: x.satir } }; }) };
   }
   if (st.tab === "sun") {
     const d = $("#derece").value;
     const var_ = n => n ? `<span class="var">var${n > 1 ? ` (${n})` : ""}</span>` : `<span class="yok">UCMDB'de yok</span>`;
-    const s = sunucuGrup().filter(e => (!d || e.d[d] > 0) && uy(e.ad, ...e.ipler, e.segment))
+    const s = sunucuGrup().filter(e => (!d || e.d[d] > 0) && (!wfS || e.wf > 0) && uy(e.ad, ...e.ipler, e.segment))
       .sort((a, b) => (DSIRA[a.ilk?.derece] ?? 9) - (DSIRA[b.ilk?.derece] ?? 9) || a.ad.localeCompare(b.ad));
-    return { bas: ["Sunucu", "IP", "Segment", "web.config", "applicationHost", "machine.config", "diğer", "Zafiyet", "En yüksek"], satir: s.map(e => ({
+    return { bas: ["Sunucu", "IP", "Segment", "Web Forms", "web.config", "applicationHost", "machine.config", "diğer", "Zafiyet", "En yüksek"], satir: s.map(e => ({
       h: [`<b>${esc(e.ad)}</b>`, `<span class="mono small">${esc([...e.ipler].join(", "))}</span>`, `<span class="small">${esc(e.segment ?? "")}</span>`,
+        e.wf ? `<span class="wf" title="${esc(e.belge.filter(b => b.webForms).map(b => yolK(b) + ": " + (b.wfNeden ?? "")).join("\n"))}">Web Forms</span> <span class="small muted">${e.wf} dosya</span>` : `<span class="muted">—</span>`,
         `<span class="num">${fmt(e.tur["web.config"] ?? 0)}</span>`, var_(e.tur["applicationHost.config"]), var_(e.tur["machine.config"]), `<span class="num">${fmt(e.tur["diğer"] ?? 0)}</span>`,
         `<span class="small">${["kesin", "olasi", "kontrol"].filter(k => e.d[k]).map(k => `${dRozet(k)} ${e.d[k]}`).join(" ") || "—"}</span>`, e.ilk ? dRozet(e.ilk.derece) : `<span class="muted">—</span>`],
-      csv: [e.ad, [...e.ipler].join(" | "), e.segment ?? "", e.tur["web.config"] ?? 0, e.tur["applicationHost.config"] ? "var" : "UCMDB'de yok", e.tur["machine.config"] ? "var" : "UCMDB'de yok",
+      csv: [e.ad, [...e.ipler].join(" | "), e.segment ?? "", e.wf ? `evet (${e.wf} web.config)` : "", e.tur["web.config"] ?? 0, e.tur["applicationHost.config"] ? "var" : "UCMDB'de yok", e.tur["machine.config"] ? "var" : "UCMDB'de yok",
         e.tur["diğer"] ?? 0, e.d.kesin, e.d.olasi, e.d.kontrol, e.ilk ? DERECE[e.ilk.derece] : ""],
       ac: e.ilk ? { id: e.ilk.belge, satir: e.ilk.satir } : { id: e.belge[0].id, satir: null } })) };
   }
@@ -396,21 +402,21 @@ function veri() {
       h: [`<b>${esc(x.terim)}</b>`, sunucuHtml(b), `<span class="mono small kir">${esc(yolK(b))}</span>${turK(b)}`, `<span class="num">${x.satir}</span>`, `<span class="mono small kir">${vurgula(x.metin, ad)}</span>`],
       csv: [x.terim, b.ip ?? "", b.sunucu ?? "", b.segment ?? "", yolK(b), x.satir, x.metin], ac: { id: x.belge, satir: x.satir } }; }) };
   }
-  const s = st.belgeler.filter(b => uy(b.ip, b.sunucu, b.segment, yolK(b), b.hata, b.tur, b.ad));
+  const s = st.belgeler.filter(b => wfOk(b) && uy(b.ip, b.sunucu, b.segment, yolK(b), b.hata, b.tur, b.ad, b.wfNeden));
   return { bas: ["Sunucu / IP", "Tür", "Dosya", "Boyut", "Zafiyet", "http/https", "exe", "Eşleşme", "Not"], satir: s.map(b => ({
-    h: [sunucuHtml(b), `<span class="small">${esc(b.tur ?? "web.config")}</span>`, `<span class="mono small kir">${esc(yolK(b))}</span>`, `<span class="num small">${fmt(b.boyut)} B<div class="muted">${esc(b.bicim)}</div></span>`,
+    h: [sunucuHtml(b), `<span class="small">${esc(b.tur ?? "web.config")}</span>${wfK(b)}${b.webForms ? `<div class="small muted">${esc(b.wfNeden ?? "")}</div>` : ""}`, `<span class="mono small kir">${esc(yolK(b))}</span>`, `<span class="num small">${fmt(b.boyut)} B<div class="muted">${esc(b.bicim)}</div></span>`,
       `<span class="num">${b.bulgu ? `<b class="err">${fmt(b.bulgu)}</b>` : ""}</span>`,
       `<span class="num">${b.url ? fmt(b.url) : ""}</span>`, `<span class="num">${b.exe ? fmt(b.exe) : ""}</span>`, `<span class="num">${b.eslesen ? fmt(b.eslesen) : ""}</span>`,
       `<span class="small ${b.hata ? "err" : "muted"}">${esc(b.hata ?? (b.maske ? `${b.maske} gizli değer maskeli` : ""))}${b.eslesme ? `<div class="muted">IP: ${esc(b.eslesme)}</div>` : ""}</span>`],
-    csv: [b.ip ?? "", b.sunucu ?? "", b.segment ?? "", (b.ipler ?? []).join(" | "), b.tur ?? "", yolK(b), b.boyut, b.bicim, b.bulgu ?? 0, b.url, b.exe, b.eslesen, b.maske, b.hata ?? ""], ac: { id: b.id, satir: null } })) };
+    csv: [b.ip ?? "", b.sunucu ?? "", b.segment ?? "", (b.ipler ?? []).join(" | "), b.tur ?? "", b.webForms ? b.wfNeden ?? "evet" : "", yolK(b), b.boyut, b.bicim, b.bulgu ?? 0, b.url, b.exe, b.eslesen, b.maske, b.hata ?? ""], ac: { id: b.id, satir: null } })) };
 }
 const CSV_BAS = {
-  zaf: ["DERECE", "KURAL", "AÇIKLAMA", "SUNUCU", "IP", "SEGMENT", "DOSYA TÜRÜ", "DOSYA YOLU", "SATIR", "EŞLEŞEN SATIR"],
-  sun: ["SUNUCU", "IP", "SEGMENT", "WEB.CONFIG", "APPLICATIONHOST.CONFIG", "MACHINE.CONFIG", "DİĞER .CONFIG", "KESİN", "OLASI", "KONTROL", "EN YÜKSEK DERECE"],
+  zaf: ["DERECE", "KURAL", "AÇIKLAMA", "SUNUCU", "IP", "SEGMENT", "DOSYA TÜRÜ", "DOSYA YOLU", "WEB FORMS", "SATIR", "EŞLEŞEN SATIR"],
+  sun: ["SUNUCU", "IP", "SEGMENT", "WEB FORMS", "WEB.CONFIG", "APPLICATIONHOST.CONFIG", "MACHINE.CONFIG", "DİĞER .CONFIG", "KESİN", "OLASI", "KONTROL", "EN YÜKSEK DERECE"],
   url: { tekil: ["ADRES", "ŞEMA", "HOST", "PORT", "DOSYA SAYISI", "SUNUCULAR"], tum: ["IP", "SUNUCU", "SEGMENT", "DOSYA", "SATIR", "ANAHTAR", "ŞEMA", "HOST", "PORT", "ADRES"] },
   exe: { tekil: ["EXE", "DOSYA SAYISI", "SUNUCULAR", "ÖRNEK SATIR"], tum: ["IP", "SUNUCU", "SEGMENT", "DOSYA", "SATIR", "EXE", "SATIR METNİ"] },
   ara: ["ARANAN", "IP", "SUNUCU", "SEGMENT", "DOSYA", "SATIR", "SATIR METNİ"],
-  belge: ["IP", "SUNUCU", "SEGMENT", "UCMDB IP'LERİ", "DOSYA TÜRÜ", "DOSYA YOLU", "BOYUT", "BİÇİM", "ZAFİYET", "HTTP/HTTPS", "EXE", "EŞLEŞME", "MASKELENEN", "NOT"],
+  belge: ["IP", "SUNUCU", "SEGMENT", "UCMDB IP'LERİ", "DOSYA TÜRÜ", "WEB FORMS", "DOSYA YOLU", "BOYUT", "BİÇİM", "ZAFİYET", "HTTP/HTTPS", "EXE", "EŞLEŞME", "MASKELENEN", "NOT"],
 };
 
 function ciz() {
@@ -428,7 +434,7 @@ function ciz() {
   const dzEk = ["kesin", "olasi", "kontrol"].map(d => { const l = dz(d); return l.length ? `${DERECE[d]}: ${fmt(new Set(l.map(x => { const b = bl(x.belge); return b.sunucu ?? b.ip; })).size)} sunucu` : ""; }).filter(Boolean).join(" · ");
   const turSay = TURLER.map(t => [t, st.belgeler.filter(b => (b.tur ?? "web.config") === t).length]).filter(x => x[1]);
   $("#stats").innerHTML = kart("zaf", st.bulgular.length, "zafiyet göstergesi", dzEk || (j.bitti ? "bulunamadı" : "aranıyor…"))
-    + kart("sun", sunucu, "sunucu", `applicationHost: ${fmt(sg.filter(e => e.tur["applicationHost.config"]).length)} · machine: ${fmt(sg.filter(e => e.tur["machine.config"]).length)}`)
+    + kart("sun", sunucu, "sunucu", `Web Forms: ${fmt(sg.filter(e => e.wf).length)} · applicationHost: ${fmt(sg.filter(e => e.tur["applicationHost.config"]).length)} · machine: ${fmt(sg.filter(e => e.tur["machine.config"]).length)}`)
     + kart("belge", st.belgeler.length, "dosya", turSay.map(([t, n]) => `${t === "diğer" ? "diğer" : t.replace(".config", "")} ${fmt(n)}`).join(" · "))
     + kart("url", tekilUrl, "http / https adresi", `${fmt(st.urller.length)} satır · ${fmt(new Set(st.urller.filter(u => u.sema === "http").map(u => u.url.toLowerCase())).size)} http`)
     + kart("exe", tekilExe, "exe geçen yer", `${fmt(st.exeler.length)} satır`)
@@ -547,6 +553,7 @@ function ozetMetni() {
     L.push(`Son tarama: ${j.bitti ? (j.hata ? "HATA " + j.hata : "tamamlandı") : "sürüyor"} · ${j.okunan}/${j.toplam} dosya · ${sure(j.gecen ?? 0)} · kapsam türü: ${(j.kapsam || "").replace(/\b(?:\d{1,3}\.){3}\d{1,3}\b/g, "x.x.x.x")}`);
     L.push("  kapsamdaki türler: " + TURLER.map(t => `${t} ${j.kapsamTur?.[t] ?? 0}`).join(" · ") + " · taranan: " + TURLER.map(t => `${t} ${st.belgeler.filter(x => (x.tur ?? "web.config") === t).length}`).join(" · "));
     const sg = sunucuGrup();
+    L.push(`  Web Forms: ${st.belgeler.filter(x => x.webForms).length} web.config · ${sg.filter(e => e.wf).length} sunucu · zafiyet bulgusu olan Web Forms dosyası ${st.belgeler.filter(x => x.webForms && x.bulgu).length}`);
     L.push(`  sunucu ${sg.length} · applicationHost'u olan ${sg.filter(e => e.tur["applicationHost.config"]).length} · machine.config'i olan ${sg.filter(e => e.tur["machine.config"]).length} · UCMDB'de config'i olmayan IP ${j.belgesizIpler?.length ?? 0}`);
     L.push(`  okunamayan dosya ${st.belgeler.filter(x => x.hata).length} (${[...new Set(st.belgeler.filter(x => x.hata).map(x => x.hata))].join(" | ")}) · biçimler: ${Object.entries(st.belgeler.reduce((a, x) => (a[x.bicim] = (a[x.bicim] ?? 0) + 1, a), {})).map(([k, v]) => `${k} ${v}`).join(", ")}`);
     for (const k of st.kurallar) {
