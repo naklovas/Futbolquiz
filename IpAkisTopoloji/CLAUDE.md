@@ -52,6 +52,8 @@ topoloji çizer ve şirket içi AI'a etki analizi yaptırır. Canlıda IIS'te, W
 | `Nessus.cs` | Nessus / Tenable.sc: repository'deki tarama sonuçlarından teknoloji, sertifika, OS, kurulu yazılım |
 | `Ucmdb.cs` | UCMDB (Oracle, MFUCMDB.CDM_CONFIGURATION_DOCUMENT_1) web.config belgeleri: sunucu eşleşmesi, içerik (zip / gzip / düz) maskeli görüntüleme |
 | `WebConfigTarama.cs` | config taraması (`wwwroot/webconfig.html`, `partial UcmdbService`): web.config / applicationHost / machine / *.config; IP / segment / Nessus DMZ / tüm ağ; zafiyet göstergeleri (idunno, anticsrf, csrfsettings), http/https adresleri, exe, metin / regex araması, tanı, Excel |
+| `DisErisim.cs` | İnternetten erişilen servisler raporu (`wwwroot/diserisim.html`): DisErisimServisi'nin DF_DIS_ERISIM* tablolarını okur, envanterle zenginleştirir |
+| `../DisErisimServisi/` | AYRI Windows servisi (repo kökünde): her gece önceki günün firewall + Carbon Black verisinden internetten erişilen iç servisleri DF_DIS_ERISIM*'e yazar |
 | `Yetki.cs` | İşlem + sayfa yetkileri (yazma, topoloji, dışa aktarma, toplu tahmin, TLS, fiziksel, açıklık taraması, erişim, işlev, etiket, eksik, imza, segment) — DokuPanel site kayıtları |
 | `AuthHelper.cs` | Kullanıcının verdiği DokuPanel yetki helper'ı (namespace `AppRel`), anahtar config'den |
 
@@ -1011,6 +1013,36 @@ katalogdisi` (katalogdisi = durum AI + Yeni + "Altyapı:" değil); CSV "SUNUCUYA
   (aspNetCore) ve MVC (System.Web.Mvc, yalnız <pages namespaces>) göstergesizse işaretlenmez. `WcBelge.WebForms / WfNeden` ("ViewState ayarı (satır 3); …"). Sayfa: "Web Forms" rozeti
   (zafiyet / dosyalar; ipucunda gösterge), Sunucular'da "Web Forms" kolonu, "Yalnız Web Forms" süzgeci (zafiyet, sunucular, dosyalar), sunucu kartında sayı, tanı özetinde satır;
   Excel: Dosyalar WEB FORMS + GÖSTERGESİ, Sunucu özeti WEB FORMS, Zafiyet WEB FORMS (DOSYA), Özet sayısı.
+- **İnternetten erişilen servisler** (kullanıcı: "Windows servis, her gece tüm ağda 24 saatlik dilimde dış ağdan / internetten erişilen cihazları bulup
+  görülme zamanı ve ilk görülme zamanıyla veritabanına kaydetsin; DeltaFlow'un altında kendi tasarım standardında rapor sayfası"; kararlar: kaynak firewall + Carbon Black,
+  engellenenler yalnız sayı, public IP → kurum (ASN) "şimdilik vazgeçtim"; sonra "başarılı erişimlerin IP'leri gerekli olabilir", "özet bilgi yetersiz olabilir" → dış IP
+  ayrıntısı da tutulur). İKİ PARÇA: (1) `DisErisimServisi/` (repo KÖKÜNDE, ayrı .NET 9 Worker; `Microsoft.Extensions.Hosting.WindowsServices`, Microsoft.Data.SqlClient;
+  servis adı DeltaFlowDisErisim): `Program.cs` (ayar: exe yanındaki appsettings.json / .Production.json; `AyarDosyasi` verilirse önce o — ör. DeltaFlow'un appsettings.Production.json'u,
+  Splunk / Firewall / ConnectionStrings tek yerde; argümanlar `--simdi` eksik günler, `--tarih=yyyy-aa-gg` tek gün, `--deneme` yazmadan ekrana; `Zamanlayici` her gün
+  `DisErisim:CalismaSaati`=02:30, açılışta 2 dk sonra eksik günler), `Splunk.cs` (DeltaFlow ExportAsync'in sade kopyası, `DisErisim:SorguDakika`=180), `Tarayici.cs`.
+  Gün = önceki takvim günü 00:00–24:00; eksik günler son başarılı ARALIK_BIT'ten, en çok `MaxGeriGun`=3. DIŞ = noktalı IPv4, RFC1918 / özel aralıklar ve KURUMUN GENEL
+  BLOKLARI dışında (segment tablosundaki özel olmayan CIDR'lar — `SegmentlerdenIcAg`=true — + `DisErisim:IcAglar`; iç içe olanlar teke, `MaxIcAg`=500); hedef İÇ olmalı. SPL'de
+  arama düzeyinde `NOT src=10.*…` ön süzgeci + `where like(…,"%.%.%.%") AND NOT (cidrmatch…)`. Firewall (Firewall:Index / Alanlar / IzinDegerleri; NAT: d = dest_translated_ip
+  yoksa dest_ip, port dest_translated_port; `DisErisim:DisZonlar` verilirse `src_zone IN (…)` (Alanlar:SrcZone)): servis sorgusu `stats sum(ok) dc(eval(…)) … by d p` (izinli /
+  engellenen oturum ve dış IP, ilk / son, NAT öncesi public hedef, kural, App-ID) + kaynak sorgusu izinliler `by d p src` → `sort 0 d, p, -n | streamstats … | where sira <=
+  MaxKaynakIp` (=20000, 0 sınırsız; aşan servis `KAYNAK_KESIK`). Carbon Black (Splunk:Index / Sourcetype): direction=inbound, src=remote_ip, d=local_ip, p=local_port (≠0), aynı
+  dış / iç koşulu; servis (count, dc, ilk / son, process_path, computer_name) + kaynak sorgusu. `DisErisim:Kaynaklar` ["fw","cb"]. YAZMA (tek transaction, #G / #D geçici
+  tablolar + SqlBulkCopy): `sql/dis_erisim.sql` — DF_DIS_ERISIM (IP + PORT PK, kümülatif ILK / SON_GORULME (izinli), FW_ILK/SON, CB_ILK/SON, TOPLAM_OTURUM, GUN_SAYISI,
+  SON_OTURUM / SON_DIS_IP / SON_ENGEL / SON_ENGEL_DIS_IP, DIS_HEDEF, KURAL, FW_UYGULAMA, EXE, SUNUCU, KAYNAK FW | CB | FW+CB, SON_TARAMA; MERGE: yalnız izinli servis eklenir,
+  SON_* yalnız daha yeni günle, toplamlar SON_TARAMA < gün sonu ise → aynı gün yeniden taranırsa iki kez sayılmaz; OUTPUT INSERT = yeni servis), _GUN (gün × servis, izinli +
+  engellenen; günü silip yazar), _DETAY (gün × servis × dış IP, izinli, KAYNAK, OTURUM, ILK, SON; günü silip yazar), _KAYNAK (servis × dış IP kümülatif ilk / son, toplam, gün,
+  SON_TARIH korumalı), _CALISMA (çalışma kaydı: aralık, durum suruyor | tamam | hata, sayılar, mesaj, makine). Saklama `DetaySaklamaGun`=180, `GunSaklamaGun`=730. Tablo adları
+  `DisErisim:Tablolar:*`, bağlantı `DisErisim:Baglanti` ya da ConnectionStrings:Envanter. (2) DeltaFlow `DisErisim.cs` (`DisErisimService`, yalnız okur) + sayfa yetkisi
+  `Yetki.DisErisim` (boşsa Topoloji): GET `/api/diserisim?seri=14` (DeListe: sonGun, ilkGun, gunler, yeniGun (`DisErisim:YeniGun`=7), calismalar (son 30), servisler — ERT
+  uygulaması (IP + port > VIP IP + port > IP'nin "(IP)"), ERT sunucu, segment / kurum (Domain) / VLAN, VIP (bu IP:port VIP ise havuz + üyeler; üyeyse VIP'leri), etiketler,
+  14 günlük izinli / engellenen serisi — ve engel: son gün yalnız engellenen servisler `RaporMaxEngel`=2000), `/api/diserisim/servis?ip=&port=&gun=` (kümülatif dış kaynaklar
+  `RaporMaxKaynak`=5000 + sayısı, 90 günlük günlük satırlar, gün verilirse o günün DETAY'ı), `/api/diserisim/disip?q=` (dış IP ya da önek → eriştiği servisler), `/api/diserisim/excel`
+  (Yetki:Disari; İnternetten erişilen, Yalnız engellenen, Dış kaynaklar <son gün> (`ExcelMaxDetay`=500000), Çalışmalar). Sayfa `wwwroot/diserisim.html` (sekme çubuğunda
+  "internetten erişilenler ↗"): son tarama bandı (hata kırmızı, "taranıyor"), kartlar (servis, son günde erişilen, yeni — ilk taramanın günü yeni sayılmaz —, ERT'de yok, yalnız
+  engellenen; tıkla → süzgeç), sekmeler İnternetten erişilenler | Yalnız engellenen | Dış IP ara | Çalışmalar; süzgeçler arama, son görülme (1 / 7 / 30 gün / tümü), kaynak, kurum,
+  yalnız yeni, ERT'de yok; sıralanabilir başlıklar; 14 günlük çubuk (mavi izinli, kırmızı yalnız engel); satıra tıkla → sağ panel (ayrıntılar, 90 günlük eğilim, dış kaynak IP'leri
+  kümülatif ya da seçilen gün; dış IP'ye tıkla → Erişim sorgula `?src=&dst=&port=`). Test: docker'da SQL Server 2022 + sahte Splunk ile servis (iki gün, aynı günün yeniden
+  taranması, sınır) ve DeltaFlow uçları + Playwright'la sayfa / Excel. Canlı Splunk alanları (PAN src_zone, CB direction değerleri) teyit edilmedi. ASN / kurum adı YOK (kullanıcı vazgeçti).
 - **Fiziksel envanter** (`FizikselEnvanter.cs`, `wwwroot/fiziksel.js`, sekme "Fiziksel envanter" `data-ui="fiziksel"`, `?fiziksel=1&kabin=&host=`;
   claude.ai sohbetindeki görev tanımı: "Bu kabin kapanırsa hangi uygulamalar etkilenir?"): veri doku DB'de HAZIR — NlyteCollector (nlyte OData →
   dbo.NlyteRaw) + `EXEC dbo.sp_KabinZincirYenile` doldurur; DeltaFlow YALNIZ OKUR (yazmaz, prosedürü çağırmaz). Betik kullanıcıda

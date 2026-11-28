@@ -45,6 +45,7 @@ builder.Services.AddSingleton<SegmentTaramaService>();
 builder.Services.AddSingleton<ServisImzaService>();
 builder.Services.AddSingleton<NessusService>();
 builder.Services.AddSingleton<UcmdbService>();
+builder.Services.AddSingleton<DisErisimService>();
 builder.Services.AddSingleton<FizikselService>();
 builder.Services.AddSingleton<ZafiyetService>();
 builder.Services.AddSingleton<BirimService>();
@@ -1241,6 +1242,32 @@ app.MapGet("/api/ucmdb/dokum", async (string? tablo, string? ip, int? ornek, boo
         return Results.File(Encoding.UTF8.GetPreamble().Concat(Encoding.UTF8.GetBytes(metin)).ToArray(), "text/plain; charset=utf-8",
             $"ucmdb_{(string.IsNullOrWhiteSpace(tablo) ? "zincir" + (v != null ? "_" + v : "") : tablo.ToLowerInvariant())}_{DateTime.Now:yyyyMMdd_HHmm}.txt");
     return Results.Text(metin, "text/plain; charset=utf-8");
+});
+// İnternetten erişilen servisler (wwwroot/diserisim.html): DisErisimServisi'nin (Windows servisi) yazdığı DF_DIS_ERISIM* tablolarını okur
+app.MapGet("/api/diserisim", async (int? seri, DisErisimService d, CancellationToken ct) =>
+{
+    try { return Results.Ok(await d.ListeAsync(Math.Clamp(seri ?? 14, 1, 60), ct)); }
+    catch (InvalidOperationException ex) { return Results.BadRequest(new { error = ex.Message }); }
+    catch (Microsoft.Data.SqlClient.SqlException ex) { return Results.BadRequest(new { error = "Veritabanı: " + ex.Message }); }
+});
+app.MapGet("/api/diserisim/servis", async (string ip, int port, DateTime? gun, DisErisimService d, CancellationToken ct) =>
+{
+    try { return Results.Ok(await d.ServisAsync(ip, port, gun, ct)); }
+    catch (InvalidOperationException ex) { return Results.BadRequest(new { error = ex.Message }); }
+    catch (Microsoft.Data.SqlClient.SqlException ex) { return Results.BadRequest(new { error = "Veritabanı: " + ex.Message }); }
+});
+app.MapGet("/api/diserisim/disip", async (string q, DisErisimService d, CancellationToken ct) =>
+{
+    try { return Results.Ok(await d.DisIpAsync(q, ct)); }
+    catch (InvalidOperationException ex) { return Results.BadRequest(new { error = ex.Message }); }
+    catch (Microsoft.Data.SqlClient.SqlException ex) { return Results.BadRequest(new { error = "Veritabanı: " + ex.Message }); }
+});
+app.MapGet("/api/diserisim/excel", async (HttpContext ctx, IConfiguration cfg, DisErisimService d, CancellationToken ct) =>
+{
+    if (!Yetki.Var(cfg, ctx, Yetki.Disari)) return Yetki.Red(ctx, "Dışa aktarma");
+    try { return Results.File(await d.ExcelAsync(ct), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", $"internetten_erisilen_{DateTime.Now:yyyyMMdd_HHmm}.xlsx"); }
+    catch (InvalidOperationException ex) { return Results.BadRequest(new { error = ex.Message }); }
+    catch (Microsoft.Data.SqlClient.SqlException ex) { return Results.BadRequest(new { error = "Veritabanı: " + ex.Message }); }
 });
 // web.config taraması sayfası (wwwroot/webconfig.html): kapsam (IP / segment / Nessus DMZ / tüm ağ) → arka plan işi; listeler artımlı (?db=&du=&de=&da=)
 app.MapGet("/api/ucmdb/segmentler", async (SegmentTaramaService seg, IConfiguration cfg, CancellationToken ct) =>

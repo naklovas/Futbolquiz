@@ -19,17 +19,18 @@
 //   Eksik    — ERT eksikleri sayfası (/api/eksik; IP kartındaki AI önerisi kolonu serbest)          (boşsa Topoloji ile aynı)
 //   Imza     — Servis imzası sayfası (/api/imza)                                                   (boşsa Topoloji ile aynı)
 //   Segment  — Segment / etiket tarama sayfası (/api/segment)                                      (boşsa Topoloji ile aynı)
+//   DisErisim — İnternetten erişilen servisler raporu (/api/diserisim; DisErisimServisi'nin tabloları) (boşsa Topoloji ile aynı)
 // Auth ara katmanı /api isteklerinde gereken siteleri sorar (kullanıcı + site başına Auth:CacheMinutes önbellek; aynı ad tek sorgu),
 // sonuç context.Items["Yetki"]. DokuPanel'e ulaşılamazsa o işlem kapalı. Auth kapalıysa (yerel) yalnız listeler geçerli.
 // ---------------------------------------------------------------------------
 static class Yetki
 {
     public const string Yazma = "Yazma", Topoloji = "Topoloji", Disari = "Disari", Toplu = "Toplu", Tls = "Tls", Fiziksel = "Fiziksel", FizikselDeger = "FizikselDeger",
-        Zafiyet = "Zafiyet", Erisim = "Erisim", Islev = "Islev", Etiket = "Etiket", Eksik = "Eksik", Imza = "Imza", Segment = "Segment";
-    public static readonly string[] Turler = [Yazma, Topoloji, Disari, Toplu, Tls, Fiziksel, FizikselDeger, Zafiyet, Erisim, Islev, Etiket, Eksik, Imza, Segment];
+        Zafiyet = "Zafiyet", Erisim = "Erisim", Islev = "Islev", Etiket = "Etiket", Eksik = "Eksik", Imza = "Imza", Segment = "Segment", DisErisim = "DisErisim";
+    public static readonly string[] Turler = [Yazma, Topoloji, Disari, Toplu, Tls, Fiziksel, FizikselDeger, Zafiyet, Erisim, Islev, Etiket, Eksik, Imza, Segment, DisErisim];
 
     // Topoloji'ye düşen (boşsa Topoloji sitesi kullanılan) yetkiler
-    static bool TopolojiyeDuser(string tur) => tur is Tls or Fiziksel or Zafiyet or Erisim or Islev or Etiket or Eksik or Imza or Segment;
+    static bool TopolojiyeDuser(string tur) => tur is Tls or Fiziksel or Zafiyet or Erisim or Islev or Etiket or Eksik or Imza or Segment or DisErisim;
 
     // Yetkinin DokuPanel site adı (yoksa null: liste / başka yetkiye bağlı)
     public static string? Site(IConfiguration cfg, string tur)
@@ -70,6 +71,7 @@ static class Yetki
         if (B("/api/segment/exeag")) return ([Segment, Etiket, Islev], "Segment / etiket tarama");
         if (B("/api/segment")) return ([Segment, Etiket], "Segment / etiket tarama");
         if (B("/api/tls/toplu")) return ([Tls], "TLS toplu sorgu");
+        if (B("/api/diserisim")) return ([DisErisim], "İnternetten erişilen servisler");
         if (B("/api/ucmdb")) return ([Tls], "UCMDB web.config");
         if (B("/api/fiziksel") && !B("/api/fiziksel/ip")) return ([Fiziksel], "Fiziksel envanter");
         if (B("/api/envanter/yenile")) return ([Yazma], "Envanteri yeniden yükleme");

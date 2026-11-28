@@ -1,0 +1,389 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DeltaFlow · internetten erişilenler</title>
+<link rel="icon" href="deltaflow.svg">
+<script>
+  try { const t = localStorage.getItem("deltaflow.theme"); if (t === "light" || t === "dark") document.documentElement.dataset.theme = t; } catch {}
+</script>
+<!--
+  İnternetten erişilen servisler (DisErisim.cs, /api/diserisim*): veriyi DisErisimServisi (Windows servisi) her gece bir önceki günün Palo Alto firewall +
+  Carbon Black verisinden DF_DIS_ERISIM* tablolarına yazar; bu sayfa yalnız okur. İlk / son görülme, dış kaynak IP'leri, engellenen denemeler.
+-->
+<style>
+  :root {
+    --bg: #f5f6f8; --panel: #ffffff; --text: #1d2330; --muted: #677084; --line: #dde1e8;
+    --in: #2f6fd6; --in-soft: #e5eefc; --ok: #2e8b57; --err: #c8353a; --warn: #b7791f; --yeni: #6b3fa0;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #14171d; --panel: #1c2028; --text: #e4e7ec; --muted: #9098a8; --line: #2d333e;
+      --in: #6ea0f0; --in-soft: #1f2d45; --ok: #5cc28a; --err: #ef6b6f; --warn: #e0b050; --yeni: #b48ce6;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #14171d; --panel: #1c2028; --text: #e4e7ec; --muted: #9098a8; --line: #2d333e;
+    --in: #6ea0f0; --in-soft: #1f2d45; --ok: #5cc28a; --err: #ef6b6f; --warn: #e0b050; --yeni: #b48ce6;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 "Segoe UI", system-ui, sans-serif; }
+  header { padding: 14px 20px; background: var(--panel); border-bottom: 1px solid var(--line); display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
+  header img { width: 30px; height: 30px; }
+  header h1 { margin: 0; font-size: 19px; }
+  header a { color: var(--muted); text-decoration: none; font-size: 13px; }
+  header a:hover { color: var(--in); }
+  header .sp { flex: 1; }
+  #me { font-size: 12.5px; color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 4px 12px; }
+  main { padding: 18px 20px 40px; max-width: 1800px; margin: 0 auto; display: grid; gap: 14px; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; }
+  .sub { color: var(--muted); font-size: 12.5px; }
+  input, select, button { font: inherit; color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; }
+  button { cursor: pointer; }
+  button:disabled { opacity: .5; cursor: default; }
+  button.primary { background: var(--in); border-color: var(--in); color: #fff; font-weight: 600; }
+  .tools { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .tools .sp { flex: 1; }
+  .tools label { display: flex; gap: 6px; align-items: center; font-size: 13px; }
+  .run { border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; background: var(--bg); font-size: 13px; display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  .run.hata { border-color: var(--err); }
+  .stats { display: flex; gap: 10px; flex-wrap: wrap; }
+  .stat { border: 1px solid var(--line); border-radius: 10px; padding: 8px 14px; min-width: 150px; background: var(--bg); cursor: pointer; }
+  .stat.on { border-color: var(--in); box-shadow: 0 0 0 1px var(--in) inset; }
+  .stat b { display: block; font-size: 20px; font-variant-numeric: tabular-nums; }
+  .stat span { color: var(--muted); font-size: 11.5px; text-transform: uppercase; letter-spacing: .04em; }
+  .tabs { display: flex; gap: 6px; flex-wrap: wrap; }
+  .tabs button.on { background: var(--in); border-color: var(--in); color: #fff; }
+  .grid { border: 1px solid var(--line); border-radius: 10px; overflow: auto; max-height: calc(100vh - 300px); }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  th { position: sticky; top: 0; background: var(--bg); color: var(--muted); font-size: 11.5px; text-transform: uppercase; letter-spacing: .04em; text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--line); z-index: 1; white-space: nowrap; }
+  th[data-s] { cursor: pointer; } th[data-s]:hover { color: var(--in); }
+  td { padding: 7px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  tr:hover td { background: var(--in-soft); }
+  tr[data-i] { cursor: pointer; }
+  tr.sec td { background: var(--in-soft); }
+  .mono { font-family: Consolas, ui-monospace, monospace; }
+  .small { font-size: 12px; } .muted { color: var(--muted); }
+  .kir { word-break: break-all; }
+  .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .r { display: inline-block; font-size: 10.5px; font-weight: 700; border-radius: 4px; padding: 0 5px; margin: 0 3px 2px 0; border: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
+  .r.fw { color: var(--warn); border-color: var(--warn); } .r.cb { color: var(--in); border-color: var(--in); }
+  .r.yeni { background: var(--yeni); border-color: var(--yeni); color: #fff; }
+  .r.et { color: var(--text); }
+  .err { color: var(--err); }
+  .empty { padding: 40px; text-align: center; color: var(--muted); }
+  .foot { display: flex; justify-content: space-between; align-items: center; margin-top: 10px; color: var(--muted); font-size: 12.5px; gap: 10px; flex-wrap: wrap; }
+  .spinner { display: inline-block; width: 12px; height: 12px; border: 2px solid var(--line); border-top-color: var(--in); border-radius: 50%; animation: sp 0.8s linear infinite; vertical-align: -2px; }
+  @keyframes sp { to { transform: rotate(360deg); } }
+  .spark rect.i { fill: var(--in); } .spark rect.e { fill: var(--err); opacity: .55; } .spark rect.b { fill: var(--line); }
+  .drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(760px, 96vw); background: var(--panel); border-left: 1px solid var(--line); box-shadow: -10px 0 30px rgba(0,0,0,.18);
+    z-index: 40; display: flex; flex-direction: column; }
+  .drawer[hidden] { display: none; }
+  .dhead { padding: 12px 16px; border-bottom: 1px solid var(--line); display: flex; gap: 10px; align-items: flex-start; }
+  .dhead h2 { margin: 0; font-size: 16px; }
+  .dbody { padding: 12px 16px 24px; overflow: auto; flex: 1; display: grid; gap: 14px; align-content: start; }
+  .kv { display: grid; grid-template-columns: 170px 1fr; gap: 4px 12px; font-size: 13px; }
+  .kv div:nth-child(odd) { color: var(--muted); }
+  h3 { margin: 0 0 6px; font-size: 13.5px; }
+  .trend { width: 100%; height: 120px; }
+  .trend rect.i { fill: var(--in); } .trend rect.e { fill: var(--err); opacity: .55; } .trend text { fill: var(--muted); font-size: 10px; }
+  .msgs { font-size: 12px; color: var(--muted); white-space: pre-wrap; }
+  details summary { cursor: pointer; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<header>
+  <img src="deltaflow.svg" alt="">
+  <div><h1>İnternetten erişilen servisler</h1>
+    <div class="sub">Her gece bir önceki gün taranır · Palo Alto firewall (izinli / engellenen) + Carbon Black (gelen bağlantı) · kaynağı public IP (kurumun kendi blokları hariç), hedefi iç ağ olan erişimler · ilk / son görülme, dış kaynak IP'leri</div></div>
+  <span class="sp"></span>
+  <a href="./">← DeltaFlow</a>
+  <span id="me"></span>
+</header>
+<main>
+  <section class="panel" id="ust">
+    <div class="run" id="run"><span class="spinner"></span> Yükleniyor…</div>
+    <div class="stats" id="stats" style="margin-top:12px"></div>
+  </section>
+
+  <section class="panel">
+    <div class="tools" style="margin-bottom:10px">
+      <div class="tabs" id="tabs">
+        <button type="button" data-tab="servis" class="on">İnternetten erişilenler</button>
+        <button type="button" data-tab="engel">Yalnız engellenen (yoklanan)</button>
+        <button type="button" data-tab="disip">Dış IP ara</button>
+        <button type="button" data-tab="calisma">Çalışmalar</button>
+      </div>
+      <span class="sp"></span>
+      <button type="button" class="primary" id="xlsx" hidden title="Servisler, yalnız engellenenler, son günün dış kaynak IP'leri, çalışmalar">📊 Excel</button>
+    </div>
+    <div class="tools" id="suzgec" style="margin-bottom:10px">
+      <input type="search" id="q" placeholder="süz: IP, port, uygulama, sunucu, segment, etiket, kural, exe…" style="min-width:300px;flex:1">
+      <select id="gorulme" title="Son görülme"><option value="1">son günde görülen</option><option value="7">son 7 günde</option><option value="30" selected>son 30 günde</option><option value="0">tümü</option></select>
+      <select id="kaynak"><option value="">firewall + Carbon Black</option><option value="FW">firewall'da görülen</option><option value="CB">Carbon Black'te görülen</option><option value="FW+CB">ikisinde de</option></select>
+      <select id="kurum"><option value="">tüm kurumlar</option></select>
+      <label><input type="checkbox" id="yalnizYeni"> Yalnız yeni</label>
+      <label><input type="checkbox" id="ertYok"> ERT'de uygulaması yok</label>
+    </div>
+    <div class="tools" id="disipAra" hidden style="margin-bottom:10px">
+      <input id="disipQ" placeholder="dış IP ya da önek (31.10.0.1 · 31.10.)" style="min-width:260px">
+      <button type="button" id="disipBtn" class="primary">Ara</button>
+      <span class="sub">Bu dış IP hangi iç servislere erişmiş (yalnız izinli; kaydedilen kaynak IP'ler)</span>
+    </div>
+    <div class="grid"><table><thead id="head"></thead><tbody id="body"></tbody></table></div>
+    <div class="foot"><span id="count"></span><span><button type="button" id="more" hidden>Daha fazla göster</button></span></div>
+  </section>
+</main>
+
+<aside class="drawer" id="drawer" hidden>
+  <div class="dhead"><div style="flex:1"><h2 id="dBaslik"></h2><div class="sub" id="dAlt"></div></div><button type="button" id="dKapat">✕</button></div>
+  <div class="dbody" id="dGovde"></div>
+</aside>
+
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const fmt = n => n == null ? "" : Number(n).toLocaleString("tr-TR");
+const tarih = d => d ? new Date(d).toLocaleString("tr-TR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "";
+const gunAd = d => d ? new Date(d).toLocaleDateString("tr-TR", { day: "2-digit", month: "2-digit", year: "numeric" }) : "";
+const gunKisa = d => d ? new Date(d).toLocaleDateString("tr-TR", { day: "2-digit", month: "2-digit" }) : "";
+const st = { yetki: {}, veri: null, tab: "servis", limit: 500, sira: { k: "son", y: -1 }, disip: null, secili: null };
+
+async function getJson(url) {
+  const r = await fetch(url);
+  const b = await r.json().catch(() => ({ error: `HTTP ${r.status}` }));
+  if (r.status === 404) throw new Error("Sunucudaki DeltaFlow sürümünde bu sayfa yok (DLL güncel değil).");
+  if (r.status === 403) throw new Error(b.error || "Yetkiniz yok.");
+  if (!r.ok) throw new Error(b.error || `HTTP ${r.status}`);
+  return b;
+}
+
+async function yukle() {
+  try { st.veri = await getJson("api/diserisim?seri=14"); }
+  catch (e) { $("#run").className = "run hata"; $("#run").innerHTML = `<span class="err">${esc(e.message)}</span>`; $("#body").innerHTML = ""; return; }
+  const kurumlar = [...new Set(st.veri.servisler.map(x => x.kurum).filter(Boolean))].sort();
+  $("#kurum").innerHTML = `<option value="">tüm kurumlar</option>` + kurumlar.map(k => `<option>${esc(k)}</option>`).join("");
+  ciz();
+}
+
+const sonGun = () => st.veri?.sonGun ? new Date(st.veri.sonGun) : null;
+function yeniMi(x) {
+  const sg = sonGun(); if (!sg || !x.ilk) return false;
+  const sinir = new Date(sg); sinir.setDate(sinir.getDate() - (st.veri.yeniGun - 1)); sinir.setHours(0, 0, 0, 0);
+  // ilk taramadan önceki geçmiş bilinmediği için ilk taramanın günü "yeni" sayılmaz
+  const ilkTarama = st.veri.ilkGun ? new Date(st.veri.ilkGun) : null;
+  return new Date(x.ilk) >= sinir && !(ilkTarama && new Date(x.ilk) < new Date(ilkTarama.getTime() + 86400000));
+}
+function sonGunMu(x) { const sg = sonGun(); return sg && x.son && new Date(x.son) >= sg; }
+
+function ustCiz() {
+  const v = st.veri, c = v.calismalar ?? [], son = c[0];
+  const tamam = c.find(x => x.durum === "tamam");
+  const run = $("#run");
+  run.className = "run" + (son?.durum === "hata" ? " hata" : "");
+  run.innerHTML = !son ? `<span class="err">Henüz tarama yok — DisErisimServisi kurulup çalıştırılmalı (sql/dis_erisim.sql betiği önce).</span>`
+    : `<b>Son taranan gün: ${gunAd(tamam?.aralikBas)}</b>
+       ${son.durum === "suruyor" ? `<span><span class="spinner"></span> ${gunAd(son.aralikBas)} taranıyor (başladı ${tarih(son.baslangic)})</span>` : ""}
+       ${son.durum === "hata" ? `<span class="err">Son çalışma HATA (${gunAd(son.aralikBas)}): ${esc((son.mesaj ?? "").split("\n").find(m => m.startsWith("HATA")) ?? son.mesaj)}</span>` : ""}
+       <span class="muted">· ${tamam ? `${fmt(tamam.servis)} servis, ${fmt(tamam.yeni)} yeni, ${fmt(tamam.detay)} dış kaynak satırı · ${tarih(tamam.bitis)} bitti${tamam.makine ? " · " + esc(tamam.makine) : ""}` : ""}
+       · kayıt ${gunAd(v.ilkGun)} gününden beri${v.envHata ? ` · <span class="err">envanter okunamadı: ${esc(v.envHata)}</span>` : ""}</span>`;
+  const s = v.servisler, sg = s.filter(sonGunMu), yeni = s.filter(yeniMi);
+  const kart = (t, f, n, ad, ek) => `<div class="stat ${st.tab === t && st.kart === f ? "on" : ""}" data-tab="${t}" data-kart="${f}"><b>${fmt(n)}</b><span>${ad}</span>${ek ? `<div class="small muted">${ek}</div>` : ""}</div>`;
+  $("#stats").innerHTML = kart("servis", "tum", s.length, "internetten erişilen servis", `${fmt(new Set(s.map(x => x.ip)).size)} IP · tüm kayıt`)
+    + kart("servis", "son", sg.length, "son günde erişilen", `${fmt(sg.reduce((a, x) => a + (x.sonDisIp ?? 0), 0))} dış IP (servis başına toplam)`)
+    + kart("servis", "yeni", yeni.length, `yeni (son ${v.yeniGun} gün)`, "ilk kez görülen servis")
+    + kart("servis", "ert", s.filter(x => !x.uygulama).length, "ERT'de uygulaması yok", "IP + port kaydı bulunamadı")
+    + kart("engel", "", v.engel.length, "yalnız engellenen", `son gün · ${fmt(v.engel.reduce((a, x) => a + x.engel, 0))} deneme`);
+}
+$("#stats").addEventListener("click", e => {
+  const k = e.target.closest("[data-tab]"); if (!k) return;
+  const f = k.dataset.kart;
+  if (k.dataset.tab === "servis") {
+    $("#gorulme").value = f === "son" ? "1" : "0"; $("#yalnizYeni").checked = f === "yeni"; $("#ertYok").checked = f === "ert";
+  }
+  st.kart = f; sekme(k.dataset.tab);
+});
+
+function sekme(t) {
+  st.tab = t; st.limit = 500;
+  document.querySelectorAll("#tabs [data-tab]").forEach(b => b.classList.toggle("on", b.dataset.tab === t));
+  $("#suzgec").hidden = !(t === "servis" || t === "engel");
+  ["#gorulme", "#kaynak", "#yalnizYeni", "#ertYok"].forEach(s => { const el = $(s); (el.closest("label") ?? el).hidden = t !== "servis"; });
+  $("#disipAra").hidden = t !== "disip";
+  ciz();
+}
+$("#tabs").addEventListener("click", e => { const b = e.target.closest("[data-tab]"); if (b) { st.kart = null; sekme(b.dataset.tab); } });
+["#q", "#gorulme", "#kaynak", "#kurum", "#yalnizYeni", "#ertYok"].forEach(s => $(s).addEventListener(s === "#q" ? "input" : "change", () => { st.limit = 500; ciz(); }));
+$("#more").addEventListener("click", () => { st.limit += 500; ciz(); });
+
+function spark(izin, engel) {
+  if (!izin) return "";
+  const n = izin.length, max = Math.max(1, ...izin, ...(engel ?? []).map(x => x * 0)), w = 5, h = 22;
+  const mx = Math.max(1, ...izin);
+  return `<svg class="spark" width="${n * w}" height="${h}" viewBox="0 0 ${n * w} ${h}">${izin.map((v, i) => {
+    const y = v ? Math.max(2, Math.round(v / mx * (h - 2))) : 1;
+    return `<rect class="${v ? "i" : (engel?.[i] ? "e" : "b")}" x="${i * w}" y="${h - (v ? y : engel?.[i] ? 4 : 1)}" width="${w - 1}" height="${v ? y : engel?.[i] ? 4 : 1}"><title>${gunKisa(st.veri.gunler[i])}: ${fmt(v)} izinli${engel?.[i] ? ", " + fmt(engel[i]) + " engellenen" : ""}</title></rect>`;
+  }).join("")}</svg>`;
+}
+const kaynakR = k => (k ?? "").split("+").filter(Boolean).map(x => `<span class="r ${x.toLowerCase()}">${x === "FW" ? "firewall" : "Carbon Black"}</span>`).join("");
+const servisHucre = x => `<span class="mono"><b>${esc(x.ip)}</b>:${x.port}</span>${x.ertSunucu ? `<div class="small muted">${esc(x.ertSunucu)}</div>` : x.sunucu ? `<div class="small muted">${esc(x.sunucu)} (CB)</div>` : ""}`;
+const uygHucre = x => `${x.uygulama ? esc(x.uygulama) : `<span class="err small">ERT'de yok</span>`}${(x.etiketler ?? []).length ? `<div>${x.etiketler.slice(0, 4).map(e => `<span class="r et">${esc(e)}</span>`).join("")}</div>` : ""}`;
+const segHucre = x => `${esc(x.segment ?? "")}${x.kurum ? `<div class="small muted">${esc(x.kurum)}${x.vlan ? " · VLAN " + esc(x.vlan) : ""}</div>` : ""}`;
+
+function servisVeri() {
+  const q = $("#q").value.trim().toLocaleLowerCase("tr"), g = +$("#gorulme").value, kay = $("#kaynak").value, kur = $("#kurum").value;
+  const sg = sonGun(), sinir = sg && g ? new Date(sg.getTime() - (g - 1) * 86400000) : null;
+  let l = st.veri.servisler.filter(x =>
+    (!sinir || (x.son && new Date(x.son) >= sinir)) && (!kay || (kay === "FW+CB" ? x.kaynak === "FW+CB" : (x.kaynak ?? "").includes(kay)))
+    && (!kur || x.kurum === kur) && (!$("#yalnizYeni").checked || yeniMi(x)) && (!$("#ertYok").checked || !x.uygulama)
+    && (!q || [x.ip, `${x.ip}:${x.port}`, x.port, x.uygulama, x.ertSunucu, x.sunucu, x.segment, x.kurum, x.vip, x.kural, x.exe, x.disHedef, x.fwUygulama, ...(x.etiketler ?? [])]
+      .some(v => String(v ?? "").toLocaleLowerCase("tr").includes(q))));
+  const k = st.sira.k, y = st.sira.y;
+  const deger = x => ({ servis: x.ip.split(".").map(n => n.padStart(3, "0")).join(".") + ":" + String(x.port).padStart(5, "0"), uyg: x.uygulama ?? "", seg: x.segment ?? "",
+    ilk: x.ilk ?? "", son: x.son ?? "", oturum: x.sonOturum ?? 0, disip: x.sonDisIp ?? 0, engel: x.sonEngel ?? 0, toplam: x.toplam, gun: x.gun })[k];
+  l.sort((a, b) => { const A = deger(a), B = deger(b); return (A < B ? -1 : A > B ? 1 : 0) * y; });
+  return l;
+}
+const TH = (k, ad) => `<th data-s="${k}">${ad}${st.sira.k === k ? (st.sira.y < 0 ? " ▼" : " ▲") : ""}</th>`;
+
+function ciz() {
+  if (!st.veri) return;
+  ustCiz();
+  $("#xlsx").hidden = !st.yetki.disari;
+  let bas = "", satirlar = [], toplam = 0, bos = "Kayıt yok.";
+  if (st.tab === "servis") {
+    const l = servisVeri(); toplam = l.length; st.liste = l;
+    bas = `<tr>${TH("servis", "Servis")}${TH("uyg", "Uygulama (ERT)")}${TH("seg", "Segment / kurum")}<th>VIP</th>${TH("ilk", "İlk görülme")}${TH("son", "Son görülme")}
+      ${TH("oturum", "Son gün oturum")}${TH("disip", "Dış IP")}${TH("engel", "Engellenen")}<th>14 gün</th>${TH("toplam", "Toplam")}${TH("gun", "Gün")}<th>Kaynak</th><th>Kural / exe</th></tr>`;
+    satirlar = l.slice(0, st.limit).map((x, i) => `<tr data-i="${i}" class="${st.secili === x ? "sec" : ""}"><td>${servisHucre(x)}</td><td>${uygHucre(x)}</td><td>${segHucre(x)}</td>
+      <td class="small">${esc(x.vip ?? "")}</td>
+      <td class="small">${tarih(x.ilk)}${yeniMi(x) ? ` <span class="r yeni">yeni</span>` : ""}</td><td class="small">${tarih(x.son)}</td>
+      <td class="num">${sonGunMu(x) ? fmt(x.sonOturum) : `<span class="muted">—</span>`}</td><td class="num">${sonGunMu(x) ? fmt(x.sonDisIp) : ""}</td>
+      <td class="num">${x.sonEngel ? `<span class="err">${fmt(x.sonEngel)}</span>` : ""}</td>
+      <td>${spark(x.seri, x.engelSeri)}</td><td class="num">${fmt(x.toplam)}</td><td class="num">${fmt(x.gun)}</td><td>${kaynakR(x.kaynak)}</td>
+      <td class="small kir">${esc(x.kural ?? "")}${x.exe ? `<div class="mono muted">${esc(x.exe.split(" | ").map(e => e.split("\\").pop()).join(", "))}</div>` : ""}</td></tr>`);
+    bos = st.veri.servisler.length ? "Süzgece uyan servis yok." : "Henüz internetten erişilen servis kaydı yok.";
+  } else if (st.tab === "engel") {
+    const q = $("#q").value.trim().toLocaleLowerCase("tr"), kur = $("#kurum").value;
+    const l = st.veri.engel.filter(x => (!kur || x.kurum === kur) && (!q || [x.ip, `${x.ip}:${x.port}`, x.port, x.uygulama, x.ertSunucu, x.segment, x.vip].some(v => String(v ?? "").toLocaleLowerCase("tr").includes(q))));
+    toplam = l.length;
+    bas = `<tr><th>Servis</th><th>Uygulama (ERT)</th><th>Segment / kurum</th><th>VIP</th><th>Engellenen oturum</th><th>Engellenen dış IP</th><th>Gün</th></tr>`;
+    satirlar = l.slice(0, st.limit).map(x => `<tr><td>${servisHucre(x)}</td><td>${uygHucre(x)}</td><td>${segHucre(x)}</td><td class="small">${esc(x.vip ?? "")}</td>
+      <td class="num err">${fmt(x.engel)}</td><td class="num">${fmt(x.engelDisIp)}</td><td class="small">${gunAd(x.tarih)}</td></tr>`);
+    bos = "Son günde yalnız engellenen (izinli erişimi olmayan) servis yok.";
+  } else if (st.tab === "disip") {
+    const d = st.disip;
+    bas = `<tr><th>Dış IP</th><th>İç servis</th><th>Uygulama (ERT)</th><th>Segment</th><th>İlk görülme</th><th>Son görülme</th><th>Toplam oturum</th><th>Gün</th></tr>`;
+    if (d?.satirlar) {
+      toplam = d.satirlar.length;
+      satirlar = d.satirlar.slice(0, st.limit).map(x => `<tr data-ip="${esc(x.ip)}" data-port="${x.port}" style="cursor:pointer"><td class="mono">${esc(x.disIp)}</td>
+        <td class="mono"><b>${esc(x.ip)}</b>:${x.port}${x.ertSunucu ? `<div class="small muted">${esc(x.ertSunucu)}</div>` : ""}</td><td>${esc(x.uygulama ?? "")}</td><td class="small">${esc(x.segment ?? "")}</td>
+        <td class="small">${tarih(x.ilk)}</td><td class="small">${tarih(x.son)}</td><td class="num">${fmt(x.toplam)}</td><td class="num">${fmt(x.gun)}</td></tr>`);
+    }
+    bos = d?.hata ? `<span class="err">${esc(d.hata)}</span>` : d?.yukleniyor ? `<span class="spinner"></span> Aranıyor…` : d ? "Bu dış IP için kayıt yok." : "Dış IP ya da önek yazıp Ara'ya basın.";
+  } else {
+    const l = st.veri.calismalar; toplam = l.length;
+    bas = `<tr><th>Taranan gün</th><th>Durum</th><th>Başlangıç</th><th>Bitiş</th><th>Servis</th><th>Yeni</th><th>Dış kaynak satırı</th><th>Kaynak sınırı</th><th>Makine</th><th>Mesaj</th></tr>`;
+    satirlar = l.map(c => `<tr><td>${gunAd(c.aralikBas)}</td><td class="${c.durum === "hata" ? "err" : ""}">${esc(c.durum)}</td><td class="small">${tarih(c.baslangic)}</td><td class="small">${tarih(c.bitis)}</td>
+      <td class="num">${fmt(c.servis)}</td><td class="num">${fmt(c.yeni)}</td><td class="num">${fmt(c.detay)}</td><td class="num">${fmt(c.kesik)}</td><td class="small">${esc(c.makine ?? "")}</td>
+      <td class="msgs">${esc(c.mesaj ?? "")}</td></tr>`);
+  }
+  $("#head").innerHTML = bas;
+  const kol = (bas.match(/<th/g) ?? []).length;
+  $("#body").innerHTML = satirlar.length ? satirlar.join("") : `<tr><td colspan="${kol}" class="empty">${bos}</td></tr>`;
+  $("#count").textContent = toplam ? `${fmt(Math.min(st.limit, toplam))} / ${fmt(toplam)} satır${st.tab === "servis" ? " · satıra tıklayınca dış kaynak IP'leri ve günlük eğilim açılır" : ""}` : "";
+  $("#more").hidden = toplam <= st.limit || st.tab === "calisma";
+}
+$("#head").addEventListener("click", e => {
+  const th = e.target.closest("th[data-s]"); if (!th) return;
+  st.sira = { k: th.dataset.s, y: st.sira.k === th.dataset.s ? -st.sira.y : (["servis", "uyg", "seg"].includes(th.dataset.s) ? 1 : -1) }; ciz();
+});
+$("#body").addEventListener("click", e => {
+  const tr = e.target.closest("tr[data-i]");
+  if (tr && st.tab === "servis") { ac(st.liste[+tr.dataset.i]); return; }
+  const d = e.target.closest("tr[data-ip]");
+  if (d) { const x = st.veri.servisler.find(s => s.ip === d.dataset.ip && s.port === +d.dataset.port); if (x) ac(x); }
+});
+
+// ---- dış IP arama ----
+async function disipAra() {
+  const q = $("#disipQ").value.trim(); if (!q) return;
+  st.disip = { yukleniyor: true }; ciz();
+  try { st.disip = await getJson(`api/diserisim/disip?q=${encodeURIComponent(q)}`); }
+  catch (e) { st.disip = { hata: e.message }; }
+  ciz();
+}
+$("#disipBtn").addEventListener("click", disipAra);
+$("#disipQ").addEventListener("keydown", e => { if (e.key === "Enter") disipAra(); });
+
+// ---- servis ayrıntısı (sağ panel) ----
+const disLink = (d, x) => `<a href="./?src=${encodeURIComponent(d)}&dst=${encodeURIComponent(x.ip)}&port=${x.port}" target="_blank" rel="noopener" title="Erişim sorgula: ${esc(d)} → ${esc(x.ip)}:${x.port}">${esc(d)}</a>`;
+async function ac(x, gun) {
+  st.secili = x; ciz();
+  $("#drawer").hidden = false;
+  $("#dBaslik").innerHTML = `<span class="mono">${esc(x.ip)}:${x.port}</span> ${yeniMi(x) ? `<span class="r yeni">yeni</span>` : ""}`;
+  $("#dAlt").textContent = [x.uygulama, x.ertSunucu ?? x.sunucu, x.segment, x.kurum].filter(Boolean).join(" · ");
+  const kv = (a, b) => b ? `<div>${a}</div><div>${b}</div>` : "";
+  const ust = `<div class="kv">
+      ${kv("İlk görülme", tarih(x.ilk))}${kv("Son görülme", tarih(x.son))}
+      ${kv("Firewall ilk / son", x.fwIlk ? `${tarih(x.fwIlk)} → ${tarih(x.fwSon)}` : "")}${kv("Carbon Black ilk / son", x.cbIlk ? `${tarih(x.cbIlk)} → ${tarih(x.cbSon)}` : "")}
+      ${kv("Toplam izinli oturum", `${fmt(x.toplam)} · ${fmt(x.gun)} günde`)}
+      ${kv("Public hedef (NAT öncesi)", `<span class="mono">${esc(x.disHedef ?? "")}</span>`)}
+      ${kv("Firewall kuralı", esc(x.kural ?? ""))}${kv("App-ID", esc(x.fwUygulama ?? ""))}
+      ${kv("Karşılayan süreç (CB)", x.exe ? `<span class="mono small kir">${esc(x.exe)}</span>` : "")}${kv("Sunucu (CB)", esc(x.sunucu ?? ""))}
+      ${kv("VIP", esc(x.vip ?? ""))}${kv("VIP üyeleri", (x.vipUyeler ?? []).map(u => `<div class="mono small">${esc(u)}</div>`).join(""))}
+      ${kv("Etiketler", (x.etiketler ?? []).map(e => `<span class="r et">${esc(e)}</span>`).join(""))}
+    </div>
+    <div class="tools"><a class="small" href="./?ip=${encodeURIComponent(x.ip)}" target="_blank" rel="noopener">IP topolojisini aç ↗</a>
+      <span class="sub">· dış IP'ye tıklayınca o IP'den bu servise erişim sorgusu açılır</span></div>`;
+  $("#dGovde").innerHTML = ust + `<div><span class="spinner"></span> Dış kaynaklar yükleniyor…</div>`;
+  let d;
+  try { d = await getJson(`api/diserisim/servis?ip=${encodeURIComponent(x.ip)}&port=${x.port}${gun ? "&gun=" + gun : ""}`); }
+  catch (e) { $("#dGovde").innerHTML = ust + `<div class="err">${esc(e.message)}</div>`; return; }
+  if (st.secili !== x) return;
+  const g = d.gunler ?? [];
+  const mx = Math.max(1, ...g.map(r => Math.max(r.izin, r.engel))), W = 700, H = 110, bw = Math.max(2, Math.min(16, Math.floor(W / Math.max(1, g.length)) - 1));
+  const trend = g.length ? `<svg class="trend" viewBox="0 0 ${W} ${H + 14}" preserveAspectRatio="none">${g.map((r, i) => {
+      const hi = Math.round(r.izin / mx * H), he = Math.round(r.engel / mx * H), x0 = i * (bw + 1);
+      return `<g><title>${gunAd(r.tarih)}: ${fmt(r.izin)} izinli (${fmt(r.izinDisIp)} dış IP) · ${fmt(r.engel)} engellenen (${fmt(r.engelDisIp)} dış IP)</title>
+        <rect class="e" x="${x0}" y="${H - he}" width="${bw}" height="${he}"></rect><rect class="i" x="${x0}" y="${H - hi}" width="${bw}" height="${hi}"></rect></g>`;
+    }).join("")}<text x="0" y="${H + 12}">${gunKisa(g[0].tarih)}</text><text x="${W}" y="${H + 12}" text-anchor="end">${gunKisa(g[g.length - 1].tarih)}</text></svg>` : `<div class="sub">Günlük kayıt yok.</div>`;
+  const gunSec = `<select id="dGun"><option value="">tüm günler (kümülatif)</option>${[...g].reverse().filter(r => r.izin > 0).map(r =>
+    `<option value="${r.tarih.slice(0, 10)}" ${gun === r.tarih.slice(0, 10) ? "selected" : ""}>${gunAd(r.tarih)} · ${fmt(r.izinDisIp)} dış IP</option>`).join("")}</select>`;
+  const tablo = gun && d.detay
+    ? `<table><thead><tr><th>Dış IP</th><th>Kaynak</th><th>Oturum</th><th>İlk</th><th>Son</th></tr></thead><tbody>${d.detay.map(r =>
+        `<tr><td class="mono">${disLink(r.disIp, x)}</td><td>${kaynakR(r.kaynak)}</td><td class="num">${fmt(r.oturum)}</td><td class="small">${tarih(r.ilk)}</td><td class="small">${tarih(r.son)}</td></tr>`).join("")
+        || `<tr><td colspan="5" class="empty">Bu gün için kaynak kaydı yok.</td></tr>`}</tbody></table>`
+    : `<table><thead><tr><th>Dış IP</th><th>İlk görülme</th><th>Son görülme</th><th>Toplam oturum</th><th>Gün</th></tr></thead><tbody>${d.kaynak.map(r =>
+        `<tr><td class="mono">${disLink(r.disIp, x)}</td><td class="small">${tarih(r.ilk)}</td><td class="small">${tarih(r.son)}</td><td class="num">${fmt(r.toplam)}</td><td class="num">${fmt(r.gun)}</td></tr>`).join("")
+        || `<tr><td colspan="5" class="empty">Dış kaynak kaydı yok (yalnız engellenmiş ya da yalnız özet).</td></tr>`}</tbody></table>`;
+  $("#dGovde").innerHTML = ust + `<div><h3>Günlük eğilim <span class="sub">mavi izinli · kırmızı engellenen (son 90 gün)</span></h3>${trend}</div>
+    <div><div class="tools"><h3 style="margin:0">Dış kaynak IP'leri</h3><span class="sp"></span>${gunSec}</div>
+      <div class="sub" style="margin:4px 0 6px">${gun ? `${gunAd(gun)} günü · ${fmt(d.detay?.length)} IP` : `${fmt(d.toplamKaynak)} farklı dış IP${d.kesik ? ` · ilk ${fmt(d.kaynak.length)} gösteriliyor` : ""}`}
+        · servis başına günde en çok DisErisim:MaxKaynakIp IP kaydedilir (en çok oturum açanlar)</div>
+      <div class="grid" style="max-height:none">${tablo}</div></div>`;
+  $("#dGun").onchange = e => ac(x, e.target.value || null);
+}
+$("#dKapat").addEventListener("click", () => { $("#drawer").hidden = true; st.secili = null; ciz(); });
+document.addEventListener("keydown", e => { if (e.key === "Escape" && !$("#drawer").hidden) $("#dKapat").click(); });
+$("#xlsx").addEventListener("click", () => { location.href = "api/diserisim/excel"; });
+
+async function acilis() {
+  const me = await fetch("api/me").then(r => r.ok ? r.json() : null).catch(() => null);
+  if (me?.name) $("#me").textContent = "👤 " + me.name;
+  st.yetki = me?.yetki || {};
+  if (st.yetki.diserisim === false) {
+    $("#run").className = "run hata";
+    $("#run").innerHTML = `<span class="err">🔒 Bu sayfa için yetkiniz yok${me?.name ? " (" + esc(me.name) + ")" : ""} — Yetki DokuPanel'den verilir.</span>`;
+    return;
+  }
+  const qs = new URLSearchParams(location.search);
+  if (qs.get("q")) $("#q").value = qs.get("q");
+  await yukle();
+}
+acilis();
+</script>
+</body>
+</html>
